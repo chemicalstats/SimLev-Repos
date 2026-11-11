@@ -629,7 +629,7 @@ TB("quantile_regression", "Meldungen und Warnungen von quantile_regression je Ze
   zeile("qreg_err_df",
     r"(quantile_regression(y, data.frame(a = x, f = factor(x > 0), g = 'z')))",
     r"(result = D.quantile_regression(y, X=pd.DataFrame({'a': x, 'f': pd.Categorical(x > 0), 'g': 'z'})))",
-    r"(result = D.quantile_regression(y, SL.RFrame("a" => x, "f" => string.(x .> 0), "g" => fill("z", length(x)))))", inp = ein("dependence/qreg_err_df", c("x", "y"))),
+    r"(result = D.quantile_regression(y, SL.RFrame("a" => x, "f" => SL.RFmt.RFactor([v > 0 ? 2 : 1 for v in x], ["FALSE", "TRUE"]), "g" => fill("z", length(x)))))", inp = ein("dependence/qreg_err_df", c("x", "y"))),
   zeile("qreg_err_rows",
     r"(quantile_regression(y, x[-1]))",
     r"(result = D.quantile_regression(y, X=x[1:]))",

@@ -17,35 +17,23 @@ function _getcol(df, name::AbstractString)
     return getproperty(df, s)
 end
 
-function _nrow_any(df)
-    df isa RFrame && return nrow(df)
-    df isa NamedTuple && return isempty(df) ? 0 : length(first(df))
-    df isa AbstractDict && return isempty(df) ? 0 : length(first(values(df)))
-    error("rebalance_trigger: df muss ein data.frame sein.")
-end
-
-function _with_col(df, name::AbstractString, v::AbstractVector)
-    if df isa RFrame
-        out = copy(df)
-        out[String(name)] = v
-        return out
-    elseif df isa NamedTuple
-        return merge(df, NamedTuple{(Symbol(name),)}((v,)))
-    elseif df isa AbstractDict
-        out = copy(df)
-        out[keytype(out) === Symbol ? Symbol(name) : name] = v
-        return out
-    end
-    error("rebalance_trigger: df muss ein data.frame sein.")
-end
-
-_f64(x) = x === missing || x === nothing ? NA : Float64(x)
 _first_obs(v) = (i = findfirst(!isnan, v); i === nothing ? length(v) : i)
 # Spalte als Vector{Float64} und erste Beobachtung (seit 1.6.1 eine Hilfe für beide Auslöser)
-function _trig_series(df, name::AbstractString)
+const _TRIG_FN = "rebalance_trigger"
+const _TRIG_SUB_FIELDS = ("type", "threshold", "lev_col", "vol_col", "triggers", "df")
+
+"Spalte numerisch (eine Spalte nur aus NA zählt als Zahlenspalte, Entscheidung 14), ohne ±Inf; erster Wert."
+function _trig_series(df, name::AbstractString, arg::AbstractString)
     col = _getcol(df, name)
-    col === nothing && error("Spalte '$name' fehlt.")
-    v = Float64[_f64(x) for x in col]
+    col === nothing && chk_stop("e2.spalte_von", _TRIG_FN, arg, "df")   # seit K43 T1-R5 (bis dahin "Spalte '<name>' fehlt.")
+    col isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", _TRIG_FN, name)   # Entscheidung 15
+    kind, arr = all(ismissing, col) ? (:logical, fill(missing, length(col))) : _column(col)
+    if kind == :logical && all(ismissing, arr)
+        kind, arr = :numeric, fill(NaN, length(arr))
+    end
+    kind == :numeric || chk_stop("spalte_typ", _TRIG_FN, name, chk_msg("typ.numerisch"))
+    v = Float64[x for x in arr]
+    any(isinf, v) && chk_stop("e1.spalte_endlich", _TRIG_FN, name)
     return v, _first_obs(v)
 end
 
@@ -93,6 +81,11 @@ Referenzwert 0 ist.
   `type` und ggf. `threshold` (in Prozent, fehlt er: `10`), `lev_col`, `vol_col`. Jeder Sub-Trigger führt
   seinen eigenen Referenzwert; die Ergebnisse werden OR-verknüpft. Standard: `nothing`.
 - `out_col`: Character. Name der zu erzeugenden logischen Spalte in `df`. Standard: `"rebal_trigger"`.
+  Seit 1.6.4 darf die Spalte in `df` noch nicht vorhanden sein (vorher still überschrieben).
+
+Seit 1.6.4 geprüft: `df` nur als `RFrame`; `threshold` eine einzelne endliche Zahl `>= 0`; Spaltennamen einzeln und
+nicht leer; die genutzte Spalte nur Zahlen oder NA (kein `Inf`); Teil-Trigger nur mit den Feldern `type`,
+`threshold`, `lev_col`, `vol_col`, `triggers` und `df` (gleiche Zeilenzahl).
 
 # Rückgabe
 `df` mit einer zusätzlichen logischen Spalte `out_col`. `true` bedeutet: an diesem Tag wird Rebalancing
@@ -111,16 +104,30 @@ d = rebalance_trigger(d, "abs_leverage"; threshold = 10)
 println(sum(d["rebal_trigger"]))     # Anzahl der Rebalancing-Tage
 ```
 """
-function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
-                               lev_col::AbstractString = "target_leverage",
-                               vol_col::AbstractString = "sigma_ewma",
-                               triggers = nothing, out_col::AbstractString = "rebal_trigger")
-    n = _nrow_any(df)
-    n < 1 && error("rebalance_trigger: leerer data.frame.")
+function rebalance_trigger(df, type; threshold = 10,
+                               lev_col = "target_leverage",
+                               vol_col = "sigma_ewma",
+                               triggers = nothing, out_col = "rebal_trigger")
+    @nospecialize
+    fn = _TRIG_FN
+    # seit 1.6.4 Eingabeprüfung vor der Rechnung (A-013, A-036): df nur als RFrame (Entscheidung 6), type aus der
+    # Liste, threshold eine einzelne endliche Zahl >= 0, Spaltennamen einzeln und nicht leer, die genutzte Spalte
+    # numerisch und ohne ±Inf, Teil-Trigger von "combined" mit den Feldern type, threshold, lev_col, vol_col,
+    # triggers und df (eigenes df mit gleicher Zeilenzahl; out_col dort nicht)
+    chk_df(df, fn, "df")
+    n = nrow(df)
+    n < 1 && chk_stop("zeilen_keine", fn, "df")   # seit K43 T1-R5 aus der Tabelle
+    type = chk_choice(type, fn, "type", ("abs_leverage", "rel_leverage", "vol_band", "combined"))
+    threshold = chk_num1(threshold, fn, "threshold"; lo = 0)
+    lev_col = chk_name1(lev_col, fn, "lev_col")
+    vol_col = chk_name1(vol_col, fn, "vol_col")
+    out_col = chk_name1(out_col, fn, "out_col")
+    # seit 1.6.4 (Entscheidung 26): vorhandene Spalte nicht still überschreiben
+    String(out_col) in names(df) && chk_stop("spalte_vorhanden", fn, out_col, "df", "out_col")
     thr = threshold / 100
     trig = falses(n)
     if type == "abs_leverage" || type == "rel_leverage"
-        lev, t0 = _trig_series(df, lev_col)
+        lev, t0 = _trig_series(df, lev_col, "lev_col")
         held = lev[t0]
         for t in t0+1:n
             v = lev[t]
@@ -134,7 +141,7 @@ function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
             end
         end
     elseif type == "vol_band"
-        vol, t0 = _trig_series(df, vol_col)
+        vol, t0 = _trig_series(df, vol_col, "vol_col")
         ref = vol[t0]
         for t in t0+1:n
             v = vol[t]
@@ -142,18 +149,31 @@ function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
                 trig[t] = true; ref = v
             end
         end
-    elseif type == "combined"
-        (triggers === nothing || isempty(triggers)) && error("type='combined' benötigt eine nicht-leere Liste 'triggers'.")
-        for sub in triggers
-            kw = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in _kvpairs(sub isa NamedTuple || sub isa AbstractDict || sub isa AbstractVector{<:Pair} ? sub : collect(sub)))
-            haskey(kw, :df) && delete!(kw, :df)
-            st = String(pop!(kw, :type))
-            haskey(kw, :out_col) || (kw[:out_col] = "..__sub__..")
-            sub_df = rebalance_trigger(df, st; kw...)
-            trig .|= Bool.(_getcol(sub_df, String(kw[:out_col])))
-        end
     else
-        error("Unbekannter type='$type'.")
+        # seit K43 T1-R5 aus der Tabelle (bis dahin "type='combined' benötigt eine nicht-leere Liste 'triggers'.")
+        triggers === nothing && chk_stop("fehlt", fn, "triggers")
+        (triggers isa Union{AbstractVector,Tuple,AbstractDict,NamedTuple} && isempty(triggers)) &&
+            chk_stop("ut1.liste_leer", fn, "triggers")
+        (triggers isa Union{AbstractVector,Tuple} && !(triggers isa AbstractVector{<:Pair})) || chk_stop("liste", fn, "triggers")
+        subs = Dict{Symbol,Any}[]
+        for (i, sub) in enumerate(triggers)
+            _is_mapping(sub) || chk_stop("liste", fn, "triggers[[$i]]")
+            ps = _kvpairs(sub)
+            for p in ps
+                p.first in _TRIG_SUB_FIELDS || chk_stop("e1.trigger_feld", fn, p.first, i)
+            end
+            any(p -> p.first == "type" && p.second !== nothing, ps) || chk_stop("fehlt", fn, "triggers[[$i]]\$type")
+            push!(subs, Dict{Symbol,Any}(Symbol(p.first) => p.second for p in ps if p.second !== nothing))   # R modifyList
+        end
+        for kw in subs
+            st = pop!(kw, :type, nothing)
+            sdf = pop!(kw, :df, df)   # eigenes df eines Teil-Triggers (wie R; bis 1.6.3 übergangen)
+            sub_df = rebalance_trigger(sdf, st; out_col = "..__sub__..", kw...)
+            nrow(sub_df) == n || chk_stop("e1.trigger_df", fn, n)
+            trig .|= Bool.(_getcol(sub_df, "..__sub__.."))
+        end
     end
-    return _with_col(df, out_col, Vector{Bool}(trig))
+    out = copy(df)
+    out[String(out_col)] = Vector{Bool}(trig)
+    return out
 end

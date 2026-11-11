@@ -19,6 +19,20 @@
 const _EPOCH = Date(1970, 1, 1)
 _fl(v) = (v === missing || v === nothing) ? NA : v isa Date ? Float64(Dates.value(v - _EPOCH)) : Float64(v)
 
+"Art der Eingabe von median/quantile (seit 1.6.4, RP, C-060): :factor, :ordered, :date, :text oder :num."
+function _stat_kind(x)
+    x isa SimLev.RFmt.RFactor && return x.ordered ? :ordered : :factor
+    vals = x isa RVector ? x.values : x
+    vals isa Union{AbstractArray,Tuple} || (vals = (vals,))
+    eltype(vals) <: Union{Missing,Nothing,Real} && return :num
+    any(v -> v isa AbstractString || v isa AbstractChar, vals) && return :text
+    any(v -> v isa Date, vals) && return :date
+    return :num
+end
+_stat_reject(fn, what) = error(SimLev.chk_msg("rp.stat_art", fn, what))
+# type == c(1L, 3L) wie R (Zahl, Wahrheitswert oder Text "1"/"3")
+_type13(t) = t isa AbstractString ? t in ("1", "3") : (t isa Real && !isnan(Float64(t)) && (t == 1 || t == 3))
+
 "Numerischer Vektor (Float64) und Namen (oder nothing)."
 _vec(x::RVector) = (Float64[_fl(v) for v in x.values], x.names)
 _vec(x::NamedMat) = (Float64[_fl(v) for v in vec(x.data)], nothing)
@@ -58,10 +72,14 @@ _rsum(a) = SimLev.r_sum(a)
 "mean() für Doubles (long double, zweiter Korrekturdurchlauf; C-Kern)."
 _rmean(a) = SimLev._rb_mean(SimLev._rbv(a))
 
-"`seq.int(from, to, length.out = n)` (Werte wie R)."
+"`seq.int(from, to, length.out = n)` (Werte wie R; seit 1.6.4 wie R aufgerundet und geprüft, C-061)."
 function seq_len_out(frm, to, length_out)
-    n = trunc(Int, length_out)
+    lo = length_out === missing ? NaN : Float64(length_out)
+    (isnan(lo) || lo < 0) && error("'length.out' must be a non-negative number")
+    n = ceil(Int, lo)
     frm = Float64(frm); to = Float64(to)
+    isfinite(frm) || error("'from' must be a finite number")
+    isfinite(to) || error("'to' must be a finite number")
     n <= 0 && return Float64[]
     return SimLev._rb_seq_len(frm, to, n)   # C-Kern sl_r_seq_len (seit 1.6.0)
 end
@@ -94,7 +112,7 @@ function _stable_argsort(v::AbstractVector, isstr::Bool, decreasing::Bool)
     isstr || return SimLev._rb_order([Float64[Float64(t) for t in v]], [decreasing], 1)   # C-Kern
     # R's orderVector1 mit Scollate: stabil (Gleichstand → Index aufsteigend), auch absteigend
     lst = [String(t) for t in v]
-    return sortperm(lst; alg = MergeSort, lt = str_lt, rev = decreasing)
+    return sortperm(lst; alg = MergeSort, lt = r_isless, rev = decreasing)   # lst::Vector{String} (seit 1.6.4 statt str_lt)
 end
 
 "R's `ssort2` (Shellsort mit Scollate) für `sort()` unbenannter Zeichenketten."
@@ -142,8 +160,13 @@ function order(args...; na_last = true, decreasing = false)
     for k in keys
         length(k[1]) != n && error("argument lengths differ")
     end
-    dec = decreasing isa AbstractVector || decreasing isa Tuple ? collect(Bool, decreasing) : fill(Bool(decreasing), length(keys))
-    length(dec) == 1 && (dec = fill(dec[1], length(keys)))
+    dv = decreasing isa AbstractVector || decreasing isa Tuple ? collect(decreasing) : [decreasing]
+    # seit 1.6.4 (C-018) wie R: mit Textschlüsseln (method "shell") höchstens ein Wert, sonst (radix) rep_len auf die
+    # Zahl der Schlüssel; ein leerer Vektor ergibt NA (bis 1.6.3 las der Kern bei zu kurzem decreasing dahinter)
+    any(k -> k[3], keys) && length(dv) > 1 && error("'decreasing' of length > 1 is only for method = \"radix\"")
+    (isempty(dv) || any(d -> d === missing || d === nothing || (d isa AbstractFloat && isnan(d)), dv)) &&
+        error("'decreasing' elements must be TRUE or FALSE")
+    dec = Bool[Bool(dv[mod1(i, length(dv))]) for i in 1:length(keys)]
     if !any(k -> k[3], keys)       # nur Zahlenschlüssel -> C-Kern sl_r_order
         nl = na_last === nothing ? -1 : (na_last === true ? 1 : 0)
         return SimLev._rb_order(Vector{Float64}[Vector{Float64}(k[1]) for k in keys], dec, nl)
@@ -198,6 +221,9 @@ end
 "last", "min", "max" (integer). `na_last`: true, false, nothing (= NA) oder "keep".
 """
 function r_rank(x; na_last = true, ties_method::AbstractString = "average")
+    # seit 1.6.4 wie R match.arg (RP, C-056; bis 1.6.3 nur volle Namen); "random" braucht R's Zufallszahlen
+    ties_method = SimLev.RFmt._r_match_arg(ties_method, ("average", "first", "last", "random", "max", "min"))
+    ties_method == "random" && error(SimLev.chk_msg("rp.rank_random"))
     names = _names_of(x)
     v, nas, isstr = _keys(x)
     xs = v[.!nas]
@@ -263,6 +289,10 @@ end
 
 "`rle(x)`: RList (Klasse \"rle\") mit `lengths` (Int) und `values`."
 function rle(x)
+    # seit 1.6.4 (Befund C-063) wie R: Matrix, Faktor und Liste sind keine Vektoren eines Grundtyps
+    (x isa AbstractArray && ndims(x) > 1) || x isa SimLev.RFmt.RFactor || x isa SimLev.RList ||
+        (x isa AbstractVector && any(v -> v isa Union{AbstractArray,AbstractDict,NamedTuple}, x)) ?
+        error("'x' must be a vector of an atomic type") : nothing
     a = x isa RVector ? x.values : x isa AbstractArray ? vec(x) : [x]
     n = length(a)
     n == 0 && return RList("lengths" => Int[], "values" => a; class = "rle")
@@ -288,6 +318,14 @@ diff_int(v) = [v[i+1] - v[i] for i in 1:length(v)-1]
 "`tabulate(bin, nbins = max(1, bin, na.rm = TRUE))` (C-Kern)."
 function tabulate(bin; nbins = nothing)
     b = _v(bin)
+    if nbins !== nothing   # seit 1.6.4 (Befund C-062) wie R: Prüfung und Meldungen von tabulate()
+        nb = nbins isa Union{AbstractVector,Tuple} && length(nbins) == 1 ? first(nbins) : nbins
+        (nb isa Real && !(nb isa Bool)) || error("invalid 'nbin' argument")
+        isnan(Float64(nb)) && error("missing value where TRUE/FALSE needed")
+        abs(Float64(nb)) >= 2147483648 && error("attempt to make a table with >= 2^31 elements")
+        nbins = trunc(Int, Float64(nb))
+        nbins < 0 && error("invalid 'nbin' argument")
+    end
     if nbins === nothing
         bb = Float64[trunc(t) for t in b if !isnan(t)]
         nbins = trunc(Int, max(1.0, isempty(bb) ? 1.0 : maximum(bb)))
@@ -345,6 +383,7 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
             br[nb] = rx[2] + dx / 1000
         end
     else
+        br = filter(!isnan, br)   # seit 1.6.4 wie R sort.int: NA/NaN entfallen (C-009)
         br = br[_stable_argsort(br, false, false)]
         nb = length(br)
     end
@@ -374,15 +413,21 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
         codes_only = true
         labs = String[]
     else
-        labs = [string(s) for s in labels]
+        labs = Union{Missing,String}[(s === missing || s === nothing || (s isa AbstractFloat && isnan(s))) ? missing :
+                                     string(s) for s in labels]
         length(labs) != nb - 1 && error("number of intervals and length of 'labels' differ")
+        any(ismissing, labs) && error("cut: labels darf kein NA enthalten.")   # seit 1.6.4 (Entscheidung 67)
     end
     code = _bincode(xv, br, right, include_lowest)
     if codes_only
         any(==(0), code) && return _vec_out(Union{Missing,Int}[c == 0 ? missing : c for c in code])
         return _vec_out(code)
     end
-    return SimLev.RFmt.RFactor(code, labs; ordered = ordered_result)
+    # seit 1.6.4 wie R factor(code, seq_along(labels), labels): gleiche Beschriftungen ergeben eine Stufe
+    # (C-009); NA als Beschriftung ist ein Fehler (oben)
+    cats = unique(String[s for s in labs])
+    pos = Int[findfirst(==(s), cats) for s in labs]
+    return SimLev.RFmt.RFactor(Int[c == 0 ? 0 : pos[c] for c in code], cats; ordered = ordered_result)
 end
 
 # ── Lage- und Streuungsmaße ──────────────────────────────────────────────
@@ -400,8 +445,78 @@ end
 # sonst Quicksort wie R). Für Werte, die sich nur im Vorzeichen der Null unterscheiden, hängt das
 # Ergebnis vom Verfahren ab.
 
-"`sort(x, partial = partial)` für Doubles ohne NA wie R (1-basierte Indizes)."
-sort_partial(x, partial) = SimLev._rb_psort(collect(Float64, _v(x)), Int64[trunc(Int64, t) for t in _v(partial)])
+"""`sort(x, partial = partial)` für Doubles wie R (1-basierte Indizes; NA/NaN entfallen wie bei `na.last = NA`).
+Seit 1.6.4 (C-015) mit den Prüfungen von R: nicht endliche Stellen „non-finite 'partial'“, bis 10 Stellen
+ganzzahlig (zur Null hin) im Bereich 1 … Länge, sonst „index k outside bounds“ bzw. außerhalb des int-Bereichs
+„NA index“ (mit Warnung); bis 1.6.3 hing der Kern, stürzte ab oder las fremden Speicher."""
+function sort_partial(x, partial)
+    v = Float64[t for t in collect(Float64, _v(x)) if !isnan(t)]
+    p = collect(Float64, _v(partial))
+    all(isfinite, p) || error("non-finite 'partial'")
+    if length(p) <= 10
+        ki = Union{Nothing,Int64}[-2147483648.0 < t < 2147483648.0 ? trunc(Int64, t) : nothing for t in sort(p)]
+        any(t -> t === nothing, ki) && @warn "NAs introduced by coercion to integer range"
+        for t in ki
+            t === nothing && error("NA index")
+            (t < 1 || t > length(v)) && error("index $t outside bounds")
+        end
+        k = Int64[t for t in ki]
+    else
+        k = zeros(Int64, length(p))   # mehr als 10 Stellen: vollständig sortiert wie R (ohne Prüfung)
+    end
+    SimLev._rb_psort(v, k)
+end
+
+"`asInteger` des numerischen `switch`-Ausdrucks: abgeschnitten, ausserhalb des int-Bereichs NA mit Warnung."
+function _switch_int(t::Float64)
+    isnan(t) && return nothing
+    if !(-2147483648.0 < t < 2147483648.0)
+        @warn "NAs introduced by coercion to integer range"
+        return nothing
+    end
+    return trunc(Int, t)
+end
+
+"""
+`type` von `quantile.default` wie R auswerten (seit 1.6.4, Befund C-028): wirksamer Typ 1–9, 0 für den Zweig
+`type <= 3` ohne passende `switch`-Wahl (R nimmt dann die untere Ordnungsstatistik `x[j]`) oder der Fehler, den R an
+derselben Stelle meldet (`if (type == 7)`, `switch`, `type - 3`).
+"""
+function quantile_type(type)
+    v = type isa Union{AbstractVector,Tuple} ? collect(type) : [type]
+    length(v) > 1 && error("the condition has length > 1")
+    isempty(v) && error("argument is of length zero")
+    t = v[1]
+    (t === missing || t === nothing) && error("missing value where TRUE/FALSE needed")
+    if t isa AbstractString   # Textvergleich wie R ("7" == 7 ist TRUE, sonst Kollation gegen "3")
+        t == "7" && return 7
+        str_collate(String(t), "3") <= 0 && error("numeric EXPR required for 'switch' without named alternatives")
+        error("non-numeric argument to binary operator")
+    end
+    t = Float64(t)
+    isnan(t) && error("missing value where TRUE/FALSE needed")
+    t == 7 && return 7
+    if t <= 3
+        k = _switch_int(t)
+        return k !== nothing && 1 <= k <= 3 ? k : 0
+    end
+    k = _switch_int(t - 3)
+    (k === nothing || !(1 <= k <= 6)) && error("object 'a' not found")
+    return k + 3
+end
+
+"R `quantile.default` im Zweig `type <= 3` ohne `h`: `x[j]` mit `j = floor(n * p)` (Rand: x[1])."
+function _quantile_lower(xv::Vector{Float64}, pp::Vector{Float64})
+    n = length(xv)
+    out = fill(NA, length(pp))
+    n == 0 && return out
+    xs = sort(xv)
+    pad = vcat(xs[1], xs[1], xs, xs[end], xs[end])
+    for (i, p) in enumerate(pp)
+        isnan(p) || (out[i] = pad[floor(Int, n * p) + 2])
+    end
+    return out
+end
 
 """
     quantile(x, probs = [0, .25, .5, .75, 1]; na_rm = false, names = true, type = 7, digits = 7)
@@ -410,7 +525,27 @@ sort_partial(x, partial) = SimLev._rb_psort(collect(Float64, _v(x)), Int64[trunc
 bei `names = false` Vector (Länge 1: Skalar).
 """
 function quantile(x, probs = [0.0, 0.25, 0.5, 0.75, 1.0]; na_rm::Bool = false, names::Bool = true,
-                  type::Integer = 7, digits::Integer = 7)
+                  type = 7, digits::Integer = 7)
+    # seit 1.6.4 (RP, C-060) wie R: ungeordnete Faktoren, geordnete außer type 1/3, Text und Datum mit type 4 bis 9 mit
+    # R's Meldungen; geordnete Faktoren (type 1/3), Text und Datum mit type 1 bis 3 abgelehnt (rp.stat_art; R rechnet
+    # dort); bis 1.6.3 Faktor-Codes bzw. Tageszahlen als Zahlen
+    kind = _stat_kind(x)
+    kind === :factor && error("(unordered) factors are not allowed")
+    if kind === :ordered
+        tv = type isa Union{AbstractVector,Tuple} ? collect(type) : [type]
+        any(_type13, tv) || error("'type' must be 1 or 3 for ordered factors")
+        _stat_reject("quantile", "geordnete Faktoren")
+    end
+    if kind === :text || kind === :date
+        vals = collect(Any, x isa RVector ? x.values : x)
+        nav = [v === missing || v === nothing || (v isa AbstractFloat && isnan(v)) for v in vals]
+        (!na_rm && any(nav)) && error("missing values and NaN's not allowed if 'na.rm' is FALSE")
+        p0 = _v(probs); eps0 = 100 * _DBL_EPS
+        any(t -> !isnan(t) && (t < -eps0 || t > 1 + eps0), p0) && error("'probs' outside [0,1]")
+        quantile_type(type) >= 4 &&
+            error(kind === :date ? "* not defined for \"Date\" objects" : "non-numeric argument to binary operator")
+        _stat_reject("quantile", kind === :date ? "Datumswerte" : "Texte")
+    end
     xv = _v(x)
     if na_rm
         xv = filter(!isnan, xv)
@@ -423,7 +558,9 @@ function quantile(x, probs = [0.0, 0.25, 0.5, 0.75, 1.0]; na_rm::Bool = false, n
     any(i -> pok[i] && (p[i] < -eps || p[i] > 1 + eps), eachindex(p)) && error("'probs' outside [0,1]")
     pp = Float64[isnan(t) ? t : max(0.0, min(1.0, t)) for t in p]
     np_ = length(pp)
-    qs = SimLev._rb_quantile(xv, pp, Int(type))      # C-Kern sl_r_quantile (Typen 1–9)
+    typ = quantile_type(type)   # seit 1.6.4 wie R (C-028)
+    qs = typ == 0 ? _quantile_lower(Vector{Float64}(xv), pp) :
+         SimLev._rb_quantile(xv, pp, typ)      # C-Kern sl_r_quantile (Typen 1–9)
     qs = Float64[pok[i] ? qs[i] : p[i] for i in eachindex(qs)]
     (names && np_ > 0) && return RVector(qs; names = _format_perc(pp, Int(digits)))
     return _vec_out(qs)
@@ -431,6 +568,27 @@ end
 
 "`median.default(x, na.rm)` (C-Kern sl_r_median, seit 1.6.0)."
 function median(x; na_rm::Bool = false)
+    # seit 1.6.4 (RP, C-060) wie R: Faktoren „need numeric data“; Text: mittlerer Wert nach R's Sortierung, bei gerader
+    # Anzahl NA mit R's Warnung; Datumswerte abgelehnt (rp.stat_art; R liefert ein Datum mit Bruchteil); bis 1.6.3
+    # Faktor-Codes bzw. Tageszahlen als Zahlen
+    kind = _stat_kind(x)
+    (kind === :factor || kind === :ordered) && error("need numeric data")
+    kind === :date && _stat_reject("median", "Datumswerte")
+    if kind === :text
+        vals = collect(Any, x isa RVector ? x.values : x)
+        na = [v === missing || v === nothing for v in vals]
+        if na_rm
+            vals = vals[.!na]
+        elseif any(na)
+            return missing                       # x[NA_integer_]: NA
+        end
+        n = length(vals)
+        n == 0 && return missing
+        xs = _ssort2(String[string(v) for v in vals], false)
+        isodd(n) && return xs[(n + 1) ÷ 2]
+        @warn "argument is not numeric or logical: returning NA"
+        return NA
+    end
     is_int = _is_int_like(x)
     xv = _v(x)
     r = SimLev._rb_median(xv, na_rm, is_int)

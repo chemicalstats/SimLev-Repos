@@ -17,6 +17,8 @@ from __future__ import annotations
 import math
 import warnings
 
+import datetime as _dt
+
 import numpy as np
 import pandas as pd
 
@@ -57,6 +59,35 @@ def _vec(x):
     return np.asarray(a, dtype=np.float64).ravel(order="F"), None
 
 
+def _stat_kind(x):
+    """Art der Eingabe von median/quantile (seit 1.6.4, RP, C-060): "factor", "ordered", "date", "text" oder "num"."""
+    if isinstance(x, pd.Series):
+        if isinstance(x.dtype, pd.CategoricalDtype):
+            return "ordered" if x.cat.ordered else "factor"
+        x = x.to_numpy()
+    if isinstance(x, pd.Categorical):
+        return "ordered" if x.ordered else "factor"
+    if x is None or isinstance(x, pd.DataFrame):
+        return "num"
+    a = np.asarray(x)
+    if a.dtype.kind == "M":
+        return "date"
+    if a.dtype.kind in "US":
+        return "text"
+    if a.dtype == object:
+        vals = [v for v in a.ravel() if v is not None and not (isinstance(v, float) and v != v)]
+        if any(isinstance(v, str) for v in vals):
+            return "text"
+        if any(isinstance(v, (_dt.date, np.datetime64)) for v in vals):
+            return "date"
+    return "num"
+
+
+def _stat_reject(fn, what):
+    from .._meldungen import EINGABE
+    raise RError(EINGABE["rp.stat_art"] % (fn, what))
+
+
 def _is_int_like(x):
     if isinstance(x, pd.Series):
         return np.issubdtype(x.dtype, np.integer) or x.dtype == bool
@@ -75,10 +106,17 @@ def _rmean(a):
 
 
 def seq_len_out(frm, to, length_out):
-    """``seq.int(from, to, length.out = n)`` (Werte wie R)."""
-    n = int(length_out)
+    """``seq.int(from, to, length.out = n)`` (Werte wie R; seit 1.6.4 wie R aufgerundet und geprüft, C-061)."""
+    lo = float(length_out)
+    if lo != lo or lo < 0:
+        raise RError("'length.out' must be a non-negative number")
+    n = int(math.ceil(lo))
     frm = float(frm)
     to = float(to)
+    if not math.isfinite(frm):
+        raise RError("'from' must be a finite number")
+    if not math.isfinite(to):
+        raise RError("'to' must be a finite number")
     if n <= 0:
         return np.zeros(0)
     out = np.empty(n)
@@ -97,6 +135,8 @@ def _keys(x):
         codes[x.codes < 0] = np.nan
         return codes, np.isnan(codes), False
     a = np.asarray(x)
+    if a.ndim > 1:   # seit 1.6.4 wie R spaltenweise (C-045; bis 1.6.3 zeilenweise bzw. Fehler „falsche Länge“)
+        a = a.ravel(order="F")
     if a.dtype.kind in "biuf":
         a = a.astype(np.float64)
         return a, np.isnan(a), False
@@ -161,9 +201,14 @@ def order(*args, na_last=True, decreasing=False):
     for k in keys:
         if len(k[0]) != n:
             raise RError("argument lengths differ")
-    dec = list(decreasing) if isinstance(decreasing, (list, tuple, np.ndarray)) else [bool(decreasing)] * len(keys)
-    if len(dec) == 1:
-        dec = dec * len(keys)
+    dec = list(decreasing) if isinstance(decreasing, (list, tuple, np.ndarray)) else [bool(decreasing)]
+    # seit 1.6.4 (C-018) wie R: mit Textschlüsseln (method "shell") höchstens ein Wert, sonst (radix) rep_len auf die
+    # Zahl der Schlüssel; ein leerer Vektor ergibt NA (bis 1.6.3 las der Kern bei zu kurzem decreasing dahinter)
+    if any(k[2] for k in keys) and len(dec) > 1:
+        raise RError("'decreasing' of length > 1 is only for method = \"radix\"")
+    if not dec or any(d is None or (isinstance(d, float) and math.isnan(d)) for d in dec):
+        raise RError("'decreasing' elements must be TRUE or FALSE")
+    dec = [bool(dec[i % len(dec)]) for i in range(len(keys))]
     if not any(k[2] for k in keys):
         # nur Zahlenschlüssel -> C-Kern sl_r_order (stabil, -0 == 0, NA/NaN fehlend)
         kk = np.ascontiguousarray(np.concatenate([np.asarray(k[0], dtype=np.float64) for k in keys]) if keys else np.zeros(0))
@@ -210,6 +255,8 @@ def sort(x, decreasing=False, na_last=None):
     if isstr and names is None:
         # sort.int(method = "shell") ohne Namen: .Internal(sort()) = ssort2
         arr = np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x, dtype=object)
+        if arr.ndim > 1:   # spaltenweise wie R (seit 1.6.4, C-045)
+            arr = arr.ravel(order="F")
         ok = arr[~na]
         y = _ssort2(ok, bool(decreasing)) if ok.size >= 2 else list(ok)
         nas = list(arr[na])
@@ -223,11 +270,10 @@ def sort(x, decreasing=False, na_last=None):
         res[:] = out
         return res
     o = order(x if not isinstance(x, pd.Series) else x.to_numpy(), na_last=na_last, decreasing=decreasing) - 1
-    if isstr:
-        out = np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x, dtype=object)[o]
-    else:
-        arr = x.to_numpy() if isinstance(x, pd.Series) else np.asarray(x)
-        out = np.asarray(arr)[o]
+    arr = np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x, dtype=object if isstr else None)
+    if arr.ndim > 1:   # spaltenweise wie R (seit 1.6.4, C-045; bis 1.6.3 Fehler)
+        arr = arr.ravel(order="F")
+    out = arr[o]
     if names is not None:
         return pd.Series(out, index=[names[i] for i in o])
     return out
@@ -241,8 +287,17 @@ def rank(x, na_last=True, ties_method="average"):
 
     ``ties_method``: ``"average"`` (double), ``"first"``, ``"last"``,
     ``"min"``, ``"max"`` (integer). ``na_last``: ``True``, ``False``,
-    ``None`` (= ``NA``, entfernen) oder ``"keep"``.
+    ``None`` (= ``NA``, entfernen) oder ``"keep"``. Seit 1.6.4 wie R über match.arg (RP, C-056; bis 1.6.3 nur volle
+    Namen); ``"random"`` braucht R's Zufallszahlen und wird abgelehnt (``rp.rank_random``).
     """
+    from .fmt import _r_match_arg
+    try:
+        ties_method = _r_match_arg(ties_method, ("average", "first", "last", "random", "max", "min"))
+    except ValueError as e:
+        raise RError(str(e)) from None
+    if ties_method == "random":
+        from .._meldungen import EINGABE
+        raise RError(EINGABE["rp.rank_random"])
     names = None
     if isinstance(x, pd.Series):
         names = None if isinstance(x.index, pd.RangeIndex) else list(x.index)
@@ -345,7 +400,7 @@ def cut(x, breaks, labels=None, include_lowest=False, right=True, dig_lab=3, ord
             br[0] = rx[0] - dx / 1000
             br[nb - 1] = rx[1] + dx / 1000
     else:
-        br = np.sort(br)
+        br = np.sort(br[~np.isnan(br)])   # seit 1.6.4 wie R sort.int: NA/NaN entfallen (C-009)
         nb = br.size
     if np.unique(br).size < br.size:
         raise RError("'breaks' are not unique")
@@ -373,17 +428,24 @@ def cut(x, breaks, labels=None, include_lowest=False, right=True, dig_lab=3, ord
         codes_only = True
         labs = None
     else:
-        labs = [str(s) for s in labels]
+        labs = [None if s is None or s is pd.NA or (isinstance(s, (float, np.floating)) and s != s) else str(s)
+                for s in labels]
         if len(labs) != nb - 1:
             raise RError("number of intervals and length of 'labels' differ")
+        if any(s is None for s in labs):   # seit 1.6.4 abgelehnt (Entscheidung 67; R bildet eine Stufe NA)
+            raise RError("cut: labels darf kein NA enthalten.")
     code = _bincode(xv, br, right, include_lowest)
     if codes_only:
         if np.isnan(code).any():
             return code
         return code.astype(np.int64)
+    # seit 1.6.4 wie R factor(code, seq_along(labels), labels): gleiche Beschriftungen ergeben eine Stufe
+    # (C-009); NA als Beschriftung ist ein Fehler (oben)
+    cats = list(dict.fromkeys(labs))
+    pos = [cats.index(s) for s in labs]
     with np.errstate(invalid="ignore"):
-        codes = np.where(np.isnan(code), -1, code - 1).astype(np.int64)
-    return pd.Categorical.from_codes(codes, categories=labs, ordered=ordered_result)
+        codes = np.array([-1 if c != c else pos[int(c) - 1] for c in code], dtype=np.int64)
+    return pd.Categorical.from_codes(codes, categories=cats, ordered=ordered_result)
 
 
 # ── Lage- und Streuungsmaße ──────────────────────────────────────────────
@@ -407,19 +469,125 @@ def _format_perc(probs, digits=7):
 # sl_r_psort sortiert wie R (bis 10 Indizes Auswahl, sonst Quicksort).
 
 def sort_partial(x, partial):
-    """``sort(x, partial = partial)`` für Doubles ohne NA wie R (1-basierte Indizes)."""
+    """``sort(x, partial = partial)`` für Doubles wie R (1-basierte Indizes; NA/NaN entfallen wie bei
+    ``na.last = NA``). Seit 1.6.4 (C-015) mit den Prüfungen von R: nicht endliche Stellen „non-finite 'partial'“,
+    bis 10 Stellen ganzzahlig (zur Null hin) im Bereich 1 … Länge, sonst „index k outside bounds“ bzw. außerhalb des
+    int-Bereichs „NA index“ (mit Warnung); bis 1.6.3 hing der Kern, stürzte ab oder las fremden Speicher."""
     v = np.array(np.asarray(x, dtype=np.float64).ravel(), dtype=np.float64)
-    k = np.ascontiguousarray(np.asarray(partial).ravel(), dtype=np.int64) if np.size(partial) else np.zeros(0, dtype=np.int64)
+    v = v[~np.isnan(v)]
+    p = np.asarray(partial, dtype=np.float64).ravel() if np.size(partial) else np.zeros(0)
+    if not np.isfinite(p).all():
+        raise RError("non-finite 'partial'")
+    if p.size <= 10:
+        ki = [int(math.trunc(t)) if -2147483648.0 < t < 2147483648.0 else None for t in np.sort(p).tolist()]
+        if any(t is None for t in ki):   # as.integer: außerhalb des int-Bereichs NA mit Warnung
+            warnings.warn("NAs introduced by coercion to integer range")
+        for t in ki:
+            if t is None:
+                raise RError("NA index")
+            if t < 1 or t > v.size:
+                raise RError("index %d outside bounds" % t)
+        k = np.ascontiguousarray(ki, dtype=np.int64)
+    else:
+        k = np.zeros(p.size, dtype=np.int64)   # mehr als 10 Stellen: vollständig sortiert wie R (ohne Prüfung)
     _ext.slc_r_psort(v, k)
     return v
+
+
+def _switch_int(t):
+    """``asInteger`` des numerischen ``switch``-Ausdrucks: abgeschnitten, ausserhalb des int-Bereichs NA mit Warnung."""
+    if t != t:
+        return None
+    if not (-2147483648.0 < t < 2147483648.0):
+        _warn("NAs introduced by coercion to integer range")
+        return None
+    return int(math.trunc(t))
+
+
+def quantile_type(type):
+    """``type`` von ``quantile.default`` wie R auswerten (seit 1.6.4, Befund C-028): wirksamer Typ 1–9, 0 für den
+    Zweig ``type <= 3`` ohne passende ``switch``-Wahl (R nimmt dann die untere Ordnungsstatistik ``x[j]``) oder der
+    Fehler, den R an derselben Stelle meldet (``if (type == 7)``, ``switch``, ``type - 3``)."""
+    v = list(type) if isinstance(type, (list, tuple, np.ndarray, pd.Series)) else [type]
+    if len(v) > 1:
+        raise RError("the condition has length > 1")
+    if not v:
+        raise RError("argument is of length zero")
+    t = v[0]
+    if t is None or t is pd.NA:
+        raise RError("missing value where TRUE/FALSE needed")
+    if isinstance(t, str):   # Textvergleich wie R ("7" == 7 ist TRUE, sonst Kollation gegen "3")
+        if t == "7":
+            return 7
+        from ._collate import str_collate
+        if str_collate(t, "3") <= 0:
+            raise RError("numeric EXPR required for 'switch' without named alternatives")
+        raise RError("non-numeric argument to binary operator")
+    t = float(t)
+    if t != t:
+        raise RError("missing value where TRUE/FALSE needed")
+    if t == 7:
+        return 7
+    if t <= 3:
+        k = _switch_int(t)
+        return k if k in (1, 2, 3) else 0
+    k = _switch_int(t - 3)
+    if k is None or not 1 <= k <= 6:
+        raise RError("object 'a' not found")
+    return k + 3
+
+
+def _quantile_lower(xv, pp):
+    """R ``quantile.default`` im Zweig ``type <= 3`` ohne ``h``: ``x[j]`` mit ``j = floor(n * p)`` (Rand: x[1])."""
+    n = xv.size
+    out = np.full(pp.size, NA_REAL)
+    if n == 0:
+        return out
+    xs = np.sort(xv)
+    pad = np.concatenate([[xs[0], xs[0]], xs, [xs[-1], xs[-1]]])
+    for i, p in enumerate(pp):
+        if p == p:
+            out[i] = pad[int(math.floor(n * p)) + 1]
+    return out
 
 
 def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type=7, digits=7):
     """``quantile.default(x, probs, na.rm, names, type)`` (Typen 1–9).
 
     Ergebnis: ``Series`` (mit Namen wie ``"25%"``) bzw. bei ``names=False``
-    ``ndarray`` (Länge 1: ``float``).
+    ``ndarray`` (Länge 1: ``float``). Seit 1.6.4 (RP, C-060) wie R: ungeordnete Faktoren „(unordered) factors are not
+    allowed“, geordnete außer type 1/3 „'type' must be 1 or 3 …“; Text und Datum mit type 4 bis 9 R's Fehler der
+    Rechnung. Geordnete Faktoren (type 1/3), Text und Datum mit type 1 bis 3 rechnet R, hier abgelehnt (``rp.stat_art``);
+    bis 1.6.3 Abbruch beim Umwandeln in Zahlen.
     """
+    kind = _stat_kind(x)
+    if kind == "factor":
+        raise RError("(unordered) factors are not allowed")
+    if kind == "ordered":
+        tv = list(type) if isinstance(type, (list, tuple, np.ndarray)) else [type]
+        # type == c(1L, 3L) wie R (Zahl, Wahrheitswert oder Text "1"/"3")
+        if not any((t in ("1", "3")) if isinstance(t, str) else
+                   (isinstance(t, (int, float, np.integer, np.floating, bool, np.bool_)) and t == t and t in (1, 3))
+                   for t in tv):
+            raise RError("'type' must be 1 or 3 for ordered factors")
+        _stat_reject("quantile", "geordnete Faktoren")
+    if kind in ("text", "date"):
+        a = np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x).ravel()
+        if a.dtype.kind == "M":
+            nav = np.isnat(a)
+        else:
+            nav = np.array([v is None or (isinstance(v, float) and v != v) or (isinstance(v, np.datetime64) and np.isnat(v))
+                            for v in a], dtype=bool)
+        if not na_rm and nav.any():
+            raise RError("missing values and NaN's not allowed if 'na.rm' is FALSE")
+        p = np.atleast_1d(np.asarray(probs, dtype=np.float64)).ravel()
+        eps = 100 * _DBL_EPS
+        with np.errstate(invalid="ignore"):
+            if (~np.isnan(p) & ((p < -eps) | (p > 1 + eps))).any():
+                raise RError("'probs' outside [0,1]")
+        if quantile_type(type) >= 4:
+            raise RError('* not defined for "Date" objects' if kind == "date" else "non-numeric argument to binary operator")
+        _stat_reject("quantile", "Datumswerte" if kind == "date" else "Texte")
     xv, _ = _vec(x)
     if na_rm:
         xv = xv[~np.isnan(xv)]
@@ -433,9 +601,13 @@ def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type
             raise RError("'probs' outside [0,1]")
     pp = np.where(np.isnan(p), p, np.maximum(0.0, np.minimum(1.0, p)))
     np_ = pp.size
+    typ = quantile_type(type)   # seit 1.6.4 wie R (C-028)
     # C-Kern sl_r_quantile (partielle Sortierung wie R, Typen 1–9)
     qs = np.empty(np_)
-    _ext.slc_r_quantile(np.ascontiguousarray(xv, dtype=np.float64), np.ascontiguousarray(pp), int(type), qs)
+    if typ == 0:
+        qs = _quantile_lower(np.asarray(xv, dtype=np.float64), pp)
+    else:
+        _ext.slc_r_quantile(np.ascontiguousarray(xv, dtype=np.float64), np.ascontiguousarray(pp), typ, qs)
     qs = np.where(pok, qs, p)
     if names and np_ > 0:
         return pd.Series(qs, index=_format_perc(pp, digits))
@@ -445,7 +617,29 @@ def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type
 
 
 def median(x, na_rm=False):
-    """``median.default(x, na.rm)``."""
+    """``median.default(x, na.rm)``. Seit 1.6.4 (RP, C-060) wie R: Faktoren „need numeric data“; Text: mittlerer Wert
+    nach R's Sortierung, bei gerader Anzahl NA mit R's Warnung; Datumswerte abgelehnt (``rp.stat_art``; R liefert ein
+    Datum mit Bruchteil). Bis 1.6.3 Abbruch beim Umwandeln in Zahlen."""
+    kind = _stat_kind(x)
+    if kind in ("factor", "ordered"):
+        raise RError("need numeric data")
+    if kind == "date":
+        _stat_reject("median", "Datumswerte")
+    if kind == "text":
+        a = list(np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x, dtype=object).ravel())
+        na = [v is None or (isinstance(v, float) and v != v) for v in a]
+        if na_rm:
+            a = [v for v, m in zip(a, na) if not m]
+        elif any(na):
+            return None                   # x[NA_integer_]: NA
+        n = len(a)
+        if n == 0:
+            return None
+        xs = _ssort2([str(v) for v in a], False)
+        if n % 2 == 1:
+            return xs[n // 2]
+        _warn("argument is not numeric or logical: returning NA")
+        return NA_REAL
     is_int = _is_int_like(x)
     xv, _ = _vec(x)
     r = _ext.slc_r_median(np.ascontiguousarray(xv), bool(na_rm), bool(is_int))   # C-Kern sl_r_median (seit 1.6.0)

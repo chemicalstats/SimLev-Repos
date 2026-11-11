@@ -60,62 +60,29 @@ def _as_cov_input(x):
     return a.reshape(-1, 1), False, None
 
 
-def _corcov(x, y, method_na, kendall, cor):
-    """R's ``cor``/``cov`` mit ``use`` als Zahl 1–5 (C-Kern ``sl_r_cov``)."""
-    X, xmat, xcn = _as_cov_input(x)
-    n, ncx = X.shape
-    ansmat = xmat
-    if y is None:
-        Y = None
-        ncy = ncx
-        ycn = None
-    else:
-        Y, ymat, ycn = _as_cov_input(y)
-        if Y.shape[0] != n:
-            raise RError("incompatible dimensions")
-        if ymat:
-            ansmat = True
-        ncy = Y.shape[1]
-    if method_na not in (1, 2, 3, 4, 5):
-        raise RError("invalid 'use' (computational method)")
-    if method_na == 2 and X.size == 0:
-        raise RError("no complete element pairs")
-    if method_na in (1, 2, 3) and X.size == 0:
-        raise RError("'x' is empty")
-    ans = np.empty(ncx * ncy)
-    try:
-        sd0 = _ext.slc_r_cov(np.ascontiguousarray(X.ravel(order="F")), n, ncx,
-                             None if Y is None else np.ascontiguousarray(Y.ravel(order="F")), ncy,
-                             method_na, int(bool(kendall)), int(bool(cor)), ans)
-    except ValueError as e:
-        raise RError(str(e)) from None
-    if sd0:
-        _warn("the standard deviation is zero")
-    ans = ans.reshape((ncx, ncy), order="F")
-    if ansmat:
-        if y is None:
-            rn = cn = xcn
-        else:
-            rn, cn = xcn, ycn
-        return _out(ans, rn, cn)
-    v = ans.ravel(order="F")
-    if v.size == 1:
-        return float(v[0])
-    return v
-
-
 _METHODS = {"pearson": 0, "kendall": 1, "spearman": 2}
 
 
-def _cor_cov(x, y, use, method, cor):
+def _cor_cov(x, y, use, method, cor, need_xy=True):
     """R's ``cor``/``cov`` (C-Kern ``sl_r_cor``, seit 1.6.0: Ränge, NA-Regeln und paarweise Rangkorrelation im
-    Kern); hier Argumente, Formen und Namen."""
+    Kern); hier Argumente, Formen und Namen. ``need_xy = False`` (``var``): ein Vektor ohne ``y`` ist erlaubt (seit
+    1.6.4 rechnet ``var`` hierüber statt über eine eigene Fassung ``_corcov`` mit ``sl_r_cov``; mit method = 0 prüft
+    ``sl_r_cor`` dasselbe und rechnet ``sl_r_cov``)."""
     na_method = _pmatch_use(use)
-    if method not in _METHODS:
-        raise RError("'arg' should be one of “pearson”, “kendall”, “spearman”")
+    # seit 1.6.4 wie R match.arg (RP, C-056): Teilnamen ("k", "s"), NULL bzw. alle drei = "pearson"; bis 1.6.3 nur volle
+    # Namen
+    from .fmt import _r_match_arg
+    try:
+        method = _r_match_arg(method, ("pearson", "kendall", "spearman"))
+    except ValueError as e:
+        raise RError(str(e)) from None
     is_mat = isinstance(x, pd.DataFrame) or (isinstance(x, np.ndarray) and x.ndim == 2)
-    if not is_mat and y is None:
+    if need_xy and not is_mat and y is None:
         raise RError("supply both 'x' and 'y' or a matrix-like 'x'")
+    if x is None:   # NULL wie R 4.3.3 (seit 1.6.4, K43 RS; bis dahin NA bzw. „incompatible dimensions“)
+        if not need_xy:
+            raise RError("'x' is NULL")               # var: C_cov
+        raise RError("'x' must be numeric" if cor else "is.numeric(x) || is.logical(x) is not TRUE")
     X, xmat, xcn = _as_cov_input(x)
     n, ncx = X.shape
     ansmat = xmat
@@ -169,14 +136,15 @@ def var(x, y=None, na_rm=False, use=None):
     """``var(x, y, na.rm, use)``."""
     if use is None:
         use = "na.or.complete" if na_rm else "everything"
-    na_method = _pmatch_use(use)
-    return _corcov(x, y, na_method, False, False)
+    return _cor_cov(x, y, use, "pearson", False, need_xy=False)
 
 
 def sd(x, na_rm=False):
     """``sd(x, na.rm)`` = ``sqrt(var(x, na.rm))``."""
     if isinstance(x, pd.DataFrame) or (isinstance(x, np.ndarray) and x.ndim == 2):
         x = np.asarray(x, dtype=np.float64).ravel(order="F")
+    elif x is None:                     # R: as.double(NULL) = numeric(0), also NA (seit 1.6.4 ausdrücklich, K43 RS)
+        x = np.empty(0, dtype=np.float64)
     v = var(x, na_rm=na_rm)
     if v != v:
         return v                        # sqrt(NA) = NA, sqrt(NaN) = NaN
@@ -241,6 +209,17 @@ class _ScaledArray(np.ndarray):
     def __array_finalize__(self, obj):
         self.scaled_center = getattr(obj, "scaled_center", None)
         self.scaled_scale = getattr(obj, "scaled_scale", None)
+
+    # seit 1.6.4 (C-046): die Attribute gehen beim Pickeln mit (bis 1.6.3 fielen sie weg)
+    def __reduce__(self):
+        f, a, st = super().__reduce__()
+        return f, a, (st, self.scaled_center, self.scaled_scale)
+
+    def __setstate__(self, state):
+        st, c, sc = state
+        super().__setstate__(st)
+        self.scaled_center = c
+        self.scaled_scale = sc
 
 
 from .base import quiet_fp  # noqa: E402

@@ -51,7 +51,8 @@ rebalance_trigger(
   \item{df}{
     \code{data.frame} mit täglichen Feldern (mindestens eine Zeile). Muss die
     relevanten numerischen Spalten (\code{lev_col} bzw. \code{vol_col})
-    enthalten, sonst Fehler.
+    enthalten, sonst Fehler (seit 1.6.4 nur Zahlen oder \code{NA}, kein
+    \code{Inf}, kein Faktor; nur ein \code{data.frame}, keine Liste).
   }
   \item{type}{
     Character. Trigger-Typ: \code{"abs_leverage"}, \code{"rel_leverage"},
@@ -63,7 +64,8 @@ rebalance_trigger(
     Bedeutung je Typ: \code{"abs_leverage"} in Prozentpunkten des Hebels
     (\code{10} = 0,10 Hebelabweichung); \code{"rel_leverage"}/\code{"vol_band"}
     relative Abweichung (\code{10} = 10 \%). Bei \code{type = "combined"}
-    ignoriert (Schwellen je Sub-Trigger). Standard: \code{10}.
+    ignoriert (Schwellen je Sub-Trigger). Eine einzelne endliche Zahl
+    \code{>= 0}. Standard: \code{10}.
   }
   \item{lev_col}{
     Character. Name der Ziel-Hebel-Spalte in \code{df}. Wird von
@@ -78,13 +80,16 @@ rebalance_trigger(
     Liste von Sub-Trigger-Specs (nur bei \code{type = "combined"}).
     Jeder Eintrag ist eine Liste mit \code{type} und ggf. \code{threshold}
     (in Prozent, fehlt er: \code{10}), \code{lev_col}, \code{vol_col}.
+    Ein eigenes \code{df} braucht dieselbe Zeilenzahl; andere Felder (auch
+    \code{out_col}) sind ein Fehler.
     Jeder Sub-Trigger führt seinen eigenen Referenzwert; die Ergebnisse
     werden OR-verknüpft. Standard: \code{NULL}.
   }
   \item{out_col}{
     Character. Name der zu erzeugenden logischen Spalte in \code{df}.
     Standard: \code{"rebal_trigger"}.
-  }
+  
+Seit 1.6.4 darf die Spalte in df noch nicht vorhanden sein (vorher still ueberschrieben).}
 }
 \value{
   \code{df} mit einer zusätzlichen logischen Spalte \code{out_col}.

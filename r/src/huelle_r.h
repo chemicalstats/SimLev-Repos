@@ -67,4 +67,32 @@ static inline void need_real(SEXP x, const char *what)
     if (TYPEOF(x) != REALSXP) Rf_errorcall(R_NilValue, "interner Fehler: %s muss double sein", what);
 }
 
+/* integer der Laenge 1 ohne NA (seit 1.6.4 hier; bis 1.6.3 wortgleich als int1 in slc_r_opt.cpp und i1 in
+ * slc_r_models.cpp; prep_r.cpp und slc_r_linalg.cpp haben eigene int1 mit anderen Regeln) */
+static inline int int1_strict(SEXP x, const char *what)
+{
+    if (TYPEOF(x) != INTSXP || XLENGTH(x) != 1 || INTEGER(x)[0] == NA_INTEGER)
+        Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine ganze Zahl (integer, Laenge 1) sein", what);
+    return INTEGER(x)[0];
+}
+
+/* Zufallszustand als raw(32) bzw. Paar list(Ergebnis, Zustand) (seit 1.6.4 hier; bis 1.6.3 in slc_r.cpp und
+ * gleichwertig in slc_r_models.cpp) */
+static inline SEXP new_state(const sl_rng *r)
+{
+    SEXP s = PROTECT(Rf_allocVector(RAWSXP, 32));
+    memcpy(RAW(s), r->s, 32);
+    UNPROTECT(1);
+    return s;
+}
+
+static inline SEXP pair(SEXP a, const sl_rng *r)
+{
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(out, 0, a);
+    SET_VECTOR_ELT(out, 1, new_state(r));
+    UNPROTECT(1);
+    return out;
+}
+
 #endif

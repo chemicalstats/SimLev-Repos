@@ -71,9 +71,10 @@ genau einem Datum je Pfadzeile, streng aufsteigend;
 \code{NULL} (Standard) = taegliche Kalenderdaten ab \code{start}
 (Standard \code{"2000-01-01"}), d. h. jede Pfadzeile zaehlt als ein
 Kalendertag. Fuer Pfade aus Handelstagen passende \code{dates} angeben
-(siehe \code{\link[=bootstrap_data]{bootstrap_data()}}).}
+(siehe \code{\link[=bootstrap_data]{bootstrap_data()}}).
+\code{start} ist ein einzelnes Datum (Date oder Text \code{"JJJJ-MM-TT"}, keine Zahl).}
 
-\item{cape}{Nur bei \code{bootstrap_result}: optional Name einer
+\item{cape}{Nur bei \code{bootstrap_result}: optional Name einer im Pfad vorhandenen
 Pfadspalte mit CAPE-Werten (Wert zu Periodenbeginn) fuer die Regel
 \code{"cape"}.}
 }

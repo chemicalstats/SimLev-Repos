@@ -41,6 +41,7 @@ from ._sim_phases import (
 )
 from ._sim_engine import _sim_engine_run
 from . import _sim_blocks as _blocks
+from ._pruefen import chk_scalar
 from ._sim_evaluate import (
     _sim_compact_trades,
     _sim_evaluate,
@@ -100,12 +101,13 @@ def simulation(
     Investmentbesteuerung (§§ 18–20 InvStG, § 23 EStG).
 
     Args:
-        data: ``data.frame`` mit täglichen Marktdaten. Pflichtfelder: ``date`` (Klasse ``Date``, aufsteigend) und
-            je eine Kursspalte pro Asset (Niveaus, keine Renditen; Name muss mit dem Asset-Namen in ``strategy``
+        data: ``data.frame`` (``pandas.DataFrame``; nur Tabellen, ein ``dict`` von Spalten vorher mit
+            ``pandas.DataFrame()`` umwandeln) mit täglichen Marktdaten. Pflichtfelder: ``date`` (Klasse ``Date``,
+            aufsteigend) und je eine Kursspalte pro Asset (Niveaus, keine Renditen; Name muss mit dem Asset-Namen in ``strategy``
             übereinstimmen; für Fonds-Wrapper die Spalten der inneren Strategie, siehe Abschnitt „Fonds-Wrapper“).
-            Optionale Spalten: Basiszins in Prozent (Spaltenname in ``tax_profile(base_rate = )``), logische
-            Signalspalten (für ``trading = "signal"``), Risk-Free-Reihe in Prozent p.a. (Name in ``risk_free``),
-            logische Trigger- und numerische Gewichtsspalten für ``rebalance_plan(event_col, event_weight)``.
+            Optionale Spalten: Basiszins in Prozent (Spaltenname in ``tax_profile(base_rate = )``), Signalspalten
+            (für ``trading = "signal"``; ``True``/``False`` oder ``0``/``1``, NA erlaubt, andere Zahlen sind ein
+            Fehler), Risk-Free-Reihe in Prozent p.a. (Name in ``risk_free``), logische Trigger- und numerische Gewichtsspalten für ``rebalance_plan(event_col, event_weight)``.
             Fehlende Kalendertage werden automatisch per LOCF aufgefüllt (logische Spalten mit ``False``);
             aufgefüllte Tage werden in ``filled`` markiert und aus Risikometriken ausgeschlossen. Trägt ``data``
             das Attribut ``filled`` aus ``series_align``, gelten Tage, an denen keines der Strategie-Assets einen
@@ -113,11 +115,12 @@ def simulation(
             Zeilenzahl des Attributs nicht zu ``data`` (z. B. nach einer Zeilenauswahl der
             ``series_align()``-Ausgabe), wird es mit Warnung ignoriert; den Zeitraum daher mit ``series_align(...,
             start =, end =)`` wählen.
+            Seit 1.6.4 darf ``date`` keine Kategorie sein (vorher still in Text umgewandelt).
 
             Eingabeprüfung: ``date`` als Text im Format ``"JJJJ-MM-TT"`` (oder Faktor) wird mit Hinweis in
             ``Date`` umgewandelt; unsortierte Zeilen werden mit Hinweis aufsteigend sortiert; doppelte Daten und
             doppelte Spaltennamen führen zu einem Fehler. Kurse müssen positiv sein (``<= 0`` oder unendlich:
-            Fehler). Einzelne fehlende Kurse (``NA``) werden mit Hinweis per LOCF gefüllt; sind in einer Zeile
+            Fehler) und seit 1.6.4 zwischen 1e-100 und 1e100 liegen (sonst Fehler). Einzelne fehlende Kurse (``NA``) werden mit Hinweis per LOCF gefüllt; sind in einer Zeile
             alle Kurse ``NA``, gilt der Tag als aufgefüllt. Hat ein Asset erst ab einem späteren Tag Kurse
             (führende ``NA``, etwa aus ``series_align(range = "all")``), wird es wie mit ``start`` = erster
             Kurstag behandelt. Mindestens ein Asset muss am ersten Tag handelbar sein. Andere DataFrame-Klassen
@@ -151,7 +154,8 @@ def simulation(
             harvest)`` oder ``None`` (Standard: keine Steuern).
         risk_free: Numerisch oder Character. Annualisierte risikolose Rendite **in Prozent** (z. B. ``3`` = 3 %
             p.a.) oder Name einer Spalte in ``data`` mit einer täglichen, annualisierten Zeitreihe in Prozent (z.
-            B. SOFR als ``5.31``). ``None`` und ``0`` sind äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent
+            B. SOFR als ``5.31``; nur Zahlenspalten, Text-, logische und Kategorie-Spalten sind ein Fehler).
+            ``None`` und ``0`` sind äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent
             umgerechnet und von der jeweiligen Tagesrendite abgezogen; Sharpe und Sortino werden auf den
             Überschussrenditen berechnet. LOCF-aufgefüllte Tage werden konsistent ausgeschlossen. Standard: ``0``.
             Zahlen über 0 und unter 0,05 (vermutlich Anteil, z. B. ``0.02`` für 2 %) werden mit Warnung als
@@ -511,6 +515,9 @@ def simulation(
                                 tax=simlev.tax_profile(rate=26.375), liquidate=True, risk_free=2)
         print(res["cagr"], res["tax_report"]["total_taxes_paid"])
     """
+    # seit 1.6.4 Vektoren der Länge 1 wie Einzelwerte (Entscheidung 4; R: c(TRUE) ist TRUE)
+    start_value, risk_free, fractions, liquidate, details = (
+        chk_scalar(v) for v in (start_value, risk_free, fractions, liquidate, details))
     if isinstance(costs, _CostsDefault):
         costs = _blocks.sim_costs()
     flat = _blocks._sim_from_blocks(costs, dca, rebalance, splits, tax)
@@ -584,16 +591,15 @@ def _simulation_flat(
     Weg ohne Bausteine mit eigenen Prüfungen ist entfallen). Die Aufrufer mit ``sim_args`` gehen seit 0.9.0
     über ``simulation()`` (``_sim_blocks._sim_args_set``).
 
-    Bitgleiche Portierung der Rechnung von ``simulation()`` aus dem R-Paket SimLev 0.5.0. Alle Raten und
-    Schwellen werden **in Prozent** angegeben (``tax_rate=26.375``, ``balance_thresh=5``,
+    Interne flache Fassung von ``simulation()`` (R: ``.simulation_flat``; die Bausteine von ``simulation()`` werden
+    vorher in diese Argumente übersetzt). Alle Raten und Schwellen werden **in Prozent** angegeben (``tax_rate=26.375``, ``balance_thresh=5``,
     ``risk_free=2`` …). Argumente und Voreinstellungen entsprechen 1:1 denen in R; ``None``
     steht für ``NULL``, ``True``/``False`` für ``TRUE``/``FALSE``, Folgen für ``c(...)``,
     ``dict`` für benannte Listen/Vektoren und ``pandas.DataFrame`` für ``data.frame``.
 
-    Neue Argumente in 0.5.0: ``order_fee``, ``dca_fee`` (Zahl in EUR oder
-    ``dict(fixed=, percent=, min=, max=)``), ``church_tax`` (Prozent), ``harvest_mode``,
-    ``harvest_day`` (``"MM-TT"``), ``harvest_loss_pot``, ``taxable_income`` (Zahl, ``dict``
-    Jahr -> zvE, ``pandas.Series`` oder ``DataFrame(year, taxable_income)``) und
+    Dazu gehören ``order_fee``, ``dca_fee`` (Zahl in EUR oder ``dict(fixed=, percent=, min=, max=)``),
+    ``church_tax`` (Prozent), ``harvest_mode``, ``harvest_day`` (``"MM-TT"``), ``harvest_loss_pot``,
+    ``taxable_income`` (Zahl, ``dict`` Jahr -> zvE, ``pandas.Series`` oder ``DataFrame(year, taxable_income)``) und
     ``tax_tariff`` (``None``, Dateipfad oder :func:`simlev.tax_tariff`-Objekt).
 
     Hinweise (R: ``message()``) gehen nach ``sys.stderr``, Warnungen sind
@@ -617,7 +623,7 @@ def _simulation_flat(
         base_rate=base_rate, fractions=fractions, risk_free=risk_free,
         split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
         order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode,
-        taxable_income=taxable_income, tariff=tax_tariff)
+        taxable_income=taxable_income, tariff=tax_tariff, liquidate=liquidate)
     if split_thresh is not None:
         split_thresh = _num_vec(split_thresh)
     prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data)

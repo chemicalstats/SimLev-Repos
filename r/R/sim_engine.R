@@ -159,6 +159,8 @@
   if (!is.null(err)) {
     if (err$code == 101L)
       stop(simpleError(sprintf(m[["101"]], format(err$d0)), cl))
+    if (err$code == 102L) stop(chk_msg("fa.nicht_endlich"), call. = FALSE)   # seit 1.6.4 (A-005, Entscheidung 103)
+    if (err$code == 103L) stop(chk_msg("ut1.unterlauf"), call. = FALSE)      # seit 1.6.4 (K43 T1-R9)
     stop(simpleError(m[["na"]], cl))
   }
   invisible(NULL)
@@ -197,11 +199,10 @@
     "212" = cat(sprintf(m[["212"]], name, if (aux == 1L) m[["212.v1"]] else m[["212.v2"]], format(v[1], digits = 5), date)),
     "213" = cat(sprintf(m[["213"]], paste(nm[ints + 1L], collapse = ", "))),
     "214" = {
-      # Vorlage mit den Namen im Format (wie bis 1.5.2: Kopf, je Asset "<Name> %.2f EUR", Zeilenende)
-      flow_values <- stats::setNames(v[-1L], nm[ints + 1L])
-      placeholder <- paste(sprintf(sub("%.2f", "%%.2f", m[["214.teil"]], fixed = TRUE), names(flow_values)), collapse = "; ")
-      format_text <- paste0(m[["214"]], placeholder, "\n")
-      cat(do.call(sprintf, c(list(format_text, v[1L]), list(date), as.list(flow_values))))
+      # Kopf, je Asset "<Name> %.2f EUR", Zeilenende; seit 1.6.4 (K43 T1-N2) die Teilstuecke einzeln wie Python und
+      # Julia (bis dahin standen die Namen im Format: ein Name mit '%' brach ab oder druckte falsch)
+      parts <- paste(sprintf(m[["214.teil"]], nm[ints + 1L], v[-1L]), collapse = "; ")
+      cat(paste0(sprintf(m[["214"]], v[1L], date), parts, "\n"))
     },
     "215" = cat(sprintf(m[["215"]], date, paste(nm[ints + 1L], collapse = ", "))),
     "216" = cat(sprintf(m[["216"]], date, v[1], v[2])),

@@ -22,12 +22,32 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "slc.h"
 
 /* Benutzerabbruch höchstens alle 2^16 Elemente prüfen */
 #define SL_POLL(cx, i) \
     do { if ((((i) + 1) & 0xFFFF) == 0 && sl_interrupted(cx)) return SL_EINTR; } while (0)
+
+/* NaN-Regeln von R auf x86-64 (seit 1.6.4 eine Fassung für slc_prep.cpp, slc_bootpath.cpp und slc_rbase.cpp; bis
+ * 1.6.3 je Datei): slc_quiet macht ein NaN still (Bit 51 gesetzt, Nutzlast bleibt), slc_lnan gibt für das Ergebnis r
+ * von a op b bei NaN den linken NaN-Operanden (still gemacht) zurück */
+static inline double slc_quiet(double x)
+{
+    uint64_t b;
+    memcpy(&b, &x, sizeof b);
+    b |= UINT64_C(0x0008000000000000);
+    memcpy(&x, &b, sizeof b);
+    return x;
+}
+static inline double slc_lnan(double r, double a, double b)
+{
+    if (r == r) return r;
+    if (a != a) return slc_quiet(a);
+    if (b != b) return slc_quiet(b);
+    return r;
+}
 
 /* interne Hilfen über Dateigrenzen (nicht öffentlich; C-Bindung wie bis 1.5.2, Symbole unverändert) */
 #ifdef __cplusplus
@@ -41,10 +61,12 @@ double slc_lgamma_pos(double x) SL_NOTHROW;               /* slc_special.cpp: x 
 
 #ifdef __cplusplus
 #include <algorithm>
-/* Quantil Typ 7 (Hyndman/Fan 1996, Definition 7; wie stats::quantile Standard) der n >= 1 Werte x, die dabei
- * umgeordnet werden (nth_element): xl + frac (xh - xl) mit den Ordnungsstatistiken xl, xh an h = (n - 1) p, bei
- * frac == 0 oder p = 1 xl ohne Rechnung. Seit 1.6.3 eine Fassung für die Bandbreite (slc_kde.cpp, vorher quant7
- * auf sortierten Werten) und CDaR (research_core_impl.h, quantile7). */
+/* Quantil Typ 7 (Hyndman/Fan 1996, Definition 7) der n >= 1 Werte x, die dabei umgeordnet werden (nth_element):
+ * xl + frac (xh - xl) mit den Ordnungsstatistiken xl, xh an h = (n - 1) p (0-basiert), bei frac == 0 oder p = 1 xl
+ * ohne Rechnung. Nicht bitgleich zu stats::quantile: R rechnet mit dem Index 1 + (n - 1) p und (1 - h) xl + h xh und
+ * weicht daher in den letzten Stellen ab (in R, Python und Julia gleich; Befund C-093, Umstellung in 1.6.5,
+ * Entscheidung 66). Seit 1.6.3 eine Fassung für die Bandbreite (slc_kde.cpp, vorher quant7 auf sortierten Werten) und
+ * CDaR (research_core_impl.h, quantile7). */
 static inline double slc_quantile7(double *x, int64_t n, double p)
 {
     const double h = (double) (n - 1) * p;

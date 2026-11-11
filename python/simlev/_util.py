@@ -46,8 +46,26 @@ def _pow1m_v(x, e):
     """``_pow1m`` elementweise (gleich lange Felder)."""
     x = np.asarray(x, dtype=np.float64)
     e = np.asarray(e, dtype=np.float64)
+    if x.ndim != 1 or e.ndim != 1:
+        with np.errstate(all="ignore"):
+            return np.array([_pow1m1(a, b) for a, b in zip(x.tolist(), e.tolist())], dtype=np.float64)
+    # als Feld (seit 1.6.4, C-074; bis dahin je Element): dieselbe Fallunterscheidung wie _pow1m1, log1p/expm1 über die
+    # C-Schleife sl_r_math1 mit denselben libm-Funktionen und Regeln (ohne Warnung: im genauen Zweig entsteht kein NaN),
+    # sonst sl_r_pow_rec (je Element wie r_pow)
+    n = min(x.size, e.size)
+    x = x[:n]
+    e = e[:n]
+    out = np.empty(n)
     with np.errstate(all="ignore"):
-        return np.array([_pow1m1(a, b) for a, b in zip(x.tolist(), e.tolist())], dtype=np.float64)
+        ok = (x >= -1) & np.isfinite(e) & (e != 0)
+        if ok.all():
+            out[:] = _libm._math1(3, _libm._expm1, _libm._math1(2, _libm._log1p, x) * e)
+        else:
+            if ok.any():
+                out[ok] = _libm._math1(3, _libm._expm1, _libm._math1(2, _libm._log1p, x[ok]) * e[ok])
+            bad = ~ok
+            out[bad] = _pow_rec(1 + x[bad], e[bad]) - 1
+    return out
 
 
 def _pow_rec(x, y):
@@ -90,6 +108,25 @@ def _log1mr2(r):
         if r * r < 0.5:
             return _libm.log1p(-(r * r))
         return _libm.log((1 - r) * (1 + r))
+
+def _cond_msg(e: BaseException) -> str:
+    """``conditionMessage(e)`` (seit 1.6.4 eine Fassung für wrapper, param_search und sensitivity)."""
+    if isinstance(e, KeyError) and e.args:
+        return str(e.args[0])
+    return str(e)
+
+
+def _na(x: Any) -> bool:
+    """NA einer Zahl in einem Ergebnis: ``None`` oder NaN (seit 1.6.4 eine Fassung für result, optimize und dashboard;
+    anders als ``_sim_base._isna`` ohne ``pd.NA``/``NaT``)."""
+    return x is None or (isinstance(x, (float, np.floating)) and math.isnan(x))
+
+
+def _is_num_scalar(x) -> bool:
+    """Zahl als Skalar (int, float, numpy), kein Wahrheitswert (seit 1.6.4 eine Fassung für deep_analysis und
+    scenarios)."""
+    return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, (bool, np.bool_))
+
 
 def _ext(mod, name):
     """Funktion ``name`` aus ``simlev.<mod>`` (spät geladen; parallel portierte Module)."""
@@ -139,8 +176,32 @@ def _unique(seq) -> list:
     return out
 
 
+def _fp_quiet(f):
+    """``(f(), True)``, wenn ``f`` ohne Gleitkomma-Ausnahme läuft, die im aktuellen ``np.errstate`` gemeldet würde
+    (diese werden für den Versuch zu Fehlern); sonst ``(None, False)`` ohne Meldung. Seit 1.6.4 (B-072, B-079, B-107)
+    für die Wiederverwendung eines Zwischenergebnisses: ohne Ausnahme hätte auch eine zweite Rechnung nichts
+    gemeldet (für Rechnungen, die sonst nur über numpy melden können)."""
+    st = {k: ("ignore" if v == "ignore" else "raise") for k, v in np.geterr().items()}
+    try:
+        with np.errstate(**st):
+            return f(), True
+    except FloatingPointError:
+        return None, False
+
+
 def _match_days(a, b) -> np.ndarray:
-    """``match(a, b)`` für Tage (0-basiert, -1 = kein Treffer)."""
+    """``match(a, b)`` für Tage (0-basiert, -1 = kein Treffer). Seit 1.6.4 (B-078) für Gleitkommafelder vektorisiert
+    (erster Treffer, 0 = -0, NaN ohne Treffer wie im Wörterbuch); sonst wie bisher."""
+    av = np.asarray(a)
+    bv = np.asarray(b)
+    if av.ndim == 1 and bv.ndim == 1 and av.dtype.kind == "f" and bv.dtype.kind == "f":
+        av = av.astype(np.float64, copy=False)
+        bi = np.flatnonzero(~np.isnan(bv))
+        if not bi.size:
+            return np.full(av.size, -1, dtype=np.int64)
+        ub, first = np.unique(bv[bi].astype(np.float64), return_index=True)
+        k = np.minimum(np.searchsorted(ub, av), ub.size - 1)
+        return np.where(ub[k] == av, bi[first[k]], -1).astype(np.int64)
     pos = {}
     for i, v in enumerate(b):
         if v not in pos:
@@ -249,7 +310,10 @@ def _dates(days):
     eine Fassung für ``deep_analysis`` und ``tactical`` (``data_prep._as_dates`` rundet ab und bleibt eigen)."""
     a = np.asarray(days, dtype=np.float64)
     out = np.full(a.shape, np.datetime64("NaT", "D"), dtype="datetime64[D]")
-    ok = ~np.isnan(a)
+    # seit 1.6.4 (Befund C-104): nur endliche Tageszahlen im Bereich von int64; ±Inf und |x| >= 2^63 ergeben NaT
+    # (wie NA in R) auf jeder Plattform, ohne undefinierte Umwandlung (bis 1.6.3 x86 zufällig NaT mit Warnung)
+    with np.errstate(invalid="ignore"):
+        ok = np.isfinite(a) & (np.abs(a) < 2.0 ** 63)
     out[ok] = _EPOCH + a[ok].astype(np.int64).astype("timedelta64[D]")
     return out
 
@@ -263,13 +327,11 @@ def _fmt_vec(f, v):
 
 
 def _cov2cor(V):
-    """``stats::cov2cor``."""
-    V = np.asarray(V, dtype=np.float64)
-    p = V.shape[0]
-    Is = np.sqrt(1 / np.diag(V))
-    r = Is.reshape(-1, 1) * V * Is.reshape(1, -1)
-    r[np.arange(p), np.arange(p)] = 1.0
-    return r
+    """``stats::cov2cor`` über den C-Kern ``sl_r_cov2cor`` (``_r.stats_cor.cov2cor``; seit 1.6.4, bis 1.6.3 eine eigene
+    Fassung wie R vor 4.x ohne Warnung): bei Diagonale 0, negativ oder NA wie R 4.3.3 NaN neben der Diagonale und die
+    Warnung "diag(V) had non-positive or NA entries; the non-finite result may be dubious". Ergebnis als
+    zusammenhängendes float64-Feld wie bisher."""
+    return np.ascontiguousarray(_stats().cov2cor(np.asarray(V, dtype=np.float64)), dtype=np.float64)
 
 
 def _num_col(v):

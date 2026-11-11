@@ -114,6 +114,7 @@ enum CfgDbl {
   CD_BALANCE_THRESH = 0, CD_DCA_VALUE, CD_FEE_PAID0, CD_EFF_RATE, CD_MARGINAL, CD_PS_THRESHOLD, CD_SPB,
   CD_SOLI_FACTOR, CD_CHURCH_K, CD_SPLIT_LO, CD_SPLIT_HI, CD_ZVE_ALL, CD_N
 };
+// AI_BUY_LGL/AI_SELL_LGL (Spalte logisch): seit 1.6.4 (Entscheidung 137) ohne Wirkung, Platz bleibt (Layout der Hosts)
 enum AssetInt { AI_STYLE = 0, AI_START_IDX, AI_START_DAY, AI_INITIAL, AI_REGIME, AI_NO_SPLIT, AI_BUY_LGL, AI_SELL_LGL, AI_N };
 enum AssetDbl { AD_SPREAD = 0, AD_SHARE, AD_BONUS, AD_N };
 // Toepfe (sim_mem$totals; Reihenfolge der Ausgabe totals_out)
@@ -129,7 +130,7 @@ struct Input {
   const int32_t* flags = nullptr;          // Tagesflags (n)
   const double* dca_n = nullptr;           // flag_dca_n (n)
   const double* day = nullptr;             // flag_date als Tageszahl (n)
-  const double* const* price = nullptr;    // je Asset market$asset_price (n); der Kern rechnet auf Kopien
+  const double* const* price = nullptr;    // je Asset market$asset_price (n); der Kern liest sie (erst ein Split legt eine Kopie an)
   const double* const* sig_buy = nullptr;  // je Asset Signal als double (logisch 0/1, NA)
   const double* const* sig_sell = nullptr;
   const double* const* event_w = nullptr;  // nullptr oder je Asset nullptr bzw. Spalte (n)
@@ -158,6 +159,8 @@ enum EventCode : int {
   EV_MARGINAL = 6,      // Warnung .handle_year_change: marginal_tax_rate fehlt; d0 Jahressaldo, d1 Freigrenze
   EV_NA_COND = 100,     // Fehler: NA in einer Bedingung (site = Stelle)
   EV_SPLIT_RATIO = 101, // Fehler .perform_asset_split: ratio <= 0; d0 ratio
+  EV_NONFINITE = 102,   // Fehler (seit 1.6.4, A-005, Entscheidung 103): Stueckzahl oder Depotwert unendlich; d0 Wert
+  EV_UNDERFLOW = 103,   // Fehler (seit 1.6.4, K43 T1-R9): Kaufbetrag > 0, Quotient Betrag/Kurs vor floor 0; d0 Betrag
   // details-Ausgaben: Werte in ev_vals[v_off ..], Ganzzahlen (Asset-Indizes bzw. Jahre) in
   // ev_ints[y_off ..]; Texte in den Hosts wortgleich zu den bisherigen cat()-Aufrufen von R
   DT_BUY = 201,         // .perform_trade_buy: aux Anlass (RS_*); v: Menge, Preis
@@ -385,7 +388,6 @@ struct AssetIn {
   const double* sig_sell = nullptr;
   const double* event_w = nullptr;    // Spalte aus event_weight (n Tage) oder nullptr
   const double* base_rates = nullptr; // market$base_rates (n Tage) oder nullptr
-  int buy_logical = 0, sell_logical = 0;   // Spalte logisch (isTRUE nur fuer logisches TRUE)
   int style = 0;                      // 0 bnh, 1 signal
   int start_idx = 1;                  // asset_start_indices (1-basiert)
   int start_day = 0;                  // Tag (1-basiert) mit asset_starts == flag_date, sonst 0
@@ -398,7 +400,8 @@ struct AssetIn {
   Status st0{};                       // Status nach .sim_init_weights
 };
 
-// Ergebnis-Vektoren je Asset (Speicher des Hosts, Laenge n; vom Kern ganz beschrieben)
+// Ergebnis-Vektoren je Asset (Speicher des Hosts, Laenge n, von den Hosts mit 0 vorbelegt; worth, money, total und
+// share beschreibt der Kern je Tag, flows nur an Tagen mit Zahlung, sonst bleibt die 0)
 struct ReportOut {
   double *worth, *money, *flows, *total, *share;
 };
@@ -570,8 +573,6 @@ class Engine {
       A.initial = ai[AI_INITIAL];
       A.regime = ai[AI_REGIME];
       A.no_split = ai[AI_NO_SPLIT];
-      A.buy_logical = ai[AI_BUY_LGL];
-      A.sell_logical = ai[AI_SELL_LGL];
       const double* ad = I.ad + (std::size_t) AD_N * a;
       A.spread = ad[AD_SPREAD];
       A.share = ad[AD_SHARE];
@@ -594,6 +595,7 @@ class Engine {
     liquidate = I.ci[CI_LIQUIDATE];
     has_marginal = I.ci[CI_HAS_MARGINAL];
     stopp_year = I.ci[CI_STOPP_YEAR];
+    if (stopp_year < -1000000 || stopp_year > 1000000) return 1;   // seit 1.6.4 (A-008: stopp_year + 1 lief ueber)
     has_zve_all = I.ci[CI_HAS_ZVE_ALL];
     details = I.ci[CI_DETAILS];
     balance_thresh = I.cd[CD_BALANCE_THRESH];
@@ -643,9 +645,13 @@ class Engine {
     ev_vals.clear();
     fee_cur = nullptr;
     quiet = false;
+    sc_keep = sc_have = false;   // seit 1.6.4 (K43 T1-R13): Lot-Tabelle von sell_count auch nach einer Ausnahme verwerfen
     try {
       run_days();
       close_years();
+      // seit 1.6.4 (A-005): Ueberlauf nach der letzten Marktbewertung (Kaeufe, Steuern am Ende)
+      for (int a = 0; a < na; a++)
+        if (std::isinf(st[a].count) || std::isinf(st[a].money)) throw NAError(0, n, a, EV_NONFINITE, st[a].money);
     } catch (const NAError& e) {
       err = e;
       return 1;
@@ -741,6 +747,10 @@ class Engine {
   // seit 1.6.3 Puffer je Funktion statt neuer Vektoren an jedem Ereignistag (jede Funktion nur fuer sich, keine
   // ruft sich selbst): calculate_sell_count (sc_*), day_dca (dca_*), day_rebalance (rb_*), day_split (sp_held)
   std::vector<double> sc_cu, sc_cc, sc_cv;
+  // Lot-Tabelle von sell_count (seit 1.6.4, A-082): sc_keep = Tabelle von Asset sc_a (Regime sc_regime) gilt weiter
+  // (nur innerhalb von sell_count_net, dort aendern sich die Lots zwischen den Aufrufen nicht)
+  bool sc_keep = false, sc_have = false, sc_any_vp = false;
+  int sc_a = -1, sc_regime = -1, sc_nl = 0;
   std::vector<double> dca_tot, dca_def, dca_alloc;
   std::vector<double> rb_targets, rb_actual, rb_ow, rb_devs, rb_differ, rb_tv, rb_tot;
   std::vector<char> rb_cash, sp_held;
@@ -835,6 +845,8 @@ class Engine {
       const double price = pxp[a][i0];
       const double worth = simlev_mul(s.count, price);
       const double total = simlev_add(worth, s.money);
+      // seit 1.6.4 (A-005): Ueberlauf (Kurse oder Betraege ausserhalb des Zahlbereichs) bricht ab; NA bleibt NA
+      if (std::isinf(total) || std::isinf(s.count)) throw NAError(0, t, a, EV_NONFINITE, total);
       buf[a] = total;
       total_portfolio = simlev_add(total_portfolio, total);
       rep[a].worth[i0] = worth;
@@ -850,6 +862,7 @@ class Engine {
       rep[a].share[i0] = w;
       st[a].differ = w;
     }
+    if (std::isinf(total_portfolio)) throw NAError(0, t, -1, EV_NONFINITE, total_portfolio);   // seit 1.6.4 (A-005)
   }
 
   void batch_market_update(int start_idx, int end_idx) {
@@ -866,6 +879,7 @@ class Engine {
         const double price = prices[idx];
         const double worth = simlev_mul(count, price);
         const double total = simlev_add(worth, money);
+        if (std::isinf(total)) throw NAError(0, idx + 1, a, EV_NONFINITE, total);   // seit 1.6.4 (A-005)
         rep[a].worth[idx] = worth;
         rep[a].money[idx] = money;
         rep[a].flows[idx] = 0.0;
@@ -883,6 +897,7 @@ class Engine {
       double last_weight = 0.0;
       for (int d = 0; d < nd; d++) {
         const int idx = start_idx - 1 + d;
+        if (a == 0 && std::isinf(buf[d])) throw NAError(0, idx + 1, -1, EV_NONFINITE, buf[d]);   // seit 1.6.4 (A-005)
         const double w = (buf[d] > 0.0) ? simlev_div(rep[a].total[idx], buf[d]) : 0.0;
         rep[a].share[idx] = w;
         last_weight = w;
@@ -961,14 +976,36 @@ class Engine {
       if (rem > 0) {
         const double s = std::min(rem, ut);
         const double lot_vp = b.has_vp ? b.vp : 0.0;
-        if (rem > 0 && lot_vp > 0) tv = simlev_add(tv, simlev_mul(s, simlev_div(lot_vp, rem)));   // Basis = remaining
+        if (lot_vp > 0) tv = simlev_add(tv, simlev_mul(s, simlev_div(lot_vp, rem)));   // Basis = remaining
         ut = simlev_sub(ut, s);
       }
     }
     return tv;
   }
+  // fifo_price und fifo_vp in einem Durchlauf (seit 1.6.4, A-083): gleiche Schleifensteuerung (rem, s, ut), jede
+  // Summe in ihrer eigenen Additionsfolge wie in den beiden Einzelfunktionen; gleiche Werte
+  void fifo_price_vp(int a, double units, double& price_out, double& vp_out) const {
+    double ut = units, tp = 0.0, tv = 0.0;
+    const std::vector<Lot>& L = buys[a];
+    for (int i = front[a]; ut > 0 && i <= (int) L.size(); ++i) {
+      const Lot& b = L[i - 1];
+      const double rem = b.remaining;
+      if (rem > 0) {
+        const double s = std::min(rem, ut);
+        tp = simlev_add(tp, simlev_mul(s, b.price));
+        const double lot_vp = b.has_vp ? b.vp : 0.0;
+        if (lot_vp > 0) tv = simlev_add(tv, simlev_mul(s, simlev_div(lot_vp, rem)));   // Basis = remaining
+        ut = simlev_sub(ut, s);
+      }
+    }
+    price_out = (units > 0) ? simlev_div(tp, units) : 0.0;
+    vp_out = tv;
+  }
   struct PSTax { double exempt_gain, exempt_loss, taxable_gain, taxable_loss; };
-  PSTax private_sale_tax(int a, double trade_count, double sell_price, int current_date) const {
+  // private_sale_tax(a, trade_count, sell_price, current_date); seit 1.6.4 (A-083) mit fp != nullptr zugleich
+  // fifo_price(a, trade_count) in *fp (gleiche Schleifensteuerung, eigene Summe; gleiche Werte)
+  PSTax private_sale_tax(int a, double trade_count, double sell_price, int current_date, double* fp = nullptr) const {
+    double tp = 0.0;
     double ur = trade_count;
     PSTax r{0, 0, 0, 0};
     const std::vector<Lot>& L = buys[a];
@@ -977,6 +1014,7 @@ class Engine {
       const double avail = b.remaining;
       if (avail > 0) {
         const double s = std::min(avail, ur);
+        if (fp) tp = simlev_add(tp, simlev_mul(s, b.price));
         const int buy_days = static_cast<int>(b.date);
         int y, m, d;
         eng_civil(buy_days, y, m, d);
@@ -994,6 +1032,7 @@ class Engine {
         ur = simlev_sub(ur, s);
       }
     }
+    if (fp) *fp = (trade_count > 0) ? simlev_div(tp, trade_count) : 0.0;
     return r;
   }
   void fifo_consume(int a, double trade_count) {
@@ -1005,7 +1044,7 @@ class Engine {
       const double rem = b.remaining;
       if (rem > 0) {
         const double red = std::min(rem, ur);
-        if (b.has_vp && b.vp > 0 && rem > 0) b.vp = simlev_mul(b.vp, 1.0 - simlev_div(red, rem));
+        if (b.has_vp && b.vp > 0) b.vp = simlev_mul(b.vp, 1.0 - simlev_div(red, rem));
         b.remaining = simlev_sub(rem, red);
         ur = simlev_sub(ur, red);
       }
@@ -1073,8 +1112,10 @@ class Engine {
   }
 
   // ── Signale (.calculate_buy_signal, .calculate_sell_signal) ──
-  lgl sig_true(const double* v, int logical, int t) const {   // isTRUE(signal[t])
-    return r_bool(logical && v[t - 1] == 1.0);
+  // isTRUE(signal[t]); seit 1.6.4 (K43 T1-N3, Entscheidung 137) auch fuer geprueft numerische 0/1-Spalten
+  // (1 wirkt wie TRUE, wie an den uebrigen Stellen ueber r_lgl); bis dahin nur fuer logische Spalten
+  lgl sig_true(const double* v, int t) const {
+    return r_bool(v[t - 1] == 1.0);
   }
   bool buy_signal(int a, int t) {
     const AssetIn& A = in[a];
@@ -1084,7 +1125,7 @@ class Engine {
     if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_lgl(A.sig_buy[t - 1])), r_gt(s.money, 0)), r_eq(s.count, 0)),
              C_BUYSIG_1, t, a))
       sig = true;
-    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_gt(s.count, 0)), r_gt(s.money, 0)), r_not(sig_true(A.sig_sell, A.sell_logical, t))),
+    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_gt(s.count, 0)), r_gt(s.money, 0)), r_not(sig_true(A.sig_sell, t))),
              C_BUYSIG_2, t, a))
       sig = true;
     if (cond(simlev_r_and(is_bnh, r_gt(s.money, 0)), C_BUYSIG_3, t, a)) sig = true;
@@ -1108,18 +1149,27 @@ class Engine {
       return;
     }
     double tp = spread_buy(mp, A.spread);
-    double tc = fractions ? simlev_div(st[a].money, tp) : std::floor(simlev_div(st[a].money, tp));
+    // seit 1.6.4 (K43 T1-R9, sinngemaess Entscheidung 103): unterlaeuft der Quotient Betrag/Kurs (mit Gebuehren
+    // Volumen/Kurs) vor floor zu 0, obwohl Betrag und Kurs positiv sind, Abbruch statt still kein Kauf;
+    // fractions = FALSE mit Betrag < Kurs ist rechtmaessig 0 Stueck, subnormale Stueckzahlen rechnen richtig
+    const double q0 = simlev_div(st[a].money, tp);
+    if (fee_cur == nullptr && q0 == 0 && st[a].money > 0 && tp > 0 && std::isfinite(tp))
+      throw NAError(site, t, a, EV_UNDERFLOW, st[a].money);
+    double tc = fractions ? q0 : std::floor(q0);
     if (fee_cur != nullptr) {
       const Fee& f = *fee_cur;
       const double money = st[a].money;
       const double vol = fee_volume(f, money, t, a);
-      tc = fractions ? vol / tp : std::floor(vol / tp);
+      const double q1 = vol / tp;
+      if (q1 == 0 && vol > 0 && tp > 0 && std::isfinite(tp)) throw NAError(site, t, a, EV_UNDERFLOW, vol);
+      tc = fractions ? q1 : std::floor(q1);
       if (cond(r_le(tc, 0), C_BUY_TC_FEE, t, a)) return;
       const double fp = fee_amount(f, tc * tp);
       tp = tp + fp / tc;
       fee_paid = fee_paid + fp;
     }
     if (cond(r_le(tc, 0), C_BUY_TC, t, a)) return;
+    if (std::isinf(tc)) throw NAError(site, t, a, EV_NONFINITE, tc);   // seit 1.6.4 (A-005): Stueckzahl ueberlaeuft
     buy_report(a, t, tc, tp, mp);
     buys[a].push_back(Lot{day[t - 1], tc, tp, tc, tc, 0.0, 0});
     detail(DT_BUY, t, a, {tc, tp}, reason);
@@ -1146,14 +1196,25 @@ class Engine {
       tp = tp - fp / tc;
       fee_paid = fee_paid + fp;
     }
-    const double fifo_p = (!has_price && person) ? fifo_price(a, tc) : (has_price ? price : 0.0);
+    const int regime = person ? A.regime : RG_NONE;
+    // FIFO-Preis, VP- und §-23-Teilsummen: seit 1.6.4 (A-083) je Verkauf in einem Durchlauf ueber die Lots (bis 1.6.3
+    // fifo_price, dann fifo_vp bzw. private_sale_tax nacheinander); gleiche Werte
+    double fifo_p = has_price ? price : 0.0, vp_paid = 0.0;
+    PSTax lr{0, 0, 0, 0};
+    const bool want_fp = !has_price && person;
+    if (regime == RG_FUND) {
+      if (want_fp) fifo_price_vp(a, tc, fifo_p, vp_paid);
+      else vp_paid = fifo_vp(a, tc);
+    } else if (regime == RG_PS) {
+      lr = private_sale_tax(a, tc, tp, (int) day[t - 1], want_fp ? &fifo_p : nullptr);
+    } else if (want_fp) {
+      fifo_p = fifo_price(a, tc);
+    }
     const double gain = simlev_mul(simlev_sub(tp, fifo_p), tc);
     double tax = 0.0;
     double exempt = 0.0;
     int has_exempt = 0;
-    const int regime = person ? A.regime : RG_NONE;
     if (regime == RG_FUND) {
-      const double vp_paid = fifo_vp(a, tc);
       const TaxRes r = p20_tax(T, simlev_sub(gain, vp_paid), A.bonus);
       tax = r.tax;
       if (det()) {
@@ -1163,7 +1224,6 @@ class Engine {
     } else if (regime == RG_CG) {
       tax = p20_tax(T, gain, 0.0).tax;
     } else if (regime == RG_PS) {
-      const PSTax lr = private_sale_tax(a, tc, tp, (int) day[t - 1]);
       if (det()) {
         if (cond(r_gt(lr.exempt_gain, 0), C_D_EXG, t, a)) detail(DT_SELL_EXG, t, a, {lr.exempt_gain});
         if (cond(r_gt(lr.exempt_loss, 0), C_D_EXL, t, a)) detail(DT_SELL_EXL, t, a, {lr.exempt_loss});
@@ -1214,6 +1274,8 @@ class Engine {
   }
 
   // ── sell_count (core/tax_core_impl.h): Menge und FIFO-Preis fuer einen Ziel-Nettoerloes ──
+  // Lot-Suche linear wie bisher (eine Binaersuche, Vorschlag A-082 Schritt 3, war im Messfall langsamer: die gesuchten
+  // Lots liegen meist vorn; callgrind der Tagesengine gegenueber linear +5 % mit Steuer, +17 % mit Gebuehr)
   static double fifo_fast(double units, const std::vector<double>& cu, const std::vector<double>& cc,
                           const std::vector<double>& prices) {
     const int nl = (int) cu.size();
@@ -1242,43 +1304,65 @@ class Engine {
                   double bonus, double loss_pool, double tax_rate, double& out_count, double& out_fp) {
     out_count = 0.0;
     out_fp = 0.0;
-    const std::vector<Lot>& b = buys[a];
-    std::vector<double>& units = buf2;
     std::vector<double>& prices = buf3;
     std::vector<double>& vpu = buf5;
-    units.clear();
-    prices.clear();
-    vpu.clear();
-    bool any_vp = false;
-    for (int i = front[a]; i <= (int) b.size(); ++i) {
-      const Lot& l = b[i - 1];
-      const double rem = l.remaining;
-      if (rem > 0) {
-        units.push_back(rem);
-        prices.push_back(l.price);
-        const double lot_vp = l.has_vp ? l.vp : 0.0;
-        const double v = (regime == RG_FUND && lot_vp > 0) ? simlev_div(lot_vp, rem) : 0.0;
-        if (v > 0) any_vp = true;
-        vpu.push_back(v);
-      }
-    }
-    if (units.empty()) return;
-    const int nl = (int) units.size();
     std::vector<double>& cu = sc_cu;
     std::vector<double>& cc = sc_cc;
     std::vector<double>& cv = sc_cv;
-    cu.assign((std::size_t) nl, 0.0);
-    cc.assign((std::size_t) nl, 0.0);
-    cv.assign((std::size_t) nl, 0.0);
-    Neumaier su, sc, sv;
-    for (int i = 0; i < nl; ++i) {
-      su.add(units[i]);
-      cu[i] = su.value();
-      sc.add(simlev_mul(units[i], prices[i]));
-      cc[i] = sc.value();
-      sv.add(simlev_mul(units[i], vpu[i]));
-      cv[i] = sv.value();
+    // Lot-Tabelle (offene Lots ab front): seit 1.6.4 (A-082) in feste Puffer (resize statt push_back), VP-Spalten nur im
+    // Fonds-Regime und die VP-Summen nur mit VP (ohne VP liest fvp sie nicht), Tabelle innerhalb von sell_count_net
+    // einmal (sc_keep); gleiche Werte wie bis 1.6.3
+    if (!(sc_keep && sc_have && sc_a == a && sc_regime == regime)) {
+      const std::vector<Lot>& b = buys[a];
+      const bool fund = regime == RG_FUND;
+      std::vector<double>& units = buf2;
+      const int cap = (int) b.size() - front[a] + 1;
+      units.resize((std::size_t) std::max(cap, 0));
+      prices.resize(units.size());
+      if (fund) vpu.resize(units.size());
+      bool any_vp = false;
+      int nl = 0;
+      for (int i = front[a]; i <= (int) b.size(); ++i) {
+        const Lot& l = b[i - 1];
+        const double rem = l.remaining;
+        if (rem > 0) {
+          units[nl] = rem;
+          prices[nl] = l.price;
+          if (fund) {
+            const double lot_vp = l.has_vp ? l.vp : 0.0;
+            const double v = lot_vp > 0 ? simlev_div(lot_vp, rem) : 0.0;
+            if (v > 0) any_vp = true;
+            vpu[nl] = v;
+          }
+          ++nl;
+        }
+      }
+      cu.resize((std::size_t) nl);
+      cc.resize((std::size_t) nl);
+      Neumaier su, sc;
+      for (int i = 0; i < nl; ++i) {
+        su.add(units[i]);
+        cu[i] = su.value();
+        sc.add(simlev_mul(units[i], prices[i]));
+        cc[i] = sc.value();
+      }
+      if (any_vp) {   // nur dann liest fvp die VP-Summen (gleiche Folge wie bis 1.6.3)
+        cv.resize((std::size_t) nl);
+        Neumaier sv;
+        for (int i = 0; i < nl; ++i) {
+          sv.add(simlev_mul(units[i], vpu[i]));
+          cv[i] = sv.value();
+        }
+      }
+      sc_have = true;
+      sc_a = a;
+      sc_regime = regime;
+      sc_nl = nl;
+      sc_any_vp = any_vp;
     }
+    if (sc_nl == 0) return;
+    const int nl = sc_nl;
+    const bool any_vp = sc_any_vp;
     auto fvp = [&](double sell) -> double {
       if (!any_vp || sell <= 0) return 0.0;
       if (sell >= cu[nl - 1]) return cv[nl - 1];
@@ -1288,17 +1372,22 @@ class Engine {
       const double prev_u = lot > 0 ? cu[lot - 1] : 0.0, prev_v = lot > 0 ? cv[lot - 1] : 0.0;
       return simlev_add(prev_v, simlev_mul(simlev_sub(sell, prev_u), vpu[lot]));
     };
+    // Zielfunktion; seit 1.6.4 (A-085, Entscheidung 88 Variante b) FIFO-Preis und Gewinn nur bei Steuer auf den Gewinn
+    // (RG_FUND, RG_CG): ohne Steuer (RG_NONE, RG_PS) ist tax = 0 und der Wert haengt nicht von den Lots ab (bitgleich)
+    const bool taxed = regime == RG_FUND || regime == RG_CG;
     auto objective = [&](double sell) -> double {
       if (sell <= 0) return -target;
       if (sell > total_shares) sell = total_shares;
-      const double fp = fifo_fast(sell, cu, cc, prices);
-      const double gain = simlev_mul(simlev_sub(trade_price, fp), sell);
       double tax = 0.0;
-      if (regime == RG_FUND) {
-        const double adj = simlev_mul(simlev_sub(gain, fvp(sell)), 1.0 - bonus);
-        tax = simlev_mul(std::max(simlev_sub(adj, loss_pool), 0.0), tax_rate);
-      } else if (regime == RG_CG) {
-        tax = simlev_mul(std::max(simlev_sub(gain, loss_pool), 0.0), tax_rate);
+      if (taxed) {
+        const double fp = fifo_fast(sell, cu, cc, prices);
+        const double gain = simlev_mul(simlev_sub(trade_price, fp), sell);
+        if (regime == RG_FUND) {
+          const double adj = simlev_mul(simlev_sub(gain, fvp(sell)), 1.0 - bonus);
+          tax = simlev_mul(std::max(simlev_sub(adj, loss_pool), 0.0), tax_rate);
+        } else {
+          tax = simlev_mul(std::max(simlev_sub(gain, loss_pool), 0.0), tax_rate);
+        }
       }
       return simlev_sub(simlev_sub(simlev_mul(sell, trade_price), tax), target);
     };
@@ -1317,8 +1406,7 @@ class Engine {
       sell = lower;
     } else if (std::fabs(f_upper) < tol) {
       sell = upper;
-    } else {
-      sell = simlev_add(lower, upper) * 0.5;
+    } else {   // Bisektion: die Schleife laeuft mindestens einmal und setzt sell beim Abbruch bzw. am Ende jeder Runde
       for (int it = 0; it < 30; ++it) {
         const double mid = simlev_add(lower, upper) * 0.5;
         const double fm = objective(mid);
@@ -1365,6 +1453,9 @@ class Engine {
   void sell_count_net(int a, double need, int t, bool round_up, double& cnt, double& fp, bool& has_fp) {
     const bool fr = fractions || round_up;
     double target = need;
+    // seit 1.6.4 (A-082): die Lot-Tabelle gilt fuer alle Aufrufe hier (die Lots aendern sich dazwischen nicht)
+    sc_keep = true;
+    sc_have = false;
     if (fee_cur != nullptr) {
       const double p = spread_sell(pxp[a][t - 1], in[a].spread);
       for (int k = 0; k < 3; k++) {
@@ -1374,6 +1465,8 @@ class Engine {
       }
     }
     calculate_sell_count(a, target, t, fr, cnt, fp);
+    sc_keep = false;
+    sc_have = false;
     has_fp = true;
     if (cond(simlev_r_and(r_bool(round_up && !fractions), r_gt(cnt, 0)), C_SCN_ROUND, t, a)) {
       cnt = simlev_r_min2(st[a].count, std::ceil(cnt - 1e-9));
@@ -1504,10 +1597,11 @@ class Engine {
   }
 
   bool gp_pending() const { return tariff_on && refund_due > 0; }
-  // Gewichte 'actual' (normiert; ohne positive Summe gleich verteilt) fuer Erstattungen
-  void refund_weights(std::vector<double>& w, int site, int t) {
+  // Gewichte 'actual' von S (normiert; ohne positive Summe gleich verteilt) fuer Erstattungen (settle_gp auf st,
+  // year_change auf S; seit 1.6.4 eine Fassung)
+  void refund_weights(const std::vector<Status>& S, std::vector<double>& w, int site, int t) {
     w.resize((std::size_t) na);
-    for (int a = 0; a < na; a++) w[a] = st[a].actual;
+    for (int a = 0; a < na; a++) w[a] = S[a].actual;
     const double sw = sl_r_sum(na, w.data(), 0);
     if (cond(r_gt(sw, 0), site, t, -1)) {
       for (int a = 0; a < na; a++) w[a] = simlev_div(w[a], sw);
@@ -1519,7 +1613,7 @@ class Engine {
     const double refund = refund_due;
     refund_due = 0.0;
     std::vector<double>& w = buf4;
-    refund_weights(w, C_GP_W, t);
+    refund_weights(st, w, C_GP_W, t);
     for (int a = 0; a < na; a++) st[a].money = simlev_add(st[a].money, simlev_mul(refund, w[a]));
     detail(DT_GP_REFUND, t, -1, {refund});
   }
@@ -1700,14 +1794,8 @@ class Engine {
     const bool refund_done = cond(simlev_r_and(r_gt(refund_base, 0), r_gt(eff_rate, 0)), C_YC_REFUND, t, -1);
     if (refund_done) {
       const double refund = simlev_mul(refund_base, eff_rate);
-      std::vector<double> w((std::size_t) na);
-      for (int a = 0; a < na; a++) w[a] = S[a].actual;
-      const double sw = sl_r_sum(na, w.data(), 0);
-      if (cond(r_gt(sw, 0), C_YC_W, t, -1)) {
-        for (int a = 0; a < na; a++) w[a] = simlev_div(w[a], sw);
-      } else {
-        for (int a = 0; a < na; a++) w[a] = 1.0 / na;
-      }
+      std::vector<double> w;
+      refund_weights(S, w, C_YC_W, t);
       for (int a = 0; a < na; a++) S[a].money = simlev_add(S[a].money, simlev_mul(refund, w[a]));
       v[TT_TOTAL_TAXES] = simlev_sub(v[TT_TOTAL_TAXES], refund);
       v[TT_LOSS_CG] = simlev_sub(v[TT_LOSS_CG], refund_base);
@@ -1925,8 +2013,8 @@ class Engine {
     for (int a : active) {
       if (in[a].style != 1) continue;
       const lgl has_pos = r_gt(st[a].count, 0);
-      const lgl sb = sig_true(in[a].sig_buy, in[a].buy_logical, t);
-      const lgl ss = sig_true(in[a].sig_sell, in[a].sell_logical, t);
+      const lgl sb = sig_true(in[a].sig_buy, t);
+      const lgl ss = sig_true(in[a].sig_sell, t);
       if (cond(simlev_r_and(has_pos, ss), C_GATE_EXIT, t, a)) {
         perform_sell(a, t, S_SELL_SIG_EXIT, in[a].spread);
         cash_only[a] = 1;
@@ -1953,7 +2041,7 @@ class Engine {
     } else {
       double max_dev = -INFINITY;
       bool any = false;
-      std::vector<double>& devs = rb_devs;
+      std::vector<double>& devs = rb_devs;   // gelesen nur unter det() (details); k Zuweisungen auch ohne
       devs.assign((std::size_t) k, 0.0);
       for (int i = 0; i < k; i++) {
         const double dev = thresh_relative ? std::fabs(simlev_sub(simlev_div(actual_w[i], targets[i]), 1.0))
@@ -2039,8 +2127,13 @@ class Engine {
     if (cond(r_le(n_, 0), C_HV_TAXN, t, a)) return 0.0;
     double p = sell_price;
     if (with_fee && fee_cur != nullptr) p = p - fee_amount(*fee_cur, n_ * sell_price) / n_;
+    // seit 1.6.4 (A-083) im Fonds-Regime FIFO-Preis und VP in einem Durchlauf (gleiche Werte)
+    if (regime == RG_FUND) {
+      double fp, vp;
+      fifo_price_vp(a, n_, fp, vp);
+      return simlev_mul(1 - bonus, simlev_sub(simlev_mul(simlev_sub(p, fp), n_), vp));
+    }
     double g = simlev_mul(simlev_sub(p, fifo_price(a, n_)), n_);
-    if (regime == RG_FUND) g = simlev_sub(g, fifo_vp(a, n_));
     return simlev_mul(1 - bonus, g);
   }
   void gain_harvest(int a, int t) {

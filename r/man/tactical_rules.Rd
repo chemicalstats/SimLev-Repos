@@ -16,7 +16,18 @@ der Laenge \code{nrow(data)}, Zeichenkette mit einem R-Ausdruck
 (ausgewertet in \code{data}, dann in der aufrufenden Umgebung) oder
 \code{list(buy, sell)} (wird mit \code{\link[=signal_state]{signal_state()}} in einen Zustand
 uebersetzt); NA gilt als \code{FALSE}. \code{weights}: benannter
-Vektor Kursspalte -> Gewicht als Anteil.}
+Vektor Kursspalte -> Gewicht als Anteil.
+Seit 1.6.4 je Regel nur die Felder when und weights; Gewichte endlich und >= 0.
+Seit 1.6.4 ist \code{when} auch eine Funktion von \code{data} (Ergebnis logischer Vektor
+der Laenge \code{nrow(data)}), und Regeltexte gelten in R, Python und Julia gleich im
+gemeinsamen Umfang: Spalten von \code{data}, Variablen und eigene Funktionen der aufrufenden
+Umgebung (bis zur globalen, nicht die Funktionen geladener Pakete), Operatoren, \code{if} und
+die Funktionen abs, all, any, as.character, as.Date, as.double, as.integer, as.logical,
+as.numeric, atan, c, ceiling, character, cos, cumsum, double, exp, expm1, floor, identity,
+ifelse, integer, is.finite, is.infinite, is.na, is.nan, isFALSE, isTRUE, length, log, log10,
+log1p, log2, logical, max, mean, median, min, nchar, numeric, pmax, pmin, quantile, rep, round,
+sd, sign, signif, sin, sqrt, sum, tan, tanh, trunc, var, xor; anderes (z. B. \code{function},
+\code{::}, Paketfunktionen) ist ein Fehler.}
 
 \item{default}{Benannter Gewichtsvektor (Anteile) fuer Zeilen, in denen
 keine Regel zutrifft.}

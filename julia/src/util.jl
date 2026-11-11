@@ -102,6 +102,14 @@ _mean_lgl(x) = r_mean_int(Int[v ? 1 : 0 for v in x])
 "`unique` mit erster Reihenfolge (Vergleich mit `in`)."
 _unique(v) = (out = similar(v, 0); for s in v; s in out || push!(out, s); end; out)
 _setdiff(a, b) = _unique([x for x in a if !(x in b)])
+"""Element `k` (Text) eines Dict, NamedTuple oder Objekts (Ergebnis einer Hülle). Seit 1.6.4 eine Fassung für Backcast
+und Optimize (bis 1.6.3 `_getel` bzw. `_getf`)."""
+_getel(r, k) = r isa AbstractDict ? r[k] : r isa NamedTuple ? getfield(r, Symbol(k)) : getproperty(r, Symbol(k))
+"Zahl als Skalar, kein Wahrheitswert (seit 1.6.4 eine Fassung für DataPrep, DeepAnalysis und Scenarios)."
+_isnum(x) = x isa Real && !(x isa Bool)
+"""R's `cummax()` über den Kern `sl_r_cummax` (wie R und Python: NA ab dem ersten NA, sonst NaN ab dem ersten NaN; seit
+1.6.4 eine Fassung für DeepAnalysis und Scenarios)."""
+_cummax(x) = r_cummax(collect(Float64, x))
 "Text ohne abschließenden Zeilenumbruch."
 _strip_nl(s) = endswith(s, "\n") ? s[1:prevind(s, lastindex(s))] : s
 
@@ -111,3 +119,31 @@ Varianten, die sich nur bei NaN im zweiten Argument bzw. in beiden unterschieden
 Argument eine endliche Konstante oder eine von `withdrawal_horizon()` geprüfte endliche Grenze)."""
 _pmax(a::Float64, b::Float64) = isnan(b) ? b : isnan(a) ? a : (b > a ? b : a)
 _pmin(a::Float64, b::Float64) = isnan(b) ? b : isnan(a) ? a : (b < a ? b : a)
+
+"""
+Umgebung eines Moduls nur mit den eigenen Namen des Moduls (seit 1.6.4, Entscheidungen 59 und 72): Regeltexte
+(`tactical_rules`, `regime_subset`, `view_prob`) kennen in allen drei Sprachen nur den gemeinsamen RExpr-Umfang und
+eigene Variablen und Funktionen des Aufrufers, nicht die Funktionen der Sprache oder geladener Pakete (bis 1.6.3 z. B.
+`cumprod` aus `Base` über `Main`, in `regime_subset` und `view_prob` auch `minimum`, `first`, `nrow`). Eigen ist ein
+Name, dessen Bindung im Modul selbst liegt (`which(mod, s) === mod`, dokumentierte Form von `Base.binding_module`);
+mit `import Paket: f` oder `using` geholte Namen gelten als fremd. Zuerst nur in Tactical für `tactical_rules` mit der Regel „alles außer `Base`/`Core`“
+(dort waren Paketfunktionen wie `nrow` sichtbar); gemeinsam und mit der Regel des eigenen Moduls seit T3-R2.
+"""
+struct _UserEnv <: AbstractDict{String,Any}
+    mod::Module
+end
+function _user_binding(e::_UserEnv, s::Symbol)
+    isdefined(e.mod, s) || return false
+    m = try
+        Base.which(e.mod, s)
+    catch
+        e.mod
+    end
+    return m === e.mod
+end
+Base.haskey(e::_UserEnv, k::AbstractString) = _user_binding(e, Symbol(k))
+Base.haskey(e::_UserEnv, k::Symbol) = _user_binding(e, k)
+Base.getindex(e::_UserEnv, k::AbstractString) = getglobal(e.mod, Symbol(k))
+Base.getindex(e::_UserEnv, k::Symbol) = getglobal(e.mod, k)
+Base.length(::_UserEnv) = 0
+Base.iterate(::_UserEnv, st...) = nothing

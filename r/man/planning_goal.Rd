@@ -32,7 +32,8 @@ Erfolg heisst Endvermoegen >= \code{goal}.}
 \item{horizon}{Anzahl Perioden bis zum Ziel (ganze Zahl >= 1; Periodenlaenge
 wie die Zeilen von \code{returns}, z. B. Jahre bei Jahresrenditen).
 Nicht zu verwechseln mit \code{horizon} in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}
-(Objekt aus \code{\link[=withdrawal_horizon]{withdrawal_horizon()}} oder Jahre).}
+(Objekt aus \code{\link[=withdrawal_horizon]{withdrawal_horizon()}} oder Jahre).
+Seit 1.6.4 hoechstens 36600 Perioden (wie path_length: 100 Jahre in Tagen).}
 
 \item{contributions}{Zahlung je Periode als Geldbetrag (Standard 0):
 Skalar oder Vektor (wird mit \code{rep_len()} auf \code{horizon}
@@ -41,10 +42,13 @@ zu Periodenbeginn vor der Rendite.}
 
 \item{n_grid}{Anzahl Punkte des logarithmischen Vermoegensrasters
 (Standard 301, mindestens 2; dazu Ziel und Startwert); mehr Punkte =
-genauer, aber langsamer.}
+genauer, aber langsamer.
+Ganze Zahl.
+Seit 1.6.4 hoechstens 10^6.}
 
 \item{n_sim}{Anzahl Pfade der Vorwaertssimulation der optimalen Politik
-(Standard 5000).}
+(ganze Zahl, Standard 5000).
+Seit 1.6.4 hoechstens 10^8.}
 
 \item{seed}{Startwert fuer die Vorwaertssimulation (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein

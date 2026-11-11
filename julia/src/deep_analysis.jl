@@ -34,7 +34,9 @@ _stop(text::AbstractString) = error(text)
 
 # ── Vektoren ────────────────────────────────────────────────────────────────
 
-_isnum_el(x) = x isa Real && !(x isa Bool)
+using ..SimLev: _isnum, _cummax   # util.jl (seit 1.6.4 eine Fassung)
+using ..SimLev: chk_fmt, chk_num1, chk_scalar, chk_stop   # pruefen.jl (seit 1.6.4)
+const _isnum_el = _isnum
 "Werte eines Vektors/Skalars als `Vector{Float64}` (missing/nothing → NA)."
 _f64(x::Real) = [Float64(x)]
 _f64(::Missing) = [_NA]
@@ -60,21 +62,6 @@ function _match(a, b)
         haskey(pos, v) || (pos[v] = i)
     end
     Int[get(pos, v, 0) for v in a]
-end
-
-"`duplicated(x, fromLast = TRUE)`."
-function _duplicated_last(x)
-    seen = Set{Any}()
-    out = falses(length(x))
-    for i in length(x):-1:1
-        k = x[i] isa Float64 && isnan(x[i]) ? :NA : x[i]
-        if k in seen
-            out[i] = true
-        else
-            push!(seen, k)
-        end
-    end
-    collect(out)
 end
 
 "R's `max()` für Doubles (NA vor NaN, erstes Maximum bei Gleichstand)."
@@ -108,9 +95,6 @@ function _rmin(x)
     s
 end
 
-"R's `cummax()` über den Kern `sl_r_cummax` (wie R und Python: NA ab dem ersten NA, sonst NaN ab dem ersten NaN; seit
-1.6.3, bis 1.6.2 eine eigene Schleife mit anderen NA/NaN-Regeln)."
-_cummax(x) = SimLev.r_cummax(collect(Float64, x))
 
 "`mean(<logical>)` (Ganzzahlsumme / n in long double)."
 _mean_lgl(b) = isempty(b) ? NaN : SimLev.r_mean_int(Int[x ? 1 : 0 for x in b])
@@ -222,18 +206,6 @@ function _col_is_numeric(v)
     vals = [e for e in v if e !== missing && e !== nothing]
     !isempty(vals) && all(_isnum_el, vals)
 end
-"`class(v)[1]` einer Spalte (für Meldungen)."
-function _r_class(v)
-    T = nonmissingtype(eltype(v))
-    T <: Bool && return "logical"
-    T <: Integer && return "integer"
-    T <: AbstractFloat && return "numeric"
-    T <: Date && return "Date"
-    T <: AbstractString && return "character"
-    vals = [e for e in v if e !== missing && e !== nothing]
-    !isempty(vals) && all(e -> e isa Bool, vals) && return "logical"
-    "character"
-end
 "`as.numeric()` einer Spalte."
 _as_numeric_col(v) = Float64[e === missing || e === nothing ? _NA : Float64(e) for e in v]
 
@@ -335,12 +307,14 @@ function _da_series(x, name::AbstractString)
             num[1]
         end
         col = x[vc]
+        col isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", "result_analysis", vc)   # Entscheidung 15 (wie R und Python; seit 1.6.4, K43 KE)
         if !_col_is_numeric(col)
             sub = SimLev.RFrame(vc => col)
             isempty(_strs(SimLev.DataPrep._num_text_cols(sub))) || SimLev.DataPrep._num_text_stop(x, [vc], name)
-            _stop(_sp("'%s': Wertspalte '%s' ist nicht numerisch (Klasse %s).", name, vc, _r_class(col)))
+            _stop(_sp("'%s': Wertspalte '%s' ist nicht numerisch.", name, vc))   # seit 1.6.4 ohne Klasse
         end
         v = _as_numeric_col(col)
+        x["date"] isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", "result_analysis", "date")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
         d = _to_date_days(x["date"], "'$name': Spalte 'date'")
         fm = get(SimLev.attrs(x), "filled", nothing)
         fl = fill(false, length(v))
@@ -356,7 +330,7 @@ function _da_series(x, name::AbstractString)
         idx = findall(!isnan, d)
         idx = idx[sortperm(d[idx]; alg = MergeSort)]
         d = d[idx]; v = v[idx]; fl = fl[idx]
-        dup = _duplicated_last(d)
+        dup = SimLev.DataPrep._duplicated(d; from_last = true)   # duplicated(d, fromLast = TRUE) (seit 1.6.4 eine Fassung)
         if any(dup)
             _message(_sp("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet.", name, count(dup)))
             d = d[.!dup]; v = v[.!dup]; fl = fl[.!dup]
@@ -371,8 +345,8 @@ function _da_series(x, name::AbstractString)
         end
         bad = findall(e -> !isfinite(e) || e <= 0, v)
         if !isempty(bad)
-            _stop(_sp("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexstände, keine Renditen); %d Werte <= 0, z. B. %s am %s.",
-                      name, vc, length(bad), _format(v[bad[1]])[1], _fmt_date1(d[bad[1]])))
+            _stop(_sp("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexstände, keine Renditen); %d Werte <= 0, z. B. am %s.",
+                      name, vc, length(bad), _fmt_date1(d[bad[1]])))   # seit 1.6.4 ohne den Wert
         end
         length(v) < 2 && _stop(_sp("'%s': mindestens zwei Daten mit Wert nötig.", name))
         return DASeries(name, d, v, collect(Bool, fl), nothing, nothing, nothing, nothing, nothing)
@@ -486,12 +460,9 @@ function _da_drawdowns(date, value, top = 10)
     end
     en = findall(neg .& .!nxt)
     seg = cumsum(neg .& .!prev)[neg]
-    rws = findall(neg)
-    tr = Int[]
-    for k in 1:maximum(seg)
-        r = rws[seg .== k]
-        push!(tr, r[something(_which_min(dd[r]), 0)])
-    end
+    # Tiefpunkt je Episode (erstes Minimum); seit 1.6.4 je Episode nur ihre Zeilen st..en (B-079; bis 1.6.3 je
+    # Episode ein Vergleich über alle Zeilen, gleiche Indizes)
+    tr = Int[st[k] - 1 + something(_which_min(view(dd, st[k]:en[k])), 0) for k in eachindex(st)]
     s0 = max.(1, st .- 1); rec = en .+ 1; opn = rec .> n
     recc = min.(rec, n)
     endv = date[recc]; endv[opn] .= NaN
@@ -506,6 +477,16 @@ function _da_drawdowns(date, value, top = 10)
                   "depth" => depth[o], "days_to_trough" => dtt[o], "days_to_recover" => dtr[o], "days_total" => dtot[o])
 end
 
+# Kopf einer Tabelle aus _da_drawdowns(…, 1e6) wie _da_drawdowns(…, top) (seit 1.6.4, B-079): dieselben Spalten
+# mit den ersten min(top, n) Zeilen
+function _da_dd_head(ddt, top)
+    n = SimLev.nrow(ddt)
+    n == 0 && return ddt
+    m = max(0, Int(min(top, n)))
+    SimLev.RFrame([c => ddt[c][1:m] for c in ("start", "trough", "end", "depth", "days_to_trough", "days_to_recover",
+                                                "days_total")]...)
+end
+
 _calc_skew(r) = (v = SimLev.calculate_skewness(r); v === nothing || v === missing ? _NA : Float64(v))
 _calc_kurt(r) = (v = SimLev.calculate_kurtosis(r); v === nothing || v === missing ? _NA : Float64(v))
 
@@ -518,7 +499,7 @@ function _sum_any(v)
 end
 
 "Kennzahlen einer Reihe (`.da_metrics`): (Namen, Werte)."
-function _da_metrics(s::DASeries, rate, ppy, var_levels)
+function _da_metrics(s::DASeries, rate, ppy, var_levels, dd_memo = nothing)
     val = s.value; fl = s.filled
     kk = vcat(1, findall(.!fl[2:end]) .+ 1)
     vk = val[kk]
@@ -534,11 +515,16 @@ function _da_metrics(s::DASeries, rate, ppy, var_levels)
     ulcer = sqrt(SimLev.r_mean(dd .* dd))
     mr = _period_returns(_da_period_values(s.date, val, "month"))
     yr = _period_returns(_da_period_values(s.date, val, "year"))
-    var_d = Float64[-_q1(r, a) for a in var_levels]
-    cvar_d = Float64[(q = _q1(r, a); -SimLev.r_mean(r[r .<= q])) for a in var_levels]
-    var_m = Float64[-_q1(mr, a) for a in var_levels]
-    cvar_m = Float64[(q = _q1(mr, a); -SimLev.r_mean(mr[mr .<= q])) for a in var_levels]
+    # seit 1.6.4 je Stufe ein Quantil für VaR und CVaR (B-110; bis 1.6.3 zweimal, gleiche Werte)
+    qd = Float64[_q1(r, a) for a in var_levels]
+    var_d = Float64[-q for q in qd]
+    cvar_d = Float64[-SimLev.r_mean(r[r .<= q]) for q in qd]
+    qm = Float64[_q1(mr, a) for a in var_levels]
+    var_m = Float64[-q for q in qm]
+    cvar_m = Float64[-SimLev.r_mean(mr[mr .<= q]) for q in qm]
     ddt = _da_drawdowns(s.date, val, 1e6)
+    # seit 1.6.4 für die Tabelle drawdowns gemerkt (B-079; dort deren Kopf, gleiche stabile Sortierung)
+    dd_memo === nothing || SimLev.nrow(ddt) >= 1e6 || push!(dd_memo, (s, ddt))
     rf_ann = rfl["ann"]
     sdex = SimLev.r_sd(ex)
     mex = SimLev.r_mean(ex)
@@ -618,14 +604,14 @@ function _da_benchmark(s::DASeries, b::DASeries, rate, ppy, cagr_s, cagr_b)
             upc, dnc, upc - dnc, cagr_s - cagr_b, te,
             te > 0 ? SimLev.r_mean(rs .- rb) * ppy / te : _NA,
             sharpe_s * SimLev.r_sd(rb) * sqrt(ppy) + rf_ann,
-            beta != 0 ? (SimLev.r_mean(es) * ppy) / beta : _NA]
+            !isnan(beta) && beta != 0 ? (SimLev.r_mean(es) * ppy) / beta : _NA]   # seit 1.6.4 NA wie R (Entscheidung 146)
 end
 
 "Monatsrenditen-Tabelle (Jahr x Monat, plus Jahr) als NamedMat."
 function _da_monthly_table(s::DASeries)
     m = _da_period_values(s.date, s.value, "month")
     mr = _period_returns(m)
-    yy = [k ÷ 100 for k in m.key]; mm = [k % 100 for k in m.key]
+    yy = [fld(k, 100) for k in m.key]; mm = [mod(k, 100) for k in m.key]   # seit 1.6.4 (RP) auch für Jahre < 0
     years = sort(unique(yy))
     pos = Dict(y => i for (i, y) in enumerate(years))
     M = fill(_NA, length(years), 13)
@@ -725,7 +711,9 @@ LOCF aufgefüllt hat, werden aus den Tagesrenditen für Volatilität, Sharpe, Va
   Monate; Standard 3).
 - `var_levels`: Wahrscheinlichkeiten für VaR und CVaR als Anteile (Standard `[0.01, 0.05, 0.10]`); historisch
   aus Tages- und Monatsrenditen.
-- `top_drawdowns`: Anzahl Einträge der Drawdown-Tabelle je Reihe (Standard 10, nach Tiefe sortiert).
+- `top_drawdowns`: Anzahl Einträge der Drawdown-Tabelle je Reihe (Standard 10, nach Tiefe sortiert); eine ganze
+  Zahl `>= 0` oder `Inf` (alle). Seit 1.6.4 geprüft: `rolling_years` endlich, `var_levels` ohne doppelte Werte,
+  `risk_free` und `inflation` als einzelne Zahl endlich (`inflation > -100`).
 - `inflation`: Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 %) oder ein Preisindex-Niveau als
   `data.frame(date, value)` bzw. benannter Vektor mit Datumsnamen (z. B. mit `series_align_macro()`
   vorbereitet). Dann werden alle Kennzahlen real (in Kaufkraft des Startdatums) berechnet, auch die MWRR und
@@ -741,6 +729,8 @@ Objekt der Klasse `SimLevAnalysis`, eine Liste mit
 - benchmark_metrics: Matrix Kennzahl x Reihe (ohne Benchmark): `alpha`, `beta`, `correlation`, `r_squared`,
   `correlation_up`, `correlation_down`, `up_capture`, `down_capture`, `capture_spread`, `active_return`,
   `tracking_error`, `information_ratio`, `m2`, `treynor`; `nothing` ohne Benchmark.
+  Seit 1.6.4 ist `treynor` bei einem Benchmark ohne Schwankung (Überschussrendite konstant) NA wie in R und Python
+  (bis 1.6.3 NaN; R und Python brachen dort ab); `alpha` und `beta` sind NaN.
 - benchmark: Name der Benchmark-Reihe oder `nothing`.
 - annual: Matrix Jahr x Reihe der Jahresrenditen (Anteile); Zeilen = alle Jahre aller Reihen, NA, wo eine
   Reihe kein Jahr hat.
@@ -827,14 +817,31 @@ function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 
     ryv = ry isa AbstractVector ? collect(ry) : Any[ry]
     rynum = all(_isnum_el, ryv)
     if !rynum || length(ryv) != 1 || isnan(Float64(ryv[1])) || _rround(12 * Float64(ryv[1])) < 2
-        txt = rynum && !isempty(ryv) ? _format(_f64(ryv)) : _format(ryv)
-        _stop(join(_sp("rolling_years muss mindestens 2/12 (zwei Monate) betragen (ist: %s).", t) for t in txt))
+        _stop("rolling_years muss mindestens 2/12 (zwei Monate) betragen.")   # seit 1.6.4 ohne Eingabewert
     end
+    fn = "result_analysis"
+    chk_num1(ryv[1], fn, "rolling_years")   # seit 1.6.4 endlich
     vl = var_levels isa AbstractVector ? collect(var_levels) : Any[var_levels]
     if isempty(vl) || !all(_isnum_el, vl) || any(e -> isnan(Float64(e)), vl) || any(e -> e <= 0 || e >= 1, vl)
         _stop("var_levels: Wahrscheinlichkeiten als Anteile zwischen 0 und 1, z. B. c(0.01, 0.05).")
     end
     vlf = Float64[Float64(e) for e in vl]
+    # seit 1.6.4 (B-052, B-045, B-012): var_levels ohne doppelte Werte, top_drawdowns eine ganze Zahl >= 0 oder Inf,
+    # risk_free und inflation als einzelne Zahl endlich (inflation > -100)
+    length(unique(vlf)) == length(vlf) || chk_stop("e1.doppelt", fn, "var_levels")
+    td = chk_scalar(top_drawdowns)
+    (_isnum_el(td) && !isnan(Float64(td)) &&
+     (Float64(td) == Inf || (isfinite(Float64(td)) && Float64(td) == trunc(Float64(td)) && Float64(td) >= 0))) ||
+        chk_stop("e1.ganz_inf", fn, "top_drawdowns", chk_fmt(0))
+    top_drawdowns = td
+    for (a, nm) in ((risk_free, "risk_free"), (inflation, "inflation"))   # Entscheidung 15: kein Faktor
+        SimLev.chk_nofactor(a, fn, nm)
+        a isa SimLev.RFrame && for k in SimLev.names(a); SimLev.chk_col_nofactor(a, k, fn); end
+    end
+    rf1 = risk_free isa Union{AbstractVector,Tuple} && !(risk_free isa SimLev.RVector) ? chk_scalar(risk_free) : risk_free
+    (_isnum_el(rf1) || rf1 === missing) && chk_num1(rf1, fn, "risk_free")
+    if1 = inflation isa Union{AbstractVector,Tuple} && !(inflation isa SimLev.RVector) ? chk_scalar(inflation) : inflation
+    (_isnum_el(if1) || if1 === missing) && chk_num1(if1, fn, "inflation"; lo = -100, lo_open = true)
     order = String[]; ser = Dict{String,DASeries}()
     for (k, v) in zip(keys_, vals)
         s = _da_series(v, k)
@@ -867,7 +874,8 @@ function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 
     rf_of(s) = _f64(SimLev.Backcast._resolve_series(risk_free, SimLev.RFrame("date" => _dates(s.date)), "risk_free"))
     ppy_of(s) = count(.!s.filled[2:end]) / ((s.date[end] - s.date[1]) / 365.25)
     rfs = Dict(k => rf_of(ser[k]) for k in order)
-    mets = [_da_metrics(ser[k], rfs[k], ppy_of(ser[k]), vlf) for k in order]
+    dd_memo = Any[]
+    mets = [_da_metrics(ser[k], rfs[k], ppy_of(ser[k]), vlf, dd_memo) for k in order]
     mnames = mets[1][1]
     met = SimLev.NamedMat(reduce(hcat, [m[2] for m in mets]); rownames = mnames, colnames = order)
     bm = nothing
@@ -896,7 +904,9 @@ function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 
     seasonality = SimLev.NamedMat(seas; rownames = _MONTH_ABB, colnames = order)
     dds = SimLev.RList()
     for k in order
-        dds[k] = _da_drawdowns(ser[k].date, ser[k].value, top_drawdowns)
+        e = findfirst(t -> t[1] === ser[k], dd_memo)
+        dds[k] = e === nothing ? _da_drawdowns(ser[k].date, ser[k].value, top_drawdowns) :
+                 _da_dd_head(dd_memo[e][2], top_drawdowns)
     end
     w = Int(_rround(12 * Float64(ryv[1])))
     rolling = SimLev.RList()
@@ -1054,13 +1064,14 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
     data = SimLev.RList()
     _rep(ks, vs) = String[k for (k, v) in zip(ks, vs) for _ in eachindex(v)]
     _cdates(fr) = vcat([collect(Date, f["date"]) for f in fr]...)
+    # Jahresmarken je Feld einmal (seit 1.6.4; yt in der Reihenfolge der Argumente, bis 1.6.3 zweimal gerechnet)
     function p_growth(s, x0, y0, w, h)
         ys = [x["series"][k]["value"] ./ x["series"][k]["value"][1] for k in snames]
         ds = [_days(x["series"][k]["date"]) for k in snames]
         allv = filter(isfinite, vcat(ys...)); alld = vcat(ds...)
         p = _ana_panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), (minimum(allv), maximum(allv)); logy = true,
-                       title = "Wertentwicklung (TWR, Start = 1)", ylab = "Wachstum (log)", xticks = _ana_year_ticks(alld)[1],
-                       xlabels = _ana_year_ticks(alld)[2])
+                       title = "Wertentwicklung (TWR, Start = 1)", ylab = "Wachstum (log)", xticks = (yt = _ana_year_ticks(alld))[1],
+                       xlabels = yt[2])
         for i in eachindex(snames)
             _ana_lines(s, p, ds[i], ys[i]; col = cols[i], lwd = 1.3)
         end
@@ -1074,7 +1085,7 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
         ds = [_days(x["series"][k]["date"]) for k in snames]
         alld = vcat(ds...)
         p = _ana_panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), (minimum(vcat(ys...)), 0.0);
-                       title = "Drawdowns", ylab = "Drawdown (%)", xticks = _ana_year_ticks(alld)[1], xlabels = _ana_year_ticks(alld)[2])
+                       title = "Drawdowns", ylab = "Drawdown (%)", xticks = (yt = _ana_year_ticks(alld))[1], xlabels = yt[2])
         for i in eachindex(snames)
             _ana_lines(s, p, ds[i], ys[i]; col = cols[i], lwd = 1)
         end
@@ -1094,7 +1105,7 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
         allv = filter(isfinite, vcat(ys...)); alld = vcat(ds...)
         p = _ana_panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), isempty(allv) ? (0.0, 1.0) : (minimum(allv), maximum(allv));
                        title = _sp("Rollierend %g J.: %s", Float64(_first(x["rolling_years"])), metric),
-                       ylab = pct ? metric * " (%)" : metric, xticks = _ana_year_ticks(alld)[1], xlabels = _ana_year_ticks(alld)[2])
+                       ylab = pct ? metric * " (%)" : metric, xticks = (yt = _ana_year_ticks(alld))[1], xlabels = yt[2])
         for (i, (k, _)) in enumerate(rl)
             _ana_lines(s, p, ds[i], ys[i]; col = cols[findfirst(==(k), snames)], lwd = 1.2)
         end

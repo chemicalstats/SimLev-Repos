@@ -34,11 +34,15 @@ from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rnum import r_cumsum, r_mean_int, r_rowmeans, r_rowsums as _rowsums, r_sum
 from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str
-from ._util import _dates, _days, _match_arg
+from ._util import _dates, _days
 from .data_prep import _civil_to_days, _find_interval_int as _find_interval, _to_date
+from .data_prep import _names as _df_names   # seit 1.6.4 eine Fassung
 from ._util import _MISSING, _unique
 from ._util import _colmeans
 from .backcast import _fill_na
+from .data_prep import _e5_choice, _e5_data_dates, _e5_lookbacks, _e5_names, _e5_numcols, _e5_weights
+from ._pruefen import (chk_bool1, chk_int1, chk_is_factor, chk_max, chk_name1, chk_nofactor, chk_num1,
+                       chk_date1, chk_stop)
 
 
 __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", "tactical_rotation",
@@ -84,17 +88,6 @@ def _mean_int(x):
     return r_mean_int(a)
 
 
-def _chr_vec(x):
-    """Zeichenvektor (``NULL`` -> leer)."""
-    if x is None:
-        return []
-    if isinstance(x, str):
-        return [x]
-    if isinstance(x, pd.Series):
-        return [str(v) for v in x.to_list()]
-    return [str(v) for v in np.asarray(x, dtype=object).ravel()]
-
-
 def _setdiff(a, b):
     b = set(b)
     return _unique([x for x in a if x not in b])
@@ -114,19 +107,11 @@ def _named(x):
 
 def _is_numeric_named(x):
     if isinstance(x, pd.Series):
-        return x.dtype.kind in "iufb" and not isinstance(x.index, pd.RangeIndex)
+        return x.dtype.kind in "iuf" and not isinstance(x.index, pd.RangeIndex)   # seit 1.6.4 ohne Wahrheitswerte wie R (T3-N8)
     if isinstance(x, Mapping):
         return len(x) > 0 and all(isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool)
                                   for v in x.values())
     return False
-
-
-def _df_names(data):
-    if isinstance(data, pd.DataFrame):
-        return [str(c) for c in data.columns]
-    if isinstance(data, Mapping):
-        return [str(k) for k in data.keys()]
-    return []
 
 
 def _col(data, name):
@@ -366,6 +351,44 @@ def _lgl(v):
     return val, na
 
 
+def _e5_sigvec_len(v):
+    """Länge eines Signalvektors (Wahrheitswerte oder Zahlen 0/1, NA erlaubt, eindimensional) oder ``None``."""
+    if chk_is_factor(v) or isinstance(v, str):
+        return None
+    if isinstance(v, pd.Series) and isinstance(v.dtype, pd.StringDtype):   # pandas-Text, auch nur aus NA, wie R
+        return None                                                         # NA_character_ (seit 1.6.4 K43 T3-N10)
+    if isinstance(v, (bool, np.bool_, int, float, np.integer, np.floating)):
+        a = np.array([v], dtype=object)
+    elif isinstance(v, (list, tuple, np.ndarray, pd.Series)) or (
+            isinstance(v, pd.api.extensions.ExtensionArray) and not pd.api.types.is_string_dtype(v.dtype)):   # auch pd.array (boolean mit pd.NA; K43 KE), Text wie R nicht
+        a = np.asarray(v.to_numpy() if isinstance(v, pd.Series) else v, dtype=object)
+        if a.ndim != 1:
+            return None
+    else:
+        return None
+    for e in a:
+        if e is None or e is pd.NA or isinstance(e, (bool, np.bool_)):
+            continue
+        if isinstance(e, (int, float, np.integer, np.floating)) and (math.isnan(float(e)) or float(e) in (0.0, 1.0)):
+            continue
+        return None
+    return len(a)
+
+
+def _e5_signal(signal, fn, i=None):
+    """Signal ``{"buy": ..., "sell": ...}``: beide vorhanden, je Wahrheitswerte oder 0/1 (NA erlaubt), gleich lang
+    (R ``.e5_signal``; seit 1.6.4, Entscheidung 1)."""
+    ok = isinstance(signal, Mapping) and "buy" in signal and "sell" in signal
+    if ok:
+        lb, ls = _e5_sigvec_len(signal["buy"]), _e5_sigvec_len(signal["sell"])
+        ok = lb is not None and lb == ls
+    if not ok:
+        if i is None:
+            chk_stop("e5.signal", fn)
+        chk_stop("e5.when", fn, i)
+    return signal
+
+
 def signal_state(signal, *, initial=False):
     """Signale in einen dauerhaften Zustand übersetzen.
 
@@ -377,6 +400,7 @@ def signal_state(signal, *, initial=False):
     Args:
         signal: ``{"buy": ..., "sell": ...}`` mit logischen Vektoren gleicher Länge (z. B. aus ``signal_sma()``);
             NA vorher durch ``False`` ersetzen (die Signal-Bausteine liefern keine NA).
+            Seit 1.6.4 nur TRUE/FALSE oder 0/1 (NA erlaubt) und gleiche Länge, sonst Fehler.
         initial: Logischer Zustand vor dem ersten Signal (Standard ``False`` = nicht investiert).
 
     Returns:
@@ -388,19 +412,14 @@ def signal_state(signal, *, initial=False):
         x = np.array([100, 102, 105, 103, 99, 97, 100, 104])
         print(simlev.signal_state({"buy": x > 101, "sell": x < 98}))
     """
+    _e5_signal(signal, "signal_state")                     # seit 1.6.4 (Entscheidung 1; B-024)
+    initial = chk_bool1(initial, "signal_state", "initial")
     bv, sv = _sig_part(signal, "buy"), _sig_part(signal, "sell")
-    # R: ifelse(b & !s, …): Text in sell scheitert an !s, Text in buy an & (seit 1.6.3 wie R; bis 1.6.2 wertete
-    # Python Text mit bool() aus, "FALSE" wurde True)
-    if _is_chr(sv):
-        raise ValueError("invalid argument type")
-    if _is_chr(bv):
-        raise ValueError("operations are possible only for numeric, logical or complex types")
+    # Text lehnt _e5_signal ab wie R (seit 1.6.4 K43 T3-N10 ohne die Fehler von R's ifelse(b & !s, …), bis dahin bei
+    # pandas-Text nur aus NA erreichbar)
     b, bna = _lgl(bv)
     s, sna = _lgl(sv)
-    n = len(b)
-    if len(s) != n:
-        s = np.resize(s, n)
-        sna = np.resize(sna, n)
+    n = len(b)                  # buy und sell gleich lang (_e5_signal; seit 1.6.4 K43 T3-N10 ohne Recyceln)
     na = bna | sna
     ev = np.where(b & ~s, 1, np.where(s & ~b, -1, 0))
     ev[na] = 0
@@ -439,8 +458,10 @@ def momentum_score(data, assets, *, lookbacks=(1, 3, 6, 12), type=("average", "1
 
     Args:
         data: DataFrame mit Spalte ``date`` (Klasse Date) und Kursspalten (Niveaus).
+            Seit 1.6.4 Datum aufsteigend ohne NA, Kursspalten numerisch (kein Faktor).
         assets: Zeichenvektor der Kursspalten.
         lookbacks: Rückblicke in Kalendermonaten (Standard ``[1, 3, 6, 12]``); bei ``type = "13612w"`` ignoriert.
+            Seit 1.6.4 ganze Zahlen von 1 bis 1200 (kein Blick in die Zukunft).
         type: ``"average"`` (Standard; ungewichtetes Mittel der Renditen) oder ``"13612w"`` (gewichtet, Rückblicke
             fest 1, 3, 6, 12).
 
@@ -467,13 +488,16 @@ def momentum_score(data, assets, *, lookbacks=(1, 3, 6, 12), type=("average", "1
         ms = simlev.momentum_score(d, ["aktien", "anleihen"])
         print(ms.tail(3))
     """
-    type = _match_arg(type, ("average", "13612w"))  # noqa: A001
-    d = _days(_to_date(_col(data, "date") if "date" in _df_names(data) else None, "momentum_score: data$date"))
+    fn = "momentum_score"
+    type = _e5_choice(type, ("average", "13612w"), fn, "type")  # noqa: A001
+    d = _days(_e5_data_dates(data, fn, "momentum_score: data$date"))   # seit 1.6.4 (K42 E5)
     n = len(d)
-    assets = _chr_vec(assets)
+    assets = _e5_names(assets, fn, "assets")
+    _e5_lookbacks(lookbacks, fn)                          # seit 1.6.4 ganze Zahlen 1 bis 1200 (B-025)
     miss = _setdiff(assets, _df_names(data))
     if miss:
         raise ValueError("momentum_score: Kursspalte(n) fehlen: %s" % ", ".join(miss))
+    _e5_numcols(data, assets, fn)                         # Entscheidung 15, B-009
     if type == "13612w":
         lookbacks = [1, 3, 6, 12]
     lookbacks = list(np.atleast_1d(np.asarray(lookbacks, dtype=object)))
@@ -565,6 +589,10 @@ def tactical_rules(data, rules, default, *, env=None):
             ``data``, dann in der aufrufenden Umgebung) oder ``{"buy": ..., "sell": ...}`` (wird mit
             ``signal_state()`` in einen Zustand übersetzt); NA gilt als ``False``. ``weights``: benannter Vektor
             Kursspalte -> Gewicht als Anteil.
+            Seit 1.6.4 je Regel nur die Felder when und weights; Gewichte endlich und >= 0. ``when`` darf auch
+            eine Funktion von ``data`` sein (wie in R seit 1.6.4); Regeltexte gelten in allen drei Sprachen im
+            gemeinsamen Umfang (Spalten, Variablen und eigene Funktionen aus ``env``, Operatoren, ``if`` und die
+            Funktionen von :mod:`simlev._r.rexpr`; R lehnt seit 1.6.4 Texte außerhalb davon ebenso ab).
         default: Benannter Gewichtsvektor (Anteile) für Zeilen, in denen keine Regel zutrifft.
         env: Mapping für freie Variablen und Funktionen in Bedingungen (Voreinstellung: Namensraum des Aufrufers).
 
@@ -591,8 +619,25 @@ def tactical_rules(data, rules, default, *, env=None):
         w = simlev.tactical_rules(d, [{"when": simlev.signal_sma(d["A"], n=200), "weights": {"A": 1}}], {"B": 1})
         print(w)
     """
+    fn = "tactical_rules"
+    _e5_data_dates(data, fn, "date")                      # seit 1.6.4 (K42 E5)
     n = _nrow(data)
-    rules = list(rules) if rules is not None else []
+    if not isinstance(rules, (list, tuple)):   # leere Liste: nur default
+        chk_stop("liste", fn, "rules")
+    rules = list(rules)
+    for i, r in enumerate(rules, start=1):
+        if not (isinstance(r, Mapping) and "when" in r and "weights" in r):
+            chk_stop("e5.regel", fn, i)
+        bad = [k for k in r if k not in ("when", "weights")]   # Entscheidung 11 sinngemäß
+        if bad:
+            chk_stop("e5.regel_feld", fn, bad[0], i)
+        _e5_weights(r["weights"], fn, "rules[[%d]]$weights" % i)
+        w = r["when"]
+        if isinstance(w, Mapping):
+            _e5_signal(w, fn, i)
+        elif not (isinstance(w, str) or callable(w) or _is_chr(w) or _e5_sigvec_len(w) is not None):
+            chk_stop("e5.when", fn, i)
+    _e5_weights(default, fn, "default")
 
     def wget(r):
         return r["weights"] if isinstance(r, Mapping) else getattr(r, "weights")
@@ -669,15 +714,19 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
             ``safe`` und ``canary``.
         assets: Zeichenvektor der Risikoanlagen für die Rotation.
         top: Anzahl gehaltener Anlagen (Standard 1; 1 bis Anzahl ``assets``).
+            Seit 1.6.4 ganze Zahl ohne Abschneiden.
         safe: Zeichenvektor der sicheren Anlage(n); bei mehreren wird die mit dem besten Score gewählt. Pflicht,
             wenn ``absolute = True`` (Standard) oder ``canary`` gesetzt ist (sonst Fehler).
         absolute: Logisch: absoluten Momentum-Filter anwenden (Standard ``True``; Score < 0 => sichere Anlage).
         canary: Optional Zeichenvektor der Canary-Anlagen (Standard ``None`` = kein Canary-Schutz).
         breadth: Schutzschwelle B als Anzahl Anlagen (mindestens 1; Standard ``None`` = Anzahl Canary-Anlagen).
+            Seit 1.6.4 ganze Zahl.
         lookbacks, type: Siehe ``momentum_score()`` (Rückblicke in Monaten; ``"average"`` oder ``"13612w"``).
         every: Entscheidungsrhythmus: ``"month"`` (Standard), ``"week"`` (ISO-Woche) oder ``"quarter"``.
         weighting: Gewichtung der gewählten Anlagen: ``"equal"`` (Standard) oder ``"inverse_vol"`` (umgekehrt
             proportional zur Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
+            Seit 1.6.4 liegen die Termine dann erst ab Zeile 63 (volles Fenster; bis 1.6.3 brach jeder frühere
+            Termin ab, mit Wochen- und Monatskursen auch mit den Standardrückblicken).
 
     Returns:
         ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten je Anlage aus ``assets`` und ``safe``,
@@ -706,28 +755,24 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
         d["geld"] = 100 * np.cumprod(np.full(n, 1 + 0.01 / 365))
         print(simlev.tactical_rotation(d, ["aktien", "anleihen"], safe="geld"))
     """
-    type = _match_arg(type, ("average", "13612w"))  # noqa: A001
-    every = _match_arg(every, ("month", "week", "quarter"))
-    weighting = _match_arg(weighting, ("equal", "inverse_vol"))
-    assets = _chr_vec(assets)
-    safe = _chr_vec(safe)
-    canary = _chr_vec(canary)
-    if (bool(absolute) or len(canary)) and not len(safe):
+    fn = "tactical_rotation"
+    type = _e5_choice(type, ("average", "13612w"), fn, "type")  # noqa: A001
+    every = _e5_choice(every, ("month", "week", "quarter"), fn, "every")
+    weighting = _e5_choice(weighting, ("equal", "inverse_vol"), fn, "weighting")
+    # seit 1.6.4 (K42 E5): Datum, Namen, Wahrheitswert, ganze Zahlen; Meldungen ohne Eingabewert (Entscheidung 8)
+    _e5_data_dates(data, fn, "momentum_score: data$date")
+    assets = _e5_names(assets, fn, "assets")
+    safe = _e5_names(safe, fn, "safe", null_ok=True) or []
+    canary = _e5_names(canary, fn, "canary", null_ok=True) or []
+    absolute = chk_bool1(absolute, fn, "absolute")
+    _e5_lookbacks(lookbacks, fn)
+    if (absolute or len(canary)) and not len(safe):
         raise ValueError("absolute bzw. canary brauchen eine sichere Anlage 'safe'.")
-    topv = _as_int1(top)
-    if len(topv) != 1 or topv[0] is None or topv[0] < 1 or topv[0] > len(assets):
-        ft = ", ".join("NA" if t is None else "%d" % t for t in topv)
-        raise ValueError("top muss zwischen 1 und der Anzahl der Anlagen in assets (%d) liegen (ist: %s)."
-                         % (len(assets), ft if len(topv) == 1 else " ".join(_fmt1(np.array(
-                             [_NA if t is None else t for t in topv]))) ))
-    top = topv[0]
-    if len(canary) and breadth is not None:
-        bv = np.atleast_1d(np.asarray(breadth, dtype=np.float64))
-        if len(bv) != 1 or math.isnan(bv[0]) or bv[0] < 1:
-            raise ValueError("breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score für "
-                             "vollen Schutz; ist: %s)." % ", ".join(_fmt1(bv)) if len(bv) == 1 else
-                             "breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score für "
-                             "vollen Schutz; ist: %s)." % " ".join(_fmt1(bv)))
+    top = int(chk_int1(top, fn, "top", lo=1))
+    if top > len(assets):
+        raise ValueError("top muss zwischen 1 und der Anzahl der Anlagen in assets (%d) liegen." % len(assets))
+    if breadth is not None:
+        breadth = chk_int1(breadth, fn, "breadth", lo=1)
     allc = _unique(assets + safe + canary)
     Sdf = momentum_score(data, allc, lookbacks=lookbacks, type=type)
     S = Sdf.to_numpy(dtype=np.float64)
@@ -739,6 +784,10 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
     if len(rows):
         keep = np.isfinite(S[np.ix_(rows - 1, ja)]).sum(axis=1) >= top
         rows = rows[keep]
+    if weighting == "inverse_vol":
+        # Termine erst ab Zeile 63, wenn das Fenster der Schwankung voll ist (seit 1.6.4, Entscheidung 144; bis
+        # 1.6.3 Abbruch "Zeilen ohne positive Gewichte" bei jedem früheren Termin)
+        rows = rows[rows >= 63]
     if not len(rows):
         raise ValueError("Zu kurze Historie für den Rückblick.")
     out_assets = _unique(assets + safe)
@@ -809,6 +858,22 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
 # ═══════════════════════════════════════════════════════════════════════════
 # Zielvolatilität, bedingte Volatilitätssteuerung
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _e5_risk_check(fn, data, weights, safe, window, ppy):
+    """Gemeinsame Prüfung der Volatilitätssteuerung (R ``.e5_risk_check``; seit 1.6.4, K42 E5)."""
+    _e5_data_dates(data, fn, "data$date")
+    if not _is_weights(weights):
+        if not _is_numeric_named(weights):
+            raise ValueError("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+        _e5_weights(weights, fn, "weights")
+    safe = chk_name1(safe, fn, "safe")
+    window = chk_int1(window, fn, "window", lo=2)
+    ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True, null_ok=True)
+    wn = [str(c) for c in weights.columns[1:]] if _is_weights(weights) else _named(weights)[0]
+    nms = _df_names(data)
+    _e5_numcols(data, [c for c in _unique(list(wn) + [safe]) if c in nms], fn)
+    return safe, window, ppy
+
 
 def _risk_vol(data, weights, safe, window, ppy):
     """``.risk_vol``: Volatilität des Risikoportfolios."""
@@ -884,6 +949,7 @@ def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max
         target: Zielvolatilität in Prozent p. a. (10 = 10 %; Standard 10). Werte unter 1 ergeben eine Warnung
             (vermutlich als Anteil angegeben).
         window: Fensterlänge der Volatilitätsschätzung in Zeilen mit Kursbewegung (Standard 63).
+            Seit 1.6.4 ganze Zahl >= 2.
         max_exposure: Höchster Risikoanteil als Anteil (Standard 1 = ohne Hebel; Werte > 1 sind nicht erlaubt, da
             die Engine keinen Kredit kennt).
         every: Anpassungsrhythmus des Risikoanteils: ``"month"`` (Standard), ``"week"``, ``"day"`` oder
@@ -920,7 +986,11 @@ def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max
         tv = simlev.tactical_target_volatility(d, {"aktien": 0.8, "anleihen": 0.2}, "geld", target=8)
         print(tv)
     """
-    every = _match_arg(every, ("month", "week", "day", "quarter"))
+    fn = "tactical_target_volatility"
+    every = _e5_choice(every, ("month", "week", "day", "quarter"), fn, "every")
+    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, ppy)   # seit 1.6.4 (K42 E5)
+    target = chk_num1(target, fn, "target", lo=0, lo_open=True)
+    max_exposure = chk_num1(max_exposure, fn, "max_exposure", lo=0)
     if max_exposure > 1:
         raise ValueError("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über "
                          "Hebelprodukte abbilden).")
@@ -946,6 +1016,14 @@ def _quantile7(x, p):
     from ._r import stats as _st
     q = _st.quantile(np.asarray(x, dtype=np.float64), p, names=False, type=7)
     return float(np.asarray(q, dtype=np.float64).ravel()[0])
+
+
+def _quantile7v(x, p):
+    """Quantile Typ 7 für mehrere Wahrscheinlichkeiten in einem Aufruf (eine Teilsortierung); Achtung: bei Daten mit
+    +0 und -0 kann das Vorzeichen einer Null von Einzelaufrufen abweichen."""
+    from ._r import stats as _st
+    q = _st.quantile(np.asarray(x, dtype=np.float64), p, names=False, type=7)
+    return [float(v) for v in np.asarray(q, dtype=np.float64).ravel()]
 
 
 def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, lower=0.2, target=None, window=63,
@@ -978,6 +1056,7 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
             ``min_exposure`` höchstens ``base``, ``max_exposure`` höchstens 1).
         min_history: Mindesthistorie der Volatilitätsschätzung in Jahren (Standard 3), bevor gesteuert wird. Ist
             sie länger als die vorhandene Historie, wird nie gesteuert (mit Warnung).
+            Seit 1.6.4 höchstens 100 Jahre.
         scaling: ``"inverse"`` (Standard): Anteil ``base * target / vol``; ``"fixed"``: feste Anteile
             ``high_exposure`` und ``low_exposure``.
         high_exposure, low_exposure: Feste Risikoanteile (Anteile) für ``scaling = "fixed"`` in hohen bzw.
@@ -1025,8 +1104,23 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
         cv = simlev.tactical_conditional_volatility(d, {"aktien": 1}, "geld", base=0.8)
         print(cv)
     """
-    every = _match_arg(every, ("month", "week", "day", "quarter"))
-    scaling = _match_arg(scaling, ("inverse", "fixed"))
+    fn = "tactical_conditional_volatility"
+    every = _e5_choice(every, ("month", "week", "day", "quarter"), fn, "every")
+    scaling = _e5_choice(scaling, ("inverse", "fixed"), fn, "scaling")
+    # seit 1.6.4 (K42 E5): einzelne endliche Zahlen vor den Bereichsprüfungen (B-012: NA lief in Python still)
+    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, ppy)
+    base = chk_num1(base, fn, "base")
+    upper = chk_num1(upper, fn, "upper")
+    min_exposure = chk_num1(min_exposure, fn, "min_exposure")
+    max_exposure = chk_num1(max_exposure, fn, "max_exposure")
+    lower = chk_num1(lower, fn, "lower", null_ok=True)
+    target = chk_num1(target, fn, "target", null_ok=True)
+    high_exposure = chk_num1(high_exposure, fn, "high_exposure", null_ok=True)
+    low_exposure = chk_num1(low_exposure, fn, "low_exposure", null_ok=True)
+    if target is not None:
+        chk_num1(target, fn, "target", lo=0, lo_open=True)
+    min_history = chk_num1(min_history, fn, "min_history", lo=0)
+    chk_max(min_history, 100, fn, "min_history")             # Entscheidung 46
     if max_exposure > 1:
         raise ValueError("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über "
                          "Hebelprodukte abbilden).")
@@ -1062,12 +1156,19 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
     cs = r_cumsum(np.where(fin, vm, 0.0)) if n else np.zeros(0)
     cn = np.cumsum(fin.astype(np.int64))
     th = np.full((len(grid), 3), _NA)
+    # seit 1.6.4 wie R/Julia seit 1.6.3 (B-081): die bisherigen Werte als Anfang von ok (aufsteigend) und beide
+    # Quantile in einem Aufruf (dieselben Ordnungsstatistiken; vol_move enthält kein -0, also dieselben Bits)
+    kg_ok = np.searchsorted(ok, grid, side="right")
     for gi, g in enumerate(grid):
         if not len(ok) or (d[g - 1] - first_ok) / 365.25 < min_history:
             continue
-        v = vm[ok[ok <= g] - 1]
-        th[gi, 0] = _NA if lower is None else _quantile7(v, lower)
-        th[gi, 1] = _quantile7(v, upper)
+        v = vm[ok[:kg_ok[gi]] - 1]
+        if lower is None:
+            th[gi, 1] = _quantile7(v, upper)
+        else:
+            q = _quantile7v(v, [lower, upper])
+            th[gi, 0] = q[0]
+            th[gi, 1] = q[1]
         th[gi, 2] = cs[g - 1] / cn[g - 1] if target is None else target / 100
     thresholds = pd.DataFrame({"date": _dates(d[grid - 1]), "lower": th[:, 0], "upper": th[:, 1],
                                "target": th[:, 2]})
@@ -1135,6 +1236,7 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
             Summe 1 normiert.
         start, end: Beginn und Ende des Uebergangs (Date oder ``"JJJJ-MM-TT"``; Standard ``None`` = erstes bzw.
             letztes Datum).
+            Seit 1.6.4 keine Zahl.
         every: Rhythmus der Stufen: ``"year"`` (Standard), ``"quarter"`` oder ``"month"``.
         **kwargs: nur ``from`` (``**{"from": …}``) als Schreibweise für ``from_`` (``from`` ist in Python ein
             Schlüsselwort); andere Namen sind ein Fehler.
@@ -1153,15 +1255,28 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
         from_ = kwargs.pop("from")
     if kwargs:
         raise TypeError("tactical_glidepath: unbekannte Argumente %s" % ", ".join(kwargs))
-    every = _match_arg(every, ("year", "quarter", "month"))
-    src = _col(data, "date") if isinstance(data, pd.DataFrame) else data
-    d = _days(_to_date(src, "tactical_glidepath: Datum"))
+    fn = "tactical_glidepath"
+    every = _e5_choice(every, ("year", "quarter", "month"), fn, "every")
+    # seit 1.6.4 (K42 E5): Datum ohne NA und aufsteigend, Gewichte benannt endlich >= 0, start/end Datum
+    if isinstance(data, pd.DataFrame):
+        d = _days(_e5_data_dates(data, fn, "tactical_glidepath: Datum"))
+    else:
+        chk_nofactor(data, fn, "data")
+        if data is None or (not isinstance(data, (str,)) and np.ndim(data) > 0 and len(data) == 0):
+            chk_stop("zeilen_keine", fn, "data")
+        d = _days(_to_date(data, "tactical_glidepath: Datum"))
+        if np.isnan(d).any() or (d.size > 1 and (np.diff(d) < 0).any()):
+            chk_stop("e5.datum_vektor", fn, "data")
     # R verlangt from und to (kein Standardwert); der Platzhalter steht nur, weil from_ als
     # Schlüsselwort-Ersatz einen Standardwert braucht. Meldung wie R bei fehlendem Argument.
     if from_ is _MISSING:
         raise ValueError('argument "from" is missing, with no default')
     if to is _MISSING:
         raise ValueError('argument "to" is missing, with no default')
+    _e5_weights(from_, "tactical_glidepath", "from")
+    _e5_weights(to, "tactical_glidepath", "to")
+    start = chk_date1(start, "tactical_glidepath", "start", null_ok=True)
+    end = chk_date1(end, "tactical_glidepath", "end", null_ok=True)
     fn, fv = _named(from_)
     tn, tv = _named(to)
     a = _unique((fn or []) + (tn or []))
@@ -1173,9 +1288,8 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
         t[a.index(k)] = x
     s = _days(_to_date(_dates([d[0]]) if start is None else start, "start"))[0]
     e = _days(_to_date(_dates([d[-1]]) if end is None else end, "end"))[0]
-    if e < s:
-        raise ValueError("tactical_glidepath: end (%s) liegt vor start (%s); für den umgekehrten Weg from und to tauschen."
-                         % (_datefmt1(e), _datefmt1(s)))
+    if e < s:   # seit 1.6.4 ohne die Daten (Entscheidung 8)
+        raise ValueError("tactical_glidepath: end liegt vor start; für den umgekehrten Weg from und to tauschen.")
     pl = _period_last(d, every)
     rows = np.array(_unique([1] + [int(r) for r in pl]), dtype=np.int64)
     if e > s:
@@ -1225,10 +1339,14 @@ def tactical_blend(*args, shares=None, **kwargs):
         raise ValueError("tactical_blend: ... muss aus SimLevWeights bestehen.")
     if shares is None:
         shares = np.repeat(1 / len(ws), len(ws))
-    sh = np.atleast_1d(np.asarray(shares, dtype=np.float64))
-    if len(sh) != len(ws) or np.isnan(sh).any() or (sh < 0).any() or _ldsum(sh) <= 0:
+    sv = list(np.atleast_1d(np.asarray(shares.to_numpy() if isinstance(shares, pd.Series) else shares, dtype=object)).ravel())
+    num = not chk_is_factor(shares) and all(isinstance(v, (int, float, np.integer, np.floating)) and
+                                           not isinstance(v, (bool, np.bool_)) for v in sv)
+    sh = np.asarray(sv, dtype=np.float64) if num else np.zeros(0)
+    if not num or len(sh) != len(ws) or not np.isfinite(sh).all() or (sh < 0).any() or _ldsum(sh) <= 0:
+        # seit 1.6.4 ohne Eingabewert, endlich (Entscheidung 8)
         raise ValueError("tactical_blend: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. "
-                         "c(0.7, 0.3)); erhalten: %s." % (len(ws), ", ".join(_fmt1(sh))))
+                         "c(0.7, 0.3))." % len(ws))
     d = _days(np.asarray(ws[0]["date"]))
     for w in ws:
         dw = _days(np.asarray(w["date"]))
@@ -1306,12 +1424,22 @@ def plot_SimLevWeights(x, width=900, height=420, main="Zielgewichte"):  # noqa: 
            "<text x=\"%s\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">%s</text>"
            % (_jl_str(L + pw / 2), _esc(main))]
     cum = np.zeros(len(t))
+    # seit 1.6.4 (B-082, Entscheidung 93) die Koordinatentexte zwischengespeichert: x einmal je Tag, y einmal je Höhe
+    # (gleicher Text: dieselbe Rechnung; +0 und -0 ergeben dieselbe Höhe)
+    xs = [_alloc_c(px(t[i])) for i in range(len(t))]
+    yc = {}
+
+    def ys(v):
+        r = yc.get(v)
+        if r is None:
+            r = yc[v] = _alloc_c(py(v))
+        return r
     for j in range(len(cols)):
         lo = cum.copy()
         w = W[:, j]
         cum = cum + np.where(np.isfinite(w), w, 0.0)
-        up = " ".join("%s,%s" % (_alloc_c(px(t[i])), _alloc_c(py(cum[i]))) for i in range(len(t)))
-        dn = " ".join("%s,%s" % (_alloc_c(px(t[i])), _alloc_c(py(lo[i]))) for i in reversed(range(len(t))))
+        up = " ".join("%s,%s" % (xs[i], ys(cum[i])) for i in range(len(t)))
+        dn = " ".join("%s,%s" % (xs[i], ys(lo[i])) for i in reversed(range(len(t))))
         out.append("<polygon points=\"%s %s\" fill=\"%s\" stroke=\"none\"/>" % (up, dn, cl[j]))
     for v in (0.0, 0.25, 0.5, 0.75, 1.0):
         out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"end\" font-size=\"11\">%s</text>"
@@ -1370,6 +1498,7 @@ def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter
             ``"relative"`` (Prozent des Zielgewichts).
         lag: Verzögerung in Zeilen von ``data`` (ganze Zahl >= 0, Standard 1); mit Attribut ``filled`` in Zeilen
             mit echten Kursen.
+            Seit 1.6.4 ohne Abschneiden (1.5 und Text sind ein Fehler).
         asset_args: Liste von Argumenten für ``asset_config()`` (über ``strategy_from_weights()``), z. B.
             ``{"spread": 0.1, "partial_exemption": {"aktien": 30, "geld": 0}}``. Ein unbenannter einzelner Wert
             gilt für alle Anlagen; benannte Vektoren werden je Anlage zugeordnet (auch mit einem Element, siehe
@@ -1427,10 +1556,15 @@ def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter
                                          asset_args={"partial_exemption": {"aktien": 30, "geld": 0}})
         print(res["tactical"]["switches"])
     """
-    rebalance = _match_arg(rebalance, ("switch", "month", "quarter", "year"))
-    tolerance_type = _match_arg(tolerance_type, ("absolute", "relative"))
+    fn = "tactical_simulation"
+    rebalance = _e5_choice(rebalance, ("switch", "month", "quarter", "year"), fn, "rebalance")
+    tolerance_type = _e5_choice(tolerance_type, ("absolute", "relative"), fn, "tolerance_type")
+    _e5_data_dates(data, fn, "data$date")                 # seit 1.6.4 (K42 E5)
     if not _is_weights(weights):
         raise ValueError("weights muss ein SimLevWeights sein.")
+    lag = chk_int1(lag, fn, "lag", lo=0)                  # seit 1.6.4 ohne Abschneiden (Entscheidung 19)
+    if asset_args is not None and not isinstance(asset_args, Mapping):
+        chk_stop("liste", fn, "asset_args")
     sim_args = dict(kwargs)
     asset_args = {} if asset_args is None else dict(asset_args)
     bad = [k for k in sim_args if k in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh")
@@ -1454,12 +1588,7 @@ def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter
     W = np.where((k >= 0)[:, None], Wall[np.maximum(k, 0), :], _NA) if len(d) else np.zeros((0, len(assets)))
     for j in range(W.shape[1]):
         W[:, j] = _fill_na(W[:, j], "locf", keep_leading=False)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        lv = _as_int1(lag)
-    if len(lv) != 1 or lv[0] is None or lv[0] < 0:
-        raise ValueError("lag muss eine ganze Zahl >= 0 sein.")
-    lag = lv[0]
+    lag = int(lag)
     n = W.shape[0]
     if lag > 0:
         fl = _filled_attr(data)

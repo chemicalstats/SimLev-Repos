@@ -5,8 +5,9 @@
 # (etwa die Eingangsfunktion für eine NamedTuple mit anderen Spaltennamen oder Pfade, die die Arbeitslast
 # nicht berührt) kosten weiterhin Übersetzungszeit.
 #
-# Daten wie beim Aufrufer: NamedTuple mit Spalte date (Vector{Date}) und Kursen (Vector{Float64}), dazu
-# RFrame, RList, NamedMat und Matrizen. rechnen Tagesengine, Vorbereitung und Auswertung von
+# Daten wie beim Aufrufer: RFrame mit Spalte date (Vector{Date}) und Kursen (Vector{Float64}) (seit 1.6.4, K43
+# T1-N7; bis dahin NamedTuple, das die Hauptfunktionen seit Entscheidung 6 ablehnen), dazu RList, NamedMat und
+# Matrizen. rechnen Tagesengine, Vorbereitung und Auswertung von
 # simulation() im C++-Kern; die Arbeitslast der Engine deckt die Kernhüllen (_sim_engine_run!, die Texte der
 # Ereignisse in _sim_engine_signal mit und ohne details, _sim_evaluate, calculate_dates_flags, xirr_rate) und
 # die Ausgabe ab, die früheren Wege der Julia-Tagesschleife nicht mehr (details nur noch in zwei Läufen statt
@@ -22,18 +23,29 @@
 # unberührt (er wird ohnehin beim Laden neu gesetzt, SLib.__init__); Zwischenspeicher und
 # Bibliotheks-Handles (ICU) werden geleert, damit keine Zeiger aus der Vorkompilierung in den Cache geraten.
 # Jeder Baustein läuft in `try`; die gesamte Arbeitslast steht zusätzlich in `try … catch`: Ein Fehler
-# (z. B. fehlende ICU, andere libm) darf das Laden des Pakets nie verhindern.
+# (z. B. fehlende ICU, andere libm) darf das Laden des Pakets nie verhindern. Damit verschluckte Fehler nicht
+# unbemerkt bleiben (bis 1.6.3 brachen so 13 von 21 Schritten ab): `_precompile_check()` führt die Arbeitslast im
+# laufenden Prozess aus und gibt die gescheiterten Schritte zurück (Werkzeug tests/werkzeuge/precompile_check.jl).
 # Abschalten:
 # SIMLEV_SKIP_PRECOMPILE=1 (alles), SIMLEV_SKIP_PRECOMPILE_EXT=1 (Erweiterungen).
 
 include("precompile_statements.jl")   # ausdrückliche Übersetzungsanweisungen (aus Traces)
 
+# Fehler der Arbeitslast: `nothing` (verschlucken, beim Vorkompilieren) oder ein Vektor `Bezeichnung => Meldung`
+# (`_precompile_check`, seit 1.6.4)
+const _PRECOMPILE_ERRORS = Ref{Any}(nothing)
+function _precompile_fail(label, e)
+    v = _PRECOMPILE_ERRORS[]
+    v === nothing || push!(v, string(label) => sprint(showerror, e))
+    return nothing
+end
+
 "Arbeitslast für die Erweiterungsmodule (je Modul die Hauptfunktionen)."
 function _precompile_ext()
-    step(f, what) = try
+    step(f, lbl) = try   # zweites Argument: Bezeichnung (seit 1.6.4 benannt, P14-R11; Fehler für _precompile_check)
         f()
-    catch
-        nothing
+    catch e
+        _precompile_fail(lbl, e)
     end
     io = IOBuffer()
     sh(x) = (show(io, MIME"text/plain"(), x); x)
@@ -47,7 +59,7 @@ function _precompile_ext()
         D = 100 .* r_cumprod(1 .+ rd)
         d = RFrame("date" => dates, "A" => A, "B" => B, "C" => C, "infl" => [2.0 + sin(i / 90) for i in 1:n],
                    "zins" => [1.0 + (i > 400) for i in 1:n])
-        nt = (date = dates, A = A, B = B, C = C, D = D)   # Kurse wie beim Aufrufer
+        nt = RFrame("date" => dates, "A" => A, "B" => B, "C" => C, "D" => D)   # Kurse wie beim Aufrufer (seit 1.6.4 RFrame)
         A3 = ["A", "B", "C"]
         st = create_strategy("A" => asset_config("etf", "bnh", 0.6), "B" => asset_config("etf", "bnh", 0.4))
         st1 = create_strategy("A" => asset_config("etf", "bnh"))
@@ -123,7 +135,7 @@ function _precompile_ext()
         end
         # Raster, Planung und Sensitivität über simulation()
         step("param_search") do
-            nt2 = (date = dates, A = A, B = B)
+            nt2 = RFrame("date" => dates, "A" => A, "B" => B)
             sim_args = RList("rebalance" => rebalance_plan(; span = 1, unit = "month"))
             sh(ParamSearch.param_search(nt2; space = ParamSearch.param_space("rebalance.thresh" => [2.0, 5.0]),
                                         strategy = stn, sim_args = sim_args, cores = 1))
@@ -132,7 +144,7 @@ function _precompile_ext()
                                             sim_args = RList("rebalance" => rebalance_plan(; span = 1))))
         end
         step("data_prep") do
-            sh(DataPrep.series_align(; a = (date = dates[1:2:end], A = A[1:2:end]), b = (date = dates, B = B)))
+            sh(DataPrep.series_align(; a = RFrame("date" => dates[1:2:end], "A" => A[1:2:end]), b = RFrame("date" => dates, "B" => B)))
         end
         step("tactical") do
             sh(Tactical.tactical_simulation(nt, Tactical.tactical_rotation(nt, A3; top = 1, absolute = false)))
@@ -149,7 +161,7 @@ function _precompile_ext()
             sh(AnalysisTests.signal_analysis(nt, "C", "A"))
         end
         step("backcast") do
-            bc = (date = dates, p = 2 .* A .* (1 .- 1e-5 .* (1:n)), i = A)
+            bc = RFrame("date" => dates, "p" => 2 .* A .* (1 .- 1e-5 .* (1:n)), "i" => A)
             sh(Backcast.backcast(Backcast.backcast_fit(bc, "p", "i")))
         end
         # Deep analysis
@@ -182,7 +194,7 @@ function _precompile_more(d, nt, dates, A3, st, stn, ra, rb, rc, rd, sh, step)
         pl(ra2)
         sa = AnalysisTests.signal_analysis(nt, "C", "A"; horizon = 21, bins = 5)
         pl(sa)
-        ps = ParamSearch.param_search((date = dates, A = nt.A, B = nt.B);
+        ps = ParamSearch.param_search(RFrame("date" => dates, "A" => nt["A"], "B" => nt["B"]);
                                       space = ParamSearch.param_space("rebalance.thresh" => [2.0, 5.0, 10.0]),
                                       strategy = stn, sim_args = RList("rebalance" => rebalance_plan(; span = 1, unit = "month")),
                                       keep_returns = "day", cores = 1)
@@ -214,7 +226,7 @@ function _precompile_more(d, nt, dates, A3, st, stn, ra, rb, rc, rd, sh, step)
         Rm = hcat(ra, rb, rc, rd)
         sh(AnalysisTests.overfit_reality_check(Rm[1:500, :]; B = 20, frequency = "week", seed = 1))
         sh(Overfitting.sharpe_deflated(Rm[1:500, :]))
-        bc = (date = dates, p = 2 .* nt.A .* (1 .- 1e-5 .* (1:n)), i = nt.A)
+        bc = RFrame("date" => dates, "p" => 2 .* nt["A"] .* (1 .- 1e-5 .* (1:n)), "i" => nt["A"])
         sh(Backcast.backcast_fit(bc, "p", "i"; method = "grid"))
         sh(Optimize.portfolio_risk_contributions(nt, ["A" => 0.5, "B" => 0.3, "C" => 0.2]; cov = "ledoit_wolf"))
         sh(Optimize.portfolio_rolling(nt, A3; window = 1, every = "month", cov = "ledoit_wolf"))
@@ -244,8 +256,9 @@ function _precompile_engine()
     dates = collect(Date(2019, 1, 1):Day(1):Date(2019, 1, 1) + Day(n - 1))
     px(a, b) = [100 * (1 + a * i / n + 0.05 * sin(b * i)) for i in 1:n]
     sb = [i % 37 < 5 for i in 1:n]; ss = [i % 37 > 25 for i in 1:n]
-    data = (date = dates, A = px(0.5, 0.05), B = px(0.1, 0.11), C = px(3.0, 0.07),
-            b = sb, s = ss, ev = [i % 50 == 0 for i in 1:n], br = fill(2.55, n), w1 = fill(0.6, n))
+    # seit 1.6.4 RFrame (simulation() nimmt nur Tabellen; bis 1.6.3 NamedTuple)
+    data = RFrame("date" => dates, "A" => px(0.5, 0.05), "B" => px(0.1, 0.11), "C" => px(3.0, 0.07),
+                  "b" => sb, "s" => ss, "ev" => [i % 50 == 0 for i in 1:n], "br" => fill(2.55, n), "w1" => fill(0.6, n))
     s2 = create_strategy(A = asset_config("etf", "bnh", 0.6, 0.1, 30), B = asset_config("etf", "bnh", 0.4, 0.1, 0))
     s3 = create_strategy(A = asset_config("certificate", "signal", 0.4, 0.2, 0; signal_buy = "b", signal_sell = "s"),
                          B = asset_config("etc", "bnh", 0.3, 0.1, 0; deliverable = true),
@@ -288,15 +301,15 @@ function _precompile_engine()
     sprint(show, MIME"text/plain"(), wrapper_nav(data, w))
     simulation(data, create_strategy(Z = asset_config("certificate"; share = 0.7, wrapper = w),
                                      C = asset_config("etf", "bnh", 0.3)); tax = tax_profile(), io = io)
-    gaps = (date = dates[1:2:end], A = px(0.5, 0.05)[1:2:end])
+    gaps = RFrame("date" => dates[1:2:end], "A" => px(0.5, 0.05)[1:2:end])
     simulation(gaps, create_strategy(A = asset_config("etf", "bnh", 1.0, 0.1, 30)); io = io)
-    rebalance_trigger((date = dates, target_leverage = px(0.1, 0.2) ./ 50), "abs_leverage")
+    rebalance_trigger(RFrame("date" => dates, "target_leverage" => px(0.1, 0.2) ./ 50), "abs_leverage")   # seit 1.6.4 RFrame
     return nothing
 end
 
 "Zustand nach der Arbeitslast zurücksetzen (Zufall, Zwischenspeicher, Bibliotheks-Handles)."
 function _precompile_reset()
-    for f in (() -> empty!(RExpr._CACHE),
+    for f in (() -> (empty!(RExpr._CACHE); empty!(RExpr._CACHE_ORDER)),
               () -> RStats.collate_reset(),
               () -> (_TT_CACHE[] = nothing),   # Tarif (tax_tariff, seit 1.6.3)
               () -> (RParallel._PRECOMPILE_THREADED[] = false))
@@ -306,6 +319,30 @@ function _precompile_reset()
         end
     end
     return nothing
+end
+
+"""Arbeitslast im laufenden Prozess mit sichtbaren Fehlern (seit 1.6.4, K43 T1-N7): Engine und Erweiterungen wie
+beim Vorkompilieren, danach `_precompile_reset()`. Rückgabe: Vektor `Bezeichnung => Meldung` der gescheiterten Schritte
+(leer: alle liefen). Werkzeug: `julia --project=julia tests/werkzeuge/precompile_check.jl`."""
+function _precompile_check()
+    errs = Pair{String,String}[]
+    _PRECOMPILE_ERRORS[] = errs
+    try
+        try
+            _precompile_engine()
+        catch e
+            _precompile_fail("engine", e)
+        end
+        try
+            _precompile_ext()
+        catch e
+            _precompile_fail("ext", e)
+        end
+    finally
+        _PRECOMPILE_ERRORS[] = nothing
+        _precompile_reset()
+    end
+    return errs
 end
 
 if ccall(:jl_generating_output, Cint, ()) == 1 && !REnv.skip_precompile()

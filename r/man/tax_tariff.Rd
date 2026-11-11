@@ -9,7 +9,9 @@ tax_tariff(file = NULL)
 }
 \arguments{
 \item{file}{Zeichenkette oder NULL. Pfad der Tarifdatei; NULL = mitgelieferte Datei
-\code{system.file("extdata", "steuertarif.csv", package = "SimLev")}.}
+\code{system.file("extdata", "steuertarif.csv", package = "SimLev")}.
+Zahlen der Datei seit 1.6.4 auch in R nur mit ASCII-Ziffern und -Leerzeichen, unabhaengig von der
+Spracheinstellung (z. B. ein geschuetztes Leerzeichen ist ein Fehler).}
 }
 \value{
 Objekt der Klasse "SimLevTaxTariff" (Liste) mit \code{zones} (data.frame
@@ -44,7 +46,9 @@ bei linearen Zonen (\code{a = 0, bezug = 0, teiler = 1}) ist \code{b} der Grenzs
 als Anteil (\code{0.42} fuer 42 \%, nicht 42); die Soli-Saetze dagegen in Prozent
 (\code{5.5} fuer 5,5 \%).
 
-Geprueft wird: Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV,
+Geprueft wird (seit 1.6.4 auch: kein Ordner, Kodierung UTF-8, ein UTF-8-BOM am Anfang wird
+uebergangen, geschlossene Anfuehrungszeichen, keine Pflichtspalte doppelt, Zahlen nur mit
+ASCII-Ziffern): Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV,
 bzw. hat eine Zeile mehr Felder als die Kopfzeile, z. B. Dezimalkomma: Fehler mit Hinweis),
 Pflichtspalten vorhanden, \code{art} nur "zone" oder "soli", alle benoetigten Werte
 numerisch und endlich, \code{teiler > 0}, Zonen streng aufsteigend mit erster Zone ab 0,
@@ -80,5 +84,5 @@ tax_tariff(f)
 
 }
 \seealso{
-\code{\link{simulation}} (Argumente taxable_income, tax_tariff)
+\code{\link{income_tariff}} (Argument tariff), \code{\link{tax_profile}} (Argument income)
 }

@@ -35,7 +35,7 @@ macro _rlist_wrapper(T, classes)
         Base.copy(x::$T) = $T(copy(getfield(x, :data)))
         SimLev.r_class(x::$T) = String[$(classes)...]
         function Base.show(io::IO, ::MIME"text/plain", x::$T)
-            f = _dispatch(_PRINTERS, x, "print")
+            f = _dispatch(_PRINTERS, x)
             f === nothing ? print(io, x) : f(io, x)
         end
         Base.display(d::TextDisplay, M::MIME"text/plain", x::$T) = _display_text(d, M, x)
@@ -69,33 +69,6 @@ end
 
 _is_num1(x) = x isa Real && !(x isa Bool) && !isnan(Float64(x))
 
-"Klassenname wie `class(x)[1]` in R (für Meldungen)."
-function _r_class1(@nospecialize(x))
-    x === nothing && return "NULL"
-    cl = r_class(x)
-    isempty(cl) || return cl[1]
-    x isa Bool && return "logical"
-    x isa Integer && return "integer"
-    x isa Real && return "numeric"
-    x isa AbstractString && return "character"
-    x isa Date && return "Date"
-    x isa DateTime && return "POSIXct"
-    x isa Function && return "function"
-    x isa RFrame && return "data.frame"
-    x isa AbstractMatrix && return "matrix"
-    if x isa AbstractVector
-        T = Base.nonmissingtype(eltype(x))
-        T <: Bool && return "logical"
-        T <: Integer && return "integer"
-        T <: Real && return "numeric"
-        T <: AbstractString && return "character"
-        T <: Date && return "Date"
-        return "list"
-    end
-    (x isa AbstractDict || x isa NamedTuple || x isa Tuple) && return "list"
-    return string(nameof(typeof(x)))
-end
-
 "Einheitliche Sicht auf benannte Listen (RList, Dict, NamedTuple, Pair-Vektor, Hüllen)."
 _is_mapping(x) = x isa AbstractDict || x isa NamedTuple || x isa AbstractVector{<:Pair}
 _kvpairs(x::NamedTuple) = [String(k) => v for (k, v) in pairs(x)]
@@ -103,6 +76,15 @@ _kvpairs(x::AbstractVector{<:Pair}) = [String(string(p.first)) => p.second for p
 _kvpairs(x::AbstractDict) = [String(string(k)) => v for (k, v) in x]
 
 _to_date_or_nothing(x) = (z = _as_date(x); z === nothing ? nothing : from_days(z))
+
+"Datum, Zeitpunkt oder Text, auch als Vektor der Länge 1 (R: `Date`, `POSIXt` oder `character`; seit 1.6.4)."
+function _is_date_like(@nospecialize(x))
+    if x isa Union{AbstractVector,Tuple}
+        length(x) == 1 || return false
+        x = first(x)
+    end
+    return x isa Union{Date,DateTime,AbstractString}
+end
 
 # ── Fonds-Wrapper: Hilfen der Strategie (R: wrapper.R) ─────────
 
@@ -148,13 +130,6 @@ _wrapper_assets_text(@nospecialize(strategy)) =
 # Meldung von asset_config() für wrapper mit trading = "signal" (strategy_from_weights() erkennt sie und nennt das Asset)
 const _AC_MSG_WRAPPER_SIGNAL = "asset_config: mit wrapper ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie)."
 
-function _cls_all(@nospecialize(x))
-    c = r_class(x)
-    isempty(c) || return join(c, "/")
-    x isa Integer && !(x isa Bool) && return "numeric"
-    return _r_class1(x)
-end
-
 """
     asset_config(asset_class = "etf", trading = "bnh", share = 1.0,
                  spread = 0.0, partial_exemption = 0.0, deliverable = false,
@@ -187,8 +162,8 @@ eingesetzt.
 - `deliverable`: Logisch. Physisch lieferbar (relevant für ETC/ETN: `true` → `"private_sale"`-Regime wie
   Xetra-Gold)? Standard: `false`.
 - `start`: Date, Character (`"JJJJ-MM-TT"`) oder `nothing`. Frühestmögliches Kaufdatum für dieses Asset (für
-  gestaffelte Asset-Starts); wird als `Date` gespeichert, ein ungültiges Datum führt zu einem Fehler. In
-  `simulation` erhält das Asset ab diesem Tag sein volles Zielgewicht `share`: Am Starttag wird immer auf die
+  gestaffelte Asset-Starts); wird als `Date` gespeichert, ein ungültiges Datum führt zu einem Fehler, ebenso
+  jede andere Angabe (z. B. eine Zahl als Tage seit 1970). In `simulation` erhält das Asset ab diesem Tag sein volles Zielgewicht `share`: Am Starttag wird immer auf die
   Zielgewichte umgeschichtet (Verkauf der übrigen Assets, Erstkauf des neuen Assets; mit Steuern, Spreads und
   Gebühren wie bei jedem Rebalancing), auch ohne `balance_mode`; ein zusätzlicher Handelsblock läuft an diesem
   Tag nicht. Mit `balance_mode = true` gilt danach der normale Rhythmus, ohne `balance_mode` wird danach nicht
@@ -196,10 +171,11 @@ eingesetzt.
 - `tax_regime`: Character oder `nothing`. Steuerregime: `"investment_fund"` (§§ 18–20 InvStG, ETFs),
   `"capital_gains"` (§ 20 EStG, keine VP), `"private_sale"` (§ 23 EStG, 1-Jahres-Frist). `nothing` = wird
   automatisch aus `asset_class` und `deliverable` abgeleitet. Andere Werte führen zu einem Fehler.
-- `signal_buy`: Character oder `nothing`. Name der Spalte in `data` mit dem Kaufsignal (logisch, `true` =
-  kaufen). Bei `trading = "signal"` Pflicht (sonst Fehler).
-- `signal_sell`: Character oder `nothing`. Name der Spalte in `data` mit dem Verkaufssignal (logisch, `true` =
-  verkaufen). Bei `trading = "signal"` Pflicht (sonst Fehler).
+- `signal_buy`: Character oder `nothing`. Name der Spalte in `data` mit dem Kaufsignal (`true`/`false` oder
+  `0`/`1`, NA erlaubt; `true` bzw. `1` = kaufen; andere Zahlen führen in `simulation` zu einem Fehler). Bei
+  `trading = "signal"` Pflicht (sonst Fehler).
+- `signal_sell`: Character oder `nothing`. Name der Spalte in `data` mit dem Verkaufssignal (`true`/`false`
+  oder `0`/`1`, NA erlaubt; `true` bzw. `1` = verkaufen). Bei `trading = "signal"` Pflicht (sonst Fehler).
 - `wrapper`: `nothing` oder ein Objekt aus `wrapper_config`: Das Asset ist dann ein Fonds-Wrapper (Zertifikat
   oder Fonds über eine innere Strategie). Sein Name ist **keine** Kursspalte; `simulation` rechnet die Kurse
   als Anteilswert (`wrapper_nav`) aus den inneren Spalten. Eine Spalte gleichen Namens in `data` ist ein
@@ -252,14 +228,15 @@ end
 function _asset_config(vals::Dict{String,Any})
     asset_class = _match_arg(get(vals, "asset_class", ASSET_CLASSES), ASSET_CLASSES)
     trading = _match_arg(get(vals, "trading", ACTION_TYPES), ACTION_TYPES)
-    share = get(vals, "share", 1.0)
-    spread = get(vals, "spread", 0.0)
-    partial_exemption = get(vals, "partial_exemption", 0.0)
-    deliverable = get(vals, "deliverable", false)
-    start = get(vals, "start", nothing)
-    tax_regime = get(vals, "tax_regime", nothing)
-    signal_buy = get(vals, "signal_buy", nothing)
-    signal_sell = get(vals, "signal_sell", nothing)
+    # seit 1.6.4 Vektoren der Länge 1 wie Einzelwerte (Entscheidung 4; R: c(0.5) ist 0.5)
+    share = chk_scalar(get(vals, "share", 1.0))
+    spread = chk_scalar(get(vals, "spread", 0.0))
+    partial_exemption = chk_scalar(get(vals, "partial_exemption", 0.0))
+    deliverable = chk_scalar(get(vals, "deliverable", false))
+    start = chk_scalar(get(vals, "start", nothing))
+    tax_regime = chk_scalar(get(vals, "tax_regime", nothing))
+    signal_buy = chk_scalar(get(vals, "signal_buy", nothing))
+    signal_sell = chk_scalar(get(vals, "signal_sell", nothing))
     wrapper = get(vals, "wrapper", nothing)
     if asset_class == "etn_standard"
         @warn "asset_config: asset_class = \"etn_standard\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = FALSE verwenden."
@@ -269,39 +246,43 @@ function _asset_config(vals::Dict{String,Any})
         asset_class = "etn"; deliverable = true
     end
     for (x, arg) in ((share, "share"), (spread, "spread"), (partial_exemption, "partial_exemption"))
-        _is_num1(x) || error("asset_config: $arg muss eine einzelne Zahl sein, nicht $(r_deparse(x)).")
+        _is_num1(x) || error("asset_config: $arg muss eine einzelne Zahl sein.")   # seit 1.6.4 ohne Eingabewert
     end
-    if share <= 0 || share > 1
-        error("asset_config: share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %), nicht " *
-              r_format1(share) *
-              (share > 1 && share <= 100 ?
-               "; für $(r_format1(share)) % share = $(r_format1(share / 100)) angeben" : "") * ".")
-    end
-    spread < 0 && error("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %), nicht $(r_format1(spread)).")
+    # bei 1 < share <= 100 wertfreier Hinweis (Entscheidung 12; seit 1.6.4, K43 KE)
+    (share <= 0 || share > 1) && error("asset_config: share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %)" *
+                                       (1 < share <= 100 ? chk_msg("ke.prozent_teilen") : "") * ".")
+    spread < 0 && error("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %).")
+    # seit 1.6.4: Spread endlich (bis 1.6.3 still angenommen); seit K43 T1-B1 über die Umwandlung geprüft (big(10)^400)
+    isfinite(Float64(spread)) || chk_stop("zahl", "asset_config", "spread")
     (partial_exemption < 0 || partial_exemption > 100) &&
-        error("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %), nicht $(r_format1(partial_exemption)).")
+        error("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %).")
     if partial_exemption > 0 && partial_exemption < 1
         @warn "asset_config: partial_exemption = $(r_format1(partial_exemption)) wird als $(r_format1(partial_exemption)) % Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(partial_exemption * 100))."
     end
     if start !== nothing
-        st = (start isa Union{AbstractVector,Tuple}) ? (length(start) == 1 ? _to_date_or_nothing(first(start)) : nothing) :
-             _to_date_or_nothing(start)
-        st === nothing && error("asset_config: start = $(r_deparse(start)) ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+        # seit 1.6.4 nur Date, DateTime oder Text (bis 1.6.3 auch Zahlen als Tage seit 1970; Entscheidung 7)
+        st = _is_date_like(start) ? ((start isa Union{AbstractVector,Tuple}) ? _to_date_or_nothing(first(start)) :
+                                     _to_date_or_nothing(start)) : nothing
+        st === nothing && error("asset_config: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
         start = st
     end
     if trading == "signal" && (signal_buy === nothing || signal_sell === nothing)
         error("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
     end
     if wrapper !== nothing   # Fonds-Wrapper: keine Signale auf den Anteilswert
-        _is_wrapper(wrapper) || error("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht $(_cls_all(wrapper)).")
+        _is_wrapper(wrapper) || error("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein.")
         trading == "signal" && error(_AC_MSG_WRAPPER_SIGNAL)
     end
+    # seit 1.6.4: Signalspalten als einzelner Name, deliverable nur true/false (bis 1.6.3 ungeprüft)
+    chk_name1(signal_buy, "asset_config", "signal_buy"; null_ok = true)
+    chk_name1(signal_sell, "asset_config", "signal_sell"; null_ok = true)
+    chk_bool1(deliverable, "asset_config", "deliverable")
     if tax_regime === nothing
         tax_regime = asset_class == "etf" ? "investment_fund" :
                      asset_class in ("etn", "etc") ? (_isTRUE(deliverable) ? "private_sale" : "capital_gains") :
                      "capital_gains"
     elseif !(tax_regime isa AbstractString && tax_regime in VALID_REGIMES)
-        error("asset_config: tax_regime = $(r_deparse(tax_regime)) ist ungültig; erlaubt sind $(join(VALID_REGIMES, ", ")) (oder NULL: aus asset_class abgeleitet).")
+        error("asset_config: tax_regime ist ungültig; erlaubt sind $(join(VALID_REGIMES, ", ")) (oder NULL: aus asset_class abgeleitet).")
     end
     d = RList("asset_class" => asset_class, "trading" => trading, "share" => share,
               "spread" => spread, "partial_exemption" => partial_exemption, "deliverable" => deliverable,
@@ -313,6 +294,23 @@ function _asset_config(vals::Dict{String,Any})
 end
 
 _isTRUE(x) = x isa Bool && x
+
+"""Feldnamen eines Listen-Assets prüfen (seit 1.6.4, K43 T1-N1; Entscheidungen 8, 11, 21; R `.asset_list_fields`):
+unbenannte, unbekannte und doppelte Felder (Pair-Vektor) sind ein Fehler. Bis dahin gab `create_strategy()` R's
+Rohmeldung "unused argument (foo = 1)" mit Eingabewert, `simulation()` übersprang unbekannte Felder still, und von
+doppelten galt still das letzte."""
+function _asset_list_fields(a, nm, fn)
+    @nospecialize
+    ps = _kvpairs(a)
+    any(p -> isempty(p.first), ps) && chk_stop("ut1.asset_unbenannt", fn, nm)
+    for p in ps
+        p.first in _FIELDS || chk_stop("ut1.asset_feld", fn, p.first, nm)
+    end
+    for i in eachindex(ps)
+        any(q -> q.first == ps[i].first, view(ps, 1:i-1)) && chk_stop("ut1.asset_feld_doppelt", fn, ps[i].first, nm)
+    end
+    return nothing
+end
 
 "`do.call(asset_config, <Liste>)` (unbekannte Felder sind ein Fehler wie in R)."
 function _config_from_mapping(m)
@@ -377,7 +375,7 @@ Asset-Spalte und bei `trading = "signal"` die Signalspalten vorhanden sind. Für
 deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
 `strategy_update_asset` akzeptiert Felder als `name = wert`-Paare; nur Felder, die das Asset bereits hat,
-sowie `wrapper` werden übernommen (unbekannte mit Warnung ignoriert; `wrapper = nothing` entfernt einen
+sowie `wrapper` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; `wrapper = nothing` entfernt einen
 Wrapper). Das Asset wird danach mit `asset_config` neu geprüft; nicht angegebene Felder bleiben unverändert.
 Ändert sich `asset_class` oder `deliverable` und wird `tax_regime` nicht mit angegeben, wird ein bisher
 automatisch abgeleitetes `tax_regime` neu abgeleitet (z. B. `"certificate"` -> `"etf"`: `"investment_fund"`);
@@ -415,8 +413,7 @@ function create_strategy(args...; assets = nothing, kwargs...)
     end
     if assets !== nothing
         if !_is_mapping(assets)
-            error("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data), nicht " *
-                  (assets isa Union{AbstractVector,Tuple} ? "eine unbenannte Liste" : _r_class1(assets)) * ".")
+            error("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data).")   # seit 1.6.4 ohne Klasse
         end
         dots = Pair{String,Any}[p for p in _kvpairs(assets)]
     end
@@ -435,9 +432,10 @@ function create_strategy(args...; assets = nothing, kwargs...)
         elseif inherits(cfg, "asset_config") && cfg isa RList
             out[name] = AssetConfig(copy(cfg))
         elseif _is_mapping(cfg)
+            _asset_list_fields(cfg, name, "create_strategy")   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
             out[name] = _config_from_mapping(cfg)
         else
-            error("create_strategy: Asset '$name' muss ein asset_config()-Objekt oder eine Liste sein, nicht $(_r_class1(cfg)).")
+            error("create_strategy: Asset '$name' muss ein asset_config()-Objekt oder eine Liste sein.")
         end
     end
     return Strategy(out)
@@ -457,8 +455,9 @@ benannte Liste von `asset_config`-Konfigurationen, die an `simulation` übergebe
 # Argumente
 - `strategy`: Ein `"strategy"`-Objekt.
 - `data_pos`: `data` auch als zweites Positionsargument.
-- `data`: `data.frame` oder `nothing`. Falls angegeben, prüft `strategy_validate` ob alle Asset-Spalten und
-  Signal-Spalten in `data` vorhanden sind.
+- `data`: `data.frame` (`RFrame`) oder `nothing`; nur Tabellen, NamedTuple oder Dict vorher mit
+  `RFrame(pairs(x)...)`, einen Vektor von Paaren mit `RFrame(x...)` umwandeln. Falls angegeben, prüft
+  `strategy_validate` ob alle Asset-Spalten und Signal-Spalten in `data` vorhanden sind.
 
 # Rückgabe
 - `create_strategy`: Objekt der Klasse `"strategy"`.
@@ -481,7 +480,7 @@ Asset-Spalte und bei `trading = "signal"` die Signalspalten vorhanden sind. Für
 deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
 `strategy_update_asset` akzeptiert Felder als `name = wert`-Paare; nur Felder, die das Asset bereits hat,
-sowie `wrapper` werden übernommen (unbekannte mit Warnung ignoriert; `wrapper = nothing` entfernt einen
+sowie `wrapper` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; `wrapper = nothing` entfernt einen
 Wrapper). Das Asset wird danach mit `asset_config` neu geprüft; nicht angegebene Felder bleiben unverändert.
 Ändert sich `asset_class` oder `deliverable` und wird `tax_regime` nicht mit angegeben, wird ein bisher
 automatisch abgeleitetes `tax_regime` neu abgeleitet (z. B. `"certificate"` -> `"etf"`: `"investment_fund"`);
@@ -507,10 +506,11 @@ println(strategy_validate(st, d))
 """
 function strategy_validate(strategy, data_pos = nothing; data = data_pos)
     inherits(strategy, "strategy") ||
-        error("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+        error("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
     for (name, a) in strategy
-        inherits(a, "asset_config") || error("strategy_validate: Asset '$name' ist kein asset_config()-Objekt (Klasse $(_r_class1(a))).")
+        inherits(a, "asset_config") || error("strategy_validate: Asset '$name' ist kein asset_config()-Objekt.")
     end
+    chk_df(data, "strategy_validate", "data"; null_ok = true)   # seit 1.6.4 (bis 1.6.3: Liste/Matrix je Sprache anders)
     if data !== nothing
         cols = _colnames(data)
         # Fonds-Wrapper: der Asset-Name ist keine Kursspalte, geprüft werden die Spalten der inneren Strategie
@@ -536,7 +536,8 @@ end
 """
     strategy_add_asset(strategy, name::AbstractString, asset)
 
-Asset hinzufügen bzw. ersetzen (gibt eine neue Strategie zurück).
+Asset hinzufügen (gibt eine neue Strategie zurück); ein schon vorhandener Name ist ein Fehler (ändern mit
+`strategy_update_asset`).
 
 Funktionen zum Erstellen, Validieren und Bearbeiten von `"strategy"`-Objekten. Eine Strategie ist eine
 benannte Liste von `asset_config`-Konfigurationen, die an `simulation` übergeben wird.
@@ -567,7 +568,7 @@ Asset-Spalte und bei `trading = "signal"` die Signalspalten vorhanden sind. Für
 deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
 `strategy_update_asset` akzeptiert Felder als `name = wert`-Paare; nur Felder, die das Asset bereits hat,
-sowie `wrapper` werden übernommen (unbekannte mit Warnung ignoriert; `wrapper = nothing` entfernt einen
+sowie `wrapper` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; `wrapper = nothing` entfernt einen
 Wrapper). Das Asset wird danach mit `asset_config` neu geprüft; nicht angegebene Felder bleiben unverändert.
 Ändert sich `asset_class` oder `deliverable` und wird `tax_regime` nicht mit angegeben, wird ein bisher
 automatisch abgeleitetes `tax_regime` neu abgeleitet (z. B. `"certificate"` -> `"etf"`: `"investment_fund"`);
@@ -588,10 +589,14 @@ st = strategy_add_asset(st, "GOLD", asset_config("etc"; share = 0.1, deliverable
 println(collect(keys(st)))
 ```
 """
-function strategy_add_asset(strategy, name::AbstractString, asset)
+function strategy_add_asset(strategy, name, asset)
     inherits(strategy, "strategy") ||
-        error("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
-    inherits(asset, "asset_config") || error("strategy_add_asset: asset muss ein asset_config()-Objekt sein, nicht $(_r_class1(asset)).")
+        error("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    inherits(asset, "asset_config") || error("strategy_add_asset: asset muss ein asset_config()-Objekt sein.")
+    name = chk_name1(name, "strategy_add_asset", "name")   # seit 1.6.4 (bis 1.6.3 MethodError bei anderen Typen)
+    # seit 1.6.4 kein stilles Überschreiben (Entscheidung 5): Ändern geht über strategy_update_asset()
+    haskey(strategy, name) &&
+        error("strategy_add_asset: Ein Asset mit diesem Namen ist schon in der Strategie; zum Ändern strategy_update_asset() verwenden.")
     out = Strategy(RList(collect(strategy)...))
     out[String(name)] = asset
     return out
@@ -634,7 +639,7 @@ Asset-Spalte und bei `trading = "signal"` die Signalspalten vorhanden sind. Für
 deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
 `strategy_update_asset` akzeptiert Felder als `name = wert`-Paare; nur Felder, die das Asset bereits hat,
-sowie `wrapper` werden übernommen (unbekannte mit Warnung ignoriert; `wrapper = nothing` entfernt einen
+sowie `wrapper` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; `wrapper = nothing` entfernt einen
 Wrapper). Das Asset wird danach mit `asset_config` neu geprüft; nicht angegebene Felder bleiben unverändert.
 Ändert sich `asset_class` oder `deliverable` und wird `tax_regime` nicht mit angegeben, wird ein bisher
 automatisch abgeleitetes `tax_regime` neu abgeleitet (z. B. `"certificate"` -> `"etf"`: `"investment_fund"`);
@@ -655,12 +660,15 @@ st = strategy_update_asset(st, "MSCI"; share = 0.6, spread = 0.1)
 println(st["MSCI"]["share"])
 ```
 """
-function strategy_update_asset(strategy, name::AbstractString; updates...)
+function strategy_update_asset(strategy, name; updates...)
     inherits(strategy, "strategy") ||
-        error("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+        error("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    name = chk_name1(name, "strategy_update_asset", "name")   # seit 1.6.4 (Länge 1 wie Einzelwert)
     haskey(strategy, name) || error("strategy_update_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
     asset = RList(collect(strategy[name])...)
     upd = [String(k) => v for (k, v) in updates]
+    # seit 1.6.4 (K43 T1-R14, Entscheidung 21): unbekannte Angaben sind ein Fehler (bis dahin nur eine Warnung)
+    chk_dots(first.(upd), vcat(collect(String, keys(asset)), "wrapper"), "strategy_update_asset")   # wrapper: nur bei Wrapper-Assets
     if any(p -> p.first in ("asset_class", "deliverable"), upd) && !any(p -> p.first == "tax_regime", upd)
         derived = try
             tmp = copy(asset); tmp["tax_regime"] = nothing
@@ -673,10 +681,6 @@ function strategy_update_asset(strategy, name::AbstractString; updates...)
         derived == get(asset, "tax_regime", nothing) && (asset["tax_regime"] = nothing)
     end
     for (param, value) in upd
-        if !haskey(asset, param) && param != "wrapper"   # wrapper: Feld nur bei Wrapper-Assets vorhanden
-            @warn "strategy_update_asset: unbekannter Parameter '$param' wird ignoriert (möglich: $(join(keys(asset), ", ")))."
-            continue
-        end
         asset[param] = value
     end
     out = Strategy(RList(collect(strategy)...))
@@ -717,7 +721,7 @@ Asset-Spalte und bei `trading = "signal"` die Signalspalten vorhanden sind. Für
 deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
 `strategy_update_asset` akzeptiert Felder als `name = wert`-Paare; nur Felder, die das Asset bereits hat,
-sowie `wrapper` werden übernommen (unbekannte mit Warnung ignoriert; `wrapper = nothing` entfernt einen
+sowie `wrapper` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; `wrapper = nothing` entfernt einen
 Wrapper). Das Asset wird danach mit `asset_config` neu geprüft; nicht angegebene Felder bleiben unverändert.
 Ändert sich `asset_class` oder `deliverable` und wird `tax_regime` nicht mit angegeben, wird ein bisher
 automatisch abgeleitetes `tax_regime` neu abgeleitet (z. B. `"certificate"` -> `"etf"`: `"investment_fund"`);
@@ -737,9 +741,10 @@ st = create_strategy(MSCI = asset_config("etf"; share = 0.7, partial_exemption =
 println(collect(keys(strategy_remove_asset(st, "BOND"))))
 ```
 """
-function strategy_remove_asset(strategy, name::AbstractString)
+function strategy_remove_asset(strategy, name)
     inherits(strategy, "strategy") ||
-        error("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+        error("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    name = chk_name1(name, "strategy_remove_asset", "name")   # seit 1.6.4 (Länge 1 wie Einzelwert)
     haskey(strategy, name) || error("strategy_remove_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
     out = Strategy(RList(collect(strategy)...))
     delete!(out, String(name))

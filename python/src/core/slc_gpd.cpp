@@ -207,17 +207,12 @@ int sl_gpd_fit(sl_ctx *cx, int n, const double *x, const sl_opt_ctrl *ctrl, doub
 {
     gpd_data d;
     sl_opt_ctrl c;
-    slc_acc a;
     double sg, xs, m, v, th[2], lo[2], hi[2], fmin;
-    int st, i, iter, nfev, r, found = 0;
+    int st, iter, nfev, r, found = 0;
     st = check_exc(cx, n, x, 10);
     if (st != SL_OK) return st;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) slc_acc_add(&a, x[i]);
-    m = slc_acc_val(&a) / n;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) { double q = x[i] - m; slc_acc_add(&a, q * q); }
-    v = slc_acc_val(&a) / (n - 1);
+    m = slc_mean(n, x);                     /* n >= 10 (check_exc) */
+    v = slc_var_m(n, x, m);
     if (!(m > 0.0)) return sl_fail(cx, SL_EARG, "GPD: alle Überschreitungen sind 0");
     /* 1. PWM */
     r = pwm_raw(n, x, &sg, &xs);

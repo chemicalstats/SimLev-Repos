@@ -20,33 +20,20 @@ import ..SimLev
 const RList = SimLev.RList
 
 
-"`paste(format(x), collapse = \", \")`; `nothing`/`missing` stehen für NA."
-function _show(x)
-    (x === nothing || x === missing) && return "NA"
-    x isa SimLev.RVector && (x = x.values)
-    x isa Tuple && (x = collect(x))
-    if x isa AbstractVector && any(v -> v === missing || v === nothing, x)
-        return join([v === missing || v === nothing ? "NA" : string(v) for v in x], ", ")
-    end
-    r = SimLev.RFmt.format(x)
-    r isa AbstractString && return String(r)
-    return join([string(s) for s in r], ", ")
-end
-
 "Varianzmodell und Regimezahl der MS-GARCH-Schätzung prüfen (`.ms_garch_check`)."
 function _ms_garch_check(K, model)
     mv = model isa AbstractVector || model isa Tuple ? collect(model) : [model]
     ok_m = length(mv) == 1 && mv[1] isa AbstractString && mv[1] in ("sGARCH", "gjrGARCH")
     ok_m || error("MS-GARCH: Varianzmodell je Regime (params ms_garch_model, ms_ar_garch_model bzw. tvtp_garch_model) " *
-                  "muss \"sGARCH\" oder \"gjrGARCH\" sein (erhalten: $(_show(model))).")
+                  "muss \"sGARCH\" oder \"gjrGARCH\" sein.")   # seit 1.6.4 ohne Wert
     kv = K isa AbstractVector || K isa Tuple ? collect(K) : [K]
     ok_k = length(kv) == 1 && kv[1] isa Real && !(kv[1] isa Bool)
     if ok_k
         k0 = Float64(kv[1])
-        ok_k = isfinite(k0) && k0 == Float64(SimLev.RFmt.r_round(k0)) && k0 >= 2
+        ok_k = isfinite(k0) && k0 == Float64(SimLev.RFmt.r_round(k0)) && 2 <= k0 <= 64   # seit 1.6.4 bis 64 (B-097)
     end
     ok_k || error("MS-GARCH: Anzahl Regime (params ms_n_regimes, ms_ar_n_regimes bzw. tvtp_n_regimes) muss eine " *
-                  "ganze Zahl >= 2 sein (erhalten: $(_show(K))).")
+                  "ganze Zahl >= 2 und <= 64 sein.")   # seit 1.6.4 ohne Wert
     return true
 end
 

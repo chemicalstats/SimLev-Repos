@@ -20,6 +20,7 @@ import math
 import numpy as np
 
 from . import _ext
+from ._pruefen import chk_stop  # seit 1.6.4 (B-028)
 
 __all__ = ["optim", "opt_testfn", "minimize_test", "numgrad_test"]
 
@@ -36,7 +37,8 @@ def _method(method):
 
 def _control(control, m, n):
     """Steuerwerte wie in R (``.sl_opt_control``): Nelder-Mead ``maxit`` = Funktionsauswertungen,
-    L-BFGS-B ``factr`` (reltol = factr * eps, Standard 1e7) und ``pgtol`` (= gtol)."""
+    L-BFGS-B ``factr`` (reltol = factr * eps, Standard 1e7) und ``pgtol`` (= gtol). Abweichung von ``optim``:
+    ``maxit = 0`` bzw. ``maxfev = 0`` heißt hier „ohne Grenze“ (kein Aufruf im Paket nutzt 0)."""
     control = dict(control or {})
     bad = [k for k in control if k not in _KNOWN]
     if bad:
@@ -64,6 +66,10 @@ def _control(control, m, n):
         else:
             reltol = num1("reltol", 1e7 * _EPS if m == 2 else math.sqrt(_EPS))
     gtol = num1("gtol", num1("pgtol", 1e-8))
+    # seit 1.6.4 (B-028, Entscheidung 76): maxit/maxfev im Bereich von int (bis 1.6.3 undefinierte Umwandlung)
+    for k, v in (("maxit", maxit), ("maxfev", maxfev)):
+        if not -2147483648.0 <= v <= 2147483647.0:
+            chk_stop("sp.optim_ganz", "optim", k)
     ctrl = (maxit, maxfev, reltol, gtol, num1("xtol", _EPS), num1("fnscale", 1.0))
     ps = control.get("parscale")
     if ps is not None:
@@ -82,8 +88,8 @@ def _scalar(v):
     t = type(v)
     if t is float or t is np.float64:   # Schnellweg (seit 1.6.3): gleiche Zahl wie über np.asarray
         return float(v)
-    if v is None:
-        return math.nan
+    if v is None:   # seit 1.6.4 wie R NULL (Länge 0) ein Fehler (B-028, Entscheidung 76; bis 1.6.3 NaN)
+        raise ValueError("optim: die Zielfunktion muss eine Zahl liefern (erhalten: Länge 0)")
     a = np.asarray(v)
     if a.size != 1 or not (np.issubdtype(a.dtype, np.number) or a.dtype == np.bool_):
         raise ValueError("optim: die Zielfunktion muss eine Zahl liefern (erhalten: Länge %d)" % a.size)

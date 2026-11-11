@@ -24,12 +24,13 @@
 module Tactical
 
 import ..SimLev
-using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _alloc_c, _alloc_ramp, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA
-using ..SimLev: _sprintf, _fmt1, _ldsum, _colmeans, _rowsums, _mean_lgl, _unique, _setdiff, _isna, _strip_nl,
+using ..SimLev: _sprintf, _ldsum, _colmeans, _rowsums, _mean_lgl, _unique, _setdiff, _isna, _strip_nl,
                 _pmax, _pmin   # util.jl, r/rnum.jl
 using Dates
+using ..SimLev: chk_bool1, chk_date1, chk_df, chk_int1, chk_max, chk_name1, chk_nofactor, chk_num1, chk_stop   # pruefen.jl
+_dp() = SimLev.DataPrep   # E5-Hilfen (data_prep.jl, seit 1.6.4)
 
 export signal_state, momentum_score, tactical_rules, tactical_rotation, tactical_target_volatility, tactical_conditional_volatility,
        tactical_glidepath, tactical_blend, tactical_simulation, print_SimLevWeights, plot_SimLevWeights
@@ -57,10 +58,7 @@ _find_interval(x::AbstractVector, v::AbstractVector) = Int[searchsortedlast(v, x
 _rowmeans(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A; mean = true)
 
 "Spalten-/Elementzugriff auf data.frame-artige Eingaben."
-_df_names(x::RFrame) = names(x)
-_df_names(x::NamedTuple) = String[String(k) for k in keys(x)]
-_df_names(x::AbstractDict) = String[string(k) for k in keys(x)]
-_df_names(x) = String[]
+const _df_names = SimLev.DataPrep._names   # gleiche vier Methoden (seit 1.6.4 eine Fassung)
 _col(x::RFrame, k) = x[String(k)]
 _col(x::NamedTuple, k) = getfield(x, Symbol(k))
 _col(x::AbstractDict, k) = haskey(x, k) ? x[k] : x[Symbol(k)]
@@ -92,8 +90,6 @@ function _is_numeric_named(x)
     false
 end
 
-"Zeichenvektor (`nothing` → leer)."
-_chr_vec(x) = x === nothing ? String[] : x isa Union{AbstractString,Symbol} ? [String(x)] : String[string(v) for v in x]
 
 "`as.integer(x)` (NA bei Unlesbarem); Vektor."
 function _as_int(x)
@@ -233,6 +229,39 @@ function _lgl(v)
     (val, na)
 end
 
+# Schlüssel einer Liste (RList, Dict, NamedTuple) als Text; `nothing` für andere Typen
+_keys_str(r) = r isa NamedTuple ? [String(k) for k in keys(r)] : r isa AbstractDict ? [string(k) for k in keys(r)] : nothing
+
+"Länge eines Signalvektors (Wahrheitswerte oder Zahlen 0/1, NA erlaubt, eindimensional) oder `nothing`."
+function _e5_sigvec_len(@nospecialize(v))
+    (v isa SimLev.RFmt.RFactor || v isa AbstractString || v === nothing) && return nothing
+    v isa RVector && (v = v.values)
+    a = v isa Union{Bool,Real,Missing} ? Any[v] : v isa AbstractVector ? v : nothing
+    a === nothing && return nothing
+    # Textvektor (auch nur aus missing, z. B. Union{Missing,String}[missing], seit 1.6.4 K43 T3-N10 auch mit nothing im
+    # Elementtyp wie _is_chr) wie R NA_character_: kein Signal
+    T = Base.nonnothingtype(nonmissingtype(eltype(a)))
+    T !== Union{} && T <: AbstractString && return nothing
+    for e in a
+        (e === missing || e isa Bool) && continue
+        (e isa Real && (isnan(Float64(e)) || Float64(e) == 0 || Float64(e) == 1)) && continue
+        return nothing
+    end
+    return length(a)
+end
+
+"Signal `(buy, sell)`: beide vorhanden, je Wahrheitswerte oder 0/1 (NA erlaubt), gleich lang (R `.e5_signal`; seit 1.6.4)."
+function _e5_signal(@nospecialize(signal), fn, i = nothing)
+    ks = _keys_str(signal)
+    ok = ks !== nothing && "buy" in ks && "sell" in ks
+    if ok
+        lb = _e5_sigvec_len(_sig_part(signal, "buy")); ls = _e5_sigvec_len(_sig_part(signal, "sell"))
+        ok = lb !== nothing && lb == ls
+    end
+    ok || (i === nothing ? chk_stop("e5.signal", fn) : chk_stop("e5.when", fn, i))
+    return signal
+end
+
 """
     signal_state(signal; initial = false)
 
@@ -246,6 +275,7 @@ den Zustand nicht. So lassen sich Signale als "investiert ja/nein" auswerten ode
 # Argumente
 - `signal`: `RList("buy" => …, "sell" => …)` mit logischen Vektoren gleicher Länge (z. B. aus `signal_sma()`);
   NA vorher durch `false` ersetzen (die Signal-Bausteine liefern keine NA).
+  Seit 1.6.4 nur TRUE/FALSE oder 0/1 (NA erlaubt) und gleiche Länge, sonst Fehler.
 - `initial`: Logischer Zustand vor dem ersten Signal (Standard `false` = nicht investiert).
 
 # Rückgabe
@@ -259,22 +289,18 @@ println(signal_state(RList("buy" => x .> 101, "sell" => x .< 98)))
 ```
 """
 function signal_state(signal; initial = false)
+    _e5_signal(signal, "signal_state")                     # seit 1.6.4 (Entscheidung 1; B-024)
+    initial = chk_bool1(initial, "signal_state", "initial")
     bv = _sig_part(signal, "buy"); sv = _sig_part(signal, "sell")
-    # R: ifelse(b & !s, …): Text in sell scheitert an !s, Text in buy an & (seit 1.6.3 wie R; bis 1.6.2 galt in Julia
-    # jeder Text als true)
-    _is_chr(sv) && error("invalid argument type")
-    _is_chr(bv) && error("operations are possible only for numeric, logical or complex types")
+    # Text lehnt _e5_signal ab wie R (seit 1.6.4 K43 T3-N10 ohne die Fehler von R's ifelse(b & !s, …), bis dahin bei
+    # Textvektoren mit nothing im Elementtyp nur aus missing erreichbar)
     b, bna = _lgl(bv)
     s, sna = _lgl(sv)
     return _signal_state(b, bna, s, sna, initial)
 end
 # Funktionsgrenze (seit 1.6.1): `_sig_part` liefert `Any`, die Schleifen laufen hier mit festen Typen
 function _signal_state(b::Vector{Bool}, bna::Vector{Bool}, s::Vector{Bool}, sna::Vector{Bool}, initial)
-    n = length(b)
-    if length(s) != n
-        s = [s[mod1(i, length(s))] for i in 1:n]
-        sna = [sna[mod1(i, length(sna))] for i in 1:n]
-    end
+    n = length(b)               # buy und sell gleich lang (_e5_signal; seit 1.6.4 K43 T3-N10 ohne Recyceln)
     ev = Int[(bna[i] || sna[i]) ? 0 : (b[i] && !s[i]) ? 1 : (s[i] && !b[i]) ? -1 : 0 for i in 1:n]
     idx = findall(!=(0), ev)
     st = fill(Bool(initial), n)
@@ -317,8 +343,10 @@ Mittlere Rendite über mehrere Rückblicke (Monate, kalenderbasiert) je Anlage, 
 
 # Argumente
 - `data`: Tabelle (RFrame) mit Spalte `date` (Klasse Date) und Kursspalten (Niveaus).
+  Seit 1.6.4 Datum aufsteigend ohne NA, Kursspalten numerisch (kein Faktor).
 - `assets`: Zeichenvektor der Kursspalten.
 - `lookbacks`: Rückblicke in Kalendermonaten (Standard `[1, 3, 6, 12]`); bei `type = "13612w"` ignoriert.
+  Seit 1.6.4 ganze Zahlen von 1 bis 1200 (kein Blick in die Zukunft).
 - `type`: `"average"` (Standard; ungewichtetes Mittel der Renditen) oder `"13612w"` (gewichtet, Rückblicke
   fest 1, 3, 6, 12).
 
@@ -346,13 +374,17 @@ println(size(ms))
 ```
 """
 function momentum_score(data, assets; lookbacks = [1, 3, 6, 12], type = nothing)
+    fn = "momentum_score"
+    type = _dp()._e5_match_arg(type, ["average", "13612w"], fn, "type")
+    _dp()._e5_data_dates(data, fn, "momentum_score: data\$date")   # seit 1.6.4 (K42 E5)
     data = SimLev.as_rframe(data)
-    type = _match_arg(type, ["average", "13612w"])
     d = _to_date(_has(data, "date") ? _col(data, "date") : nothing, "momentum_score: data\$date")
     n = length(d)
-    assets = _chr_vec(assets)
+    assets = _dp()._e5_names(assets, fn, "assets")
+    _dp()._e5_lookbacks(lookbacks, fn)                     # seit 1.6.4 ganze Zahlen 1 bis 1200 (B-025)
     miss = _setdiff(assets, _df_names(data))
     isempty(miss) || error("momentum_score: Kursspalte(n) fehlen: " * join(miss, ", "))
+    _dp()._e5_numcols(data, assets, fn)                    # Entscheidung 15, B-009
     type == "13612w" && (lookbacks = [1, 3, 6, 12])
     lb = lookbacks isa Union{AbstractVector,Tuple} ? collect(lookbacks) : [lookbacks]
     # seit 1.6.0 im Kern (sl_mom_score: Rückblickzeilen ganzzahlig, LOCF, Renditen, Scores) bei sortierten Daten
@@ -397,11 +429,14 @@ end
 # tactical_rules
 # ═══════════════════════════════════════════════════════════════════════════
 
+# _UserEnv (Umgebung eines Moduls ohne fremde Namen) seit 1.6.4 in util.jl, gemeinsam mit Dependence (T3-R2)
+const _UserEnv = SimLev._UserEnv
+
 "Bedingung als Text in R-Syntax auswerten (`SimLev.RExpr`): Spalten von `data`, dann Variablen aus `env`."
 function _eval_when(s::AbstractString, data, env)
     cols = data isa Union{RFrame,NamedTuple,AbstractDict} ? data :
            Dict{String,Any}(c => _col(data, c) for c in _df_names(data))
-    SimLev.RExpr.eval_r(s, cols; env = env)
+    SimLev.RExpr.eval_r(s, cols; env = env isa Module ? _UserEnv(env) : env)
 end
 
 "`as.logical(v)` mit NA → FALSE."
@@ -441,8 +476,13 @@ Hysterese).
   logischer Vektor der Länge `nrow(data)`, Zeichenkette mit einem R-Ausdruck (ausgewertet in `data`, dann in
   der aufrufenden Umgebung) oder `RList("buy" => …, "sell" => …)` (wird mit `signal_state()` in einen Zustand
   übersetzt); NA gilt als `false`. `weights`: benannter Vektor Kursspalte -> Gewicht als Anteil.
+  Seit 1.6.4 je Regel nur die Felder when und weights; Gewichte endlich und >= 0. `when` darf auch eine Funktion
+  von `data` sein (wie in R seit 1.6.4); Regeltexte gelten in allen drei Sprachen im gemeinsamen Umfang (Spalten,
+  Variablen und eigene Funktionen aus `env` ohne die Namen aus `Base`/`Core`, Operatoren, `if` und die Funktionen
+  von `SimLev.RExpr`; R lehnt seit 1.6.4 Texte außerhalb davon ebenso ab).
 - `default`: Benannter Gewichtsvektor (Anteile) für Zeilen, in denen keine Regel zutrifft.
-- `env`: Modul, in dem freie Variablen und Funktionen der Bedingungen gesucht werden (Standard `Main`).
+- `env`: Modul, in dem freie Variablen und Funktionen der Bedingungen gesucht werden (Standard `Main`; seit 1.6.4
+  ohne die Namen aus `Base`/`Core`).
 
 # Rückgabe
 `SimLevWeights`: Tabelle (RFrame) mit `date` und je Anlage einer Spalte Zielgewicht (Anteil, Zeilensumme 1),
@@ -469,9 +509,27 @@ println(w)
 ```
 """
 function tactical_rules(data, rules, default; env = Main)
+    fn = "tactical_rules"
+    _dp()._e5_data_dates(data, fn, "date")                 # seit 1.6.4 (K42 E5)
     data = SimLev.as_rframe(data)
     n = _nrow(data)
-    rules = rules === nothing ? Any[] : collect(rules)
+    (rules isa Union{AbstractVector,Tuple} && !(rules isa AbstractVector{<:Pair})) ||   # leer: nur default
+        chk_stop("liste", fn, "rules")
+    rules = collect(rules)
+    for (i, r) in enumerate(rules)
+        ks = _keys_str(r)
+        (ks !== nothing && "when" in ks && "weights" in ks) || chk_stop("e5.regel", fn, i)
+        bad = [k for k in ks if !(k in ("when", "weights"))]   # Entscheidung 11 sinngemäß
+        isempty(bad) || chk_stop("e5.regel_feld", fn, bad[1], i)
+        _dp()._e5_weights(_rget(r, "weights"), fn, "rules[[$i]]\$weights")
+        w = _rget(r, "when")
+        if _keys_str(w) !== nothing
+            _e5_signal(w, fn, i)
+        elseif !(w isa AbstractString || w isa Function || _is_chr(w) || _e5_sigvec_len(w) !== nothing)
+            chk_stop("e5.when", fn, i)
+        end
+    end
+    _dp()._e5_weights(default, fn, "default")
     nm_all = String[]
     for r in rules
         nm, _ = _named(_rget(r, "weights"))
@@ -545,15 +603,19 @@ besten `top` gehalten.
   `assets`, `safe` und `canary`.
 - `assets`: Zeichenvektor der Risikoanlagen für die Rotation.
 - `top`: Anzahl gehaltener Anlagen (Standard 1; 1 bis Anzahl `assets`).
+  Seit 1.6.4 ganze Zahl ohne Abschneiden.
 - `safe`: Zeichenvektor der sicheren Anlage(n); bei mehreren wird die mit dem besten Score gewählt. Pflicht,
   wenn `absolute = true` (Standard) oder `canary` gesetzt ist (sonst Fehler).
 - `absolute`: Logisch: absoluten Momentum-Filter anwenden (Standard `true`; Score < 0 => sichere Anlage).
 - `canary`: Optional Zeichenvektor der Canary-Anlagen (Standard `nothing` = kein Canary-Schutz).
 - `breadth`: Schutzschwelle B als Anzahl Anlagen (mindestens 1; Standard `nothing` = Anzahl Canary-Anlagen).
+  Seit 1.6.4 ganze Zahl.
 - `lookbacks`, `type`: Siehe `momentum_score()` (Rückblicke in Monaten; `"average"` oder `"13612w"`).
 - `every`: Entscheidungsrhythmus: `"month"` (Standard), `"week"` (ISO-Woche) oder `"quarter"`.
 - `weighting`: Gewichtung der gewählten Anlagen: `"equal"` (Standard) oder `"inverse_vol"` (umgekehrt
   proportional zur Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
+  Seit 1.6.4 liegen die Termine dann erst ab Zeile 63 (volles Fenster; bis 1.6.3 brach jeder frühere Termin ab,
+  mit Wochen- und Monatskursen auch mit den Standardrückblicken).
 
 # Rückgabe
 `SimLevWeights` (Tabelle (RFrame) mit `date` und Zielgewichten je Anlage aus `assets` und `safe`, Anteile) mit
@@ -584,25 +646,22 @@ println(tactical_rotation(d, ["aktien", "anleihen"]; safe = "geld"))
 """
 function tactical_rotation(data, assets; top = 1, safe = nothing, absolute = true, canary = nothing, breadth = nothing,
                            lookbacks = [1, 3, 6, 12], type = nothing, every = nothing, weighting = nothing)
+    fn = "tactical_rotation"
+    type = _dp()._e5_match_arg(type, ["average", "13612w"], fn, "type")
+    every = _dp()._e5_match_arg(every, ["month", "week", "quarter"], fn, "every")
+    weighting = _dp()._e5_match_arg(weighting, ["equal", "inverse_vol"], fn, "weighting")
+    # seit 1.6.4 (K42 E5): Datum, Namen, Wahrheitswert, ganze Zahlen; Meldungen ohne Eingabewert (Entscheidung 8)
+    _dp()._e5_data_dates(data, fn, "momentum_score: data\$date")
     data = SimLev.as_rframe(data)
-    type = _match_arg(type, ["average", "13612w"])
-    every = _match_arg(every, ["month", "week", "quarter"])
-    weighting = _match_arg(weighting, ["equal", "inverse_vol"])
-    assets = _chr_vec(assets); safe = _chr_vec(safe); canary = _chr_vec(canary)
-    (Bool(absolute) || !isempty(canary)) && isempty(safe) && error("absolute bzw. canary brauchen eine sichere Anlage 'safe'.")
-    tv = _as_int(top)
-    if length(tv) != 1 || tv[1] === missing || tv[1] < 1 || tv[1] > length(assets)
-        ft = length(tv) == 1 && tv[1] === missing ? "NA" : join(_fmt1(Float64[t === missing ? NA : Float64(t) for t in tv]), " ")
-        length(tv) == 1 && tv[1] !== missing && (ft = string(tv[1]))
-        error("top muss zwischen 1 und der Anzahl der Anlagen in assets ($(length(assets))) liegen (ist: $ft).")
-    end
-    top = tv[1]
-    if !isempty(canary) && breadth !== nothing
-        bv = breadth isa Union{AbstractVector,Tuple} ? Float64[_isna(b) ? NA : Float64(b) for b in breadth] : [Float64(breadth)]
-        if length(bv) != 1 || isnan(bv[1]) || bv[1] < 1
-            error("breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score für vollen Schutz; ist: $(join(_fmt1(bv), " "))).")
-        end
-    end
+    assets = _dp()._e5_names(assets, fn, "assets")
+    safe = (v = _dp()._e5_names(safe, fn, "safe"; null_ok = true); v === nothing ? String[] : v)
+    canary = (v = _dp()._e5_names(canary, fn, "canary"; null_ok = true); v === nothing ? String[] : v)
+    absolute = chk_bool1(absolute, fn, "absolute")
+    _dp()._e5_lookbacks(lookbacks, fn)
+    (absolute || !isempty(canary)) && isempty(safe) && error("absolute bzw. canary brauchen eine sichere Anlage 'safe'.")
+    top = Int(chk_int1(top, fn, "top"; lo = 1))
+    top > length(assets) && error("top muss zwischen 1 und der Anzahl der Anlagen in assets ($(length(assets))) liegen.")
+    breadth === nothing || (breadth = chk_int1(breadth, fn, "breadth"; lo = 1))
     allc = _unique(vcat(assets, safe, canary))
     Sm = momentum_score(data, allc; lookbacks = lookbacks, type = type)
     S = Sm.data
@@ -612,6 +671,9 @@ function tactical_rotation(data, assets; top = 1, safe = nothing, absolute = tru
     rows = _period_last(d, every)
     ja = [ci[a] for a in assets]
     rows = Int[i for i in rows if count(isfinite, S[i, ja]) >= top]
+    # inverse_vol: Termine erst ab Zeile 63, wenn das Fenster der Schwankung voll ist (seit 1.6.4, Entscheidung 144;
+    # bis 1.6.3 Abbruch "Zeilen ohne positive Gewichte" bei jedem früheren Termin)
+    weighting == "inverse_vol" && (rows = Int[i for i in rows if i >= 63])
     isempty(rows) && error("Zu kurze Historie für den Rückblick.")
     out_assets = _unique(vcat(assets, safe))
     oi = Dict(a => j for (j, a) in enumerate(out_assets))
@@ -688,6 +750,22 @@ end
 # Zielvolatilität, bedingte Volatilitätssteuerung
 # ═══════════════════════════════════════════════════════════════════════════
 
+"Gemeinsame Prüfung der Volatilitätssteuerung (R `.e5_risk_check`; seit 1.6.4, K42 E5)."
+function _e5_risk_check(fn, data, weights, safe, window, ppy)
+    _dp()._e5_data_dates(data, fn, "data\$date")
+    if !_isweights(weights)
+        _is_numeric_named(weights) || error("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+        _dp()._e5_weights(weights, fn, "weights")
+    end
+    safe = chk_name1(safe, fn, "safe")
+    window = chk_int1(window, fn, "window"; lo = 2)
+    ppy = chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true, null_ok = true)
+    wn = _isweights(weights) ? names(weights)[2:end] : (nm = _named(weights)[1]; nm === nothing ? String[] : nm)
+    nms = _df_names(data)
+    _dp()._e5_numcols(data, [c for c in _unique(vcat(wn, [String(safe)])) if c in nms], fn)
+    return safe, window, ppy
+end
+
 "`.risk_vol`: Volatilität des Risikoportfolios."
 function _risk_vol(data, weights, safe, window, ppy)
     d = _to_date(_col(data, "date"), "data\$date")
@@ -762,6 +840,7 @@ Wochenenden, zählen nicht).
 - `target`: Zielvolatilität in Prozent p. a. (10 = 10 %; Standard 10). Werte unter 1 ergeben eine Warnung
   (vermutlich als Anteil angegeben).
 - `window`: Fensterlänge der Volatilitätsschätzung in Zeilen mit Kursbewegung (Standard 63).
+  Seit 1.6.4 ganze Zahl >= 2.
 - `max_exposure`: Höchster Risikoanteil als Anteil (Standard 1 = ohne Hebel; Werte > 1 sind nicht erlaubt, da
   die Engine keinen Kredit kennt).
 - `every`: Anpassungsrhythmus des Risikoanteils: `"month"` (Standard), `"week"`, `"day"` oder `"quarter"`.
@@ -799,8 +878,12 @@ println(tv)
 ```
 """
 function tactical_target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1, every = nothing, ppy = nothing)
+    fn = "tactical_target_volatility"
+    every = _dp()._e5_match_arg(every, ["month", "week", "day", "quarter"], fn, "every")
+    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, ppy)   # seit 1.6.4 (K42 E5)
     data = SimLev.as_rframe(data)
-    every = _match_arg(every, ["month", "week", "day", "quarter"])
+    target = chk_num1(target, fn, "target"; lo = 0, lo_open = true)
+    max_exposure = chk_num1(max_exposure, fn, "max_exposure"; lo = 0)
     max_exposure > 1 && error("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über Hebelprodukte abbilden).")
     target < 1 && _warn("target = $(_g(target)) ist sehr klein; target ist in Prozent p. a. (10 = 10 %), nicht als Anteil.")
     rv = _risk_vol(data, weights, safe, window, ppy)
@@ -851,6 +934,7 @@ Umschichtungen (und damit Steuern und Kosten) der ständigen Steuerung (Bongaert
   `min_exposure` höchstens `base`, `max_exposure` höchstens 1).
 - `min_history`: Mindesthistorie der Volatilitätsschätzung in Jahren (Standard 3), bevor gesteuert wird. Ist
   sie länger als die vorhandene Historie, wird nie gesteuert (mit Warnung).
+  Seit 1.6.4 höchstens 100 Jahre.
 - `scaling`: `"inverse"` (Standard): Anteil `base * target / vol`; `"fixed"`: feste Anteile `high_exposure`
   und `low_exposure`.
 - `high_exposure`, `low_exposure`: Feste Risikoanteile (Anteile) für `scaling = "fixed"` in hohen bzw.
@@ -901,9 +985,20 @@ println(cv)
 function tactical_conditional_volatility(data, weights, safe; base = 1, upper = 0.8, lower = 0.2, target = nothing, window = 63,
                                 min_exposure = 0, max_exposure = 1, min_history = 3, scaling = nothing,
                                 high_exposure = nothing, low_exposure = nothing, every = nothing, ppy = nothing)
+    fn = "tactical_conditional_volatility"
+    every = _dp()._e5_match_arg(every, ["month", "week", "day", "quarter"], fn, "every")
+    scaling = _dp()._e5_match_arg(scaling, ["inverse", "fixed"], fn, "scaling")
+    # seit 1.6.4 (K42 E5): einzelne endliche Zahlen vor den Bereichsprüfungen (B-012: NaN lief in Julia still)
+    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, ppy)
     data = SimLev.as_rframe(data)
-    every = _match_arg(every, ["month", "week", "day", "quarter"])
-    scaling = _match_arg(scaling, ["inverse", "fixed"])
+    base = chk_num1(base, fn, "base"); upper = chk_num1(upper, fn, "upper")
+    min_exposure = chk_num1(min_exposure, fn, "min_exposure"); max_exposure = chk_num1(max_exposure, fn, "max_exposure")
+    lower = chk_num1(lower, fn, "lower"; null_ok = true); target = chk_num1(target, fn, "target"; null_ok = true)
+    high_exposure = chk_num1(high_exposure, fn, "high_exposure"; null_ok = true)
+    low_exposure = chk_num1(low_exposure, fn, "low_exposure"; null_ok = true)
+    target === nothing || chk_num1(target, fn, "target"; lo = 0, lo_open = true)
+    min_history = chk_num1(min_history, fn, "min_history"; lo = 0)
+    chk_max(min_history, 100, fn, "min_history")             # Entscheidung 46
     max_exposure > 1 && error("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über Hebelprodukte abbilden).")
     (base < 0 || base > max_exposure) && error("base muss zwischen 0 und max_exposure liegen.")
     (min_exposure < 0 || min_exposure > base) && error("min_exposure muss zwischen 0 und base liegen.")
@@ -1002,10 +1097,9 @@ Fehler. Das Ergebnis geht in `tactical_simulation()` oder als Kern in `tactical_
 - `data`: Tabelle (RFrame) mit Spalte `date` (z. B. der Datensatz für `simulation()`) oder Datumsvektor.
 - `to`: Benannte Gewichtsvektoren (Anteile) am Anfang und Ende; Anlagen, die nur in einem vorkommen, erhalten
   im anderen 0. Je Zeile auf Summe 1 normiert.
-- `start`: Beginn und Ende des Uebergangs (Date oder `"JJJJ-MM-TT"`; Standard `nothing` = erstes bzw. letztes
-  Datum).
-- `start`: Beginn und Ende des Uebergangs (Date oder `"JJJJ-MM-TT"`; Standard `nothing` = erstes bzw. letztes
-  Datum).
+- `start`, `end_`: Beginn und Ende des Uebergangs (Date oder `"JJJJ-MM-TT"`; `end_`, weil `end` in Julia ein
+  Schlüsselwort ist; Standard `nothing` = erstes bzw. letztes Datum).
+  Seit 1.6.4 keine Zahl.
 - `every`: Rhythmus der Stufen: `"year"` (Standard), `"quarter"` oder `"month"`.
 
 # Rückgabe
@@ -1020,10 +1114,21 @@ println(gp)
 ```
 """
 function tactical_glidepath(data, from_, to; start = nothing, end_ = nothing, every = nothing)
-    data = SimLev.as_rframe(data)
-    every = _match_arg(every, ["year", "quarter", "month"])
-    src = data isa RFrame ? data["date"] : data isa Union{NamedTuple,AbstractDict} ? _col(data, "date") : data
-    d = _to_date(src, "tactical_glidepath: Datum")
+    fnm = "tactical_glidepath"
+    every = _dp()._e5_match_arg(every, ["year", "quarter", "month"], fnm, "every")
+    # seit 1.6.4 (K42 E5): Datum ohne NA und aufsteigend, Gewichte benannt endlich >= 0, start/end Datum
+    if data isa RFrame
+        d = _dp()._e5_data_dates(data, fnm, "tactical_glidepath: Datum")
+    else
+        (data isa Union{NamedTuple,AbstractDict}) && chk_df(data, fnm, "data")
+        chk_nofactor(data, fnm, "data")
+        (data === nothing || (data isa Union{AbstractVector,Tuple} && isempty(data))) && chk_stop("zeilen_keine", fnm, "data")
+        d = _to_date(data, "tactical_glidepath: Datum")
+        dd = Float64[v === missing ? NaN : Float64(Dates.value(v - Date(1970, 1, 1))) for v in d]
+        _dp()._e5_sorted(dd) || chk_stop("e5.datum_vektor", fnm, "data")
+    end
+    _dp()._e5_weights(from_, fnm, "from"); _dp()._e5_weights(to, fnm, "to")
+    start = chk_date1(start, fnm, "start"; null_ok = true); end_ = chk_date1(end_, fnm, "end"; null_ok = true)
     fn, fv = _named(from_)
     tn, tv = _named(to)
     a = _unique(vcat(fn === nothing ? String[] : fn, tn === nothing ? String[] : tn))
@@ -1032,7 +1137,7 @@ function tactical_glidepath(data, from_, to; start = nothing, end_ = nothing, ev
     tn === nothing || for (k, x) in zip(tn, tv); t[findfirst(==(k), a)] = x; end
     s = _to_date(start === nothing ? d[1] : start, "start")[1]
     e = _to_date(end_ === nothing ? d[end] : end_, "end")[1]
-    e < s && error("tactical_glidepath: end ($(Dates.format(e, "yyyy-mm-dd"))) liegt vor start ($(Dates.format(s, "yyyy-mm-dd"))); für den umgekehrten Weg from und to tauschen.")
+    e < s && error("tactical_glidepath: end liegt vor start; für den umgekehrten Weg from und to tauschen.")   # seit 1.6.4 ohne Daten
     rows = _unique(vcat(1, _period_last(d, every)))
     sd = _dnum(s); ed = _dnum(e)
     frac = if e > s
@@ -1086,9 +1191,12 @@ function tactical_blend(ws...; shares = nothing)
     ws = collect(ws)
     (isempty(ws) || !all(_isweights, ws)) && error("tactical_blend: ... muss aus SimLevWeights bestehen.")
     shares === nothing && (shares = fill(1 / length(ws), length(ws)))
-    sh = shares isa Union{AbstractVector,Tuple} ? Float64[_isna(v) ? NA : Float64(v) for v in shares] : [Float64(shares)]
-    if length(sh) != length(ws) || any(isnan, sh) || any(<(0), sh) || _ldsum(sh) <= 0
-        error("tactical_blend: shares braucht $(length(ws)) nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)); erhalten: $(join(_fmt1(sh), ", ")).")
+    sv = shares isa Union{AbstractVector,Tuple} ? collect(Any, shares) : Any[shares]
+    num = !(shares isa SimLev.RFmt.RFactor) && all(v -> v isa Real && !(v isa Bool), sv)
+    sh = num ? Float64[Float64(v) for v in sv] : Float64[]
+    if !num || length(sh) != length(ws) || !all(isfinite, sh) || any(<(0), sh) || _ldsum(sh) <= 0
+        # seit 1.6.4 ohne Eingabewert, endlich (Entscheidung 8)
+        error("tactical_blend: shares braucht $(length(ws)) nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)).")
     end
     d = _to_date(ws[1]["date"], "date")
     dn = Float64[_dnum(z) for z in d]
@@ -1164,11 +1272,16 @@ function plot_SimLevWeights(x; file = nothing, width = 900, height = 420, main =
     println(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>")
     println(io, "<text x=\"$(L+pw/2)\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">$(_esc(main))</text>")
     cum = zeros(length(t))
+    # seit 1.6.4 (B-082, Entscheidung 93) die Koordinatentexte zwischengespeichert: x einmal je Tag, y einmal je Höhe
+    # (gleicher Text: dieselbe Rechnung)
+    xs = [_alloc_c(px(t[i])) for i in eachindex(t)]
+    yc = Dict{Float64,String}()
+    ys(v) = get!(() -> _alloc_c(py(v)), yc, v)
     for j in eachindex(cols)
         lo = copy(cum)
         cum .+= Float64[isfinite(v) ? v : 0.0 for v in W[:, j]]
-        up = join(("$(_alloc_c(px(t[i]))),$(_alloc_c(py(cum[i])))" for i in eachindex(t)), " ")
-        dn = join(("$(_alloc_c(px(t[i]))),$(_alloc_c(py(lo[i])))" for i in reverse(eachindex(t))), " ")
+        up = join(("$(xs[i]),$(ys(cum[i]))" for i in eachindex(t)), " ")
+        dn = join(("$(xs[i]),$(ys(lo[i]))" for i in reverse(eachindex(t))), " ")
         println(io, "<polygon points=\"$up $dn\" fill=\"$(cl[j])\" stroke=\"none\"/>")
     end
     for v in 0:0.25:1
@@ -1223,6 +1336,7 @@ und allen weiteren Einstellungen der Engine. Die Engine selbst bleibt unverände
   `"relative"` (Prozent des Zielgewichts).
 - `lag`: Verzögerung in Zeilen von `data` (ganze Zahl >= 0, Standard 1); mit Attribut `filled` in Zeilen mit
   echten Kursen.
+  Seit 1.6.4 ohne Abschneiden (1.5 und Text sind ein Fehler).
 - `asset_args`: Liste von Argumenten für `asset_config()` (über `strategy_from_weights()`), z. B. `(spread =
   0.1, partial_exemption = (aktien = 30, geld = 0))`. Ein unbenannter einzelner Wert gilt für alle Anlagen;
   benannte Vektoren werden je Anlage zugeordnet (auch mit einem Element, siehe `strategy_from_weights()`).
@@ -1279,10 +1393,14 @@ println(res["tactical"]["switches"])
 """
 function tactical_simulation(data, weights; rebalance = nothing, tolerance = nothing, tolerance_type = nothing, lag = 1,
                              asset_args = NamedTuple(), kwargs...)
+    fn = "tactical_simulation"
+    rebalance = _dp()._e5_match_arg(rebalance, ["switch", "month", "quarter", "year"], fn, "rebalance")
+    tolerance_type = _dp()._e5_match_arg(tolerance_type, ["absolute", "relative"], fn, "tolerance_type")
+    _dp()._e5_data_dates(data, fn, "data\$date")           # seit 1.6.4 (K42 E5)
     data = SimLev.as_rframe(data)
-    rebalance = _match_arg(rebalance, ["switch", "month", "quarter", "year"])
-    tolerance_type = _match_arg(tolerance_type, ["absolute", "relative"])
     _isweights(weights) || error("weights muss ein SimLevWeights sein.")
+    lag = chk_int1(lag, fn, "lag"; lo = 0)                  # seit 1.6.4 ohne Abschneiden (Entscheidung 19)
+    (asset_args === nothing || asset_args isa Union{NamedTuple,AbstractDict}) || chk_stop("liste", fn, "asset_args")
     bad = [String(k) for (k, _) in kwargs if String(k) in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh") ||
            startswith(String(k), "rebalance.")]
     isempty(bad) || error("tactical_simulation steuert $(join(_unique(bad), ", ")) selbst.")
@@ -1306,17 +1424,17 @@ function tactical_simulation(data, weights; rebalance = nothing, tolerance = not
     for j in eachindex(assets)
         W[:, j] = _fill_na(W[:, j], "locf"; keep_leading = false)
     end
-    lv = _as_int(lag)
-    (length(lv) != 1 || lv[1] === missing || lv[1] < 0) && error("lag muss eine ganze Zahl >= 0 sein.")
-    lag = lv[1]
+    lag = Int(lag)
     fl = data isa RFrame ? get(SimLev.attrs(data), "filled", nothing) : nothing
     if lag > 0
         real = trues(n)
-        if fl isa AbstractMatrix && size(fl, 1) == n
-            fcols = fl isa NamedMat ? fl.colnames : nothing
-            fa = fcols === nothing ? String[] : [a for a in assets if a in fcols]
+        # seit 1.6.4 (T3-N1) auch als RFrame, wie series_align es ablegt (bis 1.6.3 nur Matrix: gefüllte Tage nie
+        # erkannt, Wechsel auch auf LOCF-Tagen); wie R nur mit Spaltennamen
+        Fm, fcols, fnr = fl isa Union{AbstractMatrix,RFrame} ? SimLev._filled_matrix(fl) : (nothing, nothing, 0)
+        if Fm !== nothing && fnr == n && fcols !== nothing
+            fa = [a for a in assets if a in fcols]
             if !isempty(fa)
-                F = Float64[Bool(fl[i, findfirst(==(a), fcols)]) ? 1.0 : 0.0 for i in 1:n, a in fa]
+                F = Float64[Fm[i, findfirst(==(a), fcols)] ? 1.0 : 0.0 for i in 1:n, a in fa]
                 real = _rowsums(F) .== 0
             end
         end

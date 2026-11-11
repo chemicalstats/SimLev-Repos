@@ -65,8 +65,6 @@ Base.show(io::IO, x::SimLevSummary) = print(io, "SimLevSummary(", x["n_days"], "
 const _RULE = "═"^62
 const _SUBRULE = "  " * "─"^21
 
-_isna_any(x) = x === nothing || x === missing || (x isa AbstractFloat && isnan(x))
-
 function _undef_text(x, metric::String)
     um = get(x, "undefined_metrics", nothing)
     d = nothing
@@ -79,13 +77,14 @@ end
 
 "Text von `print(result)` aus dem R-Paket (zeichengleich, ohne abschließenden Zeilenumbruch)."
 function format_result(x)
+    inherits(x, "SimLevResult") || chk_stop("klasse", "format_result", "x", "simulation()")   # seit 1.6.4
     s = x["statistics"]
     ext = _is_true(get(x, "external_flows", false))
     io = IOBuffer()
     ln(t) = println(io, t)
     ln(""); ln(_RULE); ln("                 SimLev Simulationsergebnisse                 "); ln(_RULE); ln("")
     ln("  Wertentwicklung"); ln(_SUBRULE)
-    pct(v, metric, suffix = "") = _isna_any(v) ? _undef_text(x, metric) : r_sprintf("%+.2f%%%s", v * 100, suffix)
+    pct(v, metric, suffix = "") = _isna(v) ? _undef_text(x, metric) : r_sprintf("%+.2f%%%s", v * 100, suffix)
     if ext
         ln("  CAGR:             " * pct(x["cagr"], "cagr", " (geldgewichtet, XIRR)"))
         ln("  TTWROR:           " * pct(x["ttwror"], "ttwror", " (zeitgewichtet)"))
@@ -102,10 +101,10 @@ function format_result(x)
     ln(r_sprintf("  Mittl. Drawdown:  %.2f%%", s["average_drawdown"] * 100))
     ln(r_sprintf("  Ulcer Index:      %.4f", s["ulcer_index"]))
     ln("  Längster DD:      " * _n_tage(s["longest_drawdown"]))
-    ln("  Mittl. Erholung:  " * (_isna_any(s["avg_recovery_time"]) ? "–" : _n_tage(r_sprintf("%.0f", s["avg_recovery_time"]))))
+    ln("  Mittl. Erholung:  " * (_isna(s["avg_recovery_time"]) ? "–" : _n_tage(r_sprintf("%.0f", s["avg_recovery_time"]))))
     ln("")
     ln("  Kennzahlen"); ln(_SUBRULE)
-    fr(v) = _isna_any(v) ? "–" : r_sprintf("%+.3f", v)
+    fr(v) = _isna(v) ? "–" : r_sprintf("%+.3f", v)
     ln("  Sharpe:           " * fr(s["sharpe"]))
     ln("  Sortino:          " * fr(s["sortino"]))
     ln("  Calmar:           " * fr(s["calmar"]))
@@ -118,7 +117,7 @@ function format_result(x)
     ln("  Verteilung"); ln(_SUBRULE)
     ln(r_sprintf("  Mittel je Tag:    %+.4f%%", s["mean"] * 100))
     ln(r_sprintf("  Std.-Abw. je Tag: %.4f%%", s["sd"] * 100))
-    num3(v, metric) = _isna_any(v) ? _undef_text(x, metric) : r_sprintf("%.3f", v)
+    num3(v, metric) = _isna(v) ? _undef_text(x, metric) : r_sprintf("%.3f", v)
     ln("  Schiefe:          " * num3(s["skewness"], "skewness"))
     ln("  Wölbung:          " * num3(s["kurtosis"], "kurtosis"))
     ln("")
@@ -175,6 +174,7 @@ end
 
 "Text von `print(summary(result))` aus dem R-Paket (ohne abschließenden Zeilenumbruch)."
 function format_summary(x)
+    inherits(x, "summary.SimLevResult") || chk_stop("klasse", "format_summary", "x", "summary(<SimLevResult>)")   # seit 1.6.4
     s = x["statistics"]
     n_days = x["n_days"]
     ext = _is_true(get(x, "external_flows", false))
@@ -183,10 +183,10 @@ function format_summary(x)
     ln(""); ln(_RULE); ln("                    SimLev Zusammenfassung                    "); ln(_RULE); ln("")
     ln(r_sprintf("  Zeitraum:         %s (%.1f Jahre)", _n_tage(n_days), x["n_years"]))
     sc = get(x, "start_capital", nothing)
-    (sc !== nothing && !_isna_any(sc)) && ln(r_sprintf("  Startkapital:     %.2f EUR", sc))
+    (sc !== nothing && !_isna(sc)) && ln(r_sprintf("  Startkapital:     %.2f EUR", sc))
     ln(r_sprintf("  Depotwert Starttag: %.2f EUR", x["start_value"]))
     ln(r_sprintf("  Ende:             %.2f EUR", x["end_value"]))
-    pct(v, metric, suffix = "") = _isna_any(v) ? _undef_text(x, metric) : r_sprintf("%+.2f%%%s", v * 100, suffix)
+    pct(v, metric, suffix = "") = _isna(v) ? _undef_text(x, metric) : r_sprintf("%+.2f%%%s", v * 100, suffix)
     if ext
         ln(r_sprintf("  Eingezahlt:       %.2f EUR (Start + Sparraten)", x["invested"]))
         ln(r_sprintf("  Gesamtrendite (zeitgewichtet): %+.2f %%", x["total_return_twr"] * 100))
@@ -200,13 +200,13 @@ function format_summary(x)
         ln("  TTWROR:           " * pct(x["ttwror"], "ttwror"))
     end
     ln("")
-    fmt(v, p = false) = _isna_any(v) ? "–" : (p ? r_sprintf("%.2f%%", v * 100) : r_sprintf("%.3f", v))
+    fmt(v, p = false) = _isna(v) ? "–" : (p ? r_sprintf("%.2f%%", v * 100) : r_sprintf("%.3f", v))
     rows = ["Sharpe" => fmt(s["sharpe"]), "Sortino" => fmt(s["sortino"]), "Calmar" => fmt(s["calmar"]),
             "Omega" => fmt(s["omega"]), "Gain/Pain" => fmt(s["gain_to_pain"]), "Serenity" => fmt(s["serenity"]),
             "Martin" => fmt(s["martin_ratio"]), "Max. DD" => fmt(s["max_drawdown"], true),
             "Mittl. DD" => fmt(s["average_drawdown"], true), "Ulcer" => fmt(s["ulcer_index"]),
             "Längster DD" => r_sprintf("%d d", s["longest_drawdown"]),
-            "Mittl. Erholung" => (_isna_any(s["avg_recovery_time"]) ? "–" : r_sprintf("%.0f d", s["avg_recovery_time"]))]
+            "Mittl. Erholung" => (_isna(s["avg_recovery_time"]) ? "–" : r_sprintf("%.0f d", s["avg_recovery_time"]))]
     for (k, v) in rows
         ln("  " * rpad(k, 16) * " " * v)
     end

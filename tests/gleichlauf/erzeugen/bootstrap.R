@@ -564,7 +564,7 @@ TB("bootstrap_config", "Meldungen und Warnungen von bootstrap_config je Zeile (E
   zeile("cfg_err_letf_base_factor",
     r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = factor('a')))))",
     r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': pd.Categorical(['a'])}]))",
-    r"(result = bootstrap_config((a = "a",), letfs = [(base = ["a"],)]))", inp = list()),
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = SL.RFmt.RFactor([1], ["a"]),)]))", inp = list()),
   zeile("cfg_err_letf_lev_lgl",
     r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', leverage = TRUE))))",
     r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'leverage': True}]))",
@@ -602,6 +602,10 @@ TB("bootstrap_config", "Meldungen und Warnungen von bootstrap_config je Zeile (E
     r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'name': simlev._r.fmt.NA_REAL}]))",
     r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", name = missing,)]))", inp = list())))
 TB("bootstrap", "Meldungen und Warnungen von bootstrap je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("bs_err_method_num",   # seit 1.6.4 (K43 RS B3, Meldung mit Funktionsnamen, Entscheidung 155)
+    r"(bootstrap(data.frame(a = 1 + sin(1:50) / 100), bootstrap_config(c(a = 'a')), method = 1))",
+    r"(result = bootstrap(pd.DataFrame({'a': 1 + np.sin(np.arange(1, 51)) / 100}), bootstrap_config({'a': 'a'}), method=1))",
+    r"(result = bootstrap(RFrame("a" => 1 .+ sin.(1:50) ./ 100), bootstrap_config(Dict("a" => "a")); method = 1))", inp = list()),
   zeile("bs_garch",
     r"(cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), regime_index = 'us', aux = c(rate = 'rate'),
   letfs = list(list(base = 'eu', leverage = 2, finance = 'rate', expense = 0.5), list(base = 'us', leverage = -1, finance = 'rate', expense = 0.6)))
@@ -654,6 +658,16 @@ result = bootstrap(d, cfg, n=0))",
     r"(cfg = bootstrap_config((us = "us", eu = "eu"), regime_index = "us", aux = (rate = "rate",),
   letfs = [(base = "eu", leverage = 2, finance = "rate", expense = 0.5), (base = "us", leverage = -1, finance = "rate", expense = 0.6)])
 result = bootstrap(d, cfg; n = 0))", inp = ein("bootstrap/bs_err_n0", c("d"))),
+  zeile("bs_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), regime_index = 'us', aux = c(rate = 'rate'),
+  letfs = list(list(base = 'eu', leverage = 2, finance = 'rate', expense = 0.5), list(base = 'us', leverage = -1, finance = 'rate', expense = 0.6)))
+bootstrap(d, cfg, n = 1, cores = 0))",
+    r"(cfg = bootstrap_config({'us': 'us', 'eu': 'eu'}, regime_index='us', aux={'rate': 'rate'},
+  letfs=[{'base': 'eu', 'leverage': 2, 'finance': 'rate', 'expense': 0.5}, {'base': 'us', 'leverage': -1, 'finance': 'rate', 'expense': 0.6}])
+result = bootstrap(d, cfg, n=1, cores=0))",
+    r"(cfg = bootstrap_config((us = "us", eu = "eu"), regime_index = "us", aux = (rate = "rate",),
+  letfs = [(base = "eu", leverage = 2, finance = "rate", expense = 0.5), (base = "us", leverage = -1, finance = "rate", expense = 0.6)])
+result = bootstrap(d, cfg; n = 1, cores = 0))", inp = ein("bootstrap/bs_err_n0", c("d"))),
   zeile("bs_err_pl0",
     r"(cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), regime_index = 'us', aux = c(rate = 'rate'),
   letfs = list(list(base = 'eu', leverage = 2, finance = 'rate', expense = 0.5), list(base = 'us', leverage = -1, finance = 'rate', expense = 0.6)))
@@ -828,9 +842,21 @@ b = bootstrap(d, cfg, "stationary"; n = 2, params = (L = 20,), seed = 1, progres
 result = bootstrap_data(b; dates = Date(2001, 1, 1) .+ Day.(0:3)))", inp = ein("bootstrap/bd_err_len", c("d"))),
   zeile("bd_err_matrix",
     r"(bootstrap_data(matrix(1:4, 2, dimnames = list(NULL, c('a', 'b')))))",
-    r"(result = bootstrap_data(np.array([[1., 3], [2, 4]])))",
+    r"(result = bootstrap_data(pd.DataFrame({'a': [1, 2], 'b': [3, 4]})))",
     r"(result = bootstrap_data(SL.NamedMat([1.0 3; 2 4]; colnames = ["a", "b"])))", inp = ein("bootstrap/bd_err_matrix", c()))))
 TB("bootstrap_study", "Meldungen und Warnungen von bootstrap_study je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("study_err_method",   # seit 1.6.4 (K43 RS B3, Meldung mit Funktionsnamen, Entscheidung 155)
+    r"(bootstrap_study(data.frame(a = 1 + sin(1:50) / 100), bootstrap_config(c(a = 'a')), method = 'zz', strategies = list(s = create_strategy(a = asset_config('etf')))))",
+    r"(result = bootstrap_study(pd.DataFrame({'a': 1 + np.sin(np.arange(1, 51)) / 100}), bootstrap_config({'a': 'a'}), method='zz', strategies={'s': simlev.create_strategy(a=simlev.asset_config(asset_class='etf'))}))",
+    r"(result = bootstrap_study(RFrame("a" => 1 .+ sin.(1:50) ./ 100), bootstrap_config(Dict("a" => "a")); method = "zz", strategies = RList("s" => create_strategy(a = asset_config("etf")))))", inp = list()),
+  zeile("study_err_empty",   # seit 1.6.4 (K43 RS B3, Meldung mit Funktionsnamen, Entscheidung 155)
+    r"(bootstrap_study(data.frame(a = numeric(0)), bootstrap_config(c(a = 'a')), strategies = list(s = create_strategy(a = asset_config('etf')))))",
+    r"(result = bootstrap_study(pd.DataFrame({'a': np.array([], dtype=float)}), bootstrap_config({'a': 'a'}), strategies={'s': simlev.create_strategy(a=simlev.asset_config(asset_class='etf'))}))",
+    r"(result = bootstrap_study(RFrame("a" => Float64[]), bootstrap_config(Dict("a" => "a")); strategies = RList("s" => create_strategy(a = asset_config("etf")))))", inp = list()),
+  zeile("study_err_col",   # seit 1.6.4 (K43 RS B3, Meldung mit Funktionsnamen, Entscheidung 155)
+    r"(bootstrap_study(data.frame(a = 1 + sin(1:50) / 100), bootstrap_config(c(b = 'b')), strategies = list(s = create_strategy(a = asset_config('etf')))))",
+    r"(result = bootstrap_study(pd.DataFrame({'a': 1 + np.sin(np.arange(1, 51)) / 100}), bootstrap_config({'b': 'b'}), strategies={'s': simlev.create_strategy(a=simlev.asset_config(asset_class='etf'))}))",
+    r"(result = bootstrap_study(RFrame("a" => 1 .+ sin.(1:50) ./ 100), bootstrap_config(Dict("b" => "b")); strategies = RList("s" => create_strategy(a = asset_config("etf")))))", inp = list()),
   zeile("study_errfail",
     r"(bootstrap_study(ds, bootstrap_config(c(akt = 'aktien'), input = 'prices'), 'raw', n = 2, path_length = 100, seed = 1, progress = FALSE, strategies = list(sig = list(strategy = create_strategy(akt = asset_config('etf', 'signal', signal_buy = 'b', signal_sell = 's', spread = 0.1)), signal = function(df) stop('Spalte fehlt')))))",
     r"(def bad(df):
@@ -1083,6 +1109,14 @@ import tempfile, os
 result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=1, progress=False, keep_paths=-1, strategies={'b': bnh}))",
     r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
 result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 1, progress = false, keep_paths = -1, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
+  zeile("study_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
+bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 1, progress = FALSE, cores = 0, strategies = list(b = bnh)))",
+    r"(cfgb = bootstrap_config({'akt': 'aktien'}, input='prices'); bnh = simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))
+import tempfile, os
+result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=1, progress=False, cores=0, strategies={'b': bnh}))",
+    r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
+result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 1, progress = false, cores = 0, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
   zeile("study_err_chunk_alt",
     r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
 td <- tempfile(); dir.create(td); file.create(file.path(td, 'chunk_00001_seed2.rds'))
@@ -1094,7 +1128,7 @@ result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=2, chunk_di
     r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
 td = mktempdir(); touch(joinpath(td, "chunk_00001_seed2.rds"))
 result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = false, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
-  zeile("study_err_chunk_jl",
+  zeile("study_err_chunk_jl",   # Datei von Julia: fremd für R und Python (für Julia die eigene, leere Datei; seit 1.6.4 nur Python, T2-R15)
     r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
 td <- tempfile(); dir.create(td); file.create(file.path(td, 'chunk_00001_seed2_jl.bin'))
 bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = FALSE, strategies = list(b = bnh)))",
@@ -1104,7 +1138,18 @@ td = tempfile.mkdtemp(); open(os.path.join(td, 'chunk_00001_seed2_jl.bin'), 'w')
 result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=2, chunk_dir=td, progress=False, strategies={'b': bnh}))",
     r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
 td = mktempdir(); touch(joinpath(td, "chunk_00001_seed2_jl.bin"))
-result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = false, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
+result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = false, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds")), nur = "py"),
+  zeile("study_err_chunk_py",   # Datei von Python: fremd für R und Julia (seit 1.6.4, T2-R15)
+    r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
+td <- tempfile(); dir.create(td); file.create(file.path(td, 'chunk_00001_seed2_py.pkl'))
+bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = FALSE, strategies = list(b = bnh)))",
+    r"(cfgb = bootstrap_config({'akt': 'aktien'}, input='prices'); bnh = simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))
+import tempfile, os
+td = tempfile.mkdtemp(); open(os.path.join(td, 'chunk_00001_seed2_py.pkl'), 'w').close()
+result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=2, chunk_dir=td, progress=False, strategies={'b': bnh}))",
+    r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
+td = mktempdir(); touch(joinpath(td, "chunk_00001_seed2_py.pkl"))
+result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = false, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds")), nur = "jl"),
   zeile("study_metrics_fail",
     r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
 bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 1, progress = FALSE, metrics = function(res) NULL, strategies = list(a = bnh)))",

@@ -27,10 +27,12 @@ den Spalten aus \code{config}, Format wie bei \code{\link[=bootstrap]{bootstrap(
 \item{config}{Konfiguration aus \code{\link[=bootstrap_config]{bootstrap_config()}}.}
 
 \item{ids}{Ganzzahliger Vektor von \code{id}-Werten aus \code{x$results};
-\code{NULL} (Standard) = die \code{top} besten Punkte nach \code{by}.}
+\code{NULL} (Standard) = die \code{top} besten Punkte nach \code{by}.
+Seit 1.6.4 nur vorhandene id-Werte ohne Doppel.}
 
 \item{top}{Anzahl bester Punkte (ganze Zahl, Standard 5); nur ohne
-\code{ids}.}
+\code{ids}.
+Seit 1.6.4 ganze Zahl >= 1.}
 
 \item{by}{Rangfolge fuer \code{top}: \code{"objective"} (Standard,
 Zielgroesse der Suche) oder \code{"plateau"} (\code{plateau_mean} aus
@@ -49,7 +51,8 @@ keine.}
 
 \item{...}{Weitere Argumente fuer \code{\link[=bootstrap_study]{bootstrap_study()}}, z. B.
 \code{method}, \code{n} (Anzahl Pfade), \code{params}, \code{seed},
-\code{cores}, \code{progress}, \code{sim_args}, \code{burn_in}.}
+\code{cores}, \code{progress}, \code{sim_args}, \code{burn_in}.
+Seit 1.6.4 nur Argumente von bootstrap_study(); unbekannte oder doppelte Namen sind ein Fehler.}
 }
 \value{
 Objekt der Klasse \code{SimLevBootstrapStudy} (siehe

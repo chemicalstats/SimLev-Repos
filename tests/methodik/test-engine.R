@@ -1147,7 +1147,7 @@ test_that("start nach dem letzten Datentag ist ein Fehler", {
   st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0),
                         B = asset_config("etf", "bnh", share = 0.5, spread = 0, start = as.Date("2022-01-01")))
   tabelle("start nach dem letzten Datentag ist ein Fehler",
-    pruef(expect_error(simulation(df, st, start_value = 1e4), "start von 'B' \\(2022-01-01\\) liegt nach dem letzten Datentag \\(2021-03-31\\)"),
+    pruef(expect_error(simulation(df, st, start_value = 1e4), "start von 'B' liegt nach dem letzten Datentag \\(2021-03-31\\)"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(simulation(df, st, start_value = 1e4, rebalance = rebalance_plan(unit = "quarter")), "start von 'B'"),
           quelle = "Handrechnung (Herleitung im Test)"))
@@ -1194,25 +1194,28 @@ test_that("Kirchensteuer auf § 23-Steuer und persoenlichen Satz, Abgeltungsteue
 })
 
 # ---------------------------------------------------------------------------
-# NA im Basiszins = 0 unabhaengig von der Datenform
+# Basiszins 0 am ersten Handelstag unabhaengig von der Datenform; seit 1.6.4 (Entscheidung 17) ist NA im Basiszins ein
+# Fehler (bis 1.6.3 still 0), Jahre ohne Basiszins werden als 0 angegeben
 # ---------------------------------------------------------------------------
-test_that("NA im Basiszins am ersten Handelstag ergibt in beiden Datenformen keine VP", {
-  run <- function(d, na = TRUE) {
+test_that("Basiszins 0 am ersten Handelstag ergibt in beiden Datenformen keine VP; NA ist ein Fehler", {
+  run <- function(d, wert = 0) {
     df <- data.frame(date = d, A = .er_lin(d, c("2020-01-01", "2020-12-31", "2021-02-26"), c(100, 110, 110)), BR = 2)
-    if (na) df$BR[df$date == as.Date("2020-01-02")] <- NA
+    if (!is.null(wert)) df$BR[df$date == as.Date("2020-01-02")] <- wert
     df <- df[df$date != as.Date("2020-01-01"), ]
     .er_sim(df, create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0)), start_value = 1e6, tax = tax_profile(base_rate = "BR"))
   }
   d <- .er_days("2020-01-01", "2021-02-26"); dt <- d[!format(d, "%u") %in% c("6", "7")]
-  tabelle("NA im Basiszins am ersten Handelstag ergibt in beiden Datenformen keine VP",
+  tabelle("Basiszins 0 am ersten Handelstag ergibt in beiden Datenformen keine VP; NA ist ein Fehler",
     wert(run(d)$tax_report$total_taxes_paid,
          0,
          quelle = "Handrechnung (Herleitung im Test)"),
     wert(run(dt)$tax_report$total_taxes_paid,
          0,
          quelle = "vorher 3428,75 (LOCF-Rueckfuellung)"),
-    pruef(expect_gt(run(dt, na = FALSE)$tax_report$total_taxes_paid, 0),
-          quelle = "Kontrolle: mit Basiszins VP"))
+    pruef(expect_gt(run(dt, wert = NULL)$tax_report$total_taxes_paid, 0),
+          quelle = "Kontrolle: mit Basiszins VP"),
+    pruef(expect_error(run(d, wert = NA), "Spalte 'BR' darf kein NA enthalten"),
+          quelle = "seit 1.6.4 Fehler (Entscheidung 17; bis 1.6.3 still 0)"))
 })
 
 # ---------------------------------------------------------------------------
@@ -1580,9 +1583,9 @@ test_that("dca_value/dca_span m\u00fcssen einzelne endliche Zahlen sein", {
   for (v in list(c(100, 200), NA_real_, "100", 0, -5, Inf, NULL))
     expect_error(dca_plan(value = v, span = 1), "dca_plan: 'value' muss eine einzelne endliche Zahl > 0 sein")
   for (v in list(c(1, 2), NA_real_, 1.5, 0, "1"))
-    expect_error(dca_plan(value = 100, span = v), "dca_plan: 'span' muss eine einzelne ganze Zahl >= 1 sein")
+    expect_error(dca_plan(value = 100, span = v), "dca_plan: span muss eine ganze Zahl von 1 bis 2147483647 sein")   # seit K43 T1-R6 eine Meldung (ganz_bis)
   tabelle("dca_value/dca_span müssen einzelne endliche Zahlen sein",
-    pruef(expect_error(dca_plan(100), "dca_plan: 'span' muss .* nicht NULL"),
+    pruef(expect_error(dca_plan(100), "dca_plan: span muss eine ganze Zahl von 1 bis 2147483647 sein"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_s3_class(.er_sim(d, st, dca = dca_plan(value = 100, span = 2)), "SimLevResult"),
           quelle = "Handrechnung (Herleitung im Test)"))

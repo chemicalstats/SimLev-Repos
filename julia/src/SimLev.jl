@@ -34,6 +34,7 @@ include("r/rnum.jl")
 include("r/libm.jl")
 include("r/base.jl")
 include("r/parallel.jl")     # .par_lapply (Threads), Ausgaben je Aufgabe
+include("r/wctype.jl")       # glibc-Zeichenklassen alpha, alnum, print (seit 1.6.4; C-026, C-047)
 include("r/fmt.jl")
 include("r/rformat.jl")      # seit 1.5.2 nach fmt.jl: Runden und formatReal aus RFmt
 include("meldungen.jl")       # Meldungstabellen der Kerne (erzeugt aus core/meldungen.tsv, seit 1.6.0)
@@ -41,6 +42,7 @@ include("r/stats.jl")
 include("r/linalg.jl")
 include("r/rexpr.jl")
 include("util.jl")           # interne Hilfen mehrerer Module (match.arg, which.max; seit 1.6.1)
+include("pruefen.jl")        # einheitliche Eingabeprüfung (Tabelle eingabe; seit 1.6.4)
 
 # Engine: simulation() mit Strategie, Config, Ergebnis und Dashboard
 include("dates.jl")

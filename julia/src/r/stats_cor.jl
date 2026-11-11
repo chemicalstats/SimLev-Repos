@@ -36,38 +36,18 @@ function _as_cov_input(x)
 end
 _is_matlike(x) = x isa RFrame || x isa AbstractMatrix
 
-"R's `cor`/`cov` mit `use` als Zahl 1–5 (C-Kern `sl_r_cov`)."
-function _corcov(x, y, method_na::Int, kendall::Bool, cor::Bool)
-    X, xmat, xcn = _as_cov_input(x)
-    n, ncx = size(X)
-    ansmat = xmat
-    if y === nothing
-        Y = nothing; ncy = ncx; ycn = nothing
-    else
-        Y, ymat, ycn = _as_cov_input(y)
-        size(Y, 1) != n && error("incompatible dimensions")
-        ymat && (ansmat = true)
-        ncy = size(Y, 2)
-    end
-    1 <= method_na <= 5 || error("invalid 'use' (computational method)")
-    (method_na == 2 && isempty(X)) && error("no complete element pairs")
-    (method_na in (1, 2, 3) && isempty(X)) && error("'x' is empty")
-    ans, sd0 = SimLev._rb_cov(vec(Matrix{Float64}(X)), n, ncx, Y === nothing ? nothing : vec(Matrix{Float64}(Y)), ncy,
-                              method_na, kendall, cor)
-    sd0 && @warn "the standard deviation is zero"
-    if ansmat
-        return y === nothing ? _out(ans, xcn, xcn) : _out(ans, xcn, ycn)
-    end
-    return _vec_out(vec(ans))
-end
-
 const _COR_METHODS = Dict("pearson" => 0, "kendall" => 1, "spearman" => 2)
 
-"R's `cor`/`cov` (C-Kern `sl_r_cor`, seit 1.6.0: Ränge, NA-Regeln und paarweise Rangkorrelation im Kern)."
-function _cor_cov(x, y, use, method, cor::Bool)
+"""R's `cor`/`cov` (C-Kern `sl_r_cor`, seit 1.6.0: Ränge, NA-Regeln und paarweise Rangkorrelation im Kern).
+`need_xy = false` (`var`): ein Vektor ohne `y` ist erlaubt (seit 1.6.4 rechnet `var` hierüber statt über eine eigene
+Fassung `_corcov` mit `sl_r_cov`; mit method = 0 prüft `sl_r_cor` dasselbe und rechnet `sl_r_cov`)."""
+function _cor_cov(x, y, use, method, cor::Bool; need_xy::Bool = true)
     na_method = _pmatch_use(use)
-    haskey(_COR_METHODS, method) || error("'arg' should be one of “pearson”, “kendall”, “spearman”")
-    (!_is_matlike(x) && y === nothing) && error("supply both 'x' and 'y' or a matrix-like 'x'")
+    # seit 1.6.4 wie R match.arg (RP, C-056): Teilnamen ("k", "s"); bis 1.6.3 nur volle Namen
+    method = SimLev.RFmt._r_match_arg(method, ("pearson", "kendall", "spearman"))
+    (need_xy && !_is_matlike(x) && y === nothing) && error("supply both 'x' and 'y' or a matrix-like 'x'")
+    # NULL wie R 4.3.3 (seit 1.6.4, K43 RS; bis dahin NA bzw. „incompatible dimensions“); var: C_cov
+    x === nothing && error(!need_xy ? "'x' is NULL" : cor ? "'x' must be numeric" : "is.numeric(x) || is.logical(x) is not TRUE")
     X, xmat, xcn = _as_cov_input(x)
     n, ncx = size(X)
     ansmat = xmat
@@ -101,12 +81,12 @@ cov(x, y = nothing; use::AbstractString = "everything", method::AbstractString =
 "`var(x, y, na.rm, use)`."
 function var(x, y = nothing; na_rm::Bool = false, use = nothing)
     use === nothing && (use = na_rm ? "na.or.complete" : "everything")
-    return _corcov(x, y, _pmatch_use(use), false, false)
+    return _cor_cov(x, y, use, "pearson", false; need_xy = false)
 end
 
 "`sd(x, na.rm)` = `sqrt(var(x, na.rm))`."
 function sd(x; na_rm::Bool = false)
-    x = _is_matlike(x) ? _v(x) : x
+    x = _is_matlike(x) ? _v(x) : x === nothing ? Float64[] : x   # NULL: R as.double(NULL) = numeric(0), also NA (K43 RS)
     v = var(x; na_rm = na_rm)
     return isnan(v) ? v : _csqrt(v)
 end

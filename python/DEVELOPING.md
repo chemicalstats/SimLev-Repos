@@ -47,10 +47,7 @@ künftig nur lokal liegen (dort Abschnitt „Lokal aufbewahren“); Bauen, `pip 
   nur `fround.c`/`fprec.c`, `src/library/stats`, `src/library/base`; Liste in
   [`COPYRIGHTS.md`](COPYRIGHTS.md)).
 - Referenzfälle erzeugt R 4.3.3 mit dem installierten R-Paket SimLev
-  und `jsonlite`; kein Generator braucht ein weiteres Paket. Die Module
-  `gen_evd.R`, `gen_imputets.R`, `gen_rugarch.R`, `gen_r_nmath.R`, `gen_r_rng.R`,
-  `gen_r_linalg.R` und `gen_r_nlminb.R` prüfen entfallene Nachbildungen und sind aus dem
-  Gleichlauf ausgenommen. MS-GARCH, GARCH, GPD, DCC und die Bootstrap-Kerne
+  und `jsonlite`; kein Generator braucht ein weiteres Paket. MS-GARCH, GARCH, GPD, DCC und die Bootstrap-Kerne
   rechnet die C-Bibliothek (`simlev._lib_models`).
 - Bitgleichheit setzt Linux x86-64 (80-Bit-`long double`), glibc-libm und denselben Compiler
   mit denselben Flags für die C-Bibliothek voraus (seit 1.0.0 keine System-LAPACK mehr).
@@ -186,9 +183,9 @@ rechnet; `bootstrap`, `bootstrap_study`, `param_search` (auch über
 `sensitivity_rebalancing`, `planning_lumpsum_vs_dca` und `sensitivity_leverage` rufen
 sie auf. Sie bildet `parallel::mclapply(mc.preschedule = FALSE, mc.set.seed =
 FALSE)` nach (Verhalten in R 4.3.3). R bündelt die
-Einheiten seit 0.9.1 in höchstens `4 × cores` Pakete (ein Fork je Paket)
-mit denselben Ergebnissen, demselben Zufallszustand und denselben Fehlern;
-innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
+Einheiten in Pakete (ein Fork je Paket; seit 1.6.4 bei fester Zahl wie bei `"auto"` höchstens `2 × c` Pakete über
+`.par_auto_fork`, bis dahin `mclapply` mit höchstens `4 × cores` Paketen) mit denselben Ergebnissen und demselben
+Zufallszustand; Ausgaben, Warnungen und Fehler erscheinen dort wie mit `cores = 1`.
 
 - `cores` wird wie in `mclapply` ganzzahlig abgeschnitten; unter zwei Kernen
   oder mit höchstens einem Element ist es `lapply`.
@@ -200,14 +197,24 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
   liegt vor dem Fork in `_JOB`, an die Kinder gehen nur Indizes, zurück
   gepickelte Ergebnisse. Nicht pickelbare Ergebnisse (etwa mit Closures)
   rechnet der Elternprozess selbst nach, mit demselben Zufallszustand.
-- `sys.stdout`/`sys.stderr` eines Kinds werden eingefangen und im
-  Elternprozess in Einheitenreihenfolge ausgegeben; Warnungen gehen verloren
-  (wie in R); beim ersten Fehler (in Einheitenreihenfolge) erscheinen die
-  Ausgaben der Einheiten davor, dann wird der Fehler geworfen (wie bei
-  `cores = 1`; R liefert ein `try-error`-Element).
-- Ohne Fork (Windows, macOS) rechnet `_sequential` nacheinander mit
-  derselben Semantik. Python ≥ 3.12 warnt bei `fork()` mit laufenden
-  Threads (BLAS); `par_lapply` unterdrückt diese `DeprecationWarning`.
+- `sys.stdout`/`sys.stderr` und Warnungen eines Kinds werden eingefangen und im
+  Elternprozess in Einheitenreihenfolge wiedergegeben (seit 1.6.4, Entscheidung 133, auch bei fester Zahl: derselbe
+  Weg `_forked` wie `"auto"`, nur ohne Messung; bis dahin gingen Warnungen bei fester Zahl verloren); beim ersten
+  Fehler (in Einheitenreihenfolge) erscheinen die Ausgaben der Einheiten davor, dann wird der Fehler geworfen (wie bei
+  `cores = 1`; R ebenso seit 1.6.4, bis dahin bei fester Zahl ein `try-error`-Element).
+- Ohne Fork (Windows, macOS) rechnet `par_lapply` nacheinander wie mit `cores = 1`. Python ≥ 3.12 warnt bei
+  `fork()` mit laufenden Threads (BLAS) mit einer `DeprecationWarning`, die die Standardfilter nicht zeigen.
+
+**`cores = "auto"` (Standard seit 1.6.4, Entscheidungen 41b/41c, 112):** `par_lapply` ruft `_auto`. Die ersten
+Einheiten laufen nacheinander im Elternprozess, bis die Startzeit eines weiteren Laufs vergangen ist
+(`_lib.par_probe`, mindestens zwei Einheiten); dann wählt der Planer im Kern (`sl_par_plan`, `core/slc_prep.cpp`,
+gleiche Regel wie R und Julia) Läufe und Kern-Threads je Lauf aus der Zahl der freien Prozessoren (Prozessoren minus
+andere laufende Prozesse; seit Entscheidung 139 ohne die mit niedrigerer Priorität, also größerem `nice`), dem freien Speicher, der gemessenen Rechenzeit je Einheit, der Ergebnisgröße und den
+gemessenen Startkosten (Konstanten im Kern; Fork-Kosten wachsen mit dem Speicher des eigenen Prozesses). Bei c > 1
+schneidet `_forked(record=True)` im Kind auch die Warnungen und Änderungen der Warnungsfilter mit; der Elternprozess
+gibt sie in Elementreihenfolge über `warnings.warn_explicit` mit dem Register des auslösenden Moduls wieder, so dass
+Ausgaben, Warnungen und Fehler wie bei `cores = 1` erscheinen. Testschalter (nicht öffentlich): `SIMLEV_TEST_RUNNING`
+(Zahl der laufenden Prozesse) und die Argumente von `_lib.par_plan` (Zahl der Prozessoren, Speicher, Last).
 
 **Regeln für neue Module (Prozess-Sicherheit):**
 
@@ -253,7 +260,7 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 | `bootstrap.R` (Kerne `.sl_boot_*` in der C-Bibliothek) | `bootstrap.py` (`simlev._lib_models.boot_*`) |
 | `ms_garch.R` (Kern `.sl_ms_garch_fit` in der C-Bibliothek) | `ms_garch.py` (`simlev._lib_models`) |
 | `withdrawal.R`, `withdrawal_core.cpp` | `withdrawal.py`, `_withdrawal_core.py` |
-| `dependence.R`; `.kendall_tau_core`, `.quantile_reg_core`, `.hmm_forward_backward` aus `research_core.cpp`; DCC in der C-Bibliothek | `dependence.py`, `_dependence_core.py` (Hüllen um `simlev._ext`) |
+| `dependence.R`; `.kendall_tau_core`, `.quantile_reg_core`, `.hmm_em_core` aus `research_core.cpp`; DCC in der C-Bibliothek | `dependence.py`, `_dependence_core.py` (Hüllen um `simlev._ext`) |
 | `regimes.R` | `regimes.py` |
 | `scenarios.R` | `scenarios.py` |
 | `optimize.R`; `.proj_box_simplex`, `.qp_box_simplex`, `.min_cvar_core`, `.min_cdar_core` aus `research_core.cpp` | `optimize.py`, `_optimize_core.py` |
@@ -349,8 +356,6 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
   `engine_stress.R` ergeben 669/669. Die neuen Argumente (order_fee, dca_fee,
   church_tax, harvest_*, taxable_income, tax_tariff) wurden zusätzlich in
   750 Fällen voll verglichen.
-- Die R-Tests der Engine sind nach `tests/test_*engine*.py`, `test_tax*.py`,
-  `test_simulation.py`, `test_config.py` und `test_dashboard.py` portiert.
 - Diese Zahlen beschreiben den Stand vor 1.0.0. Der Gleichlauf
   (`tests/werkzeuge/gleichlauf/run.py --full`) ergab am 27.10.2026 Engine 1.182/1.182 und Module
   4.260/4.260. Seit 1.4.2 prüfen die Szenarien und Tabellen in `tests/` (siehe [Tests](#tests)).
@@ -554,7 +559,9 @@ ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/REA
 
 Alle Umgebungsschalter liest (und setzt) `simlev/_r/env.py`; Paket,
 Tests und Werkzeuge holen sie von dort. Ausnahme: `SIMLEV_THREADS` (Threads der elementweisen Kerne,
-seit 1.6.0) liest `simlev/_lib.py` (`nthreads`) direkt.
+seit 1.6.0; seit 1.6.4 höchstens und ohne Angabe Zahl der Prozessoren, mindestens 1, mehr mit Hinweis begrenzt; in jedem
+Kindprozess von `par_lapply` höchstens Prozessoren // Kinder)
+liest `simlev/_lib.py` (`nthreads`) direkt.
 Wann gelesen wird, bestimmt die aufrufende Stelle: `tests/lib/reftree.py` und
 `tests/werkzeuge/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich.
 
@@ -571,7 +578,7 @@ Seit 1.0.0 entfallen `SIMLEV_NO_EXT` (die C-Erweiterung ist Pflicht),
 
 `tests/lib/reftree.py` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
 Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/gleichlauf/erzeugen/`
-lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
+lesen eigene Schalter (u. a. `SIMLEV_FAELLE_DIR`, `SIMLEV_GEN_ALLE`, `SIMLEV_GEN_SUBSET`; siehe
 `tests/README.md`).
 
 ## C-Erweiterung

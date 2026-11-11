@@ -136,7 +136,14 @@ erzwingt einen R-Typ (z. B. "integer" für ganzzahlige Werte als Float64).
 """
 function print_vector(x; names = nothing, digits = nothing, quote_ = nothing, right = false, type = nothing)
     v = _as_v(x, type)
-    names !== nothing && (v.names = _strnames(names))
+    if names !== nothing
+        nm = _strnames(names)
+        # seit 1.6.4 wie R names<- (C-058): zu lange Namen sind ein Fehler, zu kurze werden mit NA ergänzt
+        length(nm) > length(v) &&
+            error("'names' attribute [$(length(nm))] must be the same length as the vector [$(length(v))]")
+        v.names = vcat(nm, _Str[nothing for _ in 1:(length(v) - length(nm))])
+    end
+    digits = _chk_digits(digits, :print)   # seit 1.6.4 wie R print.default (C-012, Entscheidung 77)
     return join(_print_vec_v(v, digits, quote_, right), "\n")
 end
 
@@ -252,7 +259,9 @@ function _matrix_lines(cols::Vector{_V}, ctype::Symbol, r::Int, c::Int, rl, cl, 
     function head()
         cn !== nothing && push!(lines, " "^rlabw * cn)
         if rn !== nothing
-            return _strwid(rn) < rlabw ? rn * " "^(rlabw - length(rn)) : rn
+            # seit 1.6.4 wie R printMatrix (C-038): Rprintf("%*s", -rlabw, rn) füllt nach Bytes auf (bis 1.6.3 nach
+            # Zeichen: bei Umlauten ein Leerzeichen mehr als R)
+            return rn * " "^max(0, rlabw - ncodeunits(rn))
         end
         return " "^rlabw
     end
@@ -312,6 +321,10 @@ function print_matrix(m; rownames = nothing, colnames = nothing, quote_ = true, 
     rownames !== nothing && (rl = _strnames(rownames))
     colnames !== nothing && (cl = _strnames(colnames))
     r, c = size(a)
+    for (k, lab, ext) in ((1, rl, r), (2, cl, c))   # seit 1.6.4 wie R dimnames<- (C-058)
+        lab !== nothing && length(lab) != ext && error("length of 'dimnames' [$k] not equal to array extent")
+    end
+    digits = _chk_digits(digits, :print)   # seit 1.6.4 wie R print.default (C-012, Entscheidung 77)
     whole = length(a) == 0 && type === nothing ? _Vl(Bool[], Bool[]) : _as_v(vec(a), type)
     ctype = whole.type
     if ctype === :factor
@@ -362,6 +375,7 @@ function print_data_frame(df; row_names = true, digits = nothing, right = true, 
         return print_vector(names(df); quote_ = false) * "\n<0 rows> (or 0-length row.names)"
     end
     nms = names(df)
+    digits = _chk_digits(digits)   # seit 1.6.4 wie R format() je Spalte (C-012, Entscheidung 77)
     cols = [_fmt_column(getfield(df, :cols)[j]; digits, type = types === nothing ? nothing : get(types, nms[j], nothing))
             for j in 1:nc]
     rl = row_names === true ? _df_rownames(df) :
@@ -394,7 +408,7 @@ end
 # Objekt mit registrierter print-Methode (S3-Klasse)?
 function _own_printer(x)
     (x isa SimLev.RList || x isa SimLev.RFrame || x isa SimLev.RVector) || return nothing
-    return SimLev._dispatch(SimLev._PRINTERS, x, "print")
+    return SimLev._dispatch(SimLev._PRINTERS, x)
 end
 
 _is_list(x) = x isa SimLev.RList || x isa Tuple || (x isa AbstractVector && eltype(x) === Any) || x isa AbstractDict
@@ -426,6 +440,9 @@ end
 
 function _print_list_lines(x, tag = "", digits = nothing, quote_ = nothing)
     items, named = _list_items(x)
+    # seit 1.6.4 wie R (C-042): eine leere RList ist list() wie R's list(); "named list()" nur mit dem Merker
+    # attrs(x)["names"] (wie setNames(list(), character(0))); bis 1.6.3 jede leere RList "named list()"
+    isempty(items) && x isa SimLev.RList && return [haskey(getfield(x, :attrs), "names") ? "named list()" : "list()"]
     isempty(items) && return [named ? "named list()" : "list()"]
     lines = String[]
     for (i, (nm, val)) in enumerate(items)
@@ -473,13 +490,8 @@ end
 # ── Standarddruck für RList/RFrame (SimLev._DEFAULT_PRINT) ────────────────
 
 function _default_print(io::IO, x)
-    if x isa SimLev.RFrame
-        cls = SimLev.r_class(x)
-        if isempty(cls) || "data.frame" in cls
-            print(io, print_data_frame(x))
-        else
-            print(io, print_data_frame(x))
-        end
+    if x isa SimLev.RFrame                    # mit und ohne Klasse data.frame gleich (seit 1.6.4 ohne die Verzweigung)
+        print(io, print_data_frame(x))
     elseif x isa SimLev.RList
         print(io, join(_print_list_lines(x), "\n"))
     else

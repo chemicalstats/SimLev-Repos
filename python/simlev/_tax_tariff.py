@@ -18,11 +18,10 @@ from typing import Any
 import pandas as pd
 
 from ._r.rformat import r_format1, r_signif, r_sprintf
-from ._r.rnum import NA_REAL
+from ._r.rlist import _PrintFormat
+from ._pruefen import chk_as_num, chk_stop
 
 __all__ = ["SimLevTaxTariff", "tax_tariff", "default_tariff_file"]
-
-_NUM_RE = re.compile(r"^\s*[-+]?((\d+\.?\d*|\.\d+)([eE][-+]?\d+)?|0[xX][0-9a-fA-F]+|Inf|inf|NaN|NA)\s*$")
 
 
 def default_tariff_file() -> str:
@@ -31,23 +30,9 @@ def default_tariff_file() -> str:
 
 
 def _as_numeric(s: Any) -> float:
-    """``as.numeric()`` für eine Zeichenkette (NA bei ungültigem Text)."""
-    if s is None:
-        return NA_REAL
-    s = str(s)
-    if not _NUM_RE.match(s):
-        return NA_REAL
-    t = s.strip()
-    if t == "NA":
-        return NA_REAL
-    if t == "NaN":
-        return math.nan
-    if t.lstrip("+-").lower().startswith("0x"):
-        sign = -1.0 if t.startswith("-") else 1.0
-        return sign * float(int(t.lstrip("+-"), 16))
-    if t.lstrip("+-") in ("Inf", "inf"):
-        return -math.inf if t.startswith("-") else math.inf
-    return float(t)
+    """``as.numeric()`` für eine Zeichenkette (NA bei ungültigem Text); seit 1.6.4 nur ASCII-Ziffern und -Leerraum
+    (A-038, Entscheidung 27), gemeinsame Hilfe :func:`simlev._pruefen.chk_as_num`."""
+    return chk_as_num(s)
 
 
 def _split_csv_line(line: str) -> list[str]:
@@ -74,10 +59,10 @@ def _split_csv_line(line: str) -> list[str]:
             cur.append(ch)
         i += 1
     out.append("".join(cur))
-    return [x.strip() for x in out]
+    return [x.strip(" \t") for x in out]   # wie read.csv(strip.white = TRUE): nur Leerzeichen und Tabulator
 
 
-class SimLevTaxTariff:
+class SimLevTaxTariff(_PrintFormat):
     """Einkommensteuertarif (R-Klasse ``SimLevTaxTariff``).
 
     Felder wie in R: ``zones`` (``pandas.DataFrame`` mit ab, bezug, teiler, a, b, c),
@@ -125,10 +110,6 @@ class SimLevTaxTariff:
 
     __str__ = __repr__
 
-    def print(self) -> "SimLevTaxTariff":
-        print(self.format())
-        return self
-
 
 def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
     """Einkommensteuertarif (§ 32a Abs. 1 EStG) und Soli (§§ 3, 4 SolZG) aus einer CSV-Datei lesen.
@@ -142,6 +123,8 @@ def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
     Args:
         file: Zeichenkette oder None. Pfad der Tarifdatei; None = mitgelieferte Datei ``system.file("extdata",
             "steuertarif.csv", package = "SimLev")``.
+            Zahlen der Datei seit 1.6.4 nur mit ASCII-Ziffern und -Leerzeichen, unabhängig von der Spracheinstellung
+            (z. B. ein geschütztes Leerzeichen ist ein Fehler); ein UTF-8-BOM am Anfang wird übergangen.
 
     Returns:
         Objekt der Klasse "SimLevTaxTariff" (Liste) mit ``zones`` (DataFrame ab, bezug, teiler, a, b, c), ``soli``
@@ -164,7 +147,8 @@ def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
         der Grenzsteuersatz als Anteil (``0.42`` für 42 %, nicht 42); die Soli-Sätze dagegen in Prozent (``5.5``
         für 5,5 %).
 
-        Geprüft wird: Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV, bzw. hat eine
+        Geprüft wird (seit 1.6.4 auch: kein Ordner, Kodierung UTF-8, ein UTF-8-BOM am Anfang wird übergangen,
+        geschlossene Anführungszeichen, keine Pflichtspalte doppelt, Zahlen nur mit ASCII-Ziffern): Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV, bzw. hat eine
         Zeile mehr Felder als die Kopfzeile, z. B. Dezimalkomma: Fehler mit Hinweis), Pflichtspalten vorhanden,
         ``art`` nur "zone" oder "soli", alle benötigten Werte numerisch und endlich, ``teiler > 0``, Zonen streng
         aufsteigend mit erster Zone ab 0, genau eine soli-Zeile mit Sätzen von 0 bis 100. Plausibilität: Der
@@ -223,31 +207,50 @@ def _tax_tariff_read(file) -> tuple:
     file = os.fspath(file)
     if not os.path.exists(file):
         raise ValueError("tax_tariff: Datei '%s' nicht gefunden." % file)
-    with open(file, encoding="utf-8") as fh:
-        raw = fh.read().splitlines()
+    # seit 1.6.4 (A-071, A-037): Ordner, Kodierung und Anführungszeichen vorab mit Meldung; ein UTF-8-BOM am
+    # Dateianfang (Excel "CSV UTF-8") wird übergangen
+    if os.path.isdir(file):
+        chk_stop("e1.tarif_ordner", "tax_tariff", file)
+    with open(file, "rb") as fh:
+        rawb = fh.read()
+    try:
+        txt = rawb.decode("utf-8")
+    except UnicodeDecodeError:
+        chk_stop("e1.tarif_utf8", "tax_tariff", file)
+    if txt.startswith("\ufeff"):
+        txt = txt[1:]
+    raw = txt.splitlines()
     gl = [ln for ln in raw if re.match(r"^#\s*Geltung\s*:", ln)]
-    geltung = re.sub(r"^#\s*Geltung\s*:", "", gl[0]).strip() if gl else None
-    body = [re.sub(r"#.*$", "", ln).strip() for ln in raw]
+    # seit 1.6.4 (K43 T1-N6) wie R's trimws nur [ \t\r\n] abschneiden (bis dahin auch Unicode-Leerraum,
+    # Entscheidung 27)
+    geltung = re.sub(r"^#\s*Geltung\s*:", "", gl[0]).strip(" \t\r\n") if gl else None
+    body = [re.sub(r"#.*$", "", ln).strip(" \t\r\n") for ln in raw]
     body = [ln for ln in body if ln]
     if body:
+        if any(ln.count('"') % 2 == 1 for ln in body):
+            chk_stop("e1.tarif_quote", "tax_tariff", file)
         nf = [ln.count(",") + 1 for ln in body]
+        # seit 1.6.4 ohne die Zeileninhalte (Entscheidung 8); die Datenzeile bleibt als Ort
         if nf[0] == 1:
             raise ValueError(
-                "tax_tariff: In '%s' wurde nur eine Spalte gelesen (Kopfzeile '%s'). Erwartet wird Komma als "
+                "tax_tariff: In '%s' wurde nur eine Spalte gelesen. Erwartet wird Komma als "
                 "Trennzeichen%s und Punkt als Dezimalzeichen, z. B. 'zone,69879,0,1,0,0.42,-11135.63'."
-                % (file, body[0], " (die Datei verwendet offenbar Semikolon, z. B. aus deutschem Excel)"
+                % (file, " (die Datei verwendet offenbar Semikolon, z. B. aus deutschem Excel)"
                    if ";" in body[0] else ""))
         for i in range(1, len(nf)):
             if nf[i] != nf[0]:
                 raise ValueError(
-                    "tax_tariff: In '%s' hat die Zeile '%s' %d Felder, die Kopfzeile %d. Dezimalzeichen ist der "
-                    "Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen." % (file, body[i], nf[i], nf[0]))
+                    "tax_tariff: In '%s' hat Datenzeile %d insgesamt %d Felder, die Kopfzeile %d. Dezimalzeichen ist der "
+                    "Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen." % (file, i, nf[i], nf[0]))
     if not body:
         raise ValueError("tax_tariff: Datei '%s' ist keine lesbare CSV-Datei (no lines available in input)." % file)
     header = _split_csv_line(body[0])
     rows = [_split_csv_line(ln) for ln in body[1:]]
     d = {h: [r[j] if j < len(r) else "" for r in rows] for j, h in enumerate(header)}
     need = ["art", "ab", "bezug", "teiler", "a", "b", "c"]
+    dup = [c for c in need if header.count(c) > 1]   # seit 1.6.4 (A-039): Pflichtspalte doppelt
+    if dup:
+        chk_stop("e1.tarif_doppelt", "tax_tariff", file, dup[0])
     miss = [c for c in need if c not in d]
     if miss:
         raise ValueError("tax_tariff: In '%s' fehlen die Spalten %s (erwartet: %s)."
@@ -255,8 +258,8 @@ def _tax_tariff_read(file) -> tuple:
     art = [a.lower() for a in d["art"]]
     bad = [i for i, a in enumerate(art) if a not in ("zone", "soli")]
     if bad:
-        raise ValueError("tax_tariff: Datenzeile %d hat art = '%s'; erlaubt sind \"zone\" und \"soli\"."
-                         % (bad[0] + 1, d["art"][bad[0]]))
+        raise ValueError("tax_tariff: Datenzeile %d hat ein ungültiges art; erlaubt sind \"zone\" und \"soli\"."
+                         % (bad[0] + 1))
 
     def num(col: str, rws: list[int]) -> list[float]:
         v = [_as_numeric(d[col][i]) for i in rws]
@@ -264,7 +267,7 @@ def _tax_tariff_read(file) -> tuple:
         if nb:
             i = rws[nb[0]]
             raise ValueError("tax_tariff: Spalte '%s' in Datenzeile %d (art = %s) ist nicht numerisch bzw. "
-                             "nicht endlich ('%s')." % (col, i + 1, art[i], d[col][i]))
+                             "nicht endlich." % (col, i + 1, art[i]))
         return v
 
     zr = [i for i, a in enumerate(art) if a == "zone"]
@@ -277,21 +280,20 @@ def _tax_tariff_read(file) -> tuple:
     z = pd.DataFrame(zd)
     ab = zd["ab"]
     if ab[0] != 0:
-        raise ValueError("tax_tariff: Die erste Zone muss bei ab = 0 beginnen (ist %s)." % r_format1(ab[0]))
+        raise ValueError("tax_tariff: Die erste Zone muss bei ab = 0 beginnen.")
     for k in range(len(ab) - 1):
         if ab[k + 1] - ab[k] <= 0:
-            raise ValueError("tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone %d ab %s folgt auf "
-                             "ab %s)." % (k + 2, r_format1(ab[k + 1]), r_format1(ab[k])))
+            raise ValueError("tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone %d)." % (k + 2))
     for k, t in enumerate(zd["teiler"]):
         if t <= 0:
-            raise ValueError("tax_tariff: teiler muss > 0 sein (Zone ab %s)." % r_format1(ab[k]))
+            raise ValueError("tax_tariff: teiler muss > 0 sein (Zone %d)." % (k + 1))
     soli = {"freigrenze": num("ab", sr)[0], "satz": num("a", sr)[0], "milderung": num("b", sr)[0]}
     if soli["freigrenze"] < 0:
         raise ValueError("tax_tariff: Die Soli-Freigrenze (ab) darf nicht negativ sein.")
     for s in ("satz", "milderung"):
         if soli[s] < 0 or soli[s] > 100:
-            raise ValueError("tax_tariff: Soli-%s muss zwischen 0 und 100 Prozent liegen (ist %s)."
-                             % ("Zuschlagsatz (a)" if s == "satz" else "Milderungssatz (b)", r_format1(soli[s])))
+            raise ValueError("tax_tariff: Soli-%s muss zwischen 0 und 100 Prozent liegen."
+                             % ("Zuschlagsatz (a)" if s == "satz" else "Milderungssatz (b)"))
     out = SimLevTaxTariff(z, soli, geltung, os.path.realpath(os.path.abspath(file)))
 
     def f(j: int, x: float) -> float:

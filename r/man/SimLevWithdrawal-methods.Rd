@@ -35,7 +35,8 @@ sonst ohne Wirkung.}
 \item{probs}{Wahrscheinlichkeiten als Anteile (Standard
 \code{c(0.05, 0.25, 0.5, 0.75, 0.95)}): bei \code{summary()} die
 ausgewiesenen Quantile, bei \code{plot()} die Quantile der Faecher
-(Baender zwischen symmetrischen Quantilen, mittleres Quantil als Linie).}
+(Baender zwischen symmetrischen Quantilen, mittleres Quantil als Linie;
+seit 1.6.4 mindestens ein Wert, sonst Fehler).}
 }
 \value{
 \code{print()} und \code{plot()}: das Objekt (unsichtbar).
@@ -44,7 +45,9 @@ ausgewiesenen Quantile, bei \code{plot()} die Quantile der Faecher
 \code{swr} (Prozent), Quantilvektoren (\code{terminal_real},
 \code{first_withdrawal}, \code{mean_spending}, \code{min_spending},
 \code{spending_drawdown} (Anteil), \code{ce_spending}, \code{taxes},
-\code{pwr} (Prozent), \code{depletion} (Jahre, nur gescheiterte Pfade))
+\code{pwr} (Prozent), \code{depletion} (Jahre, nur gescheiterte Pfade)),
+\code{depletion_median} (seit 1.6.4: gewichteter Median der
+Erschoepfungsjahre als 0,5-Quantil, unabhaengig von \code{probs})
 und \code{spending_by_year} (Konsumquantile in Jahr 1, 10, 20, 30; je
 Jahr nur ueber Pfade, deren Horizont dieses Jahr einschliesst, und nur
 fuer volle Planjahre, sonst \code{NA}).

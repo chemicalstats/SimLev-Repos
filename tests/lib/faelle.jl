@@ -9,7 +9,9 @@
 #   werden in Julia-Objekte übersetzt (siehe src/r/types.jl), der Julia-Code läuft in einem frischen Modul (mit
 #   SimLev und Dates) und setzt result. Verglichen werden Ergebnis (bitgenau, NA ≠ NaN, Vorzeichen der Null),
 #   Konsolenausgabe, Druckausgabe (show mit MIME text/plain), Warnungen (@warn-Meldungen) und Fehlermeldungen.
-#   Lockerungen: SIMLEV_LAX_NA=1 (NA = NaN), SIMLEV_STRICT_ZERO=0 (-0 = +0).
+#   Lockerungen: SIMLEV_LAX_NA=1 (NA = NaN), SIMLEV_STRICT_ZERO=0 (-0 = +0). Stufenmodell (seit 1.6.4): Teilbäume, die
+#   eine Regel in tests/lib/toleranz.tsv trifft (Format dort), vergleichen Zahlen relativ mit der Toleranz der Regel
+#   (NA ≠ NaN immer, -0 = +0); Text, Druck, Konsolenausgabe und Warnungen bleiben zeichengleich.
 # - Engine-Format (ohne module; Bereich engine): Daten, Strategie, Bausteine von simulation() und die exakten
 #   R-Ergebnisse (run_engine; inklusive NA ≠ NaN und Textausgabe).
 #
@@ -432,7 +434,7 @@ function pruefe_tabelle(case, store)
     errs = String[]
     for rc in zeilen(case, store)
         e = try
-            run_ref_case(rc)
+            run_ref_case(rc; modul = get(case, "module", nothing))   # Zeilen tragen das Modul nicht (Toleranzregeln)
         catch ex
             ["Werkzeugfehler: " * sprint(showerror, ex)]
         end
@@ -576,12 +578,58 @@ end
 
 _hx(x::Float64) = isnan(x) ? (SimLev.isna_strict(x) ? "NA" : "NaN") : string(x)
 
+# ── Toleranzstufe (Stufenmodell, seit 1.6.4) ────────────────────────────────
+# Regeln aus tests/lib/toleranz.tsv: Fall-Muster, Pfad-Muster, Funktion, relative Toleranz (Format in der Datei). Ein Fall
+# ohne Regel wird wie bisher bitgleich verglichen.
+"Muster mit `*` (beliebige Zeichen) → Regex für den ganzen Text."
+_muster(m::AbstractString) = Regex("^" * join(("\\Q" * t * "\\E" for t in split(m, '*')), ".*") * "\\z", "s")
+
+function _lies_toleranz(path)
+    regeln = Tuple{Regex,Regex,String,Float64}[]; kopf = true
+    for (nr, ln) in enumerate(eachline(path))
+        (isempty(strip(ln)) || startswith(ln, "#")) && continue
+        f = split(ln, '\t')
+        if kopf
+            f == ["fall", "pfad", "funktion", "toleranz"] || error("$path: Kopfzeile fall, pfad, funktion, toleranz erwartet")
+            kopf = false; continue
+        end
+        length(f) == 4 || error("$path, Zeile $nr: vier Spalten erwartet")
+        tol = parse(Float64, f[4])
+        0 < tol < 1e-6 || error("$path, Zeile $nr: Toleranz $(f[4]) außerhalb (0, 1e-6)")
+        push!(regeln, (_muster(f[1]), _muster(f[2]), String(f[3]), tol))
+    end
+    regeln
+end
+const TOLERANZ_DATEI = joinpath(@__DIR__, "toleranz.tsv")
+const _TOLERANZ = _lies_toleranz(TOLERANZ_DATEI)
+
+"Pfadregeln `[(Pfad-Muster, Toleranz), …]` für den Fall `<modul>/<id>` (leer = ganz bitgleich)."
+toleranz_regeln(kennung::AbstractString) =
+    Tuple{Regex,Float64}[(p, tol) for (f, p, _, tol) in _TOLERANZ if occursin(f, kennung)]
+const _KEINE_REGELN = Tuple{Regex,Float64}[]
+
+"Toleranzstufe: endliche Zahlen gleich bei |p - r| <= tol * |r|, NA und NaN immer getrennt, +0 = -0, ±Inf nur gleich sich selbst."
+function _numeq_tol(r::Float64, p, tol::Float64)
+    p === nothing && return false
+    isnan(r) && return isnan(p) && SimLev.isna_strict(r) == SimLev.isna_strict(p)
+    isnan(p) && return false
+    r == p && return true
+    return isfinite(r) && isfinite(p) && abs(p - r) <= tol * abs(r)
+end
+
 # compare! und seine Helfer übersetzen `py` nicht je Typ (@nospecialize): Jedes Szenario liefert einen eigenen Typ
 # (etwa eine NamedTuple seiner Teile); je Typ neu übersetzt kostete das rund 50 s der Julia-Suite. Die Schleifen über
 # die Elemente stehen hinter einer Funktionsgrenze (_abweichend_num, _abweichend_sonst) und werden je Vektortyp übersetzt.
-"Vergleicht `py` (Julia-Objekt) mit dem R-Baum `ref`; hängt Abweichungen an `errs` an."
-function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
+"Vergleicht `py` (Julia-Objekt) mit dem R-Baum `ref`; hängt Abweichungen an `errs` an. `regeln` (aus `toleranz_regeln`):
+trifft ein Pfad-Muster den Pfad eines Knotens, gilt für ihn und alles darunter die Toleranz der Regel (`tol`, NaN =
+bitgleich)."
+function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40, regeln = _KEINE_REGELN, tol::Float64 = NaN)
     length(errs) >= maxerr && return errs
+    if isnan(tol)
+        for (rx, t_) in regeln
+            occursin(rx, path) && (tol = t_; break)
+        end
+    end
     t = ref["t"]
     t == "skip" && return errs
     if py === MISSING_EL
@@ -603,11 +651,11 @@ function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
         if length(rv) != length(pv)
             push!(errs, "$path: Länge R $(length(rv)), Julia $(length(pv))"); return errs
         end
-        bad = t in ("num", "int", "date") ? _abweichend_num(t == "date", rv, pv) : _abweichend_sonst(rv, pv)
+        bad = t in ("num", "int", "date") ? _abweichend_num(t == "date", rv, pv, t == "date" ? NaN : tol) : _abweichend_sonst(rv, pv)
         if !isempty(bad)
             i = bad[1]
             _rp(x) = x isa Float64 ? _hx(x) : repr(x)
-            push!(errs, "$path: $(length(bad))/$(length(rv)) abweichend, erste [$i]: R=$(_rp(rv[i])) Julia=$(_rp(pv[i]))")
+            push!(errs, "$path: $(length(bad))/$(length(rv)) abweichend$(isnan(tol) || !(t in ("num", "int")) ? "" : " (Toleranz $tol)"), erste [$i]: R=$(_rp(rv[i])) Julia=$(_rp(pv[i]))")
         end
         nms = get(ref, "names", nothing)
         if nms !== nothing
@@ -623,7 +671,7 @@ function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
             push!(errs, "$path: Zeilen R $(ref["nrow"]), Julia $(SimLev.nrow(py))"); return errs
         end
         for (nm, c) in zip(nms, cols)
-            compare!(errs, c, _get(py, nm), "$path\$$nm"; maxerr)
+            compare!(errs, c, _get(py, nm), "$path\$$nm"; maxerr, regeln, tol)
         end
         return errs
     end
@@ -634,7 +682,7 @@ function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
         end
         typ = get(ref, "type", "double")
         kind = typ in ("double", "integer") ? "num" : typ == "logical" ? "lgl" : "chr"
-        compare!(errs, Dict("t" => kind, "v" => get(ref, "v", nothing)), py isa SimLev.NamedMat ? py.data : py, path; maxerr)
+        compare!(errs, Dict("t" => kind, "v" => get(ref, "v", nothing)), py isa SimLev.NamedMat ? py.data : py, path; maxerr, regeln, tol)
         dn = get(ref, "dimnames", nothing)
         if dn !== nothing && py isa SimLev.NamedMat
             dn = dn isa AbstractVector ? dn : dn isa JObj ? collect(Any, dn.vals) : Any[dn]
@@ -652,9 +700,9 @@ function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
             for (i, (nm, v)) in enumerate(zip(String.(_aslist(nms)), vals))
                 if nm == ""
                     el = py isa AbstractVector && i <= length(py) ? py[i] : MISSING_EL
-                    compare!(errs, v, el, "$path[[$i]]"; maxerr)
+                    compare!(errs, v, el, "$path[[$i]]"; maxerr, regeln, tol)
                 else
-                    compare!(errs, v, _get(py, nm), "$path\$$nm"; maxerr)
+                    compare!(errs, v, _get(py, nm), "$path\$$nm"; maxerr, regeln, tol)
                 end
             end
             return errs
@@ -665,7 +713,7 @@ function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
         end
         length(pl) != length(vals) && (push!(errs, "$path: Listenlänge R $(length(vals)), Julia $(length(pl))"); return errs)
         for (i, v) in enumerate(vals)
-            compare!(errs, v, pl[i], "$path[[$i]]"; maxerr)
+            compare!(errs, v, pl[i], "$path[[$i]]"; maxerr, regeln, tol)
         end
         return errs
     end
@@ -673,11 +721,11 @@ function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
     errs
 end
 
-function _abweichend_num(datum::Bool, rv, pv)
+function _abweichend_num(datum::Bool, rv, pv, tol::Float64 = NaN)
     bad = Int[]
     for i in eachindex(rv)
         r = rv[i] === missing ? SimLev.NA : datum ? Float64(Dates.value(rv[i] - _EPOCH)) : Float64(rv[i])
-        _numeq(r, _num(pv[i])) || push!(bad, i)
+        (isnan(tol) ? _numeq(r, _num(pv[i])) : _numeq_tol(r, _num(pv[i]), tol)) || push!(bad, i)
     end
     bad
 end
@@ -734,7 +782,8 @@ function _neues_modul()
     m
 end
 
-function _run_ref_case(case; check_print = true, check_output = true, check_warnings = true)
+function _run_ref_case(case; check_print = true, check_output = true, check_warnings = true,
+                       modul = get(case, "module", nothing))
     get(case, "nur", "") == "py" && return String[]   # Fall nur für Python (seit 1.6.1)
     haskey(case, "jl") || return ["kein Julia-Code (Feld jl) im Fall"]
     m = _neues_modul()
@@ -771,7 +820,7 @@ function _run_ref_case(case; check_print = true, check_output = true, check_warn
     err !== nothing && return ["Julia-Fehler: " * sprint(showerror, err) * "\n" * sprint(Base.show_backtrace, bt)[1:min(end, 3000)]]
     Base.invokelatest(isdefined, m, :result) || return ["Julia-Code setzt `result` nicht"]
     res = Base.invokelatest(getglobal, m, :result)
-    compare!(errs, case["result"], res)
+    compare!(errs, case["result"], res; regeln = toleranz_regeln(string(modul, "/", case["id"])))
     if check_output && get(case, "output", "") != ""
         got = endswith(out, "\n") ? chop(out) : out
         got == case["output"] || push!(errs, "Konsolenausgabe abweichend\n" * _difflines(case["output"], got))

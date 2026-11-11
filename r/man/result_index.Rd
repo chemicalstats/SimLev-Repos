@@ -10,7 +10,7 @@ result_index(x, base = 100)
 \item{x}{Objekt der Klasse \code{SimLevResult} (Ergebnis von
 \code{\link[=simulation]{simulation()}}).}
 
-\item{base}{Startwert des Index (Zahl, Standard 100).}
+\item{base}{Startwert des Index (einzelne endliche Zahl > 0, Standard 100).}
 }
 \value{
 data.frame mit einer Zeile je Simulationstag und den Spalten

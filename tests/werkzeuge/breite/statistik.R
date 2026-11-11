@@ -378,7 +378,7 @@ ref_case("da_err_text_kurs", "result_analysis(data.frame(date = d$date[1:5], Kur
          jl = paste0(JH, 'result = DA.result_analysis(SL.RFrame("date" => d.date[1:5], "Kurs" => ["1,5", "2,5", "3,1", "4", "5"], "Vol" => collect(1:5)))'))
 ref_case("da_err_factor", "result_analysis(data.frame(date = d$date[1:5], value = factor(c('1,5', '2,5', '3,1', '4', '5'))))",
          paste0(P, "result = DA.result_analysis(pd.DataFrame({'date': d['date'][:5], 'value': pd.Categorical(['1,5', '2,5', '3,1', '4', '5'])}))"), I,
-         jl = paste0(JH, 'result = DA.result_analysis(SL.RFrame("date" => d.date[1:5], "value" => ["1,5", "2,5", "3,1", "4", "5"]))'))
+         jl = paste0(JH, 'result = DA.result_analysis(SL.RFrame("date" => d.date[1:5], "value" => SL.RFmt.RFactor([1, 2, 3, 4, 5], ["1,5", "2,5", "3,1", "4", "5"])))'))
 ref_case("da_err_novalues", "result_analysis(data.frame(date = d$date[1:5], value = NA_real_))", paste0(P, "result = DA.result_analysis(pd.DataFrame({'date': d['date'][:5], 'value': simlev._r.fmt.NA_REAL}))"), I,
          jl = paste0(JH, 'result = DA.result_analysis(SL.RFrame("date" => d.date[1:5], "value" => fill(SL.NA, 5)))'))
 ref_case("da_err_nonpos", "z <- x1; z$value[100] <- 0; result_analysis(z)", paste0(P, "z = x1.copy(); z.loc[99, 'value'] = 0.0\nresult = DA.result_analysis(z)"), list(x1 = x1),

@@ -14,7 +14,7 @@ sensitivity_leverage(
   strategy = NULL,
   sim_args = list(),
   metrics = bootstrap_study_metrics,
-  cores = 1L
+  cores = "auto"
 )
 }
 \arguments{
@@ -24,7 +24,8 @@ sensitivity_leverage(
 mit dem letzten Wert gefuellt).}
 
 \item{leverages}{Numerischer Vektor der zu pruefenden Hebel (Standard
-\code{seq(0.5, 4, by = 0.25)}).}
+\code{seq(0.5, 4, by = 0.25)}).
+Seit 1.6.4 endliche Zahlen.}
 
 \item{rate}{Finanzierungszins in Prozent p. a. (Standard 0): Skalar,
 Spaltenname, Vektor der Laenge \code{nrow(data)},
@@ -47,15 +48,35 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
-(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).}
+(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).
+Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen keiner festen
+Spalte des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).}
 
-\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Fork auf Unix, PSOCK auf Windows):
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
+\code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
+der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).}
 }
 \value{
 data.frame der Klasse \code{SimLevSensitivity} mit \code{leverage}
 und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen);
 Attribut \code{optimal} (benannter Vektor \code{cagr}, \code{sharpe}:
-Hebel mit maximaler CAGR bzw. Sharpe Ratio) und \code{kind = "leverage"}.
+Hebel mit maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert) und \code{kind = "leverage"}.
 Mit Sparplan (\code{sim_args}) ist \code{cagr} geldgewichtet (XIRR).
 Ausgabe und Grafik ueber \code{print()} und \code{plot()}.
 }

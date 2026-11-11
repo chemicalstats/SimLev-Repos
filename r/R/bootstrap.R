@@ -175,24 +175,32 @@
 #' @export
 bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux = NULL, aux_type = NULL,
                              cross = c("ratio", "joint"), input = c("returns", "prices")) {
+  .e5_choice(cross, c("ratio", "joint"), "bootstrap_config", "cross")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
+  .e5_choice(input, c("returns", "prices"), "bootstrap_config", "input")
   cross <- match.arg(cross); input <- match.arg(input)
   if (is.null(names(indices)) || any(names(indices) == ""))
-    stop("indices muss vollst\u00e4ndig benannt sein: c(name1 = 'spalte1', ...)")
+    chk_stop("ut2.indices", "bootstrap_config")
   index_names <- names(indices)
-  if (anyDuplicated(index_names)) stop("Doppelte Index-Namen: ", paste(index_names[duplicated(index_names)], collapse = ", "))
-  if (!is.null(aux) && (is.null(names(aux)) || any(names(aux) == ""))) stop("aux muss benannt sein.")
+  if (anyDuplicated(index_names)) chk_stop("rs.index_doppelt", "bootstrap_config", paste(index_names[duplicated(index_names)], collapse = ", "))
+  if (!is.null(aux) && (is.null(names(aux)) || any(names(aux) == ""))) chk_stop("ut2.aux", "bootstrap_config")
+  # seit 1.6.4: Spaltenangaben je ein Name (Text); bis 1.6.3 waehlte R bei Faktor bzw. Zahl still die Spalte ueber
+  # den Code bzw. die Position (FW2-1)
+  for (i in seq_along(indices)) chk_name1(indices[[i]], "bootstrap_config", sprintf("indices['%s']", index_names[i]))
+  for (i in seq_along(aux)) chk_name1(aux[[i]], "bootstrap_config", sprintf("aux['%s']", names(aux)[i]))
+  if (!is.null(letfs) && !is.list(letfs)) chk_stop("liste", "bootstrap_config", "letfs")
+  for (i in seq_along(letfs)) if (!is.list(letfs[[i]])) chk_stop("liste", "bootstrap_config", sprintf("letfs[[%d]]", i))
+  chk_name1(regime_index, "bootstrap_config", "regime_index", null_ok = TRUE)
   aux_names <- names(aux) %||% character(0)
   if (!is.null(aux_type) && !length(aux_type)) aux_type <- NULL   # character(0) wie NULL (keine Angabe)
   if (!is.null(aux_type)) {
     if (!is.character(aux_type) || is.null(names(aux_type)) || any(names(aux_type) == "") || anyNA(aux_type))
-      stop("aux_type muss ein benannter Zeichenvektor sein: c(<Name aus aux> = 'level' oder 'rate'), z. B. c(cpi = 'level', zins = 'rate').")
+      chk_stop("ut2.aux_type", "bootstrap_config")
     bad <- setdiff(names(aux_type), aux_names)
     if (length(bad)) stop(sprintf("aux_type: '%s' ist keine Zusatzreihe aus aux (verf\u00fcgbar: %s).", paste(bad, collapse = "', '"),
                                   if (length(aux_names)) paste(aux_names, collapse = ", ") else "keine"))
     if (anyDuplicated(names(aux_type))) stop(sprintf("aux_type: Name '%s' doppelt angegeben.", names(aux_type)[duplicated(names(aux_type))][1]))
     bad <- which(!aux_type %in% c("level", "rate"))
-    if (length(bad)) stop(sprintf("aux_type['%s'] = '%s': erlaubt sind nur 'level' (Niveau, z. B. Preisindex) und 'rate' (Rate, z. B. Zins in Prozent).",
-                                  names(aux_type)[bad[1]], aux_type[[bad[1]]]))
+    if (length(bad)) chk_stop("rs.aux_type_wert", "bootstrap_config", names(aux_type)[bad[1]])   # seit 1.6.4 ohne Eingabewert
   }
   aux_type_full <- stats::setNames(rep("rate", length(aux_names)), aux_names)
   aux_type_full[names(aux_type)] <- unname(aux_type)
@@ -203,42 +211,48 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
   # logisch, Faktor, NA) still durch einen Rueckfall in R, base als Faktor mit der falschen Spalte
   txt1 <- function(v) is.character(v) && length(v) == 1L && !is.na(v)
   num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
-  chk_num <- function(i, v, nm) if (!num1(v)) stop(sprintf("LETF %d: %s muss eine einzelne endliche Zahl sein", i, nm))
+  chk_num <- function(i, v, nm) if (!num1(v)) chk_stop("zahl", "bootstrap_config", sprintf("letfs[[%d]]$%s", i, nm))
   chk_col <- function(i, v, nm) if (!num1(v) && !txt1(v))
-    stop(sprintf("LETF %d: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein", i, nm))
+    chk_stop("ut2.zahl_oder_aux", "bootstrap_config", sprintf("letfs[[%d]]$%s", i, nm))
   letf_list <- lapply(seq_along(letfs), function(i) {
     l <- letfs[[i]]
-    if (is.null(l$base)) stop(sprintf("LETF %d: 'base' muss angegeben werden", i))
-    if (!txt1(l$base)) stop(sprintf("LETF %d: base muss ein einzelner Name (Text) sein", i))
+    if (is.null(l$base)) chk_stop("fehlt", "bootstrap_config", sprintf("letfs[[%d]]$base", i))
+    if (!txt1(l$base)) chk_stop("text", "bootstrap_config", sprintf("letfs[[%d]]$base", i))
     if (!l$base %in% index_names)
-      stop(sprintf("LETF %d: base '%s' nicht in indices. Verf\u00fcgbar: %s", i, l$base, paste(index_names, collapse = ", ")))
+      chk_stop("rs.letf_base", "bootstrap_config", sprintf("letfs[[%d]]$base", i), l$base, paste(index_names, collapse = ", "))
     lev <- l$leverage %||% 2
     chk_num(i, lev, "leverage")
-    if (lev == 0) stop(sprintf("LETF %d: leverage darf nicht 0 sein", i))
+    if (lev == 0) chk_stop("rs.letf_null", "bootstrap_config", sprintf("letfs[[%d]]$leverage", i))
     fin <- l$finance %||% 3.5
     chk_col(i, fin, "finance")
-    if (is.character(fin) && !fin %in% aux_names) stop(sprintf("LETF %d: finance-Reihe '%s' nicht in aux.", i, fin))
-    if (is_level(fin)) stop(sprintf("LETF %d: finance-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; der Finanzierungszins muss eine Rate (Prozent p. a.) sein.", i, fin))
+    if (is.character(fin) && !fin %in% aux_names) chk_stop("rs.letf_aux", "bootstrap_config", sprintf("letfs[[%d]]$finance", i), fin)
+    if (is_level(fin)) chk_stop("ut2.finance_level", "bootstrap_config", sprintf("letfs[[%d]]$finance", i), fin)
     if (is.numeric(fin) && fin < 0) warning(sprintf("LETF %d: negativer Finanzierungszins.", i))
     exp_ <- l$expense %||% 0.5
     chk_num(i, exp_, "expense")
-    if (exp_ < 0) stop(sprintf("LETF %d: expense muss >= 0 sein", i))
+    if (exp_ < 0) chk_stop("ut2.expense", "bootstrap_config", sprintf("letfs[[%d]]$expense", i))
     days <- l$days %||% 1
     chk_col(i, days, "days")
-    if (is.character(days) && !days %in% aux_names) stop(sprintf("LETF %d: days-Reihe '%s' nicht in aux.", i, days))
-    if (is_level(days)) stop(sprintf("LETF %d: days-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden unver\u00e4ndert gebraucht ('rate').", i, days))
+    if (is.character(days) && !days %in% aux_names) chk_stop("rs.letf_aux", "bootstrap_config", sprintf("letfs[[%d]]$days", i), days)
+    if (is_level(days)) chk_stop("rs.letf_days_level", "bootstrap_config", sprintf("letfs[[%d]]$days", i), days)
     spread <- l$spread %||% 0; rate_basis <- l$rate_basis %||% 360; ter_basis <- l$ter_basis %||% 365
     chk_num(i, spread, "spread"); chk_num(i, rate_basis, "rate_basis"); chk_num(i, ter_basis, "ter_basis")
-    if (!is.null(l$name) && !txt1(l$name)) stop(sprintf("LETF %d: name muss ein einzelner Name (Text) sein", i))
+    # seit 1.6.4 Tagesbasis > 0, Tage je Zeile > 0, Spread >= 0 (bis 1.6.3: Basis 0 brach mit falscher Ursache ab,
+    # negative Werte kehrten die Kosten still in Ertraege um)
+    lw <- sprintf("LETF %d", i)
+    chk_num1(rate_basis, lw, "rate_basis", lo = 0, lo_open = TRUE); chk_num1(ter_basis, lw, "ter_basis", lo = 0, lo_open = TRUE)
+    if (is.numeric(days)) chk_num1(days, lw, "days", lo = 0, lo_open = TRUE)
+    chk_num1(spread, lw, "spread", lo = 0)
+    if (!is.null(l$name) && !txt1(l$name)) chk_stop("text", "bootstrap_config", sprintf("letfs[[%d]]$name", i))
     name <- l$name %||% (if (lev > 0) paste0(l$base, "_l", lev) else paste0(l$base, "_inv", abs(lev)))
     list(name = name, base = l$base, leverage = lev, finance = fin, expense = exp_,
          spread = spread, days = days, rate_basis = rate_basis, ter_basis = ter_basis)
   })
   letf_names <- vapply(letf_list, function(x) x$name, "")
-  if (anyDuplicated(c(index_names, letf_names, aux_names))) stop("Namen von Indizes, LETFs und aux m\u00fcssen eindeutig sein.")
+  if (anyDuplicated(c(index_names, letf_names, aux_names))) chk_stop("rs.namen_eindeutig", "bootstrap_config")
 
   if (is.null(regime_index)) regime_index <- index_names[1]
-  else if (!regime_index %in% index_names) stop(sprintf("regime_index '%s' nicht in indices", regime_index))
+  else if (!regime_index %in% index_names) chk_stop("rs.regime_index", "bootstrap_config", regime_index)
 
   structure(list(
     indices = lapply(index_names, function(nm) list(name = nm, col = indices[[nm]])),
@@ -276,12 +290,32 @@ print.bootstrap_config <- function(x, ...) {
 #' Renditematrix und Zusatzreihen extrahieren
 #' @keywords internal
 #' @noRd
-.extract_returns <- function(data, config) {
-  if (!is.data.frame(data) && !is.matrix(data)) stop("data muss ein data.frame oder eine Matrix sein")
-  if (nrow(data) == 0) stop("data darf nicht leer sein")
+.boot_data_check <- function(data, who = "bootstrap") {
+  if (!is.data.frame(data) && !is.matrix(data)) chk_stop("ut2.boot_data", who)   # seit 1.6.4 mit Funktionsnamen (K43 T2-B6)
+  if (nrow(data) == 0) chk_stop("rs.data_leer", who)
+  invisible(NULL)
+}
+# Spalten der Konfiguration (Indizes und Zusatzreihen) nur als Zahlen (seit 1.6.4, Entscheidung 39 wie Entscheidung 2;
+# bis 1.6.3 rechneten R und Python mit Zahlen als Text, Julia brach ab): Faktor -> spalte_faktor, sonst nicht numerisch
+# -> spalte_typ; eine Spalte nur aus NA zaehlt als Zahlenspalte (Entscheidung 14). Fehlende Spalten meldet
+# .extract_returns. Nur bootstrap() und bootstrap_study() (E4 nutzt .extract_returns ohne diese Pruefung).
+.boot_numcols <- function(data, config, who) {
+  nms <- if (is.data.frame(data)) names(data) else colnames(data)
+  cols <- c(vapply(config$indices, function(ix) ix$col, ""), unlist(unname(config$aux)))
+  for (col in intersect(cols, nms)) {
+    v <- if (is.data.frame(data)) data[[col]] else data[, col]
+    if (is.factor(v)) chk_stop("spalte_faktor", who, col)
+    if (!(is.numeric(v) || (is.logical(v) && all(is.na(v))))) chk_stop("spalte_typ", who, col, chk_msg("typ.numerisch"))
+  }
+  invisible(NULL)
+}
+.extract_returns <- function(data, config, who = "bootstrap") {
+  .boot_data_check(data, who)
   get_col <- function(col) {
     nms <- if (is.data.frame(data)) names(data) else colnames(data)
-    if (!col %in% nms) stop(sprintf("Spalte '%s' nicht gefunden. Verf\u00fcgbar: %s", col, paste(nms, collapse = ", ")))
+    if (!col %in% nms) chk_stop("rs.spalte_fehlt", who, col, paste(nms, collapse = ", "))
+    # seit 1.6.4 (Entscheidung 15): keine Faktorspalte (vorher rechnete R mit den Codes)
+    if (is.data.frame(data) && is.factor(data[[col]])) chk_stop("spalte_faktor", who, col)
     as.numeric(if (is.data.frame(data)) data[[col]] else data[, col])
   }
   ret <- vapply(config$indices, function(ix) get_col(ix$col), numeric(nrow(data)))
@@ -303,10 +337,9 @@ print.bootstrap_config <- function(x, ...) {
     message(sprintf("Hinweis: %d unvollst\u00e4ndige Zeilen entfernt.", sum(!ok)))
     ret <- ret[ok, , drop = FALSE]; if (!is.null(aux)) aux <- aux[ok, , drop = FALSE]
   }
-  if (!nrow(ret)) stop("data enth\u00e4lt keine vollst\u00e4ndige Zeile in den verwendeten Spalten.")
+  if (!nrow(ret)) chk_stop("rs.keine_zeile", who)
   bad <- which(!is.finite(ret), arr.ind = TRUE)
-  if (nrow(bad)) stop(sprintf("Renditen enthalten nicht endliche Werte (Inf), erste in Spalte '%s', Zeile %d der verwendeten Daten.",
-                              colnames(ret)[bad[1, 2]], bad[1, 1]))
+  if (nrow(bad)) chk_stop("rs.nicht_endlich", who, colnames(ret)[bad[1, 2]], bad[1, 1])
   if (!is.null(aux)) {
     # Zeilenverhaeltnisse der Zusatzreihen (fuer Niveau-Reihen wie einen CPI): Wert je Zeile
     # geteilt durch den Wert vor diesem Schritt (bei "prices" die Vorzeile der Kurse, bei
@@ -324,7 +357,7 @@ print.bootstrap_config <- function(x, ...) {
     rownames(aux_ratio) <- NULL
     aux_start <- prev1                       # Startwert der Niveau-Variante (erste Historienzeile bzw. Startzeile der Kurse)
   }
-  if (any(ret <= 0)) stop("Renditen <= 0 gefunden (erwartet: Brutto-Renditen > 0, z. B. 1.002).")
+  if (any(ret <= 0)) chk_stop("rs.rendite_null", who)
   if (stats::median(abs(ret - 1)) > 0.5)
     warning("Renditen sehen nicht wie Brutto-Tagesrenditen aus (Median |R - 1| > 0.5). input = 'prices' vergessen?")
   list(ret = ret, aux = aux, aux_ratio = aux_ratio, aux_start = aux_start)
@@ -431,7 +464,15 @@ print.bootstrap_config <- function(x, ...) {
 #' @seealso [bootstrap()], [bootstrap_study()]
 #' @export
 bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
+  .e5_choice(transform, c("none", "abs", "squared"), "bootstrap_block_length", "transform")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   transform <- match.arg(transform)
+  # seit 1.6.4: nur Zahlen (vorher Text still 1; Python rechnete Text wie Zahlen und Kategorien als Codes)
+  # Entscheidung 15: Faktor bzw. Faktorspalte mit eigener Meldung
+  chk_nofactor(x, "bootstrap_block_length", "x")
+  if (is.data.frame(x)) for (k in names(x)) chk_col_nofactor(x, k, "bootstrap_block_length")
+  ok <- if (is.data.frame(x)) ncol(x) >= 1L && all(vapply(x, function(v) is.numeric(v) && !is.factor(v), NA))
+        else is.numeric(x) && !is.factor(x)
+  if (!ok) chk_stop("e2.zahlen_matrix", "bootstrap_block_length", "x")
   x <- as.matrix(x)
   res <- t(apply(x, 2, function(v) {
     v <- v[is.finite(v)]
@@ -455,7 +496,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   r0 <- acov(0)
   if (r0 <= 0) return(c(stationary = 1, circular = 1))
   lags <- seq_len(floor(mmax))
-  rho <- vapply(lags, acov, 0) / r0
+  A <- vapply(lags, acov, 0)   # seit 1.6.4 (A-089) einmal fuer rho und Rk (M <= floor(mmax))
+  rho <- A / r0
   insig <- abs(rho) < crit
   KNi <- ceiling(KN)
   mhat <- NA
@@ -467,7 +509,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   M <- min(2 * mhat, floor(mmax))
   kk <- seq_len(M)
   lam <- function(t) ifelse(abs(t) <= 0.5, 1, ifelse(abs(t) <= 1, 2 * (1 - abs(t)), 0))
-  Rk <- vapply(kk, acov, 0)
+  Rk <- A[kk]
   G <- 2 * sum(lam(kk / M) * kk * Rk)
   g0 <- r0 + 2 * sum(lam(kk / M) * Rk)
   if (g0 <= 0) return(c(stationary = 1, circular = 1))
@@ -547,12 +589,12 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     if (is.finite(f$scale) && f$scale > 0 && is.finite(f$shape)) { scale <- f$scale; shape <- f$shape; method <- "MLE" }
   }, error = function(e) NULL)
   if (is.null(scale) && ne >= 20) {
-    m <- mean(exc); v <- stats::var(exc)
+    m <- mean(exc); v <- .sl_var(exc)
     if (v > 0 && m > 0) { ratio <- m^2 / v; shape <- max(-0.5, min(1, 0.5 * (1 - ratio)))
       scale <- max(1e-3, 0.5 * m * (1 + ratio)); method <- "Momente" }
   }
-  if (is.null(scale) && ne >= 5) { scale <- max(1e-3, stats::sd(exc)); shape <- 0.1; method <- "empirisch" }
-  if (is.null(scale)) { scale <- max(0.005, 2 * stats::sd(base_ret - 1)); shape <- 0.1; method <- "Default"
+  if (is.null(scale) && ne >= 5) { scale <- max(1e-3, .sl_sd(exc)); shape <- 0.1; method <- "empirisch" }
+  if (is.null(scale)) { scale <- max(0.005, 2 * .sl_sd(base_ret - 1)); shape <- 0.1; method <- "Default"
     warning(sprintf("Tail-Fit: Default-Parameter (nur %d Tail-Beobachtungen)", ne)) }
   if (shape >= 0.5) warning(sprintf("GPD shape = %.3f (%s): unendliche Varianz", shape, side))
   list(prob = prob, thresh = thr, scale = scale, shape = shape, pool = which(mask), method = method)
@@ -594,7 +636,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   }
   unc <- vapply(seq_len(K), function(r) {
     p <- al[r] + be[r] + ga[r] / 2
-    if (p < 0.9999 && om[r] > 0) om[r] / (1 - p) else { i <- which(reg == r); if (length(i) >= 10) stats::var(ex[i]) else stats::var(ex) }
+    if (p < 0.9999 && om[r] > 0) om[r] / (1 - p) else { i <- which(reg == r); if (length(i) >= 10) .sl_var(ex[i]) else .sl_var(ex) }
   }, 0)
   delta <- matrix(0, K, K)
   if (tvtp) for (i in seq_len(K)) {
@@ -608,7 +650,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   cm <- mu[reg] + phi[reg] * lag_ex + lam[reg] * sig
   z <- (ex - cm) / sig; z[!is.finite(z)] <- 0
   pools <- lapply(seq_len(K), function(r) { i <- which(reg == r); if (length(i) < 10) seq_len(n) else i })
-  for (r in seq_len(K)) { i <- pools[[r]]; s <- stats::sd(z[i]); if (is.finite(s) && s > 0) z[i] <- (z[i] - mean(z[i])) / s }
+  for (r in seq_len(K)) { i <- pools[[r]]; s <- .sl_sd(z[i]); if (is.finite(s) && s > 0) z[i] <- (z[i] - mean(z[i])) / s }
   pi_ <- rep(1 / K, K); for (it in 1:1000) { p2 <- as.numeric(pi_ %m% P); if (max(abs(p2 - pi_)) < 1e-12) break; pi_ <- p2 }
   message(sprintf("MS-GARCH(%d, %s%s%s): P(stay) = %s", K, garch_model, if (ar_gm) ", AR-M" else "",
                   if (tvtp) ", TVTP" else "", paste(sprintf("%.3f", diag(P)), collapse = "/")))
@@ -751,7 +793,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' @noRd
 .build_path <- function(g, aux, config, start = 100, aux_ratio = NULL, aux_start = NULL) {
   ret <- g$ret; idx <- g$idx
-  if (!is.matrix(ret) || any(!is.finite(ret)) || any(ret <= 0)) return(NULL)
+  # seit 1.6.4 (A-058) ohne die Vorpruefung any(!is.finite(ret)) || any(ret <= 0): der Kern (sl_boot_path) prueft
+  # dieselbe Bedingung und liefert dann NULL (gleiches Ergebnis, ein Durchlauf statt drei)
+  if (!is.matrix(ret)) return(NULL)
   # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf)
   sp <- .boot_path_spec(ret, idx, aux, config, start, aux_ratio, aux_start)
   # bis 1.6.2 rechnete hier ein Rueckfall in R; seit 1.6.3 unerreichbar (bootstrap_config prueft die LETF-Felder,
@@ -775,7 +819,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   if (is.null(grid)) grid <- .get_ess_grid(method, n_obs)
   if (is.null(grid) || !length(grid)) return(NULL)
   ess_params <- c("L", "block_length", "n_regimes", "tail_prob", "ms_n_regimes", "ms_ar_n_regimes", "tvtp_n_regimes")
-  non_ess <- c("vol_window", "wild_type", "both_tails", "p_break", "garch_order", "ms_garch_model")
+  non_ess <- c("vol_window", "wild_type", "both_tails", "p_break", "garch_order")   # seit 1.6.4 ohne Textparameter (Entscheidung 31)
   nm <- names(grid)
   design <- expand.grid(grid, stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
   design$ess_per_boot <- apply(design[, nm, drop = FALSE], 1, function(row)
@@ -798,42 +842,90 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 }
 
 #' Verfahrensparameter vor dem Ziehen pruefen (klare Meldung statt verworfener Pfade)
+#'
+#' Seit 1.6.4 vor der Vorberechnung (vorher danach) und ohne Eingabewert in den Meldungen; dazu n_regimes,
+#' vol_window (regime), tail_prob (evt, tails), both_tails (evt) und die Obergrenze 64 der MS-GARCH-Regime
+#' (der Kern rechnet hoechstens 64; Python/Julia legten vorher K x K-Felder an).
 #' @keywords internal
 #' @noRd
-.check_boot_params <- function(method, p, n_obs) {
+.check_boot_params <- function(method, p, n_obs, who = "bootstrap") {
   num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
   if (method == "stationary" && (!num1(p$L) || p$L < 1))
-    stop(sprintf("params$L (erwartete Blockl\u00e4nge) muss eine Zahl >= 1 sein (erhalten: %s).", paste(format(p$L), collapse = ", ")))
+    chk_stop("ut2.param_L", who)
   if (method %in% c("block", "circular")) {
     b <- p$block_length; hi <- if (method == "block") n_obs - 1L else n_obs
     if (!num1(b) || b != round(b) || b < 1 || b > hi)
-      stop(sprintf("params$block_length muss eine ganze Zahl von 1 bis %d sein (%d Zeilen Historie%s; erhalten: %s).",
-                   hi, n_obs, if (method == "block") ", sonst g\u00e4be es nur einen Blockstart" else "",
-                   paste(format(b), collapse = ", ")))
+      chk_stop("ut2.param_block", who, as.integer(hi), as.integer(n_obs),
+               if (method == "block") ", sonst g\u00e4be es nur einen Blockstart" else "")
   }
   if (method == "wild" && (!num1(p$wild_type) || !p$wild_type %in% 0:2))
-    stop(sprintf("params$wild_type muss 0 (Rademacher), 1 (Mammen) oder 2 (Normal) sein (erhalten: %s).",
-                 paste(format(p$wild_type), collapse = ", ")))
+    chk_stop("ut2.param_wild", who)
   if (method == "reset" && (!num1(p$p_break) || p$p_break < 0 || p$p_break > 1))
-    stop(sprintf("params$p_break muss ein Anteil zwischen 0 und 1 sein (erhalten: %s).", paste(format(p$p_break), collapse = ", ")))
+    chk_stop("ut2.param_p_break", who)
+  if (method == "regime") {
+    chk_int1(p$n_regimes, who, "params$n_regimes", lo = 1)
+    chk_int1(p$vol_window, who, "params$vol_window", lo = 2)
+  }
+  if (method %in% c("evt", "tails"))
+    chk_num1(p$tail_prob, who, "params$tail_prob", lo = 0, hi = 0.5, lo_open = TRUE, hi_open = TRUE)
+  if (method == "evt") chk_bool1(p$both_tails, who, "params$both_tails")
+  kn <- switch(method, ms_garch = "ms_n_regimes", ms_ar_garch_m = "ms_ar_n_regimes", tvtp_ms_garch = "tvtp_n_regimes", NULL)
+  # K < 2, nicht ganz usw. meldet .ms_garch_check (Vorberechnung); hier nur die Obergrenze des Kerns
+  if (!is.null(kn) && num1(p[[kn]]) && p[[kn]] > 64) chk_stop("ganz_bis", who, paste0("params$", kn), "2", "64")
   invisible(TRUE)
+}
+
+#' ESS-Gitter pruefen: NULL oder benannte Liste nicht leerer atomarer Vektoren (seit 1.6.4)
+#' @keywords internal
+#' @noRd
+.check_ess_grid <- function(g, who) {
+  if (is.null(g)) return(invisible(NULL))
+  if (is.list(g) && any(vapply(g, is.factor, NA))) chk_stop("faktor", who, "ess_grid")   # Entscheidung 15
+  if (!is.list(g) || is.data.frame(g) || !length(g) || is.null(names(g)) || anyNA(names(g)) || any(names(g) == "") ||
+      !all(vapply(g, function(v) is.atomic(v) && length(v) > 0L && !is.factor(v), NA)))
+    chk_stop("e2.gitter", who)
+  if (anyDuplicated(names(g))) chk_stop("e2.doppelt", who, "ess_grid")
+  # seit 1.6.4 nur Zahlen (Entscheidung 31; bis 1.6.3 scheiterten Textparameter wie ms_garch_model technisch);
+  # Wahrheitswerte (z. B. both_tails) bleiben erlaubt (Entscheidung 45)
+  if (!all(vapply(g, function(v) is.numeric(v) || is.logical(v), NA))) chk_stop("gitter_zahlen", who)
+  invisible(NULL)
 }
 
 #' Gemeinsame Vorbereitung fuer bootstrap() und bootstrap_study()
 #' @keywords internal
 #' @noRd
-.boot_setup <- function(data, config, method, n, params, ess, ess_grid, path_length, cores = 1L) {
-  if (!inherits(config, "bootstrap_config")) stop("config muss mit bootstrap_config() erstellt werden")
-  if (!method %in% .boot_methods) stop("Unbekannte Methode '", method, "'. Verf\u00fcgbar: ", paste(.boot_methods, collapse = ", "))
-  if (!is.numeric(n) || length(n) != 1 || n < 1) stop("n muss eine positive Zahl sein")
+.boot_setup <- function(data, config, method, n, params, ess, ess_grid, path_length, cores = 1L,
+                        max_tries = 10L, progress = TRUE, who = "bootstrap") {
+  if (!inherits(config, "bootstrap_config")) chk_stop("klasse", who, "config", "bootstrap_config()")
+  # seit 1.6.4: Methode als einzelner Text, n auch NA, Meldungen ohne Eingabewert (Entscheidung 8)
+  if (!is.character(method) || length(method) != 1L || is.na(method) || !method %in% .boot_methods)
+    chk_stop("auswahl", who, "method", paste0('"', .boot_methods, '"', collapse = ", "))
+  if (!is.numeric(n) || length(n) != 1 || is.na(n) || n < 1) chk_stop("ut2.n_positiv", who)
   if (!is.null(path_length) && (!is.numeric(path_length) || length(path_length) != 1 || !is.finite(path_length) ||
                                 path_length < 1 || path_length != round(path_length)))
-    stop(sprintf("path_length muss eine ganze Zahl >= 1 sein (erhalten: %s).", paste(format(path_length), collapse = ", ")))
-  ex <- .extract_returns(data, config)
+    chk_stop("ganz", who, "path_length", "1")
+  # einheitliche Eingabepruefung (seit 1.6.4): data wie .extract_returns, dann die uebrigen Argumente vor der Vorberechnung
+  .boot_data_check(data, who)
+  chk_int1(n, who, "n")
+  # seit 1.6.4 Obergrenzen (Entscheidungen 16, 36 und 46): n <= 10^8, path_length <= 36 600 Tage (100 Jahre)
+  chk_max(n, SL_MAX_N, who, "n")
+  if (!is.null(path_length)) chk_max(path_length, SL_MAX_TAGE, who, "path_length")
+  if (!is.null(params) && !is.list(params)) chk_stop("liste", who, "params")
+  chk_bool1(ess, who, "ess")
+  .check_ess_grid(ess_grid, who)
+  chk_int1(max_tries, who, "max_tries")
+  cores <- chk_cores(cores, who)   # seit 1.6.4 hoechstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
+  chk_bool1(progress, who, "progress")
+  .boot_numcols(data, config, who)   # seit 1.6.4 nur Zahlenspalten (Entscheidung 39)
+  ex <- .extract_returns(data, config, who)
   n_obs <- nrow(ex$ret)
+  # seit 1.6.4 (Entscheidung 38): ess = TRUE mit dem Standardgitter braucht fuer Blocklaengen mindestens 4 Renditen
+  # (bis 1.6.3 R-Rohfehler "missing value where TRUE/FALSE needed", Python ZeroDivisionError)
+  if (isTRUE(ess) && is.null(ess_grid) && method %in% c("stationary", "block", "circular") && n_obs < 4L)
+    chk_stop("ess_kurz", who, 4L)
   n_out <- as.integer(path_length %||% n_obs)
   if (method %in% c("wild", "reset") && n_out != n_obs)
-    stop(sprintf("Verfahren '%s' erh\u00e4lt die Chronologie; path_length muss %d sein.", method, n_obs))
+    chk_stop("ut2.chronologie", who, method, as.integer(n_obs))
   params <- .resolve_auto(params, ex$ret)
   design <- if (ess) .ess_design(method, ess_grid, as.integer(n), n_obs) else NULL
   if (ess && is.null(design)) message("Keine Hyperparameter f\u00fcr ESS - nutze Standard-Bootstrap")
@@ -843,14 +935,14 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   })
   combo_of_path <- if (is.null(design)) rep(1L, n) else rep(seq_len(nrow(design)), design$n_sims)
   n_paths <- length(combo_of_path)
+  base_p <- lapply(combos, .get_base_params)
+  for (bp in base_p) .check_boot_params(method, bp, n_obs, who)   # seit 1.6.4 vor der Vorberechnung
   infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores),
                                                error = function(e) stop(sprintf("Vorberechnung fehlgeschlagen: %s", e$message))))
-  base_p <- lapply(combos, .get_base_params)
-  for (bp in base_p) .check_boot_params(method, bp, n_obs)
   weights <- if (is.null(design)) rep(1, n_paths) else design$weight[combo_of_path]
   weights <- weights / sum(weights) * length(weights)
   list(ex = ex, n_obs = n_obs, n_out = n_out, design = design, combos = combos, base_p = base_p,
-       infos = infos, combo_of_path = combo_of_path, n_paths = n_paths, weights = weights)
+       infos = infos, combo_of_path = combo_of_path, n_paths = n_paths, weights = weights, cores = cores)
 }
 
 #' Einen gueltigen Pfad mit eigenem Zufallsstrom erzeugen (mit Wiederholungen)
@@ -875,88 +967,200 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 
 #' Parallele Ausfuehrung (fork auf Unix, PSOCK auf Windows)
 #'
-#' Unix: [.par_lapply_fork()] (Einheiten in Pakete gebuendelt, ein Fork je Paket).
 #' Jede Einheit laeuft als parallele Einheit (Merker \code{.sl_state$in_unit}): der globale
 #' Zufallszustand von SimLev ist darin gesperrt, auch bei \code{cores = 1}. Zufaellige Einheiten
 #' bekommen ihren Strom als Argument (Stroeme je Einheit, R/slc.R); damit
 #' haengt das Ergebnis nicht von \code{cores} ab. R's Zufallszustand (\code{.Random.seed})
 #' wird weder gelesen noch gesetzt.
+#' \itemize{
+#'   \item \code{cores = "auto"}: [.par_lapply_auto()].
+#'   \item Feste Zahl >= 2 auf Unix (seit 1.6.4, Entscheidung 133): derselbe Weg wie \code{"auto"}, nur ohne
+#'     Messung: [.par_auto_fork()] ueber alle Einheiten mit min(cores, Einheiten) Forks, Kern-Threads je Kind
+#'     Prozessoren / Forks. Ergebnis, Ausgaben, Meldungen, Warnungen und Fehler wie \code{cores = 1}; endet ein Kind
+#'     ohne Ergebnis: Fehler. Bis dahin \code{mclapply} ueber hoechstens 4 cores Pakete
+#'     (\code{.par_lapply_fork}): Ausgaben und Warnungen der Einheiten gingen verloren, Fehler kamen als
+#'     \code{try-error}-Elemente mit Warnung "k function calls resulted in an error" zurueck (Folgefehler oder still
+#'     fehlende Zeilen in den Aufrufern), ein abgestuerztes Kind lieferte \code{NULL}.
+#'   \item Windows: feste Zahl ueber einen PSOCK-Cluster (\code{parLapplyLB}) wie bis 1.6.3.
+#' }
 #' @keywords internal
 #' @noRd
 .par_lapply <- function(X, FUN, cores) {
+  if (identical(cores, "auto")) return(.par_lapply_auto(X, FUN))   # seit 1.6.4: Planer
   if (cores <= 1 || length(X) <= 1) return(.sl_in_unit(lapply(X, FUN)))
-  if (.Platform$OS.type == "unix") return(.par_lapply_fork(X, FUN, cores))
+  if (.Platform$OS.type == "unix") return(.par_lapply_fixed(X, FUN, cores))
+  .sl_nthreads()                                               # Hinweis zu SIMLEV_THREADS hoechstens einmal, hier
   cl <- parallel::makePSOCKcluster(cores)
   on.exit(parallel::stopCluster(cl))
   parallel::clusterEvalQ(cl, { suppressPackageStartupMessages(library(SimLev))
     assign("in_unit", TRUE, envir = SimLev:::.sl_state) })      # Merker "in Einheit": globaler Zustand gesperrt
+  # Kern-Threads je Prozess (seit 1.6.4, Entscheidung 41c): Prozessoren / Prozesse, mindestens 1
+  parallel::clusterCall(cl, function(k) assign("thread_cap", k, envir = get(".sl_state", envir = asNamespace("SimLev"))),
+                        .sl_unit_threads(min(as.integer(cores), length(X))))
   parallel::parLapplyLB(cl, X, FUN)
 }
 
-#' Fork mit gebuendelten Einheiten (Unix)
-#'
-#' Ergebnis wie \code{parallel::mclapply(X, FUN, mc.cores = cores,
-#' mc.preschedule = FALSE, mc.set.seed = FALSE)} mit einem Fork je Einheit,
-#' aber mit einem Fork je Paket:
-#' \itemize{
-#'   \item P = min(Einheiten, 4 * cores) Pakete aufeinanderfolgender Einheiten,
-#'     Groessen um hoechstens 1 verschieden; \code{mclapply} verteilt die Pakete
-#'     dynamisch, jedes Paket rechnet seine Einheiten der Reihe nach.
-#'   \item Zufall: keiner der Sonderwege von frueher.
-#'     SimLev-Einheiten ziehen nur aus dem Strom, den sie als Argument bekommen; R's
-#'     Zufallszustand (\code{.Random.seed}, \code{RNGkind()}) wird weder gelesen noch gesetzt.
-#'   \item Fehler: je Einheit \code{try}, \code{try-error} mit derselben Meldung
-#'     und Bedingung wie bisher (Aufruf \code{FUN(X[[i]], ...)} fuer die ersten
-#'     \code{cores} Einheiten, danach \code{FUN(X[[nexti]], ...)}, wie in
-#'     \code{mclapply}); Warnung "k function calls resulted in an error" mit
-#'     demselben k und demselben Aufruf wie bisher.
-#'   \item Absturz eines Kinds: alle Einheiten des Pakets \code{NULL}; die
-#'     Warnung von \code{mclapply} ("... did not deliver ...") zaehlt Pakete.
-#'   \item Ausgaben, Meldungen und Warnungen der Einheiten werden nicht
-#'     eingefangen (wie bisher); innerhalb eines Pakets erscheinen sie in
-#'     Einheitenreihenfolge. Aenderungen globaler Zustaende sehen die folgenden
-#'     Einheiten desselben Pakets (keine Arbeitsfunktion haengt davon ab).
-#' }
-#' \code{1 < cores < 2} (und ungueltiges \code{cores}): wie bisher \code{mclapply}
-#' selbst (also \code{lapply} bzw. dessen Fehler).
-#' @keywords internal
-#' @noRd
-.par_lapply_fork <- function(X, FUN, cores) {
-  nc <- suppressWarnings(as.integer(cores))
-  if (is.na(nc) || nc < 2L)
-    return(.sl_in_unit(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE)))
-  if (!is.vector(X) || is.object(X)) X <- as.list(X)          # wie mclapply
+# Feste Zahl cores >= 2 auf Unix (seit 1.6.4, Entscheidung 133): alle Einheiten ueber .par_auto_fork mit
+# c = min(cores, Einheiten) Forks (ganzzahlig abgeschnitten wie mclapply; unter 2 nacheinander wie lapply)
+.par_lapply_fixed <- function(X, FUN, cores) {
+  if (!is.vector(X) || is.object(X)) X <- as.list(X)              # wie lapply
   FUN <- match.fun(FUN)
   n <- length(X)
-  ce <- min(nc, n)                                            # Kinder beim Start (mclapply)
-  n_pk <- min(n, 4L * nc)
-  packs <- unname(split(seq_len(n), ((seq_len(n) - 1) * n_pk) %/% n))
-  run_pack <- function(idx, ...) {
-    out <- vector("list", length(idx)); err <- logical(length(idx))
-    .sl_state$in_unit <- TRUE                                 # Merker "in Einheit", nur im Kind
-    for (k in seq_along(idx)) {
-      # Aufruf wortgleich wie in mclapply (Meldung und Bedingung des try-error)
-      i <- nexti <- idx[[k]]
-      r <- if (i <= ce) try(list(FUN(X[[i]], ...)), silent = TRUE) else try(list(FUN(X[[nexti]], ...)), silent = TRUE)
-      if (inherits(r, "try-error")) { err[k] <- TRUE; out[k] <- list(r) } else out[k] <- r
-    }
-    list(out, err)
-  }
-  rp <- parallel::mclapply(packs, run_pack, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE)
-  res <- vector("list", n); errs <- logical(n)
-  for (p in seq_along(packs)) {
-    if (!is.list(rp[[p]]) || length(rp[[p]]) != 2L) next      # Kind ohne Ergebnis: Einheiten NULL
-    res[packs[[p]]] <- rp[[p]][[1L]]; errs[packs[[p]]] <- rp[[p]][[2L]]
-  }
+  c <- min(as.integer(cores), n)
+  if (c < 2L) return(.sl_in_unit(lapply(X, FUN)))
+  res <- .par_auto_fork(X, seq_len(n), FUN, c, .sl_unit_threads(c))
   names(res) <- names(X)
-  # mclapply zaehlt bei n <= cores alle try-error-Ergebnisse, sonst die Einheiten mit Fehler
-  n_err <- if (n <= nc) sum(vapply(res, inherits, NA, "try-error")) else sum(errs)
-  if (n_err)
-    warning(simpleWarning(gettextf("%d function calls resulted in an error", n_err, domain = "R-parallel"),
-                          quote(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE))))
   res
 }
 
+
+#' Parallele Ausfuehrung mit cores = "auto" (seit 1.6.4, Entscheidungen 41b/41c)
+#'
+#' Ergebnis, Ausgaben, Meldungen, Warnungen und Fehler wie \code{cores = 1} (\code{lapply} als parallele Einheit):
+#' \itemize{
+#'   \item Messen: die ersten Einheiten laufen nacheinander im Elternprozess, bis die Startzeit eines weiteren
+#'     Laufs (\code{.sl_par_probe}) vergangen ist (mindestens zwei Einheiten); Rechenzeit je Einheit = Mittel ohne
+#'     die erste (sie enthaelt Anlaufkosten), bei nur einer Einheit deren Zeit; Ergebnisgroesse je Einheit aus
+#'     \code{object.size}.
+#'   \item Planen: \code{.sl_par_plan} (Kern sl_par_plan) waehlt Laeufe c und Kern-Threads je Lauf aus der Zahl der
+#'     Prozessoren, dem freien Speicher, den restlichen Einheiten und den Kosten; c = 1: der Rest nacheinander.
+#'   \item Verteilen (c > 1, nur Unix): Rest in hoechstens 2 c Pakete aufeinanderfolgender Einheiten, je Paket ein
+#'     Fork (\code{mcparallel}), hoechstens c gleichzeitig, dynamisch zugeteilt. Im Kind schneidet
+#'     \code{.par_rec_unit} Ausgaben, Meldungen und Warnungen jeder Einheit mit (nach dem ersten Fehler eines
+#'     Pakets keine weiteren Einheiten); der Elternprozess gibt sie in Einheitenreihenfolge wieder, sobald alle
+#'     Einheiten davor fertig sind, und loest den ersten Fehler in Einheitenreihenfolge erneut aus (laufende
+#'     Kinder werden beendet). Endet ein Kind ohne Ergebnis: Fehler.
+#'   \item Windows (PSOCK, Startkosten hier nicht gemessen) und ein Prozessor: nacheinander.
+#'   \item Den Verteilweg (\code{.par_auto_fork}) nutzt seit 1.6.4 auch eine feste Zahl (\code{.par_lapply_fixed}).
+#' }
+#' @keywords internal
+#' @noRd
+.par_lapply_auto <- function(X, FUN) {
+  if (!is.vector(X) || is.object(X)) X <- as.list(X)              # wie lapply
+  FUN <- match.fun(FUN)
+  n <- length(X)
+  .sl_state$par_last <- c(probed = n, runs = 1L, threads = NA_integer_)   # letzter Plan (intern, fuer Proben)
+  if (n <= 1L || .Platform$OS.type != "unix" || .sl_nprocs() < 2L) return(.sl_in_unit(lapply(X, FUN)))
+  res <- vector("list", n)
+  one <- function(i, ...) FUN(X[[i]], ...)                        # Aufruf wie in lapply: FUN(X[[i]], ...)
+  probe <- .sl_par_probe(0L)
+  k <- 0L; t_first <- 0; t_rest <- 0
+  .sl_in_unit(repeat {
+    k <- k + 1L
+    t0 <- as.numeric(Sys.time())
+    res[k] <- list(one(k))
+    dt <- as.numeric(Sys.time()) - t0
+    if (k == 1L) t_first <- dt else t_rest <- t_rest + dt
+    if (k >= n || (k >= 2L && t_first + t_rest >= probe)) break
+  })
+  if (k < n) {
+    u <- if (k >= 2L) t_rest / (k - 1L) else t_first
+    pl <- .sl_par_plan(n - k, u, as.numeric(utils::object.size(res[seq_len(k)])) / k, 0L)
+    .sl_state$par_last <- c(probed = k, runs = pl[1L], threads = pl[2L])
+    idx <- (k + 1L):n
+    res[idx] <- if (pl[1L] >= 2L) .par_auto_fork(X, idx, FUN, pl[1L], pl[2L])
+                else .sl_in_unit(lapply(idx, one))
+  }
+  names(res) <- names(X)
+  res
+}
+
+# Eine Einheit im Kind mitschneiden: list(ok, value, ev); ev = Ereignisse in Reihenfolge, je list(art, wert) mit art
+# "o" (Ausgabe als Bytes), "m" (Meldung), "w" (Warnung); bei Fehler ok = FALSE und value = Bedingung
+.par_rec_unit <- function(X, i, FUN) {
+  ev <- list(); pos <- 0L
+  rc <- rawConnection(raw(0), open = "w")
+  sink(rc)
+  flush_out <- function() {
+    b <- rawConnectionValue(rc)
+    if (length(b) > pos) { ev[[length(ev) + 1L]] <<- list("o", b[(pos + 1L):length(b)]); pos <<- length(b) }
+  }
+  r <- tryCatch(withCallingHandlers(list(ok = TRUE, value = FUN(X[[i]])),
+                                    message = function(m) { flush_out(); ev[[length(ev) + 1L]] <<- list("m", m)
+                                                            invokeRestart("muffleMessage") },
+                                    warning = function(w) { flush_out(); ev[[length(ev) + 1L]] <<- list("w", w)
+                                                            invokeRestart("muffleWarning") }),
+                error = function(e) list(ok = FALSE, value = e))
+  flush_out()
+  sink()
+  close(rc)
+  r$ev <- ev
+  r
+}
+
+# Ereignisse einer Einheit im Elternprozess wiedergeben (Meldungen und Warnungen als dieselben Bedingungen; der
+# Hinweis zu SIMLEV_THREADS hoechstens einmal je Sitzung wie nacheinander)
+.par_replay <- function(ev) {
+  hint <- NULL
+  for (e in ev) {
+    if (e[[1L]] == "o") cat(rawToChar(e[[2L]]))
+    else if (e[[1L]] == "m") {
+      if (is.null(hint)) hint <- paste0(chk_msg("hinweis.prozessoren", "SIMLEV_THREADS", .sl_nprocs()), "\n")
+      if (identical(conditionMessage(e[[2L]]), hint)) {
+        if (isTRUE(.sl_state$threads_hint)) next
+        assign("threads_hint", TRUE, envir = .sl_state)
+      }
+      message(e[[2L]])
+    } else warning(e[[2L]])
+  }
+  invisible(NULL)
+}
+
+# Rest idx in Paketen auf c Forks (mcparallel), Kern-Threads je Kind cap; Wiedergabe in Einheitenreihenfolge
+.par_auto_fork <- function(X, idx, FUN, c, cap) {
+  m <- length(idx)
+  n_pk <- min(m, 2L * c)                                          # 2 Pakete je Lauf (Kern: packs)
+  packs <- unname(split(idx, ((seq_len(m) - 1) * n_pk) %/% m))
+  parent <- Sys.getpid()
+  run_pack <- function(ii) {
+    .Call(C_sl_child_guard, parent)                               # seit 1.6.4 (K43 T2-B4): endet mit dem Elternprozess
+    .sl_state$in_unit <- TRUE                                     # nur im Kind
+    .sl_state$thread_cap <- cap
+    out <- vector("list", length(ii))
+    for (j in seq_along(ii)) {
+      out[[j]] <- .par_rec_unit(X, ii[[j]], FUN)
+      if (!out[[j]]$ok) { length(out) <- j; break }
+    }
+    out
+  }
+  res <- vector("list", m)
+  got <- vector("list", n_pk); have <- logical(n_pk)
+  running <- list(); nxt <- 1L; done <- 0L
+  # Aufraeumen und Einsammeln ohne die Warnung "k parallel job(s) did not deliver a result" von mccollect (seit 1.6.4,
+  # K43 T2-R5): ob ein Kind kein Ergebnis lieferte, prueft die Wiedergabe unten (Fehler)
+  on.exit(for (r in running) {
+    tools::pskill(r$job$pid); suppressWarnings(parallel::mccollect(r$job, wait = TRUE))
+  }, add = TRUE)
+  while (done < n_pk) {
+    while (length(running) < c && nxt <= n_pk) {
+      pk <- packs[[nxt]]
+      job <- parallel::mcparallel(run_pack(pk), silent = FALSE)
+      running[[as.character(job$pid)]] <- list(job = job, p = nxt)
+      nxt <- nxt + 1L
+    }
+    r <- if (length(running))
+      suppressWarnings(parallel::mccollect(lapply(running, `[[`, "job"), wait = FALSE, timeout = 0.02))
+    for (pid in names(r)) {
+      p <- running[[pid]]$p
+      got[p] <- list(r[[pid]]); have[p] <- TRUE
+      running[[pid]] <- NULL
+    }
+    while (done < n_pk && have[done + 1L]) {
+      p <- done + 1L; out <- got[[p]]
+      # Kind ohne Ergebnis: seit 1.6.4 (K43 T2-R4) Baustein ohne Nummer, in R und Python gleich (bis dahin
+      # "par_lapply: Prozess endete ohne Ergebnis (Element k)" mit dem ersten Element des Pakets)
+      if (!is.list(out) || inherits(out, "try-error")) chk_stop("ut2.prozess", "par_lapply")
+      for (j in seq_along(out)) {
+        .par_replay(out[[j]]$ev)
+        if (!out[[j]]$ok) stop(out[[j]]$value)
+        res[match(packs[[p]][j], idx)] <- list(out[[j]]$value)
+      }
+      got[p] <- list(NULL)
+      done <- p
+    }
+  }
+  res
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Oeffentliche Funktionen
@@ -978,6 +1182,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   \code{input = "prices"}, als Kursniveaus; Zusatzreihen beliebig). Jede
 #'   Zeile ist ein Simulationsschritt ("Tag"); eine Datumsspalte wird nicht
 #'   ausgewertet.
+#'   Seit 1.6.4 muessen die Spalten aus config Zahlen enthalten (Text, auch Zahlen als Text, ist ein Fehler).
 #' @param config Objekt aus [bootstrap_config()].
 #' @param method Verfahren (Standard in \code{bootstrap()}: \code{"raw"}, in
 #'   \code{\link[=bootstrap_study]{bootstrap_study()}}: \code{"stationary"}). In Klammern die Eintraege von
@@ -1001,6 +1206,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   Gesamtbudget, das auf die Parameterkombinationen verteilt wird.
 #'   Pfade, die nach \code{max_tries} Versuchen ungueltig bleiben, fehlen im
 #'   Ergebnis.
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param params Benannte Liste von Verfahrensparametern; nicht angegebene
 #'   Eintraege erhalten den Standardwert (Standard \code{list()} = alle
 #'   Standardwerte). Je Verfahren werden nur die oben genannten Eintraege
@@ -1046,17 +1252,21 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   Pfade erhalten Gewichte (Mittel 1), mit denen [bootstrap_probability()]
 #'   und \code{summary()} rechnen. Fuer "raw", "garch" und "gjr_garch" gibt es
 #'   kein Standardgitter (dann normaler Bootstrap).
+#'   Seit 1.6.4 braucht ess = TRUE mit dem Standardgitter bei stationary, block und circular mindestens 4 Renditen
+#'   (sonst Fehler).
 #' @param ess_grid Benannte Liste von Wertevektoren je Hyperparameter (z. B.
 #'   \code{list(L = c(20, 50, 100))}); \code{NULL} (Standard) = Standardgitter
 #'   des Verfahrens (z. B. \code{L} bzw. \code{block_length} 5, 10, 20, 30,
 #'   50, 75, 100 Zeilen, begrenzt auf die halbe Historienlaenge). Nur bei
 #'   \code{ess = TRUE} verwendet.
+#'   Seit 1.6.4 nur Zahlen (und Wahrheitswerte); Text wie ms_garch_model ist ein Fehler.
 #' @param progress Logisch: Fortschritts- und Abschlussmeldung per
 #'   \code{message()} ausgeben (Standard \code{TRUE}).
 #' @param path_length Pfadlaenge in Zeilen (simulierte Schritte, ganze Zahl,
 #'   mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie. Damit lassen sich
 #'   z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
 #'   \code{path_length + 1} Zeilen (Startzeile plus Schritte).
+#'   Seit 1.6.4 hoechstens 36600 (100 Jahre in Tagen).
 #' @param seed Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
 #'   einmal aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]; ganze Zahl von 0
 #'   bis \eqn{2^{31} - 1}, im Ergebnis unter \code{seed} gespeichert, damit reproduzierbar).
@@ -1067,10 +1277,22 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
 #'   unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
 #'   \code{set.seed()} wirkt nicht.
-#' @param cores Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
-#'   Windows). Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
-#'   \code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen
-#'   Threads; das Ergebnis haengt davon nicht ab.
+#' @param cores Anzahl Prozesse (Fork auf Unix, PSOCK-Cluster auf Windows):
+#'   \code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+#'   Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+#'   dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+#'   Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+#'   viele, wie der freie Speicher traegt, und
+#'   nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+#'   einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+#'   erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+#'   Eine feste Zahl rechnet wie bis 1.6.3; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
+#'   begrenzt.
+#'   Das Ergebnis haengt nicht von cores ab.
+#'   Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
+#'   Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
+#'   \code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen Threads (mit
+#'   \code{"auto"} auf den Kern-Threads: Zahl der Prozessoren bzw. SIMLEV_THREADS); das Ergebnis haengt davon nicht ab.
 #' @param max_tries Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
 #'   ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
 #'   Hebelprodukts macht den Pfad nicht ungueltig.
@@ -1156,10 +1378,11 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' @export
 bootstrap <- function(data, config, method = "raw", n = 1000, params = list(), ess = FALSE,
                       ess_grid = NULL, path_length = NULL, max_tries = 10L, seed = NULL,
-                      cores = 1L, progress = TRUE) {
+                      cores = "auto", progress = TRUE) {
   t0 <- Sys.time()
-  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
-  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # NULL -> einmal k aus G
+  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress, "bootstrap")
+  cores <- setup$cores   # begrenzt (Entscheidung 41)
+  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed, "bootstrap")   # NULL -> einmal k aus G
   streams <- .sl_streams(seed, setup$n_paths)                 # U_i = J^i(S_0) je Pfad
   res <- .par_lapply(seq_len(setup$n_paths), function(i)
     .draw_path(setup, i, streams[[i]], config, method, max_tries), cores)
@@ -1218,8 +1441,10 @@ print.bootstrap_result <- function(x, ...) {
 #' @seealso [bootstrap()], [bootstrap_data()]
 #' @export
 bootstrap_validate <- function(result, min_rows = NULL, verbose = TRUE) {
-  if (!inherits(result, "bootstrap_result")) stop("result muss ein bootstrap_result-Objekt sein")
-  if (!length(result$paths)) stop("Keine Pfade im Ergebnis vorhanden")
+  if (!inherits(result, "bootstrap_result")) chk_stop("klasse", "bootstrap_validate", "result", "bootstrap()")
+  if (!length(result$paths)) chk_stop("rs.keine_pfade", "bootstrap_validate")
+  if (!is.null(min_rows)) chk_int1(min_rows, "bootstrap_validate", "min_rows", lo = 0)   # seit 1.6.4
+  chk_bool1(verbose, "bootstrap_validate", "verbose")
   P <- result$paths
   ok <- vapply(P, function(p) !is.null(p) && (is.matrix(p) || is.data.frame(p)) && nrow(p) > 0 &&
                  !anyNA(p) && all(is.finite(as.matrix(p))), TRUE)
@@ -1247,6 +1472,8 @@ bootstrap_validate <- function(result, min_rows = NULL, verbose = TRUE) {
 #'
 #' @param result \code{bootstrap_result} aus [bootstrap()] oder eine einzelne
 #'   Pfadmatrix (z. B. \code{result$paths[[i]]}).
+#'   Seit 1.6.4 auch wie beschrieben ein einzelner Pfad: Zahlenmatrix (Spalten ohne Namen heissen V1, V2, ...) oder
+#'   Tabelle aus Zahlenspalten.
 #' @param i Pfadnummer (Standard 1); nur bei \code{bootstrap_result} verwendet.
 #' @param dates Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen
 #'   hat (\code{path_length + 1}), z. B. ein Handelstagskalender;
@@ -1281,13 +1508,23 @@ bootstrap_validate <- function(result, min_rows = NULL, verbose = TRUE) {
 #' @seealso [bootstrap()], [simulation()], [bootstrap_study()]
 #' @export
 bootstrap_data <- function(result, i = 1L, dates = NULL, start = "2000-01-01") {
-  P <- if (inherits(result, "bootstrap_result")) result$paths[[i]] else result
+  # seit 1.6.4: Pfadnummer als ganze Zahl von 1 bis zur Pfadzahl (vorher z. B. i = 2.5 abgeschnitten), start als Datum
+  is_res <- inherits(result, "bootstrap_result")
+  if (is_res) chk_int1(i, "bootstrap_data", "i", lo = 1, hi = length(result$paths))
+  # seit 1.6.4 (Entscheidung 30) wie dokumentiert auch ein einzelner Pfad: Zahlenmatrix oder Tabelle aus Zahlenspalten
+  # (bis 1.6.3 "$ operator is invalid for atomic vectors" bei einer Matrix)
+  else if (!((is.matrix(result) && is.numeric(result) && ncol(result) >= 1L) ||
+             (is.data.frame(result) && ncol(result) >= 1L && all(vapply(result, is.numeric, NA)))))
+    chk_stop("pfad", "bootstrap_data")
+  chk_date1(start, "bootstrap_data", "start")
+  P <- if (is_res) result$paths[[i]] else result
+  chk_nofactor(dates, "bootstrap_data", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = nrow(P))
-  if (length(dates) != nrow(P)) stop(sprintf("dates hat L\u00e4nge %d, Pfad hat %d Zeilen.", length(dates), nrow(P)))
+  if (length(dates) != nrow(P)) chk_stop("rs.dates_pfad", "bootstrap_data", length(dates), nrow(P))
   out <- data.frame(date = .to_date(dates, "dates"), as.data.frame(P), check.names = FALSE)
   # ausdruecklich als "rate" gekennzeichnete Reihen mitgeben (fuer withdrawal_cohorts); sonst kein Attribut
-  set <- if (inherits(result, "bootstrap_result")) result$config$aux_type_set else NULL
-  set <- set[result$config$aux_type[set] %in% "rate"]
+  set <- if (is_res) result$config$aux_type_set else NULL
+  if (length(set)) set <- set[result$config$aux_type[set] %in% "rate"]
   if (length(set)) attr(out, "aux_type") <- result$config$aux_type[set]
   out
 }
@@ -1336,6 +1573,7 @@ bootstrap_data <- function(result, i = 1L, dates = NULL, start = "2000-01-01") {
 #' @seealso [bootstrap_study()], [sensitivity_grid()], [simulation()]
 #' @export
 bootstrap_study_metrics <- function(res) {
+  if (!inherits(res, "SimLevResult")) chk_stop("klasse", "bootstrap_study_metrics", "res", "simulation()")   # seit 1.6.4
   s <- res$statistics
   dq <- stats::quantile(res$drawdowns, c(0.5, 0.9), names = FALSE)
   c(cagr = res$cagr, ttwror = res$ttwror, final_value = utils::tail(res$worth, 1),
@@ -1407,6 +1645,8 @@ bootstrap_study_metrics <- function(res) {
 #' @param metrics Funktion \code{SimLevResult -> benannter numerischer Vektor}
 #'   (Standard [bootstrap_study_metrics()]); die Namen werden zu Spalten von
 #'   \code{results}.
+#'   Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen nicht path, weight, combo,
+#'   tries oder strategy heissen (sonst Fehler nach dem Rechnen).
 #' @param benchmark Name einer Strategie aus \code{strategies} als Vergleich
 #'   fuer die gepaarte Auswertung in \code{summary()}; \code{NULL} (Standard)
 #'   = keine.
@@ -1423,6 +1663,8 @@ bootstrap_study_metrics <- function(res) {
 #'   gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
 #'   Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten
 #'   Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.
+#'   Seit 1.6.4 werden die Dateien atomar geschrieben (temporaerer Name, dann umbenannt); eine unvollstaendige oder
+#'   beschaedigte Datei bricht bei jedem cores mit derselben Meldung ab.
 #' @param keep_paths Pfadmatrizen zusaetzlich zurueckgeben (Diagnose):
 #'   \code{TRUE} = alle Pfade, \code{FALSE} oder 0 (Standard) = keine, ganze
 #'   Zahl k >= 1 = die ersten k Pfade (k groesser als die Pfadzahl: alle);
@@ -1456,11 +1698,23 @@ bootstrap_study_metrics <- function(res) {
 #'   endlich oder <= 0 (z. B. eine nicht gekennzeichnete Zinsreihe mit
 #'   Vorzeichenwechsel), warnt die Funktion, und [withdrawal_paths()] bricht
 #'   mit dieser Reihe als Inflation ab. Standard \code{NULL}.
-#' @param cores Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.
-#'   Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (Ergebnis
-#'   unabhaengig davon).
+#' @param cores Anzahl Prozesse; parallelisiert wird ueber Chunks:
+#'   \code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+#'   Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+#'   dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+#'   Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+#'   viele, wie der freie Speicher traegt, und
+#'   nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+#'   einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+#'   erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+#'   Eine feste Zahl rechnet wie bis 1.6.3; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
+#'   begrenzt.
+#'   Das Ergebnis haengt nicht von cores ab.
+#'   Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
+#'   Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (mit \code{"auto"} die Kern-Threads;
+#'   Ergebnis unabhaengig davon).
 #' @param progress Logisch: Fortschrittsmeldungen per \code{message()}
-#'   (Standard \code{TRUE}; Meldung je Chunk nur bei \code{cores = 1}).
+#'   (Standard \code{TRUE}; Meldung je Chunk nur bei \code{cores = 1} und \code{cores = "auto"}).
 #'
 #' @return Objekt der Klasse \code{SimLevBootstrapStudy}, eine Liste mit
 #'   \describe{
@@ -1546,39 +1800,70 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
                             sim_args = list(), metrics = bootstrap_study_metrics, benchmark = NULL,
                             chunk_dir = NULL, keep_paths = 0L,
                             keep_returns = c("none", "year", "quarter", "month"), keep_aux = NULL,
-                            max_tries = 10L, chunk_size = 25L, seed = NULL, cores = 1L, progress = TRUE) {
+                            max_tries = 10L, chunk_size = 25L, seed = NULL, cores = "auto", progress = TRUE) {
   own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
+  .e5_choice(keep_returns, c("none", "year", "quarter", "month"), "bootstrap_study", "keep_returns")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   keep_returns <- match.arg(keep_returns)
-  if (!is.null(keep_aux) && !all(keep_aux %in% config$aux_names))
-    stop("keep_aux muss Namen aus config$aux enthalten.")
+  fn <- "bootstrap_study"
+  # seit 1.6.4: config vor keep_aux (vorher "$ operator is invalid"), keep_aux nur Text ohne Doppel
+  if (!inherits(config, "bootstrap_config")) chk_stop("klasse", "bootstrap_study", "config", "bootstrap_config()")
+  if (!is.null(keep_aux) && (!is.character(keep_aux) || !all(keep_aux %in% config$aux_names)))
+    chk_stop("ut2.keep_aux", "bootstrap_study")
+  if (anyDuplicated(keep_aux)) chk_stop("e2.doppelt", fn, "keep_aux")
   t0 <- Sys.time()
-  if (missing(strategies) || !length(strategies) || is.null(names(strategies)) || any(names(strategies) == ""))
-    stop("'strategies' muss eine benannte, nicht-leere Liste sein.")
+  if (missing(strategies) || !is.list(strategies) || inherits(strategies, "strategy") || !length(strategies) ||
+      is.null(names(strategies)) || anyNA(names(strategies)) || any(names(strategies) == ""))
+    chk_stop("ut2.strategies", "bootstrap_study")
+  if (anyDuplicated(names(strategies))) chk_stop("e2.doppelt", fn, "strategies")   # vorher: R erste, Julia letzte
   specs <- lapply(strategies, function(s) {
     if (is.list(s) && !is.null(s$strategy) && !inherits(s, "strategy")) s else list(strategy = s)
   })
-  if (!is.null(benchmark) && !benchmark %in% names(specs)) stop("benchmark muss einer der Strategienamen sein.")
+  for (sp in specs) .e2_check_strategy(sp$strategy)   # wie simulation(), vor dem Ziehen (seit 1.6.4)
+  if (!is.null(benchmark) && (!is.character(benchmark) || length(benchmark) != 1L || !benchmark %in% names(specs)))
+    chk_stop("ut2.benchmark_name", "bootstrap_study")
+  if (!is.null(sim_args) && !is.list(sim_args)) chk_stop("liste", fn, "sim_args")
+  if (!is.function(metrics)) chk_stop("e2.funktion", fn, "metrics")
+  if (!is.null(chunk_dir)) {
+    chk_name1(chunk_dir, fn, "chunk_dir")
+    if (file.exists(chunk_dir) && !dir.exists(chunk_dir)) chk_stop("e2.verzeichnis", fn, "chunk_dir")
+  }
+  chk_int1(burn_in, fn, "burn_in", lo = 0)
+  chk_int1(chunk_size, fn, "chunk_size")
+  chk_date1(start, fn, "start")
   # Argumente fuer simulation() je Strategie einmal aufloesen (Bausteine, Pfade; alte flache Namen: Fehler)
   sim_args <- .sim_args_set(list(), sim_args, "bootstrap_study")
   for (nm in names(specs)) specs[[nm]]$sim <- .sim_args_set(sim_args, specs[[nm]]$args, "bootstrap_study")
-  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
+  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress, fn)
+  cores <- setup$cores   # begrenzt (Entscheidung 41)
   keep_paths <- .keep_count(keep_paths, setup$n_paths, "bootstrap_study")   # TRUE = alle Pfade
+  chk_nofactor(dates, "bootstrap_study", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = setup$n_out + 1L)
-  if (length(dates) != setup$n_out + 1L) stop(sprintf("dates braucht L\u00e4nge %d (Pfadl\u00e4nge + 1).", setup$n_out + 1L))
+  if (length(dates) != setup$n_out + 1L) chk_stop("rs.dates_studie", fn, setup$n_out + 1L)
   dates <- .to_date(dates, "dates")
-  if (burn_in >= setup$n_out) stop("burn_in ist l\u00e4nger als der Pfad.")
-  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # NULL -> einmal k aus G
+  if (burn_in >= setup$n_out) chk_stop("rs.burn_in", fn)
+  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed, "bootstrap_study")   # NULL -> einmal k aus G
   streams <- .sl_streams(seed, setup$n_paths)                 # U_i = J^i(S_0) je Pfad
   chunks <- split(seq_len(setup$n_paths), ceiling(seq_len(setup$n_paths) / chunk_size))
   chunk_file <- function(ci) NULL
+  cached <- vector("list", length(chunks))
   if (!is.null(chunk_dir)) {
     dir.create(chunk_dir, showWarnings = FALSE, recursive = TRUE)
     chunk_file <- function(ci) file.path(chunk_dir, paste0(.chunk_stem(ci, seed, keep_returns, keep_paths), "_r.rds"))
     .chunk_pruefen(chunk_dir, length(chunks), seed, keep_returns, keep_paths, "_r.rds")
+    # seit 1.6.4 (Entscheidung 29): vorhandene Zwischendateien vor dem Rechnen lesen; eine unvollstaendige oder
+    # beschaedigte Datei bricht bei jedem cores mit derselben Meldung ab (bis 1.6.3 bei cores > 1 nur Warnung und
+    # fehlende Pfade)
+    for (ci in seq_along(chunks)) {
+      f <- chunk_file(ci)
+      if (!file.exists(f)) next
+      x <- tryCatch(readRDS(f), error = function(e) NULL)
+      if (!is.list(x) || length(x) != length(chunks[[ci]])) chk_stop("chunk_kaputt", fn, ci)
+      cached[ci] <- list(x)
+    }
   }
   sim_rows <- (burn_in + 1L):(setup$n_out + 1L)
   ret_ends <- if (keep_returns != "none") .anniv_ends(dates[sim_rows], keep_returns) else NULL
-  if (!is.null(ret_ends) && length(ret_ends) < 2) stop("Pfad nach burn_in zu kurz f\u00fcr eine volle Periode in keep_returns.")
+  if (!is.null(ret_ends) && length(ret_ends) < 2) chk_stop("rs.burn_in_kurz", fn)
   per_ret <- function(v) { v <- v[ret_ends]; v[-1] / v[-length(v)] }
   # keep_aux: Inflationsniveau je Pfadzeile. aux_type "rate" (ausdruecklich): Rate in Prozent p. a.
   # ueber die Kalendertage aufgezinst; "level": Pfadspalte (kumuliertes Niveau); ohne Angabe wie
@@ -1628,33 +1913,53 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     list(id = i, rows = rows, aux = aux_ret, path = if (i <= keep_paths) dp$path else NULL)
   }
   run_chunk <- function(ci) {
+    if (!is.null(cached[[ci]])) return(cached[[ci]])
     f <- chunk_file(ci)
-    if (!is.null(f) && file.exists(f)) return(readRDS(f))
     out <- lapply(chunks[[ci]], eval_path)
-    if (!is.null(f)) saveRDS(out, f)
-    if (progress && cores <= 1) message(sprintf("  Chunk %d/%d fertig (%.0f s)", ci, length(chunks),
-                                                as.numeric(difftime(Sys.time(), t0, units = "secs"))))
+    if (!is.null(f)) {   # seit 1.6.4 atomar: erst unter einem temporaeren Namen, dann umbenennen (Entscheidung 29)
+      tmp <- paste0(f, ".tmp", Sys.getpid())
+      saveRDS(out, tmp)
+      if (!file.rename(tmp, f)) { unlink(tmp); saveRDS(out, f) }
+    }
+    # seit 1.6.4 bei jedem cores (Entscheidung 135; bis dahin nur bei cores = 1 und "auto")
+    if (progress) message(sprintf("  Chunk %d/%d fertig (%.0f s)", ci, length(chunks),
+                                  as.numeric(difftime(Sys.time(), t0, units = "secs"))))
     out
   }
-  if (progress) message(sprintf("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %d Kern(e)",
-                                method, setup$n_paths, length(specs), length(chunks), cores))
+  if (progress) message(sprintf("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %s Kern(e)",
+                                method, setup$n_paths, length(specs), length(chunks), format(cores)))
   res <- .par_lapply(seq_along(chunks), run_chunk, cores)
-  failed_chunks <- vapply(res, function(r) inherits(r, "try-error") || !is.list(r), TRUE)
-  if (any(failed_chunks)) warning(sprintf("%d Chunks mit Fehler: %s", sum(failed_chunks),
-                                          paste(unique(unlist(res[failed_chunks])), collapse = "; ")))
-  res <- unlist(res[!failed_chunks], recursive = FALSE)
+  # seit 1.6.4 (K43 KR/UT2) ohne die Behandlung von try-error-Chunks ("k Chunks mit Fehler"): seit Entscheidung 133
+  # loest jeder Weg von .par_lapply den ersten Fehler aus (Unix wie cores = 1, Windows parLapplyLB selbst)
+  res <- unlist(res, recursive = FALSE)
+  # seit 1.6.4 (Entscheidung 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte (bis 1.6.3 je
+  # Sprache verschiedene falsche Tabellen); geprueft nach dem Rechnen, bei jedem cores gleich
+  for (r in res) for (nm in names(specs)) {
+    rw <- r$rows[[nm]]$row
+    if (is.null(rw)) next
+    mn <- names(rw)[-(1:4)]
+    if (anyNA(mn) || any(mn == "") || anyDuplicated(mn) ||
+        any(mn %in% c("path", "weight", "combo", "tries", "strategy")))
+      chk_stop("kennzahl_namen", fn)
+  }
   tab <- do.call(rbind, lapply(names(specs), function(nm) {
     m <- do.call(rbind, lapply(res, function(r) r$rows[[nm]]$row))
     if (is.null(m)) return(NULL)
     data.frame(strategy = nm, m, check.names = FALSE, stringsAsFactors = FALSE)
   }))
   # Fehler und Warnungen der Einzelsimulationen je Strategie zusammenfassen (Anzahl = Pfade)
+  # seit 1.6.4 (A-059) die Teile je Pfad und Strategie in vorab angelegten Listen, am Ende einmal unlist (bis 1.6.3 c()
+  # je Eintrag, quadratisch in der Zahl der Eintraege); gleiche Vektoren in gleicher Reihenfolge
   cond_tab <- function(field) {
-    st <- character(); sg <- character(); ms <- character(); pa <- integer()
+    m <- length(res) * length(specs)
+    stl <- vector("list", m); sgl <- vector("list", m); msl <- vector("list", m); pal <- vector("list", m); j <- 0L
     for (r in res) for (nm in names(specs)) { v <- r$rows[[nm]][[field]]
       if (!length(v)) next
-      if (field == "err") { sg <- c(sg, v[["stage"]]); v <- v[["message"]] } else sg <- c(sg, rep(NA_character_, length(v)))
-      st <- c(st, rep(nm, length(v))); ms <- c(ms, v); pa <- c(pa, rep(as.integer(r$id), length(v))) }
+      j <- j + 1L
+      if (field == "err") { sgl[j] <- list(v[["stage"]]); v <- v[["message"]] } else sgl[[j]] <- rep(NA_character_, length(v))
+      stl[[j]] <- rep(nm, length(v)); msl[j] <- list(v); pal[[j]] <- rep(as.integer(r$id), length(v)) }
+    st <- c(character(), unlist(stl)); sg <- c(character(), unlist(sgl)); ms <- c(character(), unlist(msl))
+    pa <- c(integer(), unlist(pal))
     if (!length(st)) return(NULL)
     key <- paste(st, sg, ms, sep = "\r"); first <- !duplicated(key)
     out <- data.frame(strategy = st[first], stage = sg[first], message = ms[first], n = as.integer(table(key)[key[first]]),
@@ -1736,14 +2041,14 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
 #' Zweck: gemeinsame Pruefung von keep_paths in bootstrap_study() und withdrawal_simulation(): TRUE = alle
 #' Pfade, FALSE oder 0 = keine, ganze Zahl k >= 1 = die ersten k Pfade; k > n still alle.
 #' Eingabe: x (keep_paths), n (Anzahl Pfade; Inf, wenn noch unbekannt), who (Aufrufer fuer die Meldung).
-#' Ausgabe: Anzahl in 0..n (Zahl). Fehler bei NA, Text, Vektor, negativen oder nicht ganzen Zahlen.
+#' Ausgabe: Anzahl in 0..n (Zahl). Fehler bei NA, Text, Vektor, negativen oder nicht ganzen Zahlen (seit 1.6.4 ohne
+#' den Eingabewert in der Meldung).
 #' @keywords internal
 #' @noRd
 .keep_count <- function(x, n, who) {
   if (is.logical(x) && length(x) == 1L && !is.na(x)) return(if (x) n else 0)
   if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < 0 || x != round(x))
-    stop(sprintf("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) sein, nicht %s.",
-                 who, paste(format(x), collapse = ", ")), call. = FALSE)
+    chk_stop("ut2.keep_paths", who)   # seit 1.6.4 aus der Tabelle (K43 T2-B6)
   min(as.numeric(x), n)
 }
 
@@ -1833,9 +2138,16 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
 #' @seealso [bootstrap_study()], [bootstrap_study_metrics()]
 #' @export
 bootstrap_probability <- function(study, ..., thresholds = NULL) {
-  if (!inherits(study, "SimLevBootstrapStudy")) stop("study muss ein SimLevBootstrapStudy-Objekt sein.")
+  if (!inherits(study, "SimLevBootstrapStudy")) chk_stop("klasse", "bootstrap_probability", "study", "bootstrap_study()")
+  # seit 1.6.4: thresholds als benannte Liste (je Strategie eine benannte Liste von Ausdruecken)
+  if (!is.null(thresholds) && (!is.list(thresholds) || is.null(names(thresholds)) || anyNA(names(thresholds)) ||
+                               any(names(thresholds) == "") ||
+                               !all(vapply(thresholds, function(t) is.list(t) && length(t) > 0L && !is.null(names(t)) &&
+                                                           !anyNA(names(t)) && all(names(t) != ""), NA))))
+    chk_stop("e2.benannt", "bootstrap_probability", "thresholds")
   env <- parent.frame()                                   # freie Variablen im Aufrufer suchen
   conds <- as.list(substitute(list(...)))[-1]
+  if (!length(conds) && is.null(thresholds)) chk_stop("e2.bedingung", "bootstrap_probability")   # seit 1.6.4 (vorher NULL)
   if (is.null(names(conds))) names(conds) <- vapply(conds, function(e) paste(deparse(e), collapse = ""), "")
   names(conds)[names(conds) == ""] <- vapply(conds[names(conds) == ""], function(e) paste(deparse(e), collapse = ""), "")
   tab <- study$results

@@ -22,7 +22,7 @@ param_search(
   maximize = TRUE,
   keep_returns = c("day", "none"),
   seed = NULL,
-  cores = 1L
+  cores = "auto"
 )
 
 \method{summary}{SimLevParamSearch}(object, top = 10L, ...)
@@ -40,7 +40,8 @@ param_search(
 \arguments{
 \item{data}{data.frame wie in \code{\link[=simulation]{simulation()}} (Spalte \code{date} und
 Kursspalten als Niveaus), inklusive Vorlauf fuer Signale (siehe
-\code{burn_in}).}
+\code{burn_in}).
+Seit 1.6.4 mindestens eine Datenzeile (vorab geprueft).}
 
 \item{builder}{Funktion \code{function(p)}, die aus einer benannten Liste
 \code{p} (ein Punkt des Raums) entweder eine Strategie oder eine Liste
@@ -70,7 +71,8 @@ Abdeckung bei vielen Dimensionen).}
 \item{n}{Anzahl Punkte bei \code{"random"} und \code{"lhs"} (ganze Zahl,
 Standard 50); bei \code{"grid"} ignoriert. Doppelte Punkte werden
 entfernt und in hoechstens 20 Runden nachgezogen; es koennen weniger
-Punkte entstehen.}
+Punkte entstehen.
+Seit 1.6.4 hoechstens 10^8.}
 
 \item{constraint}{Optional \code{function(p)}, die \code{TRUE} fuer
 zulaessige Punkte liefert (z. B. Gewichte summieren sich hoechstens zu
@@ -86,12 +88,15 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 
 \item{burn_in}{Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
 Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
-ganze Zahl, Standard 0).}
+ganze Zahl, Standard 0).
+Seit 1.6.4 eine ganze Zahl >= 0.}
 
 \item{metrics}{Funktion \code{SimLevResult ->} benannter numerischer
 Vektor (Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}: u. a. \code{cagr},
 \code{max_drawdown} als Anteil, \code{sharpe}; \code{cagr} ist mit
-Sparplan geldgewichtet, XIRR).}
+Sparplan geldgewichtet, XIRR).
+Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen keiner festen
+Spalte des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).}
 
 \item{objective}{Name der Zielgroesse (Element von \code{metrics}, Standard
 \code{"sharpe"}) fuer Ranking, Plateau und \code{\link[=param_bootstrap]{param_bootstrap()}}.}
@@ -111,9 +116,25 @@ Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_s
 Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.}
 
-\item{cores}{Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
-Unix per Fork (\code{parallel::mclapply}), unter Windows per
-PSOCK-Cluster.}
+\item{cores}{Anzahl paralleler Prozesse (unter Unix per Fork, unter Windows per PSOCK-Cluster):
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
+\code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
+der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).}
 
 \item{object, x}{Objekt der Klasse \code{SimLevParamSearch}.}
 
@@ -133,7 +154,9 @@ an \code{\link[graphics:plot.default]{graphics::plot()}} bzw. \code{\link[graphi
 \item{metric}{Name der Kennzahl (Spalte von \code{results}) fuer die
 Grafik (Standard: Zielgroesse). Beim Raster werden die Zellen
 beschriftet, \code{cagr}, \code{ttwror}, \code{max_drawdown} und
-\code{avg_drawdown} in Prozent.}
+\code{avg_drawdown} in Prozent.
+Seit 1.6.4 ein Fehler, wenn die Spalte keinen endlichen Wert hat (vorher R Grafikfehler, Python und
+Julia ein leeres Bild).}
 
 \item{params}{Ein oder zwei Parameternamen fuer die Achsen (Standard: die
 ersten beiden); weitere Dimensionen werden mit \code{fun}

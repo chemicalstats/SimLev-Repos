@@ -579,7 +579,7 @@ simulation <- function(data, strategy, start_value = 10000,
       fractions = fractions, risk_free = risk_free, split_mode = split_mode,
       split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
       dca_fee = dca_fee, harvest_mode = harvest_mode,
-      taxable_income = taxable_income, tariff = tax_tariff)
+      taxable_income = taxable_income, tariff = tax_tariff, liquidate = liquidate)
 
     # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
     prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data)

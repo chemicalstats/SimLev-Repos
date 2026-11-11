@@ -102,7 +102,6 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
                1 if a in no_split else 0, sig_logical[k][0], sig_logical[k][1]]
         bonus = sim["assets"][a].get("bonus")
         ad += [float(mk[a]["spread_rate"]), float(cfg["strategy"][a]["share"]), _num(bonus)]
-    fields = ("count", "price", "worth", "money", "total", "target", "actual", "differ")
     reports = []
     for a in nm:
         new = {k: np.zeros(n) for k in ("worth", "money", "flows", "total", "share")}
@@ -144,7 +143,7 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
           _num(cfg.get("sparer_pauschbetrag")), _num(cfg.get("soli_factor_income"), 1.0), _num(cfg.get("church_k")),
           lo, hi,
           float(env.zve_all) if env is not None and env.zve_all is not None else 0.0]
-    (status, totals, lots, sells, taxes, px, fee_paid, tax_unpaid, rows, ks, refund_due, events,
+    (status, totals, lots, sells, taxes, px, fee_paid, tax_unpaid, rows, ks, events,
      err, flags) = _ext.sim_engine_run(
         prep, flag_date.astype(np.float64), prices, sb, ss, ew, br, np.array(ai, dtype=np.int32),
         np.array(ad, dtype=np.float64), np.array(ci, dtype=np.int32), np.array(cd, dtype=np.float64),
@@ -155,7 +154,7 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
     fl["flag_harvest"] = (np.frombuffer(flags, dtype=np.int32) & 128) != 0
     fl["tax_regimes"] = tax_regimes
     for k, a in enumerate(nm):
-        sim["status"][a] = {f: float(stv[8 * k + j]) for j, f in enumerate(fields)}
+        sim["status"][a] = {"money": float(stv[8 * k + 3])}   # Status je Asset: gelesen wird nur money (wie R seit 1.6.3)
         # Lots, Verkäufe und Steuerbuchungen als flache Felder (seit 1.6.3); die Dicts je Eintrag baut erst
         # SimLevResult.trades (_trades_dicts), die Auswertung liest Zähler und offene Lots aus den Feldern
         tr = sim["trades"][a]
@@ -167,7 +166,7 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
     tv = np.frombuffer(totals, dtype=np.float64)
     for j, f in enumerate(_TOT_FIELDS):
         tt[f] = int(tv[j]) if f == "current_year" else float(tv[j])
-    if env is not None:   # Tarifweg: Jahreszeilen (wie _tariff_close), KiSt-Salden, Erstattung
+    if env is not None:   # Tarifweg: Jahreszeilen (wie _tariff_close), KiSt-Salden
         rv = np.frombuffer(rows, dtype=np.float64).reshape(-1, len(_ROW_FIELDS))
         for x in rv:
             row = {f: float(v) for f, v in zip(_ROW_FIELDS, x)}
@@ -177,8 +176,6 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
         kv = np.frombuffer(ks, dtype=np.float64).reshape(-1, 2)
         for y, v in kv:
             env.ks[str(int(y))] = float(v)
-        env.refund_due = refund_due
-        env.due_info = None
     _FEE.paid = fee_paid
     _sim_engine_signal(events, err, nm, flag_date)
     return sim, tax_unpaid
@@ -246,6 +243,12 @@ def _sim_engine_signal(events, err, nm, flag_date) -> None:
     if err is not None:
         if err[3] == 101:
             _stop(_MS["101"] % r_format1(err[4]))
+        if err[3] == 102:                                     # seit 1.6.4 (A-005, Entscheidung 103)
+            from ._pruefen import chk_stop
+            chk_stop("fa.nicht_endlich")
+        if err[3] == 103:                                     # seit 1.6.4 (K43 T1-R9)
+            from ._pruefen import chk_stop
+            chk_stop("ut1.unterlauf")
         _stop(_MS["na"])
 
 

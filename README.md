@@ -2182,6 +2182,7 @@ SimLev-Repos/
 ├── README.md, LICENSE.md
 ├── STRUKTUR.md     Zuordnung R / Python / Julia (erzeugt aus tests/schnittstelle)
 ├── LITERATUR.md    Quellen der Verfahren
+├── assets/         Logo-Varianten (simlev-blue.png, simlev-green.png)
 ├── core/           C-Bibliothek und gemeinsame C++-Kerne; Kopien in r/src,
 │                   python/src/core und julia/deps/core (core/sync.py)
 ├── r/              R-Paket mit Vignette (r/vignettes), Beispieldaten (r/inst/extdata)

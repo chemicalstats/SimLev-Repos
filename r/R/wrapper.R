@@ -72,9 +72,9 @@ wrapper_config <- function(strategy, rebalance = NULL, costs = funds_costs(), or
     stop("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die create_strategy() annimmt).",
          call. = FALSE)
   if (!inherits(strategy, "strategy")) {
-    if (!is.list(strategy))
-      stop(sprintf("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein, nicht %s.",
-                   class(strategy)[1]), call. = FALSE)
+    if (!is.list(strategy))   # seit 1.6.4 ohne Klasse (Entscheidung 8)
+      stop("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein.",
+           call. = FALSE)
     strategy <- create_strategy(assets = strategy)
   }
   strategy_validate(strategy)
@@ -87,15 +87,12 @@ wrapper_config <- function(strategy, rebalance = NULL, costs = funds_costs(), or
     stop(sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.4f, m\u00fcssen aber 1 ergeben.", total),
          call. = FALSE)
   if (!is.null(rebalance) && !inherits(rebalance, "SimLevRebalancePlan"))
-    stop(sprintf("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein, nicht %s.",
-                 paste(class(rebalance), collapse = "/")), call. = FALSE)
+    stop("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.", call. = FALSE)
   if (!inherits(costs, "SimLevFundsCosts"))
-    stop(sprintf("wrapper_config: costs muss ein Objekt aus funds_costs() sein, nicht %s.",
-                 if (is.null(costs)) "NULL" else paste(class(costs), collapse = "/")), call. = FALSE)
-  fs <- .fee_spec(order_fee)
+    stop("wrapper_config: costs muss ein Objekt aus funds_costs() sein.", call. = FALSE)
+  fs <- .fee_spec(order_fee, "wrapper_config", "order_fee")
   if (!is.null(volume) && (!is.numeric(volume) || length(volume) != 1L || !is.finite(volume) || volume <= 0))
-    stop(sprintf("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR), nicht %s.",
-                 .blk_show(volume)), call. = FALSE)
+    stop("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR).", call. = FALSE)
   if (!is.null(fs) && is.null(volume) && (fs$fixed > 0 || fs$min > 0 || is.finite(fs$max)))
     stop(paste0("wrapper_config: order_fee enth\u00e4lt feste Betr\u00e4ge in EUR (fixed, min oder max); daf\u00fcr ist das Fondsvolumen ",
                 "'volume' in EUR n\u00f6tig (die innere Rechnung startet dann mit diesem Volumen). Ohne volume gehen nur ",
@@ -212,16 +209,17 @@ print.SimLevWrapperConfig <- function(x, ...) {
 #' @export
 #' @noRd
 wrapper_nav <- function(data, wrapper, splits = NULL) {
-  if (!inherits(wrapper, "SimLevWrapperConfig"))
-    stop(sprintf("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein, nicht %s.",
-                 if (missing(wrapper) || is.null(wrapper)) "NULL" else paste(class(wrapper), collapse = "/")), call. = FALSE)
+  # seit 1.6.4 Meldungen ohne Klasse (Entscheidung 8); data nur als Tabelle, die Meldung nennt die Umwandlung
+  # (Entscheidung 6, wie simulation())
+  if (missing(wrapper) || !inherits(wrapper, "SimLevWrapperConfig"))
+    stop("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.", call. = FALSE)
   if (!is.null(splits) && !inherits(splits, "SimLevSplitRule"))
-    stop(sprintf("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein, nicht %s.",
-                 paste(class(splits), collapse = "/")), call. = FALSE)
+    stop("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.", call. = FALSE)
   if (missing(data) || !is.data.frame(data) || !"date" %in% names(data))
-    stop("wrapper_nav: data muss ein data.frame mit Spalte 'date' und den Kursspalten der inneren Strategie sein.", call. = FALSE)
+    chk_stop("e1.tabelle_spalten", "wrapper_nav", chk_msg("tabelle.formen"))
   fa <- attr(data, "filled")
   if (!identical(class(data), "data.frame")) data <- as.data.frame(data, stringsAsFactors = FALSE)
+  chk_col_nofactor(data, "date", "wrapper_nav")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   data$date <- .to_date(data$date, "wrapper_nav: data$date")
   if (anyNA(data$date)) stop(sprintf("wrapper_nav: Spalte 'date' enth\u00e4lt NA (erstmals in Zeile %d).", which(is.na(data$date))[1]),
                              call. = FALSE)

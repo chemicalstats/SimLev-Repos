@@ -35,6 +35,27 @@ static inline void slc_acc_add(slc_acc *a, double v)
 
 static inline double slc_acc_val(const slc_acc *a) { return a->s + a->c; }
 
+/* Mittelwert (kompensierte Summe / n) und Stichprobenvarianz um m (Nenner n - 1, zwei Durchgänge, kompensiert;
+ * n < 2: NaN). Seit 1.6.4 eine Fassung für GARCH, MS-GARCH, GPD und Kerndichte (bis 1.6.3 je Datei). */
+static inline double slc_mean(int64_t n, const double *x)
+{
+    slc_acc a;
+    int64_t i;
+    slc_acc_init(&a, 0.0);
+    for (i = 0; i < n; i++) slc_acc_add(&a, x[i]);
+    return slc_acc_val(&a) / (double) n;
+}
+
+static inline double slc_var_m(int64_t n, const double *x, double m)
+{
+    slc_acc a;
+    int64_t i;
+    if (n < 2) return NAN;
+    slc_acc_init(&a, 0.0);
+    for (i = 0; i < n; i++) { double d = x[i] - m; slc_acc_add(&a, d * d); }
+    return slc_acc_val(&a) / (double) (n - 1);
+}
+
 /* Euklidische Norm ohne Über- und Unterlauf: Skalierung mit dem Betragsmaximum, kompensierte Summe */
 static inline double slc_nrm2(int64_t n, const double *x, int64_t incx)
 {

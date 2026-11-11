@@ -150,8 +150,13 @@ def outer(X, Y, FUN="*"):
 # ── Vergleich, Symmetrie ──────────────────────────────────────────────────
 
 def all_equal_numeric(target, current, tolerance=1.4901161193847656e-08):
-    """Kern von ``all.equal.numeric`` (ohne Attribute); ``True`` oder Text."""
+    """Kern von ``all.equal.numeric`` (ohne Attribute); ``True`` oder Text. Seit 1.6.4 (Befund C-095) wie R:
+    ``tolerance`` muss eine Zahl sein, NaN ergibt bei Unterschieden R's Fehler, die Abweichung steht wie
+    ``format(xy)`` (7 Stellen) im Text."""
     from .rnum import r_sum
+    from .rformat import r_format1
+    if isinstance(tolerance, (bool, np.bool_)) or not isinstance(tolerance, (int, float, np.integer, np.floating)):
+        raise ValueError("'tolerance' should be numeric")
     t = np.asarray(target, dtype=np.float64).ravel(order="F")
     c = np.asarray(current, dtype=np.float64).ravel(order="F")
     if t.size != c.size:
@@ -163,6 +168,8 @@ def all_equal_numeric(target, current, tolerance=1.4901161193847656e-08):
         out = out | (t == c)
         if out.all():
             return True
+        if math.isnan(float(tolerance)):
+            raise ValueError("missing value where TRUE/FALSE needed")
         keep = ~out
         t = t[keep]
         c = c[keep]
@@ -174,27 +181,67 @@ def all_equal_numeric(target, current, tolerance=1.4901161193847656e-08):
             what = "absolute"
         xy = r_sum(np.abs(t - c) / (N * scale))
     if math.isnan(xy) or xy > tolerance:
-        return "Mean %s difference: %s" % (what, xy)
+        return "Mean %s difference: %s" % (what, r_format1(float(xy), digits=7))
     return True
 
 
 # ── diag ──────────────────────────────────────────────────────────────────
 
 
+def _as_integer1(v):
+    """asInteger von R für nrow/ncol: erste Zahl abgeschnitten; NA, nicht lesbarer Text und |x| >= 2^31 ergeben None
+    (außerhalb von int mit R's Warnung)."""
+    import warnings
+    a = np.asarray(v, dtype=object).ravel()
+    if a.size == 0:
+        return None
+    t = a[0]
+    if t is None:
+        return None
+    if isinstance(t, (bool, np.bool_)):
+        return int(t)
+    if isinstance(t, str):
+        from .rnum import r_string_to_real
+        f, bad = r_string_to_real(t)
+        if bad:
+            warnings.warn("NAs introduced by coercion", UserWarning, stacklevel=3)
+    else:
+        f = float(t)
+    if f != f:
+        return None
+    if not (-2147483648.0 < f < 2147483648.0):
+        warnings.warn("NAs introduced by coercion to integer range", UserWarning, stacklevel=3)
+        return None
+    return int(math.trunc(f))
+
+
 def diag(x=1, nrow=None, ncol=None):
-    """``diag(x, nrow, ncol)`` wie R für einen Vektor oder eine Zahl ``x`` (seit 1.6.3 ohne den Matrixfall und
-    ohne ``diag(n)``: Aufrufer ``optimize`` übergeben stets einen Vektor bzw. eine Zahl mit ``nrow``)."""
+    """``diag(x, nrow, ncol)`` wie R für einen Vektor oder eine Zahl ``x`` (seit 1.6.3 ohne den Matrixfall). Seit 1.6.4
+    wie R (C-044, Entscheidung 97): ``diag(n)`` ohne nrow/ncol ist die n×n-Einheitsmatrix (bis 1.6.3 1×1 mit n),
+    nrow/ncol wie asInteger mit R's Meldungen, ein leerer Vektor ergibt bei Größe 0 eine 0×0-Matrix."""
     if isinstance(x, (pd.DataFrame, np.ndarray)) and np.ndim(x) == 2:
         raise RError("diag: Matrixfall entfallen (interner Fehler)")
-    v = np.asarray(x, dtype=np.float64).ravel()
-    n = v.size
+    if nrow is None and ncol is None and np.size(x) == 1:
+        n = _as_integer1(x)
+        v = np.array([1.0])
+    else:
+        v = np.asarray(x, dtype=np.float64).ravel()
+        n = v.size
     if nrow is not None:
-        n = int(nrow)
-    nc = n if ncol is None else int(ncol)
-    if v.size == 0:
+        n = _as_integer1(nrow)
+    nc = n if ncol is None else _as_integer1(ncol)
+    if n is None:
+        raise RError("invalid 'nrow' value (too large or NA)")
+    if n < 0:
+        raise RError("invalid 'nrow' value (< 0)")
+    if nc is None:
+        raise RError("invalid 'ncol' value (too large or NA)")
+    if nc < 0:
+        raise RError("invalid 'ncol' value (< 0)")
+    mn = min(n, nc)
+    if mn > 0 and v.size == 0:
         raise RError("'x' must have positive length")
     out = np.zeros((n, nc))
-    mn = min(n, nc)
     if mn > 0:
         out[np.arange(mn), np.arange(mn)] = np.resize(v, mn)
     return out

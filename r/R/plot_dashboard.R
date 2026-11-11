@@ -23,10 +23,11 @@
 #'   Namen sind ein Fehler)
 #' @param compare Optional: zweites SimLevResult-Objekt zum Vergleich (gleicher Zeitraum)
 #' @param colors Benannte Liste: eigenes Farbschema (primary, secondary, positive, negative,
-#'   neutral, background, grid; R-Farbname oder Hex-Code, ungueltige Farben sind ein Fehler);
+#'   neutral, background, grid; R-Farbname oder Hex-Code, ungueltige Farben sind ein Fehler; Farbnummern als
+#'   Text seit 1.6.4 nur aus ASCII-Ziffern, z. B. "3", nicht "3.0" oder "0x1");
 #'   nicht genannte Elemente aus dem Standard, unbekannte Namen sind ein Fehler;
 #'   NULL = Standard-Farbschema
-#' @param ... Weitere Argumente (ignoriert)
+#' @param ... nicht verwendet; seit 1.6.4 sind benannte Argumente, die plot.SimLevResult nicht kennt, ein Fehler
 #'
 #' @return NULL, unsichtbar (die Grafik entsteht als Nebeneffekt)
 #' @export
@@ -55,6 +56,8 @@ plot.SimLevResult <- function(
     colors = NULL,
     ...
 ) {
+  # seit 1.6.4 (K42 E5, Entscheidung 57): benannte unbekannte Argumente sind ein Fehler (bis 1.6.3 still ignoriert)
+  chk_dots(names(match.call(expand.dots = FALSE)$...) %||% character(0), character(0), "plot.SimLevResult")
   style <- match.arg(style)
   panels_given <- !missing(panels)
   
@@ -62,8 +65,8 @@ plot.SimLevResult <- function(
   # nicht passende Werte still); Abkuerzungen wie bei match.arg erlaubt
   all_panels <- c("performance", "drawdown", "distribution", "rolling", "monthly", "stats", "correlation", "comparison")
   if (!is.character(panels) || !length(panels) || anyNA(panels))
-    stop(sprintf("plot.SimLevResult: panels muss ein Zeichenvektor sein (erhalten: %s); m\u00f6glich: %s.",
-                 paste(format(panels), collapse = ", "), paste0("\"", all_panels, "\"", collapse = ", ")))
+    stop(sprintf("plot.SimLevResult: panels muss ein Zeichenvektor sein; m\u00f6glich: %s.",   # seit 1.6.4 ohne Wert
+                 paste0("\"", all_panels, "\"", collapse = ", ")))
   pm <- pmatch(panels, all_panels, duplicates.ok = TRUE)
   if (anyNA(pm))
     stop(sprintf("plot.SimLevResult: unbekannte(s) Panel(s) %s in panels; m\u00f6glich: %s.",
@@ -90,10 +93,12 @@ plot.SimLevResult <- function(
     if (length(unk)) stop(sprintf("plot.SimLevResult: unbekannte Farbe(n) %s in colors; m\u00f6glich: %s.",
                                   paste0("'", unk, "'", collapse = ", "), paste(names(default_colors), collapse = ", ")))
     # Farbwerte pruefen: je Element ein Wert, den grDevices::col2rgb() versteht (Name oder Hex-Code)
+    # seit 1.6.4 gelten nur reine ASCII-Ganzzahltexte als Farbnummer (Entscheidung 55; "3.0", "2e0", "0x1" Fehler)
     ok <- vapply(as.list(colors), function(v) length(v) == 1 && !is.na(v) && (is.character(v) || is.numeric(v)) &&
+                   !(is.character(v) && grepl("^[0-9]", v) && !grepl("^[0-9]+$", v)) &&
                    !inherits(tryCatch(grDevices::col2rgb(v), error = function(e) e), "error"), TRUE)
     if (!all(ok)) stop(sprintf("plot.SimLevResult: ung\u00fcltige Farbe(n) in colors: %s; erwartet je Element ein R-Farbname (z. B. \"navy\", siehe grDevices::colors()) oder ein Hex-Code \"#RRGGBB\" bzw. \"#RRGGBBAA\".",
-                               paste(sprintf("%s = %s", names(colors)[!ok], vapply(as.list(colors)[!ok], function(v) paste(deparse(v), collapse = ""), "")), collapse = ", ")))
+                               paste0("'", names(colors)[!ok], "'", collapse = ", ")))   # seit 1.6.4 nur die Namen (Entscheidung 8)
     colors <- utils::modifyList(default_colors, as.list(colors))
   }
   # Transparenz ueber adjustcolor() (gleiche RGBA-Werte wie das fruehere Hex-Suffix "30"/"40"/"80" bei
@@ -102,9 +107,10 @@ plot.SimLevResult <- function(
   
   # compare: Ergebnis ueber dieselben Tage (wird auf der Datumsachse von x gezeichnet)
   if (!is.null(compare) && (!inherits(compare, "SimLevResult") || length(compare$worth) != length(x$worth)))
-    stop(sprintf("plot.SimLevResult: compare muss ein SimLevResult \u00fcber dieselben Tage wie x sein (%s); NULL = kein Vergleich.",
-                 if (!inherits(compare, "SimLevResult")) sprintf("erhalten: Objekt der Klasse '%s'", class(compare)[1])
-                 else sprintf("%d statt %d Tage", length(compare$worth), length(x$worth))))
+    stop(if (!inherits(compare, "SimLevResult"))   # seit 1.6.4 ohne Klasse der Eingabe (Entscheidung 8)
+           "plot.SimLevResult: compare muss ein SimLevResult \u00fcber dieselben Tage wie x sein; NULL = kein Vergleich."
+         else sprintf("plot.SimLevResult: compare muss ein SimLevResult \u00fcber dieselben Tage wie x sein (%d statt %d Tage); NULL = kein Vergleich.",
+                      length(compare$worth), length(x$worth)))
   # style = "custom": Panels, die einen Vergleich brauchen, ohne compare nicht zeichnen (mit Warnung statt Leerfeld)
   if (style == "custom" && is.null(compare) && any(need <- panels %in% c("correlation", "comparison"))) {
     skipped <- panels[need]
@@ -232,7 +238,7 @@ plot.SimLevResult <- function(
     if (ext) lines(dates, .dash$invested, col = colors$neutral, lwd = 1.5, lty = 3, type = "s")
     
     # Vergleichsergebnis einzeichnen, falls angegeben
-    if (!is.null(compare) && "performance" %in% selected_panels) {
+    if (!is.null(compare)) {
       lines(dates, compare$worth, col = colors$secondary, lwd = 2.5, lty = 2)
       legend("topleft", 
              legend = c("Strategie 1", "Strategie 2", if (ext) "Einzahlungen"),
@@ -300,7 +306,7 @@ plot.SimLevResult <- function(
     # Taegliche Renditen in Prozent (einzahlungsbereinigt, ohne aufgefuellte Tage)
     returns <- .dash$returns * 100
     
-    hist(returns,
+    h <- hist(returns,
          breaks = 50,
          col = alpha_col(colors$primary, 0x80),
          border = colors$primary,
@@ -314,8 +320,9 @@ plot.SimLevResult <- function(
     
     # Normalverteilung ueberlagern
     x_seq <- seq(min(returns), max(returns), length.out = 100)
-    y_norm <- .sl_dnorm(x_seq, mean = mean(returns), sd = sd(returns))
-    y_norm_scaled <- y_norm * length(returns) * diff(range(returns)) / 50
+    y_norm <- .sl_dnorm(x_seq, mean = mean(returns), sd = .sl_sd(returns))
+    # seit 1.6.4 mit der Klassenbreite der Balken (B-001, Entscheidung 91; bis 1.6.3 diff(range) / 50)
+    y_norm_scaled <- y_norm * length(returns) * (h$breaks[2L] - h$breaks[1L])
     lines(x_seq, y_norm_scaled, col = colors$secondary, lwd = 2, lty = 2)
     
     # Senkrechte Linie beim Mittelwert
@@ -325,7 +332,7 @@ plot.SimLevResult <- function(
     legend("topright",
            legend = c(
              sprintf("Mittel: %.2f%%", mean(returns)),
-             sprintf("Std.-Abw.: %.2f%%", sd(returns)),
+             sprintf("Std.-Abw.: %.2f%%", .sl_sd(returns)),
              sprintf("Schiefe: %.2f", x$statistics$skewness),
              sprintf("W\u00f6lbung: %.2f", x$statistics$kurtosis)
            ),
@@ -343,10 +350,9 @@ plot.SimLevResult <- function(
     window <- max(2, min(30, floor(n_days / 10)))
     if (n_days > window) {
       growth <- cumprod(1 + c(0, .dash$all_returns))
-      rolling_returns <- sapply(window:n_days, function(i) {
-        days <- as.numeric(dates[i]) - as.numeric(dates[i - window + 1])
-        ((growth[i] / growth[i - window + 1])^(365.25 / days) - 1) * 100
-      })
+      # seit 1.6.4 vektorisiert (B-084; bis 1.6.3 sapply mit dates[i] je Fenster), elementweise dieselbe Rechnung
+      ii <- window:n_days; jj <- ii - window + 1
+      rolling_returns <- ((growth[ii] / growth[jj])^(365.25 / (as.numeric(dates[ii]) - as.numeric(dates[jj]))) - 1) * 100
       
       rolling_dates <- dates[window:n_days]
       
@@ -394,7 +400,7 @@ plot.SimLevResult <- function(
   # ===========================================================================
   # PANEL 5: HEATMAP DER MONATSRENDITEN
   # ===========================================================================
-  if ("monthly" %in% selected_panels && !is.null(dates)) {
+  if ("monthly" %in% selected_panels) {                          # dates ist nie NULL (oben)
     # Monatsrenditen berechnen
     dates_date <- as.Date(dates)
     year_month <- format(dates_date, "%Y-%m")
@@ -563,7 +569,7 @@ plot.SimLevResult <- function(
       rho <- ifelse(vx > 0 & vy > 0, (k * sxy - sx * sy) / sqrt(pmax(vx, 0) * pmax(vy, 0)), NA_real_)
       rho <- pmin(pmax(rho, -1), 1)
       rho_dates <- dates[-1][ok][k:m]
-      rho_all <- if (stats::sd(rx) > 0 && stats::sd(ry) > 0) stats::cor(rx, ry) else NA_real_
+      rho_all <- if (.sl_sd(rx) > 0 && .sl_sd(ry) > 0) .sl_cor(rx, ry) else NA_real_
       plot(rho_dates, rho, type = "n", xlim = range(dates), ylim = c(-1, 1), xlab = "", ylab = "Korrelation",
            main = sprintf("Rollierende Korrelation (%d Tage)", k),
            col.main = colors$primary, cex.main = 1.3, font.main = 2, las = 1)
@@ -680,8 +686,8 @@ plot.SimLevResult <- function(
 #'
 #' @param x Ein SimLevResult-Objekt
 #' @param filename Zeichenkette: Pfad der PDF-Ausgabedatei
-#' @param width Zahl: Breite in Zoll
-#' @param height Zahl: Hoehe in Zoll
+#' @param width Zahl: Breite in Zoll (seit 1.6.4: 3 bis 100)
+#' @param height Zahl: Hoehe in Zoll (seit 1.6.4: 3 bis 100)
 #' @param ... Weitere Argumente fuer plot.SimLevResult
 #'
 #' @export
@@ -692,6 +698,13 @@ plot.SimLevResult <- function(
 #' @noRd
 export_dashboard <- function(x, filename = "dashboard.pdf", 
                              width = 14, height = 10, ...) {
+  # seit 1.6.4 (K42 E5, B-027, C-010): Pruefung vor pdf(), damit keine fremde oder leere Datei entsteht
+  fn <- "export_dashboard"
+  if (!inherits(x, "SimLevResult")) chk_stop("klasse", fn, "x", "simulation()")
+  chk_name1(filename, fn, "filename")
+  chk_num1(width, fn, "width", lo = 3, hi = 100)
+  chk_num1(height, fn, "height", lo = 3, hi = 100)
+  chk_dots(names(list(...)) %||% character(0), c("style", "panels", "compare", "colors"), fn)
   pdf(filename, width = width, height = height)
   dev_pdf <- dev.cur()
   on.exit(dev.off(dev_pdf))   # PDF-Geraet auch bei Fehler schliessen

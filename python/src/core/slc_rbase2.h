@@ -5,8 +5,9 @@
  *             slc_rbase_fmt.cpp (formatReal/encodeReal, round/signif, sprintf, formatC, prettyNum).
  * Zweck:      Bis 1.5.2 bildeten Python (python/simlev/_r/) und Julia (julia/src/r/) diese Funktionen von R je für
  *             sich nach; seit 1.6.0 rechnen beide mit diesen Kernen, die Sprachen behalten dünne Hüllen
- *             (Argumente, NA-Kennung, Rückgabe). R selbst behält seine Grundfunktionen; diese Dateien gehen nicht
- *             nach r/src/ (core/sync.py) und nicht in slc.h.
+ *             (Argumente, NA-Kennung, Rückgabe). R selbst behält seine Grundfunktionen; nach r/src/ gehen seit 1.6.4
+ *             (C-035) nur diese Datei, slc_rbase_cov.cpp, slc_rbase_smooth.cpp und slc_rbase_clust.cpp (Statistikwege
+ *             von R, r/R/slc_stats.R; core/sync.py); keine geht in slc.h.
  * NA:         R's NA_real_ ist das NaN mit Nutzlast 1954 (0x7FF00000000007A2), R's NaN das ruhige
  *             0x7FF8000000000000. Die Kerne unterscheiden beide wie R.
  * Herkunft:           übersetzt aus R 4.3.3 über die Port-Funktionen python/simlev/_r/ und julia/src/r/ bis 1.5.2;
@@ -15,7 +16,7 @@
  *                     jeweiligen R-Quelle)
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
  * Änderungen:         C++ im gemeinsamen Teil von C und C++, ohne R-Datenstrukturen, gemeinsamer Kern für Python und
- *                     Julia (nicht Teil des R-Pakets).
+ *                     Julia (seit 1.6.4 teils auch für R, siehe Zweck).
  * Prüforakel: R 1.5.2 von SimLev (Gleichlauf: clust_fuzz.R, vec_fuzz.R, cor_fuzz.R, smooth_fuzz.R, padj_fuzz.R,
  *             fmt_fuzz.R).
  */

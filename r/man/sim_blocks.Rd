@@ -78,7 +78,8 @@ funds_costs(fee = 0.95, performance_fee = 5)
     (Veräußerungskosten); steuerlich wirkt sie damit gewinnmindernd. Zusätzlich zum Spread je
     Asset (\code{spread} in \code{\link{asset_config}}; einen Spread für die ganze Simulation
     gibt es nicht). Unbekannte Listenfelder (z. B. \code{fix} statt \code{fixed}) und negative
-    Gebühren führen zu einem Fehler. Bei Zwangsverkäufen für die Vorabpauschale und die
+    Gebühren führen zu einem Fehler; jedes Feld ist eine einzelne endliche Zahl (\code{max} auch
+    \code{Inf}), \code{NA}, Text und \code{TRUE} sind ein Fehler. Bei Zwangsverkäufen für die Vorabpauschale und die
     § 23-Steuer wird so viel verkauft, dass Steuer und Gebühr gedeckt sind.
   }
   \item{dca_fee}{
@@ -98,10 +99,13 @@ funds_costs(fee = 0.95, performance_fee = 5)
     \code{dca_plan}: Abstand zwischen zwei Terminen in Perioden von \code{unit} (z. B.
     \code{3} mit \code{"month"} = alle drei Monate); Pflicht, eine einzelne ganze Zahl
     \code{>= 1} (sonst Fehler). \code{rebalance_plan}: Rebalancing-Intervall in Perioden von
-    \code{unit}; \code{NULL} (Standard) = 1.
+    \code{unit}; \code{NULL} (Standard) = 1, sonst eine einzelne endliche Zahl \code{>= 1}
+    (seit 1.6.4 eine ganze Zahl; vorher lief z. B. 1.5 wie 1). Höchstens 2147483647, bei \code{"quarter"}
+    715827882 (Schritt in Monaten als Ganzzahl).
   }
   \item{days}{
-    Integer-Vektor oder \code{NULL}. Tag(e) innerhalb jeder Periode (1--31): bei
+    Integer-Vektor (keine Matrix, mindestens ein Tag) oder \code{NULL}. Tag(e) innerhalb jeder
+    Periode (1--31): bei
     \code{"month"} Tag des Monats, bei \code{"quarter"} Tag im ersten Monat der Periode, bei
     \code{"year"} Tag im Januar; mit \code{anchor = "end"} rückwärts vom Periodenende gezählt
     (1 = letzter Tag). Nicht existierende Tage entfallen (z. B. Tag 31 im April, bei
@@ -121,7 +125,8 @@ funds_costs(fee = 0.95, performance_fee = 5)
     \code{"end"} (ab Periodenende). Ohne \code{days} wirkungslos.
   }
   \item{start}{
-    Date (oder \code{"JJJJ-MM-TT"}) oder \code{NULL}. Bezugsdatum des Terminplans: Die
+    Date, Datum-Uhrzeit oder \code{"JJJJ-MM-TT"} (keine Zahl) oder \code{NULL}. Bezugsdatum des
+    Terminplans: Die
     Perioden beginnen am Monatsersten dieses Datums (bei \code{"year"} am 1. Januar); Termine
     vor dem ersten Datentag entfallen. Kein Datum: Fehler beim Anlegen; liegt das Datum nach
     dem letzten Datentag, bricht \code{simulation()} mit Fehler ab. \code{NULL} (Standard) =
@@ -181,7 +186,8 @@ funds_costs(fee = 0.95, performance_fee = 5)
     einer numerischen Spalte in \code{data} mit dem Zielgewicht. Wirkt nur an Tagen, an denen
     \code{event_col} \code{TRUE} ist; die Werte werden auf Summe 1 normiert und nur verwendet,
     wenn alle aktiven Assets einen endlichen Wert haben und die Summe positiv ist (fehlt ein
-    Asset, gelten mit Warnung an Event-Tagen die Strategie-Gewichte). Unbenannte Angaben,
+    Asset, gelten mit Warnung an Event-Tagen die Strategie-Gewichte). Unbenannte oder doppelte
+    Namen und Einträge, die kein einzelner Spaltenname sind, sind schon beim Anlegen ein Fehler;
     unbekannte Asset-Namen, fehlende Spalten und negative Gewichte führen in
     \code{simulation()} zu einem Fehler. \code{NULL} = Strategie-Gewichte. Ohne
     \code{event_col} wirkungslos (Warnung).
@@ -221,7 +227,7 @@ funds_costs(fee = 0.95, performance_fee = 5)
     \code{tax_profile}: Basiszins für die Vorabpauschale: \code{NULL} (Standard: keine
     Vorabpauschale), eine Zahl \strong{in Prozent} (z. B. \code{2.55} = 2,55 \%; negativ
     erlaubt und wie 0 behandelt) oder der Name einer Spalte in \code{data} mit täglichen
-    Basiszinswerten in Prozent (wie \code{risk_free}; \code{NA} wird zu 0, für ein Jahr zählt
+    Basiszinswerten in Prozent (wie \code{risk_free}; seit 1.6.4 Zahlen ohne \code{NA}, Jahre ohne Basiszins als 0; für ein Jahr zählt
     der Wert vom ersten Handelstag, § 18 Abs. 4 InvStG). Zahlen zwischen 0 und 0,05
     (vermutlich Anteil) werden mit Warnung als Prozent gelesen, für eine Spalte gilt dieselbe
     Schwelle für den Median; fehlt die Spalte, bricht \code{simulation()} mit Fehler ab.
@@ -283,7 +289,7 @@ funds_costs(fee = 0.95, performance_fee = 5)
   }
   \item{day}{
     \code{harvest_rule}: Termin als \code{"MM-TT"} (Standard \code{"12-15"}); genutzt wird
-    der erste Handelstag ab diesem Datum, vor dem 31.12. (sonst Fehler).
+    der erste Handelstag ab diesem Datum, vor dem 31.12. (sonst Fehler). Nur Ziffern 0--9; seit 1.6.4 Monat 01 bis 12 und Tag 01 bis 31.
   }
   \item{loss_pot}{
     \code{harvest_rule}: Auch den Verlusttopf durch realisierte Gewinne nutzen? Standard

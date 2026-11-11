@@ -50,10 +50,33 @@ def _hmm_viterbi(lB, lA, lp0):
         dl = mx + lB[t, :]
     path = np.zeros(Tn, dtype=np.int64)
     w = _which_max(dl)
-    path[Tn - 1] = (w + 1) if w is not None else 0
+    if w is None:                               # seit 1.6.4 wie R: which.max über lauter NA ist leer (B-094)
+        raise ValueError("replacement has length zero")
+    path[Tn - 1] = w + 1
     for t in range(Tn - 1, 0, -1):
         path[t - 1] = bp[t, path[t] - 1]
     return path
+
+
+def _e4_dates(dv, fn):
+    """Datumsvektor (Datum/Zeitpunkt oder Text, wie R Date/character), keine Zahl, keine Kategorie, nicht leer
+    (Entscheidungen 7 und 15; R ``regime_states``)."""
+    import datetime as _dt
+    ok = False
+    if _dep.chk_is_factor(dv):
+        ok = False
+    elif isinstance(dv, (str, _dt.date, np.datetime64)):
+        ok = True
+    elif isinstance(dv, (pd.Series, pd.Index)):
+        ok = len(dv) >= 1 and (pd.api.types.is_datetime64_any_dtype(dv.dtype) or
+                               all(isinstance(v, (str, _dt.date, np.datetime64)) or v is None or v is pd.NaT for v in dv))
+    elif isinstance(dv, (list, tuple, np.ndarray)):
+        a = np.asarray(dv)
+        ok = a.ndim == 1 and a.size >= 1 and (a.dtype.kind in "MU" or
+                                              all(isinstance(v, (str, _dt.date, np.datetime64)) or v is None for v in a.tolist()))
+    if not ok:
+        _dep.chk_stop("e4.daten", fn)
+    return dv
 
 
 def _hmm_em(X, k, init, max_iter, tol, ridge):
@@ -163,11 +186,11 @@ def _plot_hmm(x, data=None, width=900, height=380):
     dates = np.asarray(x["dates"]).astype("datetime64[D]")
     data = {"filtered": pd.DataFrame({"date": dates, "probability": top})}
     lab = "P(Z%d | bis t)" % k
-    p = _grid_svg(["p"], lambda _: (lambda c, box: _grid_lines(
+    svg = _grid_svg(["p"], lambda _: (lambda c, box: _grid_lines(
         c, box, [(_dep._days(x["dates"]), top, "#B5562B", lab)], ylim=(0.0, 1.0), hline=[(0.5, "grey")], dates=True,
         ylabel=lab, title="Gefilterte Wahrscheinlichkeit des unruhigsten Zustands (Z%d)" % k)),
         width=width, height=height)
-    return p.svg, data
+    return svg, data
 
 
 def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_start=5, max_iter=300, tol=1e-7, seed=1):
@@ -187,12 +210,15 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
             Kovarianzmatrix je Zustand).
         k: Anzahl Zustände (ganze Zahl >= 2, Standard 2); es werden mindestens ``50 * k`` Perioden benötigt.
             Spalten ohne Schwankung (z. B. konstante Kurse) sind ein Fehler.
+            Seit 1.6.4 höchstens 10^8.
         frequency: Periodenlänge der Renditen: ``"week"`` (Standard, ISO-Wochen), ``"day"`` oder ``"month"``. Bei
             ``"day"`` entfallen Tage, an denen alle Renditen 0 sind (z. B. fortgeschriebene Wochenenden).
         n_start: Anzahl Startwerte (ganze Zahl, Standard 5): der erste aus Quantilen einer rollierenden
             Volatilität, die übrigen zufällig; es zählt das Ergebnis mit der höchsten Log-Likelihood.
+            Seit 1.6.4 höchstens 10^8.
         max_iter, tol: Höchstzahl Baum-Welch-Iterationen je Start (Standard 300) und relative Abbruchschranke:
             Abbruch, wenn sich die Log-Likelihood um weniger als ``tol * (1 + |logL|)`` ändert (Standard 1e-7).
+            Seit 1.6.4 max_iter eine ganze Zahl von 0 bis 10^8, tol eine Zahl ≥ 0.
         seed: Startwert (Standard 1) für die zufälligen Startzuordnungen (nur bei ``n_start > 1``). Mit Startwert
             (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt
             unverändert; mit ``None`` wird genau einmal ein Startwert aus dem Zufallszustand von SimLev gezogen
@@ -264,17 +290,23 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
     kv = np.atleast_1d(np.asarray(k, dtype=object))
     ok = (kv.size == 1 and isinstance(kv[0], (int, float, np.integer, np.floating)) and not isinstance(kv[0], (bool, np.bool_))
           and math.isfinite(float(kv[0])) and float(kv[0]) == float(_fmt.r_round(float(kv[0]))) and float(kv[0]) >= 2)
-    if not ok:
-        raise ValueError("regime_hmm: k muss eine ganze Zahl >= 2 sein (erhalten: %s); ein Zustand wäre eine einzige "
-                         "Normalverteilung ohne Regime." % _dep._fmt1(k))
+    fn = "regime_hmm"                                          # seit 1.6.4 vor der Rechnung (K42 E4)
+    if not ok or _dep.chk_is_factor(k):                         # seit 1.6.4 ohne Wert
+        raise ValueError("regime_hmm: k muss eine ganze Zahl >= 2 sein; ein Zustand wäre eine einzige "
+                         "Normalverteilung ohne Regime.")
+    _dep.chk_max(kv[0], _dep.SL_MAX_N, fn, "k")   # B-054
+    columns = _dep._e4_names(columns, fn, "columns")
+    _dep._e4_data(data, columns, fn)                           # B-015
+    n_start = _dep._e4_count(n_start, fn, "n_start")           # B-032
+    max_iter = _dep._e4_count(max_iter, fn, "max_iter", lo=0)
+    tol = _dep.chk_num1(tol, fn, "tol", lo=0)
     k = int(float(kv[0]))
-    columns = _dep._as_names(columns)
     rd = _dep._dep_returns(data, columns, None, frequency)
     X = rd[columns].to_numpy(dtype=np.float64)
     Tn, d = X.shape
     if Tn < 50 * k:
-        raise ValueError("regime_hmm: zu wenige Perioden für die Zustandszahl (%d Perioden, mindestens %d für k = %d)."
-                         % (Tn, 50 * k, k))
+        raise ValueError("regime_hmm: zu wenige Perioden für die Zustandszahl (%d Perioden, mindestens %d)."
+                         % (Tn, 50 * k))
     flat = [columns[j] for j in range(d) if r_sd(X[:, j]) == 0]
     if flat:
         raise ValueError("regime_hmm: Spalte(n) %s ohne Schwankung (alle Periodenrenditen gleich, z. B. konstante Kurse); "
@@ -285,7 +317,7 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
     win = int(max(4, float(_fmt.r_round(ppy / 12))))
 
     sl = _dep._sl()
-    rs = sl.main_stream(seed) if n_start >= 2 else None   # Hauptstrom, nur bei Zufallsstarts
+    rs = sl.main_stream(seed, "regime_hmm") if n_start >= 2 else None   # Hauptstrom, nur bei Zufallsstarts
     inits = []
     for s in range(1, int(n_start) + 1):
         if s == 1:
@@ -351,8 +383,10 @@ def regime_states(x, dates, *, type=("filtered", "smoothed", "viterbi"), output=
             ``"probability"`` (Wahrscheinlichkeit von ``state_prob`` als Anteil; nicht mit ``type = "viterbi"``).
         state_prob: Zustandsnummer (1 bis k) für ``output = "probability"``; Standard ``x["k"]``, der unruhigste
             Zustand.
+            Seit 1.6.4 eine ganze Zahl von 1 bis k.
         lag: Verzögerung in Kalendertagen (Standard 1): Der Wert einer Periode gilt ab Periodenende + ``lag``
             Tage; 0 = schon am Periodenende.
+            Seit 1.6.4 eine ganze Zahl ≥ 0.
 
     Returns:
         Vektor mit einem Wert je Datum in ``dates``: ganze Zahlen (Zustand) bzw. Wahrscheinlichkeiten als Anteil;
@@ -371,8 +405,16 @@ def regime_states(x, dates, *, type=("filtered", "smoothed", "viterbi"), output=
     """
     type = _dep._match_arg(type, ("filtered", "smoothed", "viterbi"), "type")
     output = _dep._match_arg(output, ("state", "probability"), "output")
+    fn = "regime_states"                                       # seit 1.6.4 vor der Rechnung (K42 E4)
+    if not isinstance(x, SimLevHMM):
+        _dep.chk_stop("klasse", fn, "x", "regime_hmm()")
     if state_prob is None:
         state_prob = x["k"]
+    if isinstance(dates, pd.DataFrame):
+        _dep.chk_cols(dates, ["date"], fn)                     # B-054
+    _e4_dates(dates["date"] if isinstance(dates, pd.DataFrame) else dates, fn)
+    state_prob = _dep.chk_int1(state_prob, fn, "state_prob", lo=1, hi=x["k"])   # B-007
+    lag = _dep.chk_int1(lag, fn, "lag", lo=0)                  # B-012
     if type != "filtered":
         warnings.warn("Geglättete bzw. Viterbi-Zustände nutzen Zukunftsdaten - nur zur Beschreibung verwenden.")
     src = dates["date"] if isinstance(dates, pd.DataFrame) else dates
@@ -385,8 +427,11 @@ def regime_states(x, dates, *, type=("filtered", "smoothed", "viterbi"), output=
     elif P is None:
         v = np.asarray(x["viterbi"], dtype=np.float64)
     else:
+        # Zustand mit der größten Wahrscheinlichkeit (erster bei Gleichstand wie which.max), NA bei Zeilen mit NaN;
+        # seit 1.6.4 auf der ganzen Matrix (B-065; bis 1.6.3 _which_max je Zeile, gleiche Werte)
         Pm = np.asarray(P, dtype=np.float64)
-        v = np.array([(_which_max(r) + 1) if not np.isnan(r).any() else _NA for r in Pm], dtype=np.float64)
+        bad = np.isnan(Pm).any(axis=1)
+        v = np.where(bad, _NA, np.argmax(np.where(bad[:, None], 0.0, Pm), axis=1) + 1.0)
     dv = _dep._days(d)
     ref = _dep._days(x["dates"]) + lag
     kk = np.searchsorted(ref, dv, side="right")

@@ -36,7 +36,7 @@ class _OptRes(RList):
     pass
 
 
-def _num1(v, what):
+def _num1(v):
     """Rückgabe einer Zielfunktion als double (``coerceVector``)."""
     if isinstance(v, (pd.Series, pd.DataFrame)):
         v = v.to_numpy()
@@ -60,7 +60,7 @@ def optimize(f, interval=None, *args, lower=None, upper=None, maximum=False,
 
     def fcn1(x):
         s = f(x, *args, **kwargs)
-        a = _num1(s, "optimize")
+        a = _num1(s)
         if a.size != 1:
             raise RError("invalid function value in 'optimize'")
         v = float(sgn * a[0]) if maximum else float(a[0])
@@ -88,7 +88,7 @@ def optimize(f, interval=None, *args, lower=None, upper=None, maximum=False,
     res = _OptRes()
     res["maximum" if maximum else "minimum"] = val
     obj = f(val, *args, **kwargs)
-    a = _num1(obj, "")
+    a = _num1(obj)
     res["objective"] = float(a[0]) if a.size == 1 else obj
     return res
 

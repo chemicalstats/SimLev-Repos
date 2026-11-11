@@ -25,7 +25,7 @@
 module RLinalg
 
 import ..SimLev
-import ..SimLev: RVector, NamedMat, RFrame, NA
+import ..SimLev: RVector, NamedMat, RFrame, NA, _f64   # _f64: r/rnum.jl (seit 1.6.4)
 using Dates
 import ..RStats: _isint_t   # gleiche Hilfe wie RStats (seit 1.5.2 nur dort)
 
@@ -47,7 +47,6 @@ struct _M
 end
 _M(v, dim; rn = nothing, cn = nothing, names = nothing, is_int = false) = _M(v, dim, rn, cn, names, is_int)
 
-_f64(v) = v === missing || v === nothing ? NA : Float64(v)
 
 len(m::_M) = length(m.v)
 
@@ -78,7 +77,9 @@ _rerr(msg) = error(msg)
 # ── Vergleich, Symmetrie ──────────────────────────────────────────────────
 
 "Kern von `all.equal.numeric` (ohne Attribute); `true` oder Text."
-function all_equal_numeric(target, current; tolerance::Real = 1.4901161193847656e-08)
+function all_equal_numeric(target, current; tolerance = 1.4901161193847656e-08)
+    # seit 1.6.4 (Befund C-095) wie R: tolerance eine Zahl, NaN bei Unterschieden R's Fehler, Abweichung wie format()
+    (tolerance isa Real && !(tolerance isa Bool)) || error("'tolerance' should be numeric")
     t = _as_r(target).v
     c = _as_r(current).v
     length(t) != length(c) && return "Numeric: lengths ($(length(t)), $(length(c))) differ"
@@ -88,6 +89,7 @@ function all_equal_numeric(target, current; tolerance::Real = 1.4901161193847656
     end
     out = out .| (t .== c)
     all(out) && return true
+    isnan(Float64(tolerance)) && error("missing value where TRUE/FALSE needed")
     keep = .!out
     t = t[keep]; c = c[keep]
     N = length(t)
@@ -98,12 +100,31 @@ function all_equal_numeric(target, current; tolerance::Real = 1.4901161193847656
         what = "absolute"
     end
     xy = SimLev.r_sum(abs.(t .- c) ./ (N * scale))
-    (isnan(xy) || xy > tolerance) && return "Mean $what difference: " * SimLev.r_sprintf("%.7g", xy)
+    (isnan(xy) || xy > tolerance) && return "Mean $what difference: " * SimLev.r_format1(Float64(xy); digits = 7)
     return true
 end
 
 # ── diag ──────────────────────────────────────────────────────────────────
 
+
+"asInteger von R für nrow/ncol: erste Zahl abgeschnitten; NA, nicht lesbarer Text und |x| >= 2^31 ergeben `nothing`."
+function _as_integer1(v)
+    t = v isa AbstractArray ? (isempty(v) ? nothing : first(v)) : v
+    (t === nothing || t === missing) && return nothing
+    t isa Bool && return Int(t)
+    if t isa AbstractString
+        f, bad = SimLev.RExpr._str2num(String(t))
+        bad && @warn "NAs introduced by coercion"
+    else
+        f = Float64(t)
+    end
+    isnan(f) && return nothing
+    if !(-2147483648.0 < f < 2147483648.0)
+        @warn "NAs introduced by coercion to integer range"
+        return nothing
+    end
+    return Int(trunc(f))
+end
 
 "`diag(x, nrow, ncol)` wie R."
 function diag(x = 1; nrow = nothing, ncol = nothing, names::Bool = true)
@@ -119,16 +140,22 @@ function diag(x = 1; nrow = nothing, ncol = nothing, names::Bool = true)
         end
         return length(y) == 1 ? y[1] : y
     end
-    if x isa Number && nrow === nothing && ncol === nothing
-        n = trunc(Int, x)
+    # seit 1.6.4 wie R (C-044, Entscheidung 97): nrow/ncol wie asInteger mit R's Meldungen, ein leerer Vektor ergibt bei
+    # Größe 0 eine 0×0-Matrix (bis 1.6.3 InexactError/ArgumentError bzw. „'x' must have positive length“)
+    if (x isa Number || x === missing) && nrow === nothing && ncol === nothing
+        n = _as_integer1(x)
         v = [1.0]
     else
         v = _as_r(x).v
         n = length(v)
     end
-    nrow !== nothing && (n = trunc(Int, nrow))
-    nc = ncol === nothing ? n : trunc(Int, ncol)
-    isempty(v) && _rerr("'x' must have positive length")
+    nrow !== nothing && (n = _as_integer1(nrow))
+    nc = ncol === nothing ? n : _as_integer1(ncol)
+    n === nothing && _rerr("invalid 'nrow' value (too large or NA)")
+    n < 0 && _rerr("invalid 'nrow' value (< 0)")
+    nc === nothing && _rerr("invalid 'ncol' value (too large or NA)")
+    nc < 0 && _rerr("invalid 'ncol' value (< 0)")
+    (min(n, nc) > 0 && isempty(v)) && _rerr("'x' must have positive length")
     out = zeros(n, nc)
     for i in 1:min(n, nc)
         out[i, i] = v[(i - 1) % length(v) + 1]

@@ -13,8 +13,9 @@ tests/
   ausgabe/        print, summary, Grafik (faelle/; R-Basisgrafik, SVG in Python und Julia)
   schnittstelle/  Bleibt die öffentliche API stabil? (eingefrorener Stand frozen/, Abgleich der drei Sprachen)
   werkzeuge/      keine Tests: Gleichlauf-Lauf mit Zufalls- und Breitenprüfungen (gleichlauf/, zufall/, breite/), Laufzeit (bench/),
-                  Doku-Prüfungen (doku/), Neuerzeugen (erzeugen.py)
-  lib/            gemeinsame Hilfen der Python- und Julia-Tests (Lesen und Vergleich der Referenzfälle; Python: faelle.py, reftree.py)
+                  Doku-Prüfungen (doku/), Kernproben in C++ (kern/, seit 1.6.4), Neuerzeugen (erzeugen.py)
+  lib/            gemeinsame Hilfen der Python- und Julia-Tests (Lesen und Vergleich der Referenzfälle; Python: faelle.py, reftree.py;
+                  Toleranzstufe: toleranz.tsv)
 ```
 
 ## Befehle
@@ -29,7 +30,7 @@ Aus der Repo-Wurzel, mit `LC_ALL=C.UTF-8` (die Referenzen entstanden unter C.UTF
 | Julia | `julia --project=julia tests/run.jl [gleichlauf fehler ausgabe schnittstelle]` (nach `Pkg.build()`) | 7 min (Übersetzen je Aufruf) |
 | Schnittstelle (drei Sprachen) | `tests/schnittstelle/run.py --check` (`--freeze` nur mit Eintrag in `tests/schnittstelle/CHANGES.md`) | 1 min |
 | Gleichlauf-Lauf | `tests/werkzeuge/gleichlauf/run.py --quick` bzw. `--full` (baut selbst; `--no-build`; seit 1.6.2 zwei Schritte gleichzeitig, `--jobs N`) | 8 bzw. 30 min |
-| Referenz der Vorversion | `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen 163` (einmal je Versionsschritt; siehe unten) | rund 15 min |
+| Referenz der Vorversion | `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen 164` (einmal je Versionsschritt; siehe unten) | rund 15 min |
 | Fälle neu erzeugen | `R_LIBS=<…> tests/werkzeuge/erzeugen.py [bereich …]` | 32 s |
 | Laufzeitmessung | `R_LIBS=<…> tests/werkzeuge/bench/run.py` | siehe `werkzeuge/bench/README.md` |
 
@@ -77,12 +78,21 @@ und Tabellen der Bereiche in `erzeugen/szenario_tools.R`). Ein Test ist
   sind auch die Werte Tabellen je Funktion („Eingabe → Wert“; Zeilen = Fälle aus `erzeugen/auswahl.txt`).
 
 Python und Julia rechnen jeden Test nach und müssen Bit für Bit gleich sein (NA und NaN getrennt, Vorzeichen der Null,
-Konsolen- und Druckausgabe, Warnungen, Fehlermeldung). Lange Daten sind auf den kürzesten Ausschnitt gekürzt, der die
+Konsolen- und Druckausgabe, Warnungen, Fehlermeldung); Ausnahme ist die Toleranzstufe (nächster Absatz). Lange Daten sind auf den kürzesten Ausschnitt gekürzt, der die
 Zeilenabdeckung hält (im Generator markiert mit `# bis 1.4.1 …`). Die bisherigen Einzelfälle der Bereiche (bis 1.4.1 hier
 erzeugt) prüft als Breitenprüfung nur noch der Gleichlauf-Lauf (`tests/werkzeuge/breite/<bereich>.R`, nichts abgelegt).
 Die Grafiktests finden die Objekte über `lib/faelle.fall("<modul>/<Kennung>")` (Tabellenzeile oder Teil) und rechnen
 jedes Szenario je Testlauf nur einmal (Zwischenspeicher in `ausgabe/test_grafik.py` bzw. `ausgabe/grafik.jl`; die Teile
 eines Szenarios teilen sich den Lauf, die Tests lesen die Objekte nur).
+
+**Stufenmodell (seit 1.6.4):** `lib/toleranz.tsv` listet die Teile mit Toleranz (Spalten `fall`, `pfad`, `funktion`,
+`toleranz`; `*` als Platzhalter; Regel gilt für den Pfad und alles darunter). Freigegeben sind nur `summary()` von
+`simulation()` (`engine/*`, `result$zusammenfassung`) und `sharpe_probabilistic` (Entscheidung 152). Dort gelten Zahlen
+als gleich bei relativ ≤ 1e-12 gegen R, NA und NaN bleiben getrennt, +0 = −0 (unabhängig von `SIMLEV_LAX_NA` und
+`SIMLEV_STRICT_ZERO`). Text, Druck-, Konsolen- und Warnungsausgaben bleiben zeichengleich, alles andere bitgleich wie
+oben. Es gilt für die Modulfälle in Python (`lib/reftree.py`) und Julia (`lib/faelle.jl`), damit auch für
+`werkzeuge/gleichlauf/vergleich.{py,jl}` (deren Zeilen heißen weiter „bitgleich“); nicht für das Engine-Format.
+Abweichungen in diesen Teilen nennen die Toleranz (`… abweichend (Toleranz 1e-12) …`). Neue Zeilen nur nach Freigabe.
 
 ### gleichlauf (Rechnen Python und Julia wie R?)
 
@@ -308,12 +318,13 @@ Test)". Die erwarteten Werte sind dieselben wie vor der Umstellung auf Tabellen 
 | `werkzeuge/gleichlauf/run.py` | erzeugt mit dem aktuellen R **alle** Fälle der Generatoren neu (`SIMLEV_GEN_ALLE=1`; `--quick` jede 20. Kennung) und vergleicht Python und Julia (`vergleich.{py,jl}`); `--full` zusätzlich `faelle_diff.py` (Katalog Byte für Byte gleich); Zufallsprüfungen `FUZZ_REF` gegen die abgelegte Referenz der Vorversion (nur lesen, seit 1.6.2); `exporte.py` zählt die Exporte ohne Fall |
 | `werkzeuge/zufall/engine_faelle.R`, `engine_stress.R`, `packen.py` | Zufallsprüfung der Engine (500 bzw. 1000 Fälle im Engine-Format), nur im Gleichlauf-Lauf, nichts abgelegt |
 | `werkzeuge/breite/<bereich>.R` | Breitenprüfung: die bisherigen Einzelfälle der neun Bereiche mit Szenarien (bis 1.4.1 Generatoren des Katalogs, gleiche Zufallsfolge), nur im Gleichlauf-Lauf (`breite_<bereich>`), nichts abgelegt |
-| `werkzeuge/gleichlauf/*_fuzz.R` | Zufallsprüfungen (Datumskern, slc_rbase, Tarifkern mit dem aktuellen R als Orakel; die Familien aus `FUZZ_REF` in `run.py` gegen die abgelegte Referenz der Vorversion, seit 1.6.3 R 1.6.3; `prec_fuzz.R` und `eigen_fuzz.R` zusätzlich Genauigkeit gegen Rmpfr) |
+| `werkzeuge/gleichlauf/*_fuzz.R` | Zufallsprüfungen (Datumskern, slc_rbase, Tarifkern mit dem aktuellen R als Orakel; die Familien aus `FUZZ_REF` in `run.py` gegen die abgelegte Referenz der Vorversion, seit 1.6.4 R 1.6.4; `prec_fuzz.R` und `eigen_fuzz.R` zusätzlich Genauigkeit gegen Rmpfr) |
 | `werkzeuge/bench/` | Laufzeitmessung (siehe `README.md` dort) |
 | `werkzeuge/doku/beispiele.py` | führt alle Codeblöcke der READMEs (Wurzel, `r/`, `python/`, `julia/`), der R-Vignette und der Tutorials in R, Python und Julia aus und vergleicht die Ausgabeblöcke (`--write` schreibt sie neu) |
 | `werkzeuge/doku/verweise.py` | prüft relative Verweise, Bildpfade und Anker in Markdown-Dateien |
 | `werkzeuge/doku/bilder.py` | erzeugt die Abbildungen des Haupt-README in `r/man/figures/` aus echten R-Läufen |
 | `werkzeuge/erzeugen.py` | Katalog mit dem installierten R neu erzeugen |
+| `werkzeuge/precompile_check.jl` | führt die Vorkompilier-Arbeitslast von SimLev.jl im laufenden Prozess aus und nennt gescheiterte Schritte (beim Vorkompilieren verschluckt jeder Schritt seine Fehler; seit 1.6.4) |
 
 ## Neu erzeugen
 
@@ -325,8 +336,8 @@ sie nur:
   seinen Arbeitsordner und vergleicht sie mit dem Katalog (`--full`: `faelle_diff.py`), Python und Julia rechnen alle
   Fälle der Generatoren nach (der Katalog ist nur eine Auswahl, daher gegen die frisch erzeugten Fälle).
 - **Referenzausgaben der Zufallsprüfungen** (`FUZZ_REF`): `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen K [name …]`
-  rechnet sie mit der eingefrorenen R-Bibliothek der Vorversion (`REFLIBS`, seit 1.6.2 nur eine Fassung, seit 1.6.3 `163` =
-  R 1.6.3 in `/home/claude/rlib163`, Umgebung `SIMLEV_FUZZ_REFLIB163`) für `--quick` und `--full` und legt sie unter
+  rechnet sie mit der eingefrorenen R-Bibliothek der Vorversion (`REFLIBS`, seit 1.6.2 nur eine Fassung, seit 1.6.4 `164` =
+  R 1.6.4 in `/home/claude/rlib164`, Umgebung `SIMLEV_FUZZ_REFLIB164`) für `--quick` und `--full` und legt sie unter
   `/home/claude/gleichlauf_ref/K` ab (Umgebung `SIMLEV_GLEICHLAUF_REF`): `quick/`, `full/` und `manifest.json` mit
   Fassung, R-Version, je Familie Startwert, Fallzahl und SHA-256 der Datei und des Skripts (seit 1.6.3 auch der mit `source()` geladenen Hilfsdateien). Vorhandene Einträge bleiben
   (`--ersetzen` überschreibt). Der übliche Lauf vergleicht R neu, Python und Julia mit dieser Ablage; fehlt sie oder
@@ -352,6 +363,6 @@ Außerhalb von `tests/` verweisen nur das Haupt-README und `r/DEVELOPING.md`, `p
 `julia/DEVELOPING.md` auf diesen Ordner; Pakete, Bau und `R CMD check` brauchen ihn nicht (geprüft mit einer Kopie ohne `tests/`). Die Suiten finden
 die Pakete über die Repo-Wurzel (`tests/` muss dafür neben `r/`, `python/`, `julia/` liegen) bzw. über `R_LIBS` und das
 installierte `simlev`. Der Vergleich mit den Referenzfällen liegt ganz in `tests/lib` (Python `reftree.py` und
-`faelle.py`, Julia `faelle.jl`; seit 1.4.2 ist kein Lade- oder Vergleichscode für Testfälle mehr im Paket). Aus dem
+`faelle.py`, Julia `faelle.jl`, Toleranzliste `toleranz.tsv`; seit 1.4.2 ist kein Lade- oder Vergleichscode für Testfälle mehr im Paket). Aus dem
 Paket nutzen die Tests nur die Umgebungsschalter `SIMLEV_LAX_NA`, `SIMLEV_STRICT_ZERO` und die Kollation
 (`simlev._r.env` bzw. `SimLev.REnv`).

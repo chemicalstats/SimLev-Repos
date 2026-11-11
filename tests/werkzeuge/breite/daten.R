@@ -79,7 +79,8 @@ JL <- list(
   cs_clean = 'result = DP.series_check(d)',
   cs_split3 = 'result = DP.series_check(RFrame("date" => d6.date, "A" => [90, 91, 92, 30.5, 31, 31.2, 31.3, 31.1, 93.3, 93]))',
   cs_firstna = 'result = DP.series_check(d)',
-  cs_onlyna = 'result = DP.series_check(d; columns = ["C", "C"])',
+  cs_onlyna = 'result = DP.series_check(d; columns = ["C"])',
+  cs_onlyna_dup = 'result = DP.series_check(d; columns = ["C", "C"])',
   cs_nocols = 'result = DP.series_check(d; columns = String[])',
   cs_err = 'result = DP.series_check(RFrame("x" => [1.0]))',
   am_yoy = 'result = DP.series_align_macro(d, cpi; name = "infl", lag = 45, transform = "yoy")',
@@ -285,7 +286,8 @@ rc("cs_split3", "series_check(data.frame(date = d6$date, A = c(90, 91, 92, 30.5,
    "result = DP.series_check(pd.DataFrame(dict(date=d6['date'], A=[90, 91, 92, 30.5, 31, 31.2, 31.3, 31.1, 93.3, 93])))", list(d6 = d6))
 dna <- data.frame(date = as.Date("2020-01-01") + 0:4, C = NA_real_, A = c(1, 2, 3, 4, 5))
 rc("cs_firstna", "series_check(d)", "result = DP.series_check(d)", list(d = dna))
-rc("cs_onlyna", "series_check(d, columns = c('C', 'C'))", "result = DP.series_check(d, columns=['C', 'C'])", list(d = dna))
+rc("cs_onlyna", "series_check(d, columns = 'C')", "result = DP.series_check(d, columns=['C'])", list(d = dna))   # seit 1.6.4 doppelte Namen Fehler (Entscheidung 53)
+rc("cs_onlyna_dup", "series_check(d, columns = c('C', 'C'))", "result = DP.series_check(d, columns=['C', 'C'])", list(d = dna))
 rc("cs_nocols", "series_check(d, columns = character(0))", "result = DP.series_check(d, columns=[])", list(d = dna))
 
 # ── series_align_macro ────────────────────────────────────────────────────────────
@@ -584,7 +586,8 @@ JL <- list(
   bc_linear = 'f = BC.backcast_fit(s, "etf", "idx"; ter = 0.2, model = "linear")\nresult = BC.backcast(f; rebase = 100)',
   bc_spline = 'f = BC.backcast_fit(s, "etf", "idx"; model = "spline", fx = "fx", validate = false)\nresult = BC.backcast(f)',
   bc_nofit = sprintf('result = BC.backcast(nothing; data = s, product = "etf", index = "idx", ter = %s, leverage = 2, rate = "rate", params = RList("drag" => 0.4), fill = "model")', TERJ),
-  bc_nofit_attr = paste0('bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric", unknown = 5)\n', ATTRJ),
+  bc_nofit_attr = paste0('bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric")\n', ATTRJ),
+  bc_unknown = paste0('bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric", unknown = 5)\n', ATTRJ),
   bc_noprod = 's.etf = fill(NA, nrow(s))\nresult = BC.backcast(; data = s, product = "etf", index = "idx", fx = "fx", index_fill = "linear")',
   bc_lead = 's.idx[1:5] .= NA\nresult = BC.backcast(; data = s, product = "etf", index = "idx", rebase = 1)',
   bc_err_splice = 'result = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2030-01-01")',
@@ -729,7 +732,9 @@ rc("bc_spline", "f <- backcast_fit(s, 'etf', 'idx', model = 'spline', fx = 'fx',
    "f = BC.backcast_fit(s, 'etf', 'idx', model='spline', fx='fx', validate=False); result = BC.backcast(fit=f)", list(s = sp))
 rc("bc_nofit", sprintf("backcast(NULL, data = s, product = 'etf', index = 'idx', ter = %s, leverage = 2, rate = 'rate', params = list(drag = 0.4), fill = 'model')", TER),
    sprintf("result = BC.backcast(fit=None, data=s, product='etf', index='idx', ter=%s, leverage=2, rate='rate', params={'drag': 0.4}, fill='model')", TERP), list(s = s2))
-rc("bc_nofit_attr", "bc <- backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric', unknown = 5); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date'))",
+rc("bc_nofit_attr", "bc <- backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric'); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date'))",
+   "bc = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2006-01-01', lag=1, accrual='geometric')\nresult = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date'])", list(s = s2))   # seit 1.6.4 ohne unknown = 5 (Entscheidung 21)
+rc("bc_unknown", "bc <- backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric', unknown = 5); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date'))",
    "bc = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2006-01-01', lag=1, accrual='geometric', unknown=5)\nresult = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date'])", list(s = s2))
 rc("bc_noprod", "s$etf <- NA; backcast(data = s, product = 'etf', index = 'idx', fx = 'fx', index_fill = 'linear')",
    "s['etf'] = simlev._r.fmt.NA_REAL\nresult = BC.backcast(data=s, product='etf', index='idx', fx='fx', index_fill='linear')", list(s = sp))
@@ -757,7 +762,7 @@ JL <- list(
   core_mean_edge = 'result = [SC.roll_mean_core(collect(1.0:5.0), 5), SC.roll_mean_core(collect(1.0:5.0), 6), SC.roll_mean_core(collect(1.0:5.0), 0), SC.roll_mean_core([0.1, 0.2, 0.3], 1)]',
   core_cov = 'result = SC.roll_cov_core(x, reverse(x), 50)',
   core_cov_na = 'result = SC.roll_cov_core(x, sqrt.(x), 15)',
-  core_cov_edge = 'result = [SC.roll_cov_core([1.0, 2, 3], [1.0, 2, 3, 4], 2), SC.roll_cov_core([1.0, 2, 3], [3.0, 2, 1], 3), SC.roll_cov_core([1.0, 2, 3], [3.0, 2, 1], 4)]',
+  core_cov_edge = 'result = [SC.roll_cov_core([1.0, 2, 3], [1.0, 2, 4], 2), SC.roll_cov_core([1.0, 2, 3], [3.0, 2, 1], 3), SC.roll_cov_core([1.0, 2, 3], [3.0, 2, 1], 4)]',
   roll_mean = 'result = SG._roll_mean(x, 50)',
   roll_var = 'result = SG._roll_var(x, 50)',
   roll_var_int = 'result = SG._roll_var(collect(1:30), 7.9)',
@@ -826,8 +831,9 @@ rc("core_mean_na", "SimLev:::.roll_mean_core(x, 20L)", "result = SC.roll_mean_co
 rc("core_mean_inf", "SimLev:::.roll_mean_core(x, 5L)", "result = SC.roll_mean_core(x, 5)", list(x = xinf))
 rc("core_cov", "SimLev:::.roll_cov_core(x, rev(x), 50L)", "result = SC.roll_cov_core(x, x[::-1], 50)", list(x = xc))
 rc("core_cov_na", "SimLev:::.roll_cov_core(x, sqrt(x), 15L)", "with np.errstate(invalid='ignore'):\n    y = np.sqrt(x)\nresult = SC.roll_cov_core(x, y, 15)", list(x = xna))
-rc("core_cov_edge", "list(SimLev:::.roll_cov_core(1:3 + 0, 1:4 + 0, 2L), SimLev:::.roll_cov_core(1:3 + 0, 3:1 + 0, 3L), SimLev:::.roll_cov_core(1:3 + 0, 3:1 + 0, 4L))",
-   "result = [SC.roll_cov_core(np.arange(1, 4.), np.arange(1, 5.), 2), SC.roll_cov_core(np.arange(1, 4.), np.arange(3, 0, -1.), 3), SC.roll_cov_core(np.arange(1, 4.), np.arange(3, 0, -1.), 4)]")
+# seit 1.6.4 gleich lange Reihen (die R-Hülle prüft die Länge, Paket SP, Entscheidungen 75–81)
+rc("core_cov_edge", "list(SimLev:::.roll_cov_core(1:3 + 0, c(1, 2, 4), 2L), SimLev:::.roll_cov_core(1:3 + 0, 3:1 + 0, 3L), SimLev:::.roll_cov_core(1:3 + 0, 3:1 + 0, 4L))",
+   "result = [SC.roll_cov_core(np.arange(1, 4.), np.array([1., 2, 4]), 2), SC.roll_cov_core(np.arange(1, 4.), np.arange(3, 0, -1.), 3), SC.roll_cov_core(np.arange(1, 4.), np.arange(3, 0, -1.), 4)]")
 rc("roll_mean", "SimLev:::.roll_mean(x, 50)", "result = SG._roll_mean(x, 50)", list(x = xc))
 rc("roll_var", "SimLev:::.roll_var(x, 50)", "result = SG._roll_var(x, 50)", list(x = xc))
 rc("roll_var_int", "SimLev:::.roll_var(1:30, 7.9)", "result = SG._roll_var(np.arange(1, 31), 7.9)")

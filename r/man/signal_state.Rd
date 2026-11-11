@@ -9,7 +9,8 @@ signal_state(signal, initial = FALSE)
 \arguments{
 \item{signal}{\code{list(buy, sell)} mit logischen Vektoren gleicher
 Laenge (z. B. aus \code{\link[=signal_sma]{signal_sma()}}); NA vorher durch \code{FALSE}
-ersetzen (die Signal-Bausteine liefern keine NA).}
+ersetzen (die Signal-Bausteine liefern keine NA).
+Seit 1.6.4 nur TRUE/FALSE oder 0/1 (NA erlaubt) und gleiche Laenge, sonst Fehler.}
 
 \item{initial}{Logischer Zustand vor dem ersten Signal (Standard
 \code{FALSE} = nicht investiert).}

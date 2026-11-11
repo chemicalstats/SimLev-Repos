@@ -12,7 +12,8 @@ sharpe_deflated(
   effective = TRUE,
   frequency = c("week", "day", "month"),
   dates = NULL,
-  risk_free = 0
+  risk_free = 0,
+  rho_method = c("cor", "linear")
 )
 
 \method{print}{SimLevDSR}(x, ...)
@@ -27,12 +28,14 @@ Perioden, Spalten = Punkte, einfache Renditen als Anteil). Bei
 \item{id}{Zu pruefender Punkt: bei \code{SimLevParamSearch} die
 \code{id} aus \code{x$results}, bei einer Matrix die Spaltennummer der
 urspruenglichen Matrix. \code{NULL} (Standard) = Punkt mit der hoechsten
-Sharpe Ratio.}
+Sharpe Ratio.
+Seit 1.6.4 eine ganze Zahl.}
 
 \item{n_trials}{Versuchsanzahl \eqn{N} (positive Zahl, ueberschreibt die
 Schaetzung), z. B. wenn vorher schon andere Suchen gelaufen sind.
 \code{NULL} (Standard) = aus \code{x} geschaetzt (siehe
-\code{effective}).}
+\code{effective}).
+Seit 1.6.4 eine einzelne endliche Zahl > 0.}
 
 \item{effective}{Logisch. \code{TRUE} (Standard) = effektive
 Versuchsanzahl \eqn{N_{eff}}; \code{FALSE} = Anzahl gueltiger Spalten.}
@@ -57,6 +60,17 @@ wird als \code{risk_free / 100 / ppy} von jeder Periodenrendite
 abgezogen. \code{ppy} (Perioden je Jahr) wird aus dem Datum geschaetzt:
 (Anzahl Perioden - 1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252
 (\code{"day"}), 52 (\code{"week"}) bzw. 12 (\code{"month"}).}
+
+\item{rho_method}{Rechenweg der mittleren paarweisen Korrelation
+\eqn{\bar\rho}: \code{"cor"} (Standard) = Mittel des oberen Dreiecks der
+vollen Korrelationsmatrix (Rechenzeit wie \eqn{T N^2});
+\code{"linear"} = \eqn{(\lVert\sum_j z_j\rVert^2 - N) / (N (N - 1))} mit den
+zentrierten und auf Laenge 1 skalierten Spalten \eqn{z_j} (Rechenzeit wie
+\eqn{T N}). Mathematisch
+gleich; \code{rho}, \code{n_eff}, \code{n_trials}, \code{sr0} und
+\code{dsr} weichen in den letzten Stellen ab (in R, Python und Julia
+gleich). Mit nicht endlichen Renditen rechnet auch \code{"linear"} ueber
+die Korrelationsmatrix. Seit 1.6.4.}
 
 \item{...}{ungenutzt.}
 }

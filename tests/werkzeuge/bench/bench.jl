@@ -27,10 +27,11 @@ path(level, n, m, s) = level .* RB.r_cumprod(1 .+ R.rnorm(n, m, s))
 # ── Daten wie bench.R ──
 SimLev.simlev_seed(1); n = 10958
 A = path(100, n, 3e-4, 0.01); B = path(50, n, 1e-4, 0.003)
-d30 = (date = collect(Date(1995, 1, 1):Day(1):(Date(1995, 1, 1) + Day(n - 1))), A = A, B = B)
+# Tabellen als RFrame (seit 1.6.4 nimmt simulation() bzw. bootstrap() kein NamedTuple mehr; Entscheidung 6)
+d30 = RFrame(pairs((date = collect(Date(1995, 1, 1):Day(1):(Date(1995, 1, 1) + Day(n - 1))), A = A, B = B))...)
 SimLev.simlev_seed(7); n = 7305
 ak = path(100, n, 3e-4, 0.011); bo = path(100, n, 1e-4, 0.003); go = path(100, n, 2e-4, 0.009); em = path(100, n, 3e-4, 0.014)
-d = (date = collect(Date(2000, 1, 1):Day(1):(Date(2000, 1, 1) + Day(n - 1))), aktien = ak, bonds = bo, gold = go, em = em)
+d = RFrame(pairs((date = collect(Date(2000, 1, 1):Day(1):(Date(2000, 1, 1) + Day(n - 1))), aktien = ak, bonds = bo, gold = go, em = em))...)
 W = reshape(1 .+ R.rnorm(30 * 2000, 0.05, 0.15), 30, 2000)
 
 function sim_msgjr(n, om, al, ga, be, P, seed)
@@ -48,7 +49,7 @@ end
 y8 = sim_msgjr(2000, [2e-6, 2e-5], [0.02, 0.05], [0.04, 0.10], [0.92, 0.85], [0.99 0.01; 0.03 0.97], 7)
 
 fp(x) = @sprintf("%.17g", RB.r_sum(vec(x)))
-println("Daten: S30 ", fp(d30.A), ", T ", fp(d.em), ", W ", fp(W), ", T8 ", fp(y8))
+println("Daten: S30 ", fp(A), ", T ", fp(em), ", W ", fp(W), ", T8 ", fp(y8))
 
 st30 = create_strategy(A = asset_config("etf", "bnh"; share = 0.7), B = asset_config("etf", "bnh"; share = 0.3))
 cfg = bootstrap_config((akt = "aktien",); input = "prices")

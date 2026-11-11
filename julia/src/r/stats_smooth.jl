@@ -55,7 +55,7 @@ function _seq_int(frm, to, n)
     isfinite(frm) || error("'from' must be a finite number")
     isfinite(to) || error("'to' must be a finite number")
     out = seq_len_out(frm, to, n)
-    n = trunc(Int, n)
+    n = ceil(Int, Float64(n))   # seit 1.6.4 wie R aufgerundet (C-061)
     rby = 0.0
     if n > 2
         nint = Float64(n - 1)
@@ -74,12 +74,18 @@ end
 _approx_core(x::Vector{Float64}, y::Vector{Float64}, v::Vector{Float64}, method::Int, yleft::Float64, yright::Float64,
              f::Float64) = SimLev._rb_approx(x, y, v, method, yleft, yright, f)
 
-function _approx_setup(x, y, method, yleft, yright, rule, f::Float64, ties, na_rm::Bool, ties_missing::Bool)
+function _approx_setup(x, y, method, yleft, yright, rule, f, ties, na_rm::Bool, ties_missing::Bool)
     meths = [("linear", 1), ("constant", 2)]
     m = isempty(method) ? Int[] : [v for (k, v) in meths if startswith(k, method)]
     length(m) != 1 && error("invalid interpolation method")
     method = m[1]
-    rule = collect(_v(rule))
+    # seit 1.6.4 wie R stopifnot(is.numeric(rule), (lenR <- length(rule)) >= 1L, lenR <= 2L) (C-061)
+    rv = rule isa Union{AbstractVector,Tuple} ? collect(rule) : [rule]
+    (all(v -> v isa Real && !(v isa Bool), rv) && !(!isempty(rv) && all(ismissing, rv))) ||
+        error("is.numeric(rule) is not TRUE")
+    isempty(rv) && error("(lenR <- length(rule)) >= 1L is not TRUE")
+    length(rv) > 2 && error("lenR <= 2L is not TRUE")
+    rule = Float64.(rv)
     length(rule) == 1 && (rule = [rule[1], rule[1]])
     xv, yv, kept_na, notna = _regularize(x, y, ties, ties_missing, na_rm)
     nona = na_rm || !kept_na
@@ -88,8 +94,25 @@ function _approx_setup(x, y, method, yleft, yright, rule, f::Float64, ties, na_r
         method == 1 && error("need at least two non-NA values to interpolate")
         nx == 0 && error("zero non-NA points")
     end
+    yleft === nothing && isnan(rule[1]) && error("missing value where TRUE/FALSE needed")
     yleft === nothing && (yleft = rule[1] == 1 ? NA : yv[1])
+    yright === nothing && isnan(rule[2]) && error("missing value where TRUE/FALSE needed")
     yright === nothing && (yright = rule[2] == 1 ? NA : yv[end])
+    # seit 1.6.4 wie R stopifnot(length(yleft) == 1L, length(yright) == 1L, length(f) == 1L) (T4-R3; bis dahin
+    # MethodError/TypeError); die f- und NA-Prüfung (C_ApproxTest) folgt in approx erst nach n und xout
+    _ax_len(yleft) == 1 || error("length(yleft) == 1L is not TRUE")
+    _ax_len(yright) == 1 || error("length(yright) == 1L is not TRUE")
+    _ax_len(f) == 1 || error("length(f) == 1L is not TRUE")
+    return xv, yv, method, _ax_one(yleft), _ax_one(yright), nona, notna, nx, _ax_one(f)
+end
+
+"`length(v)` für ein Argument (nothing = NULL, Einzelwert 1, sonst Zahl der Elemente)."
+_ax_len(v) = v === nothing ? 0 : v isa Union{AbstractArray,Tuple} ? length(v) : 1
+"Wert eines Arguments der Länge 1 als Float64."
+_ax_one(v) = v isa Union{AbstractArray,Tuple} ? Float64(first(v)) : Float64(v)
+
+"R's C_ApproxTest: f bei method \"constant\", dann NA in x (und y bei na.rm)."
+function _approx_test(xv, yv, method::Int, f::Float64, na_rm::Bool)
     if method == 2
         (!isfinite(f) || f < 0 || f > 1) && error("approx(): invalid f value")
     end
@@ -98,7 +121,7 @@ function _approx_setup(x, y, method, yleft, yright, rule, f::Float64, ties, na_r
     else
         any(isnan, xv) && error("approx(x,y, .., na.rm=FALSE): NA values in x are not allowed")
     end
-    return xv, yv, method, Float64(yleft), Float64(yright), nona, notna, nx
+    return nothing
 end
 
 """
@@ -108,12 +131,16 @@ end
 Warnung beim Zusammenfassen); auch "ordered", eine Funktion oder
 `("ordered", fun)`. Ergebnis: RList mit `x` und `y`.
 """
-function approx(x, y = nothing; xout = nothing, method::AbstractString = "linear", n::Integer = 50, yleft = nothing,
-                yright = nothing, rule = 1, f::Real = 0, ties = nothing, na_rm::Bool = true)
+function approx(x, y = nothing; xout = nothing, method::AbstractString = "linear", n = 50, yleft = nothing,
+                yright = nothing, rule = 1, f = 0, ties = nothing, na_rm::Bool = true)
     ties_missing = ties === nothing
-    xv, yv, meth, yl, yr, nona, notna, nx = _approx_setup(x, y, method, yleft, yright, rule, Float64(f),
-                                                         ties === nothing ? _rmean : ties, na_rm, ties_missing)
+    # Reihenfolge der Prüfungen seit 1.6.4 wie stats::approx 4.3.3 (T4-R3): method, rule, Werte, yleft/yright/f-Längen,
+    # n und xout, dann f und NA (C_ApproxTest)
+    xv, yv, meth, yl, yr, nona, notna, nx, fv = _approx_setup(x, y, method, yleft, yright, rule, f,
+                                                             ties === nothing ? _rmean : ties, na_rm, ties_missing)
     if xout === nothing
+        n === nothing && error("argument is of length zero")
+        (n isa Real && isnan(n)) && error("missing value where TRUE/FALSE needed")
         n <= 0 && error("'approx' requires n >= 1")
         if nona
             xo = _seq_int(xv[1], xv[nx], n)
@@ -121,10 +148,10 @@ function approx(x, y = nothing; xout = nothing, method::AbstractString = "linear
             xs = xv[notna]
             xo = _seq_int(xs[1], xs[end], n)
         end
-    else
-        xo = _v(xout)
     end
-    yo = _approx_core(xv, yv, xo, meth, yl, yr, Float64(f))
+    _approx_test(xv, yv, meth, fv, na_rm)
+    xout === nothing || (xo = _v(xout))
+    yo = _approx_core(xv, yv, xo, meth, yl, yr, fv)
     xres = xout === nothing ? _vec_out(xo) : (xout isa Real ? Float64(xout) : xout)
     return RList("x" => xres, "y" => (xout isa Real ? yo[1] : _vec_out(yo)))
 end
@@ -148,15 +175,42 @@ SimLev.attrs(F::ApproxFun) = F.attrs
 
 "`approxfun(...)`: liefert eine aufrufbare Funktion `v -> y` (ApproxFun mit x, y)."
 function approxfun(x, y = nothing; method::AbstractString = "linear", yleft = nothing, yright = nothing, rule = 1,
-                   f::Real = 0, ties = nothing, na_rm::Bool = true)
+                   f = 0, ties = nothing, na_rm::Bool = true)
     ties_missing = ties === nothing
-    xv, yv, meth, yl, yr, nona, notna, nx = _approx_setup(x, y, method, yleft, yright, rule, Float64(f),
-                                                         ties === nothing ? _rmean : ties, na_rm, ties_missing)
-    return ApproxFun(xv, yv, meth, yl, yr, Float64(f), Dict{String,Any}())
+    xv, yv, meth, yl, yr, nona, notna, nx, fv = _approx_setup(x, y, method, yleft, yright, rule, f,
+                                                             ties === nothing ? _rmean : ties, na_rm, ties_missing)
+    _approx_test(xv, yv, meth, fv, na_rm)
+    return ApproxFun(xv, yv, meth, yl, yr, fv, Dict{String,Any}())
+end
+
+"`as.integer(v)[1]` für einen Wert (abgeschnitten; NA, Text ohne Zahl, ±Inf → `nothing`)."
+function _as_int1(v)
+    v isa Union{AbstractVector,Tuple} && (v = isempty(v) ? nothing : first(v))
+    (v === nothing || v === missing) && return nothing
+    if v isa AbstractString
+        f = tryparse(Float64, strip(v))
+        f === nothing && return nothing
+        v = f
+    end
+    v isa Real || return nothing
+    f = Float64(v)
+    (isnan(f) || !(-2147483648.0 < f < 2147483648.0)) && return nothing
+    return trunc(Int, f)
+end
+
+"`as.logical(v)[1]` für einen Wert (Text \"TRUE\"/\"true\"/\"T\"/\"True\" bzw. \"FALSE\"/…; Zahl != 0; sonst `nothing`)."
+function _as_lgl1(v)
+    v isa Union{AbstractVector,Tuple} && (v = isempty(v) ? nothing : first(v))
+    (v === nothing || v === missing) && return nothing
+    v isa Bool && return v
+    v isa AbstractString && return v in ("TRUE", "true", "T", "True") ? true :
+                                  v in ("FALSE", "false", "F", "False") ? false : nothing
+    v isa Real || return nothing
+    return isnan(Float64(v)) ? nothing : v != 0
 end
 
 "`filter(x, filter, method, sides, circular, init)` (ohne ts-Attribute)."
-function r_filter(x, filter; method::AbstractString = "convolution", sides::Integer = 2, circular::Bool = false,
+function r_filter(x, filter; method::AbstractString = "convolution", sides = 2, circular = false,
                   init = nothing)
     meth = [m for m in ("convolution", "recursive") if startswith(m, method)]
     length(meth) != 1 && error("'arg' should be one of “convolution”, “recursive”")
@@ -164,14 +218,19 @@ function r_filter(x, filter; method::AbstractString = "convolution", sides::Inte
     is_mat = x isa AbstractMatrix || x isa RFrame
     X = is_mat ? _as_cov_input(x)[1] : reshape(_v(x), :, 1)
     n, nser = size(X)
+    n == 0 && error("'ts' object must have one or more observations")   # seit 1.6.4 wie R as.ts(x) (C-052)
     fv = _v(filter)
     nf = length(fv)
     any(isnan, fv) && error("missing values in 'filter'")
     Y = Matrix{Float64}(undef, n, nser)
     if method == "convolution"
         nf > n && error("'filter' is longer than time series")
-        sides = Int(sides)
-        sides in (1, 2) || error("argument 'sides' must be 1 or 2")
+        sv = _as_int1(sides)   # seit 1.6.4 wie R as.integer(sides), NA mit Meldung (C-052)
+        (sv === nothing || !(sv in (1, 2))) && error("argument 'sides' must be 1 or 2")
+        sides = sv
+        cv = _as_lgl1(circular)
+        cv === nothing && error("'circular' must be logical and not NA")
+        circular = cv
         ini = zeros(0, nser)
     elseif init === nothing
         ini = zeros(nf, nser)
@@ -190,8 +249,9 @@ function r_filter(x, filter; method::AbstractString = "convolution", sides::Inte
         ini = ia
     end
     for s in 1:nser   # C-Kerne sl_r_filter_conv, sl_r_filter_rec (seit 1.6.0)
-        Y[:, s] = SimLev._rb_filter(Vector{Float64}(X[:, s]), Vector{Float64}(fv), method == "recursive", Int(sides),
-                                    circular, Vector{Float64}(ini[:, s]))
+        Y[:, s] = SimLev._rb_filter(Vector{Float64}(X[:, s]), Vector{Float64}(fv), method == "recursive",
+                                    method == "recursive" ? 2 : Int(sides), circular === true,
+                                    Vector{Float64}(ini[:, s]))
     end
     is_mat && return Y
     return _vec_out(Y[:, 1])

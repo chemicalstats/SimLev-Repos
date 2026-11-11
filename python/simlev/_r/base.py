@@ -77,8 +77,28 @@ def _vec(x):
     return _np.atleast_1d(_np.asarray(x, dtype=_np.float64)).ravel(order="F"), None
 
 
+def _not_numeric_mean(x):
+    """R ``mean.default``: weder Zahl noch Wahrheitswert (Faktor, Text, NULL). Ein ``DataFrame`` steht in Python auch
+    für eine R-Matrix und gilt mit Zahlenspalten weiter als Zahl (R ``mean(<data.frame>)`` ist NA)."""
+    if x is None or isinstance(x, (_pd.Categorical, str)):
+        return True
+    if isinstance(x, _pd.DataFrame):
+        return not all(d.kind in "iufb" for d in x.dtypes)
+    if isinstance(x, _pd.Series):
+        return not (x.dtype.kind in "iufb")
+    a = _np.asarray(x, dtype=object) if isinstance(x, (list, tuple)) else _np.asarray(x)
+    if a.dtype.kind in "iufb":
+        return False
+    return not all(isinstance(v, (int, float, bool, _np.integer, _np.floating, _np.bool_)) for v in a.ravel())
+
+
 def mean(x, na_rm=False):
-    """``mean(x)`` auch für Matrizen/Arrays/DataFrame-Werte (alle Elemente)."""
+    """``mean(x)`` auch für Matrizen/Arrays/DataFrame-Werte (alle Elemente); Faktor, Text und NULL ergeben seit
+    1.6.4 wie R ``NA`` mit Warnung (C-066)."""
+    if _not_numeric_mean(x):
+        import warnings
+        warnings.warn("argument is not numeric or logical: returning NA")
+        return NA_REAL
     if isinstance(x, _pd.DataFrame):
         a = x.to_numpy(dtype=_np.float64).ravel(order="F")
     else:
@@ -92,6 +112,13 @@ def mean(x, na_rm=False):
 
 def diff(x, lag=1, differences=1):
     """``diff(x, lag, differences)`` für Vektoren und Matrizen (zeilenweise)."""
+    # seit 1.6.4 wie R diff.default (C-066): lag und differences ganze Zahlen >= 1 (bisher negativer Abstand)
+    lv = list(lag) if isinstance(lag, (list, tuple, _np.ndarray)) else [lag]
+    dv = list(differences) if isinstance(differences, (list, tuple, _np.ndarray)) else [differences]
+    if len(lv) != 1 or len(dv) > 1 or not dv or lv[0] is None or dv[0] is None or not lv[0] >= 1 or not dv[0] >= 1:
+        from .linalg import RError
+        raise RError("'lag' and 'differences' must be integers >= 1")
+    lag, differences = int(lv[0]), int(dv[0])
     if isinstance(x, _pd.DataFrame) or (isinstance(x, _np.ndarray) and x.ndim == 2):
         a, rn, cn = _mat(x)
         for _ in _bi.range(differences):
@@ -119,18 +146,30 @@ def _pext(args, na_rm, greater):
     n = max(v.size for v, _ in vals)
     if any(v.size == 0 for v, _ in vals):
         return _np.zeros(0)
+    if any(n % v.size for v, _ in vals):   # seit 1.6.4 wie R do_pmin (C-094), eine Warnung je Aufruf
+        import warnings
+        warnings.warn("an argument will be fractionally recycled", UserWarning, stacklevel=3)
     first, nm = vals[0]
     out = _np.resize(first, n).copy()
     for v, _ in vals[1:]:
         t = _np.resize(v, n)
-        for i in _bi.range(n):
-            a = out[i]
-            b = t[i]
-            # wie do_pmin: (narm && ISNAN(r)) || (!ISNAN(b) && b > r) || (!narm && ISNAN(b))
-            if (na_rm and a != a) or (b > a if greater else b < a) or (not na_rm and b != b):
-                out[i] = b
+        # wie do_pmin: (narm && ISNAN(r)) || (!ISNAN(b) && b > r) || (!narm && ISNAN(b)); als Feld (seit 1.6.4, C-071;
+        # bis dahin je Element, dieselbe Bedingung, Werte unverändert kopiert)
+        with _np.errstate(invalid="ignore"):
+            take = (t > out) if greater else (t < out)
+            if na_rm:
+                take |= _np.isnan(out)
+            else:
+                take |= _np.isnan(t)
+        _np.copyto(out, t, where=take)
     if nm is not None and len(nm) == n:
         return _pd.Series(out, index=nm)
+    # seit 1.6.4 wie R mostattributes(): Form (dim, dimnames) des ersten Arguments, wenn die Länge passt (C-094)
+    a0 = args[0]
+    if isinstance(a0, _pd.DataFrame) and a0.size == n:
+        return _pd.DataFrame(out.reshape(a0.shape, order="F"), index=a0.index, columns=a0.columns)
+    if isinstance(a0, _np.ndarray) and a0.ndim >= 2 and a0.size == n:
+        return out.reshape(a0.shape, order="F")
     return out
 
 

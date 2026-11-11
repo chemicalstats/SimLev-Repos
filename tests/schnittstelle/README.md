@@ -37,9 +37,9 @@ prüfen dagegen und brauchen nur die eigene Sprache:
 
 | Sprache | Datei | Test | Auszug |
 |---|---|---|---|
-| R | `frozen/r.json` | `r/tests/testthat/test-api-frozen.R` | `Rscript api_r.R … --frozen-check frozen/r.json` (eigener Prozess); bei `R CMD check` übersprungen, wenn das Repo nicht erreichbar ist |
+| R | `frozen/r.json` | `tests/schnittstelle/test-api.R` (in `tests/run.R`) | `Rscript api_r.R … --frozen-check frozen/r.json` (eigener Prozess) |
 | Python | `frozen/py.json` | `tests/schnittstelle/test_api.py` | `python3 api_py.py … --frozen-check frozen/py.json` (eigener Prozess) |
-| Julia | `frozen/jl.json` | `tests/schnittstelle/api.jl` (in `runtests.jl`) | `api_jl.jl` per `include` in ein eigenes Modul, `frozen_check(…)` im Testprozess |
+| Julia | `frozen/jl.json` | `tests/schnittstelle/api.jl` (in `tests/run.jl`) | `api_jl.jl` per `include` in ein eigenes Modul, `frozen_check(…)` im Testprozess |
 
 **Inhalt.** Je Funktion (`functions`) und je Methode (`methods`,
 Schlüssel `<generic>.<Klasse>`) die Argumente in Reihenfolge, ein Argument je

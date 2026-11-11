@@ -11,13 +11,16 @@ param_plateau(x, metric = x$objective, radius = 1L, k = 5L)
 Renditen sind nicht noetig).}
 
 \item{metric}{Name einer Kennzahlspalte von \code{x$results} (Standard:
-Zielgroesse der Suche, \code{x$objective}).}
+Zielgroesse der Suche, \code{x$objective}).
+Seit 1.6.4 muss es eine Spalte von x$results sein.}
 
 \item{radius}{Maximaler Abstand in Rasterstufen je Dimension (ganze Zahl,
-Standard 1); nur \code{method = "grid"}.}
+Standard 1); nur \code{method = "grid"}.
+Seit 1.6.4 eine ganze Zahl >= 0.}
 
 \item{k}{Anzahl Nachbarn inklusive Punkt selbst (ganze Zahl, Standard 5);
-nur \code{method = "random"} und \code{"lhs"}.}
+nur \code{method = "random"} und \code{"lhs"}.
+Seit 1.6.4 eine ganze Zahl >= 1.}
 }
 \value{
 data.frame je Punkt mit \code{id}, \code{value} (Kennzahl des

@@ -30,7 +30,9 @@ benannte Liste solcher Objekte (Name = Asset, z. B.
 bleiben ohne Wrapper. Fehler: Namen, die kein Asset sind, Elemente, die
 kein \code{SimLevWrapperConfig} sind, eine Liste ohne Namen, und
 \code{wrapper} zusammen mit \code{trading = "signal"} fuer dasselbe Asset
-(die Meldung nennt das Asset).}
+(die Meldung nennt das Asset).
+Seit 1.6.4 ist ein unbekanntes Argument oder share (setzt die Funktion aus weights) ein Fehler mit
+einheitlicher Meldung.}
 }
 \value{
 Objekt der Klasse \code{strategy} (wie \code{\link[=create_strategy]{create_strategy()}}).

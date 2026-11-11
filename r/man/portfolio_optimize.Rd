@@ -96,7 +96,7 @@ Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52,
 
 \item{resample}{Anzahl Block-Bootstrap-Stichproben fuer das
 Michaud-Resampling (ganze Zahl, Standard 0 = aus); die Gewichte sind
-dann das Mittel der Einzeloptimierungen.}
+dann das Mittel der Einzeloptimierungen. Seit 1.6.4 hoechstens 10^8.}
 
 \item{block}{Mittlere Blocklaenge des stationaeren Bootstraps fuer das
 Resampling in Perioden. \code{NULL} (Standard) = \eqn{T^{1/3}} gerundet,

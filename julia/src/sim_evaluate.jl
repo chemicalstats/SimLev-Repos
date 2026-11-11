@@ -286,22 +286,25 @@ periodisches Rebalancing, ereignisbasiertes Rebalancing sowie die Deutsche Inves
 InvStG, § 23 EStG).
 
 # Argumente
-- `data`: `data.frame` mit täglichen Marktdaten. Pflichtfelder: `date` (Klasse `Date`, aufsteigend) und je
-  eine Kursspalte pro Asset (Niveaus, keine Renditen; Name muss mit dem Asset-Namen in `strategy`
-  übereinstimmen; für Fonds-Wrapper die Spalten der inneren Strategie, siehe Abschnitt „Fonds-Wrapper“).
-  Optionale Spalten: Basiszins in Prozent (Spaltenname in `tax_profile(base_rate = )`), logische Signalspalten
-  (für `trading = "signal"`), Risk-Free-Reihe in Prozent p.a. (Name in `risk_free`), logische Trigger- und
-  numerische Gewichtsspalten für `rebalance_plan(event_col, event_weight)`. Fehlende Kalendertage werden
+- `data`: `data.frame` (`RFrame`; nur Tabellen, NamedTuple oder Dict vorher mit `RFrame(pairs(x)...)`,
+  einen Vektor von Paaren mit `RFrame(x...)` umwandeln) mit täglichen Marktdaten. Pflichtfelder: `date`
+  (Klasse `Date`, aufsteigend) und je eine Kursspalte pro Asset (Niveaus, keine Renditen; Name muss mit dem
+  Asset-Namen in `strategy` übereinstimmen; für Fonds-Wrapper die Spalten der inneren Strategie, siehe Abschnitt
+  „Fonds-Wrapper“). Optionale Spalten: Basiszins in Prozent (Spaltenname in `tax_profile(base_rate = )`),
+  Signalspalten (für `trading = "signal"`; `true`/`false` oder `0`/`1`, NA erlaubt, andere Zahlen sind ein
+  Fehler), Risk-Free-Reihe in Prozent p.a. (Name in `risk_free`), logische Trigger- und numerische
+  Gewichtsspalten für `rebalance_plan(event_col, event_weight)`. Fehlende Kalendertage werden
   automatisch per LOCF aufgefüllt (logische Spalten mit `false`); aufgefüllte Tage werden in `filled` markiert
   und aus Risikometriken ausgeschlossen. Trägt `data` das Attribut `filled` aus `series_align`, gelten Tage,
   an denen keines der Strategie-Assets einen echten Kurs hat, ebenso als aufgefüllt (kein Handel, nicht in den
   Risikometriken). Passt die Zeilenzahl des Attributs nicht zu `data` (z. B. nach einer Zeilenauswahl der
   `series_align()`-Ausgabe), wird es mit Warnung ignoriert; den Zeitraum daher mit `series_align(..., start =,
   end =)` wählen.
+  Seit 1.6.4 darf `date` kein Faktor sein (vorher still in Text umgewandelt).
 
   Eingabeprüfung: `date` als Text im Format `"JJJJ-MM-TT"` (oder Faktor) wird mit Hinweis in `Date`
   umgewandelt; unsortierte Zeilen werden mit Hinweis aufsteigend sortiert; doppelte Daten und doppelte
-  Spaltennamen führen zu einem Fehler. Kurse müssen positiv sein (`<= 0` oder unendlich: Fehler). Einzelne
+  Spaltennamen führen zu einem Fehler. Kurse müssen positiv sein (`<= 0` oder unendlich: Fehler) und seit 1.6.4 zwischen 1e-100 und 1e100 liegen (sonst Fehler). Einzelne
   fehlende Kurse (`NA`) werden mit Hinweis per LOCF gefüllt; sind in einer Zeile alle Kurse `NA`, gilt der Tag
   als aufgefüllt. Hat ein Asset erst ab einem späteren Tag Kurse (führende `NA`, etwa aus `series_align(range
   = "all")`), wird es wie mit `start` = erster Kurstag behandelt. Mindestens ein Asset muss am ersten Tag
@@ -333,7 +336,8 @@ InvStG, § 23 EStG).
   oder `nothing` (Standard: keine Steuern).
 - `risk_free`: Numerisch oder Character. Annualisierte risikolose Rendite **in Prozent** (z. B. `3` = 3 %
   p.a.) oder Name einer Spalte in `data` mit einer täglichen, annualisierten Zeitreihe in Prozent (z. B. SOFR
-  als `5.31`). `nothing` und `0` sind äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent umgerechnet und
+  als `5.31`; nur Zahlenspalten, Text-, logische und Faktorspalten sind ein Fehler). `nothing` und `0` sind
+  äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent umgerechnet und
   von der jeweiligen Tagesrendite abgezogen; Sharpe und Sortino werden auf den Überschussrenditen berechnet.
   LOCF-aufgefüllte Tage werden konsistent ausgeschlossen. Standard: `0`. Zahlen über 0 und unter 0,05
   (vermutlich Anteil, z. B. `0.02` für 2 %) werden mit Warnung als Prozent gelesen; kleine echte Prozentsätze
@@ -680,6 +684,8 @@ function simulation(data, strategy; start_value = 10000, costs = sim_costs(), dc
                     splits = nothing, tax = nothing, risk_free = 0, fractions = true,
                     liquidate = false, details = false, io::IO = stdout)
     @nospecialize
+    # seit 1.6.4 Vektoren der Länge 1 wie Einzelwerte (Entscheidung 4; R: c(TRUE) ist TRUE)
+    start_value, risk_free, fractions, liquidate, details = chk_scalar.((start_value, risk_free, fractions, liquidate, details))
     flat = _sim_from_blocks(costs, dca, rebalance, splits, tax)
     return _simulation_flat(data, strategy; start_value = start_value, risk_free = risk_free, fractions = fractions,
                             liquidate = liquidate, details = details, io = io, flat...)
@@ -710,13 +716,13 @@ function _simulation_flat(data, strategy; start_value = 10000, details = false, 
                     dca_fee = nothing, harvest_mode = false, harvest_day = "12-15", harvest_loss_pot = true,
                     taxable_income = nothing, tax_tariff = nothing, io::IO = stdout)
     @nospecialize
-    details = details == true
+    # seit 1.6.4 prüft _sim_check_inputs details wie fractions (bis 1.6.3: details == true)
     cfg, fr = _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
                                 balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                                 marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                                 use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                                 fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                                order_fee, dca_fee, harvest_mode, taxable_income, tax_tariff, io)
+                                order_fee, dca_fee, harvest_mode, taxable_income, tax_tariff, io; liquidate = liquidate)
     split_thresh !== nothing && (split_thresh = _num_vec(split_thresh))
     start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data)
     sim = _sim_build_state(fr, cfg.strategy, start_date, stopp_date, cfg.sparer_pauschbetrag,

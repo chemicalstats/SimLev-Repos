@@ -44,18 +44,21 @@ Wiederholungen mit \eqn{|d^* - d| \ge |d|}, Intervall = 2.5- und
 97.5-\%-Quantil der Bootstrap-Differenzen).}
 
 \item{B}{Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur
-bei \code{method = "bootstrap"}.}
+bei \code{method = "bootstrap"}.
+Seit 1.6.4 hoechstens 10^8.}
 
 \item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden
 (geometrisch verteilte Blocklaengen, Bloecke laufen zyklisch ueber das
 Ende); \code{NULL} (Standard) = \code{max(2, round(T^(1/3)))} mit
-\eqn{T} = Anzahl Renditepaare. Nur bei \code{method = "bootstrap"}.}
+\eqn{T} = Anzahl Renditepaare. Nur bei \code{method = "bootstrap"}.
+Seit 1.6.4 eine Zahl >= 1.}
 
 \item{ppy}{Perioden je Jahr fuer die Annualisierung. \code{NULL}
 (Standard) = bei Vektoren 252 (\code{"day"}), 52 (\code{"week"}) bzw. 12
 (\code{"month"}); bei Ergebnissen und data.frames aus den gemeinsamen
 Daten geschaetzt: (Anzahl Perioden - 1) / (Zeitspanne in Tagen /
-365.25).}
+365.25).
+Seit 1.6.4 eine Zahl > 0.}
 
 \item{seed}{Startwert fuer den Bootstrap (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein

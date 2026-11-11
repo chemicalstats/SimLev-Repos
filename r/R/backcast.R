@@ -49,7 +49,11 @@
     if (ncol(x) < 2) stop(sprintf("%s: data.frame braucht die Spalten date und Wert.", what))
     dcol <- if ("date" %in% names(x)) "date" else names(x)[1]
     vcol <- setdiff(names(x), dcol)[1]
-    return(.step_series(.to_date(x[[dcol]], sprintf("%s: Datum", what)), as.numeric(x[[vcol]]), .to_date(data$date, what)))
+    fd <- .to_date(x[[dcol]], sprintf("%s: Datum", what))
+    # seit 1.6.4 (Entscheidung 147, T3-N5) in allen drei Sprachen abgelehnt (bis 1.6.3 in R Abbruch in findInterval,
+    # in Python und Julia wurde die Zeile still uebergangen)
+    if (anyNA(fd)) chk_stop("ut3.datum_fehlt", what, which(is.na(fd))[1L])
+    return(.step_series(fd, as.numeric(x[[vcol]]), .to_date(data$date, what)))
   }
   if (is.character(x) && length(x) == 1L) {
     if (!x %in% names(data)) stop(sprintf("%s: Spalte '%s' fehlt im Datensatz.", what, x))
@@ -64,6 +68,70 @@
   if (is.numeric(x) && length(x) == 1L) return(rep(as.numeric(x), n))
   if (is.numeric(x) && length(x) == n) return(as.numeric(x))
   stop(sprintf("%s: nicht interpretierbare Angabe (Skalar, Vektor der L\u00e4nge %d, Spaltenname, data.frame(date, Wert) oder benannter Vektor mit Datumsnamen).", what, n))
+}
+
+# --- Eingabepruefung Backcast (seit 1.6.4, K42 E4, B-017, B-087; Hilfen in pruefen.R und dependence.R) -----------
+
+# Angabe einer Reihe (ter, rate, fx) vor .resolve_series: Zahl(en) endlich, Spaltenname einer Zahlenspalte mit
+# endlichen Werten oder NA, Tabelle (date, Wert) mit endlichen Zahlen; Faktor, Wahrheitswerte, Listen und Matrizen
+# sind ein Fehler. Form und Laenge prueft .resolve_series (unveraenderte Meldungen).
+.bc_check_series <- function(x, data, fn, arg) {
+  if (is.null(x)) return(invisible(x))
+  if (is.factor(x)) chk_stop("faktor", fn, arg)
+  if (is.data.frame(x)) {
+    if (ncol(x) >= 2L) {
+      dcol <- if ("date" %in% names(x)) "date" else names(x)[1]; vcol <- setdiff(names(x), dcol)[1]
+      if (is.factor(x[[dcol]])) chk_stop("spalte_faktor", fn, dcol)
+      .e4_numcol(x, vcol, fn)
+      if (!all(is.finite(x[[vcol]]))) chk_stop("e3.werte", fn, arg)
+    }
+    return(invisible(x))
+  }
+  if (is.character(x)) {
+    if (length(x) != 1L || is.na(x) || !nzchar(x)) chk_stop("e4.reihe", fn, arg)
+    if (x %in% names(data)) {
+      .e4_numcol(data, x, fn)
+      v <- data[[x]]; if (any(is.infinite(v))) chk_stop("e1.spalte_endlich", fn, x)
+    }
+    return(invisible(x))
+  }
+  nur_na <- is.logical(x) && length(x) && all(is.na(x))           # NA (logisch) wie NA_real_ (Entscheidung 14)
+  if (!(is.numeric(x) || nur_na) || !is.null(dim(x)) || !length(x)) chk_stop("e4.reihe", fn, arg)
+  if (!all(is.finite(x))) chk_stop("e3.werte", fn, arg)
+  invisible(x)
+}
+
+# gemeinsame Modellangaben von backcast_fit() und backcast() ohne Fit
+.bc_check_args <- function(fn, data, product, index, ter, leverage, rate, fx, rate_lag, ter_basis, rate_basis) {
+  chk_df(data, fn, "data")                                        # Entscheidung 6, B-057
+  chk_name1(product, fn, "product"); chk_name1(index, fn, "index")
+  if ("date" %in% names(data)) chk_col_nofactor(data, "date", fn) # Entscheidung 15
+  for (col in c(product, index)) if (col %in% names(data)) .e4_numcol(data, col, fn)
+  if (is.factor(leverage) || !is.numeric(leverage) || length(leverage) != 1L || !is.finite(leverage) || leverage == 0)
+    stop("'leverage' muss eine Zahl ungleich 0 sein.")            # seit 1.6.4 auch NA und Inf
+  .bc_check_series(ter, data, fn, "ter"); .bc_check_series(rate, data, fn, "rate"); .bc_check_series(fx, data, fn, "fx")
+  chk_int1(rate_lag, fn, "rate_lag", lo = 0, hi = max(0, nrow(data) - 1))
+  chk_num1(ter_basis, fn, "ter_basis", lo = 0, lo_open = TRUE); chk_num1(rate_basis, fn, "rate_basis", lo = 0, lo_open = TRUE)
+  invisible(TRUE)
+}
+
+# lag: "auto" oder ganze Zahl mit |lag| < nrow(data)
+.bc_check_lag <- function(lag, data, fn, auto_ok = TRUE) {
+  key <- if (auto_ok) "e4.lag" else "e4.lag_ohne_fit"
+  if (auto_ok && identical(lag, "auto")) return(invisible(lag))
+  if (!(!is.factor(lag) && is.numeric(lag) && length(lag) == 1L && is.finite(lag) && lag == trunc(lag) && abs(lag) < nrow(data)))
+    chk_stop(key, fn)
+  invisible(lag)
+}
+
+# drag, spread, beta als benannte Liste einzelner endlicher Zahlen (fixed, params)
+.bc_check_par <- function(p, fn, arg, null_ok = FALSE) {
+  if (is.null(p) && null_ok) return(invisible(p))
+  ok <- is.list(p) && !is.data.frame(p) && (!length(p) || (!is.null(names(p)) && all(names(p) %in% c("drag", "spread", "beta")) &&
+                                                           !anyDuplicated(names(p))))
+  if (ok) for (v in p) if (!(!is.factor(v) && is.numeric(v) && length(v) == 1L && is.finite(v))) ok <- FALSE
+  if (!ok) chk_stop("e4.parameter", fn, arg)
+  invisible(p)
 }
 
 #' Stufenfunktion: Wert gilt ab Datum (vor dem ersten Datum: erster Wert)
@@ -98,7 +166,7 @@
   } else if (method == "linear") {
     out <- v
     inner <- first:last
-    out[inner] <- stats::approx(ok, v[ok], xout = inner)$y
+    out[inner] <- .sl_approx(ok, v[ok], xout = inner)$y
     if (last < length(v)) out[(last + 1L):length(v)] <- v[last]
     if (first > 1L) out[1:(first - 1L)] <- v[first]
   } else {
@@ -135,15 +203,16 @@
 #' @keywords internal
 #' @noRd
 .bc_metric_table <- function(err_mat, grid) {
-  metrics <- list(
-    median_absolute_error  = function(x) stats::median(abs(x), na.rm = TRUE),
-    mean_absolute_error    = function(x) mean(abs(x), na.rm = TRUE),
-    mean_squared_error     = function(x) mean(x^2, na.rm = TRUE),
-    root_mean_squared_error = function(x) sqrt(mean(x^2, na.rm = TRUE)),
-    max_absolute_error     = function(x) max(abs(x), na.rm = TRUE),
-    final_absolute_error   = function(x) abs(x[max(which(is.finite(x)))])
-  )
-  vapply(metrics, function(f) grid[which.min(apply(err_mat, 2, f))], numeric(1))
+  # seit 1.6.4 (B-071) je Spalte einmal NA-Filter und abs (bis 1.6.3 je Metrik eine eigene Spaltenkopie); gleiche
+  # Werte: abs vor bzw. nach dem NA-Filter, x^2 = abs(x) * abs(x), dieselben Summenfunktionen
+  nm <- c("median_absolute_error", "mean_absolute_error", "mean_squared_error", "root_mean_squared_error",
+          "max_absolute_error", "final_absolute_error")
+  M <- vapply(seq_len(ncol(err_mat)), function(j) {
+    x <- err_mat[, j]; a <- abs(x[!is.na(x)]); q <- a * a; mq <- mean(q)
+    c(stats::median(a), mean(a), mq, sqrt(mq), max(a), abs(x[max(which(is.finite(x)))]))
+  }, numeric(6))
+  M <- matrix(M, nrow = 6L)
+  stats::setNames(vapply(1:6, function(k) grid[which.min(M[k, ])], numeric(1)), nm)
 }
 
 #' Ueberlappung, Komponenten und Hilfsgroessen vorbereiten
@@ -278,17 +347,20 @@
   diffs <- ret_s - ret_p
   per_year <- if (yrs > 0) (m - 1) / yrs else 252
   rel <- 0 - expm1(so - po)                                # 1 - sim/real (seit 1.6.2 genauer, 0 - : +0 wie bisher)
+  cw <- FALSE
   list(
     n_obs = m, years = yrs, start = d_obs[1], end = d_obs[m],
-    tracking_error = stats::sd(diffs) * sqrt(per_year) * 100,       # % p. a.
+    tracking_error = .sl_sd(diffs) * sqrt(per_year) * 100,       # % p. a.
     tracking_difference = if (yrs > 0) (expm1(so[m] / yrs) - expm1(po[m] / yrs)) * 100 else NA_real_,
     cagr_sim = if (yrs > 0) expm1(so[m] / yrs) * 100 else NA_real_,
     cagr_product = if (yrs > 0) expm1(po[m] / yrs) * 100 else NA_real_,
     final_deviation = expm1(so[m] - po[m]) * 100,
     max_abs_deviation = max(abs(rel)) * 100,
     rmse_level = sqrt(mean((so - po)^2)) * 100,
-    correlation = if (length(diffs) > 2) stats::cor(ret_s, ret_p) else NA_real_,
-    r_squared = if (length(diffs) > 2) stats::cor(ret_s, ret_p)^2 else NA_real_,
+    # seit 1.6.4 cor einmal (B-107); warnt cor, ein zweiter Aufruf wie bisher (gleiche Warnungen in gleicher Folge)
+    correlation = (cr <- if (length(diffs) > 2) withCallingHandlers(.sl_cor(ret_s, ret_p),
+                                                                    warning = function(w) cw <<- TRUE) else NA_real_),
+    r_squared = if (length(diffs) > 2) (if (cw) .sl_cor(ret_s, ret_p) else cr)^2 else NA_real_,
     deviation = data.frame(date = d_obs, deviation = rel)
   )
 }
@@ -371,12 +443,15 @@
 #' @param horizon Renditehorizont in Produktbeobachtungen fuer "return"/"hybrid"
 #'   (ganze Zahl >= 1, Standard 1). Werte > 1 (z. B. 5) daempfen asynchrone
 #'   Schlusskurse (Xetra vs. US-Index).
+#'   Seit 1.6.4 kleiner als die Zahl der Produktbeobachtungen im Fit-Fenster.
 #' @param hybrid_weight Gewicht des Renditeterms bei "hybrid" als Anteil
 #'   (0..1, Standard 0.5); der Niveauterm erhaelt 1 - \code{hybrid_weight}.
 #' @param lag Verzoegerung des Index gegenueber dem Produkt in Zeilen
 #'   (ganzzahlig, Standard 0; bei k > 0 wird die Produktrendite in Zeile t mit
 #'   der Indexrendite aus Zeile t - k modelliert) oder \code{"auto"} (Lag aus
 #'   -2..2 mit der hoechsten Korrelation, bei negativem Hebel der niedrigsten).
+#'   Seit 1.6.4 mit Betrag kleiner als die Zeilenzahl von data.
+#'   Ist bei "auto" keine der fuenf Korrelationen bestimmbar (jede braucht mindestens 30 gemeinsame Renditen, keine konstante Reihe), meldet die Funktion das seit 1.6.4 (lag dann angeben).
 #' @param rate_lag Verzoegerung des Zinssatzes in Zeilen (Standard 0 = Satz
 #'   des Tages t; k > 0 = Satz aus Zeile t - k).
 #' @param start,end Optionales Fit-Fenster (Datum oder Zeichenkette
@@ -397,6 +472,7 @@
 #'   \code{c(unten, oben)} mit unten < oben).
 #' @param ter_basis,rate_basis Tagesbasis fuer TER (Standard 365) und fuer
 #'   Zins und Spread (Standard 360, Act/360).
+#'   Seit 1.6.4 Zahlen > 0.
 #' @param accrual Abgrenzung der TER: \code{"linear"} (Standard,
 #'   TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
 #'   ((1 + TER)^(T/365) - 1, wie in den Skripten).
@@ -479,6 +555,18 @@ backcast_fit <- function(data, product, index,
   method    <- match.arg(method)
   accrual   <- match.arg(accrual)
   index_fill <- match.arg(index_fill)
+  fn <- "backcast_fit"                                            # seit 1.6.4 vor der Rechnung (K42 E4, B-017)
+  .bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_lag, ter_basis, rate_basis)
+  if (is.factor(fit)) chk_stop("faktor", fn, "fit")
+  .bc_check_par(fixed, fn, "fixed")                               # B-087
+  .e4_count(horizon, fn, "horizon")                               # B-011, B-017
+  chk_prob(hybrid_weight, fn, "hybrid_weight")
+  .bc_check_lag(lag, data, fn)
+  if (!is.null(start)) start <- chk_date1(start, fn, "start")     # B-011 (Entscheidung 7: keine Zahl)
+  if (!is.null(end)) end <- chk_date1(end, fn, "end")
+  if (is.factor(grid) || !is.numeric(grid) || !is.null(dim(grid)) || !length(grid) || !all(is.finite(grid)))
+    chk_stop("e2.zahlen_endlich", fn, "grid")                     # B-017
+  chk_bool1(validate, fn, "validate")                             # B-051
   fit <- unique(as.character(fit))
   if (length(fit) && !all(fit %in% c("drag", "spread", "beta")))
     stop("'fit' darf nur 'drag', 'spread' und 'beta' enthalten.")
@@ -487,8 +575,9 @@ backcast_fit <- function(data, product, index,
     stop("'bounds' muss eine benannte Liste mit Eintr\u00e4gen drag, spread und/oder beta sein, z. B. list(drag = c(-5, 5)).")
   bounds <- utils::modifyList(list(drag = c(-10, 10), spread = c(-5, 10), beta = c(0.5, 1.5)), bounds)
   for (k in names(bounds)) { b <- bounds[[k]]
-    if (!is.numeric(b) || length(b) != 2L || anyNA(b) || b[1] >= b[2])
-      stop(sprintf("bounds$%s muss c(unten, oben) mit unten < oben sein (ist: %s).", k, paste(format(b), collapse = ", "))) }
+    if (is.factor(b) || !is.numeric(b) || length(b) != 2L || !all(is.finite(b)) || b[1] >= b[2] ||
+        !is.finite(b[2] - b[1]))   # seit 1.6.4 ohne Wert, endlich; Breite endlich (B-005: sonst endlose Brent-Suche)
+      stop(sprintf("bounds$%s muss c(unten, oben) mit unten < oben sein.", k)) }
   if (model != "structural" && "beta" %in% fit) {
     warning("'beta' wird bei Regressionsmodellen \u00fcber die Regression gesch\u00e4tzt und hier ignoriert.")
     fit <- setdiff(fit, "beta")
@@ -507,8 +596,11 @@ backcast_fit <- function(data, product, index,
     cand <- -2:2
     cors <- vapply(cand, function(k) {
       xs <- .shift(prep$x, k); ok <- is.finite(xs) & is.finite(pr)
-      if (sum(ok) < 30) NA_real_ else stats::cor(xs[ok], pr[ok])
+      if (sum(ok) < 30) NA_real_ else .sl_cor(xs[ok], pr[ok])
     }, numeric(1))
+    # keine der fuenf Korrelationen bestimmbar (<= 30 gemeinsame Renditen, Luecken, konstante Reihe): seit 1.6.4 eine
+    # Meldung in allen drei Sprachen (Entscheidung 145; bis 1.6.3 "argument is of length zero")
+    if (all(is.na(cors))) chk_stop("ut3.lag_auto", "backcast_fit")
     lag <- cand[which.max(sign(leverage) * cors)]
     prep <- .bc_prepare(data, product, index, ter, leverage, rate, fx, as.integer(rate_lag),
                         ter_basis, rate_basis, accrual, index_fill, as.integer(lag))
@@ -528,6 +620,8 @@ backcast_fit <- function(data, product, index,
     list(pos = pos, logp = log(prep$prod[rows][pos]))
   }
   obs <- make_obs(win)
+  # seit 1.6.4: ohne Renditepaare waere die Zielfunktion leer (B-017; bis 1.6.3 Ergebnis an der Suchgrenze)
+  if (objective != "level" && horizon >= length(obs$pos)) chk_stop("e4.horizont", fn, length(obs$pos))
 
   # Regression (nur Regressionsmodelle), auf 1-Schritt-Renditen der Beobachtungen
   fit_reg <- function(rows) {
@@ -544,14 +638,24 @@ backcast_fit <- function(data, product, index,
   reg <- fit_reg(win)
 
   par0 <- utils::modifyList(list(drag = 0, spread = 0, beta = 1), fixed)
-  obj_fun <- function(theta, rows, ob, rg) {
-    p <- par0; p[fit] <- as.list(theta)
-    .bc_objective(.bc_model_returns(prep, p, model, rg)[rows], seq_along(rows), ob,
-                  objective, horizon, loss, hybrid_weight)
+  # Zielfunktion im Fenster rows (seit 1.6.4, B-106): Basis und Einheiten einmal je Fit auf rows (elementweise wie
+  # .bc_model_returns(prep, p, model, rg)[rows]); haengt die Basis vom gesuchten beta ab (Strukturmodell), je
+  # Auswertung nur auf rows. .bc_objective erwartet win als Index in r; wir uebergeben r[rows] und 1..length
+  make_obj <- function(rows, ob, rg) {
+    sp_r <- prep$sp_unit[rows]; dr_r <- prep$dr_unit[rows]
+    base_r <- if (model != "structural" || !("beta" %in% fit)) .bc_base(prep, par0, model, rg)[rows]
+    x_r <- prep$x[rows]; fin_r <- prep$fin[rows]; ter_r <- prep$ter_cost[rows]
+    ix <- seq_along(rows)
+    function(theta) {
+      p <- par0; p[fit] <- as.list(theta)
+      b <- if (is.null(base_r)) p[["beta"]] * prep$leverage * x_r + fin_r - ter_r else base_r
+      .bc_objective(b - p[["spread"]] * sp_r - p[["drag"]] * dr_r, ix, ob, objective, horizon, loss, hybrid_weight)
+    }
   }
-  # .bc_objective erwartet win als Index in r; wir uebergeben r[rows] und 1..length
-  run_fit <- function(rows, ob, rg) {
-    if (!length(fit)) return(list(par = par0, value = obj_fun(numeric(0), rows, ob, rg), grid = NULL))
+  # metrics = FALSE (Validierung, seit 1.6.4, B-070): im Gitter nur die Zielwerte, ohne Fehlermatrix, Metrik- und
+  # Gittertabelle (genutzt wird dort nur par)
+  run_fit <- function(rows, ob, rg, metrics = TRUE) {
+    if (!length(fit)) return(list(par = par0, value = make_obj(rows, ob, rg)(numeric(0)), grid = NULL))
     if (method == "grid") {
       if (length(fit) != 1L) stop("method = 'grid' unterst\u00fctzt genau einen Parameter in 'fit'.")
       # seit 1.6.3 je Gitterpunkt einmal und nur im Fenster rows (elementweise wie .bc_model_returns(...)[rows]);
@@ -559,14 +663,27 @@ backcast_fit <- function(data, product, index,
       sp_r <- prep$sp_unit[rows]; dr_r <- prep$dr_unit[rows]
       base_r <- if (model != "structural" || fit != "beta") .bc_base(prep, par0, model, rg)[rows]
       x_r <- prep$x[rows]; fin_r <- prep$fin[rows]; ter_r <- prep$ter_cost[rows]
-      m_obs <- length(ob$pos)
-      ve <- vapply(grid, function(g) {
+      m_obs <- length(ob$pos); ix <- seq_along(rows)
+      # seit 1.6.4 (B-069) je Punkt ein .bc_errors: "level" bei objective = "level" (horizon bleibt dort
+      # unausgewertet), sonst "hybrid"; Zielwert wie .bc_objective, Fehlerspalte aus dem Niveaufehler
+      eo <- if (objective == "level") "level" else "hybrid"
+      pt <- function(g) {
         p <- par0; p[[fit]] <- g
         b <- if (is.null(base_r)) p[["beta"]] * prep$leverage * x_r + fin_r - ter_r else base_r
-        r <- b - p[["spread"]] * sp_r - p[["drag"]] * dr_r
+        e <- .bc_errors(b - p[["spread"]] * sp_r - p[["drag"]] * dr_r, ix, ob, eo, horizon)
+        if (objective == "level") list(.bc_loss(e, loss), e)
+        else if (objective == "return") list(.bc_loss(e$ret, loss), e$level)
+        else list(sqrt(hybrid_weight * mean(e$ret^2) + (1 - hybrid_weight) * mean(e$level^2)), e$level)
+      }
+      if (!metrics) {
+        vals <- vapply(grid, function(g) pt(g)[[1L]], 0)
+        p <- par0; p[[fit]] <- grid[which.min(vals)]
+        return(list(par = p, value = min(vals), grid = NULL))
+      }
+      ve <- vapply(grid, function(g) {
+        z <- pt(g)
         # Fehlermatrix fuer die Metriktabelle (relative Abweichung 1 - sim/real)
-        c(.bc_objective(r, seq_along(rows), ob, objective, horizon, loss, hybrid_weight),
-          0 - expm1(.bc_errors(r, seq_along(rows), ob, "level", 1L)))
+        c(z[[1L]], 0 - expm1(z[[2L]]))
       }, numeric(1L + m_obs))
       ve <- matrix(ve, nrow = 1L + m_obs)
       vals <- ve[1L, ]
@@ -576,20 +693,21 @@ backcast_fit <- function(data, product, index,
       return(list(par = p, value = min(vals), grid = data.frame(value = grid, loss = vals),
                   metrics = .bc_metric_table(err_mat, grid)))
     }
+    obj <- make_obj(rows, ob, rg)
     if (length(fit) == 1L) {
       b <- bounds[[fit]]
-      o <- stats::optimize(function(t) obj_fun(t, rows, ob, rg), lower = b[1], upper = b[2], tol = 1e-8)
+      o <- .sl_optimize(function(t) obj(t), lower = b[1], upper = b[2], tol = 1e-8)
       p <- par0; p[[fit]] <- o$minimum
       return(list(par = p, value = o$objective, grid = NULL))
     }
     lo <- vapply(fit, function(k) bounds[[k]][1], 0); hi <- vapply(fit, function(k) bounds[[k]][2], 0)
     # glatte Zielfunktion (rmse, mse, hybrid): Wert und analytischer Gradient ganz in C (projizierter
     # BFGS mit den Steuerwerten von .sl_optim "L-BFGS-B"). mae, median und max sind nicht differenzierbar;
-    # dort bleibt .sl_optim mit Rueckfragen an obj_fun und numerischem Gradienten (wie bis 1.1.0).
+    # dort bleibt .sl_optim mit Rueckfragen an obj und numerischem Gradienten (wie bis 1.1.0).
     o <- if (objective == "hybrid" || loss %in% c("rmse", "mse"))
       .sl_backcast_fit(.bc_cprob(prep, model, rg, rows, ob, objective, loss, horizon, hybrid_weight),
                        unlist(par0[c("drag", "spread", "beta")]), match(fit, c("drag", "spread", "beta")), lo, hi)
-    else .sl_optim(unlist(par0[fit]), function(t) obj_fun(t, rows, ob, rg), method = "L-BFGS-B", lower = lo, upper = hi)
+    else .sl_optim(unlist(par0[fit]), function(t) obj(t), method = "L-BFGS-B", lower = lo, upper = hi)
     p <- par0; p[fit] <- as.list(o$par)
     list(par = p, value = o$value, grid = NULL, convergence = o$convergence)
   }
@@ -607,7 +725,7 @@ backcast_fit <- function(data, product, index,
     ob_tr <- make_obs(tr_rows); ob_te <- make_obs(te_rows)
     rg_tr <- tryCatch(fit_reg(tr_rows), error = function(e) NULL)
     if (model == "structural" || !is.null(rg_tr)) {
-      res_tr <- run_fit(tr_rows, ob_tr, rg_tr)
+      res_tr <- run_fit(tr_rows, ob_tr, rg_tr, metrics = FALSE)   # nur par (B-070)
       d_te <- .bc_diagnostics(.bc_model_returns(prep, res_tr$par, model, rg_tr)[te_rows],
                               seq_along(te_rows), ob_te, prep$dates[te_rows])
       d_te0 <- .bc_diagnostics(.bc_model_returns(prep, par0, model, rg_tr)[te_rows],
@@ -671,11 +789,13 @@ backcast_fit <- function(data, product, index,
 #' @param rebase \code{NULL} (Standard; Produkteinheiten, echte Kurse bleiben
 #'   erhalten) oder Startwert der Reihe am ersten Indextag, z. B. 100
 #'   (\code{value} und \code{model} werden skaliert, \code{product} nicht).
+#'   Seit 1.6.4 eine Zahl > 0.
 #' @param ... Bei \code{fit = NULL}: Argumente wie in [backcast_fit()]
 #'   (\code{product}, \code{index} als Pflicht; \code{ter} (Standard 0),
 #'   \code{leverage} (1), \code{rate} (\code{NULL} = 0), \code{fx},
 #'   \code{rate_lag}, \code{ter_basis}, \code{rate_basis}, \code{accrual},
 #'   \code{index_fill}, \code{lag}; \code{model} nur "structural").
+#'   Seit 1.6.4 mit \code{fit} nicht erlaubt (die Angaben stammen aus dem Fit).
 #'
 #' @return data.frame der Klasse \code{c("SimLevBackcast", "data.frame")} mit
 #'   einer Zeile je Zeile von \code{data}: \code{date}, \code{value}
@@ -704,8 +824,19 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
                      fill = c("locf", "linear", "stine", "model"),
                      rebase = NULL, ...) {
   fill <- match.arg(fill)
+  fn <- "backcast"                                                # seit 1.6.4 vor der Rechnung (K42 E4)
+  dots <- list(...)
+  if (length(dots) && (is.null(names(dots)) || any(!nzchar(names(dots))))) chk_stop("argument_unbekannt", fn, "")
+  chk_dots(names(dots), c("product", "index", "ter", "leverage", "rate", "fx", "rate_lag", "ter_basis", "rate_basis",
+                          "accrual", "index_fill", "lag", "model"), fn)   # Entscheidung 21
+  if (!is.null(fit) && !inherits(fit, "SimLevBackcastFit")) stop("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+  chk_df(data, fn, "data", null_ok = TRUE)                        # Entscheidung 6
+  .bc_check_par(params, fn, "params", null_ok = TRUE)
+  if (!(identical(splice, "inception") || identical(splice, "none") || inherits(splice, c("Date", "POSIXt")) ||
+        (is.character(splice) && length(splice) == 1L && !is.na(splice))) || length(splice) != 1L)
+    chk_stop("e4.splice", fn)                                     # Entscheidung 7 und 15 (keine Zahl, kein Faktor)
+  if (!is.null(rebase)) chk_num1(rebase, fn, "rebase", lo = 0, lo_open = TRUE)   # B-017
   if (is.null(fit)) {
-    dots <- list(...)
     if (is.null(data)) stop("Ohne 'fit' muss 'data' angegeben werden.")
     a <- utils::modifyList(list(ter = 0, leverage = 1, rate = NULL, fx = NULL, rate_lag = 0L,
                                 ter_basis = 365, rate_basis = 360, accrual = "linear",
@@ -713,14 +844,22 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
     if (is.null(a$product) || is.null(a$index)) stop("'product' und 'index' m\u00fcssen angegeben werden.")
     a$data <- data
     model <- dots$model %||% "structural"
-    if (model != "structural") stop("Ohne Fit ist nur model = 'structural' m\u00f6glich.")
+    if (!identical(model, "structural")) stop("Ohne Fit ist nur model = 'structural' m\u00f6glich.")
+    .bc_check_args(fn, data, a$product, a$index, a$ter, a$leverage, a$rate, a$fx, a$rate_lag, a$ter_basis, a$rate_basis)
+    chk_choice(a$accrual, fn, "accrual", c("linear", "geometric"))     # bis 1.6.3 unbekannte Werte still "linear"
+    chk_choice(a$index_fill, fn, "index_fill", c("locf", "linear", "stine"))
+    .bc_check_lag(dots$lag %||% 0L, data, fn, auto_ok = FALSE)    # ohne Fit kein 'auto'
     reg <- NULL
     par <- utils::modifyList(list(drag = 0, spread = 0, beta = 1), params %||% list())
     lag <- as.integer(dots$lag %||% 0L)
   } else {
     if (!inherits(fit, "SimLevBackcastFit")) stop("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+    if (length(dots)) chk_stop("e4.fit_angabe", fn, names(dots)[1])   # Entscheidung 71 (bis 1.6.3 still ignoriert)
     a <- fit$call_args
-    if (!is.null(data)) a$data <- data
+    if (!is.null(data)) {
+      a$data <- data                                              # seit 1.6.4 wie im Fit geprueft
+      .bc_check_args(fn, data, a$product, a$index, a$ter, a$leverage, a$rate, a$fx, a$rate_lag, a$ter_basis, a$rate_basis)
+    }
     model <- fit$model; reg <- fit$regression; lag <- fit$lag
     par <- utils::modifyList(fit$params, params %||% list())
   }
@@ -743,8 +882,8 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
     sd0 <- .to_date(splice, "splice")
     if (length(sd0) != 1L || is.na(sd0)) stop("splice: \"inception\", \"none\" oder ein Datum ('JJJJ-MM-TT').")
     k0 <- obs[prep$dates[obs] >= sd0][1]
-    if (is.na(k0)) stop(sprintf("Kein Produktkurs ab dem Verkettungsdatum %s vorhanden (letzter Produktkurs am %s).",
-                                format(sd0), format(prep$dates[max(obs)])))
+    if (is.na(k0)) stop(sprintf("Kein Produktkurs ab dem Verkettungsdatum vorhanden (letzter Produktkurs am %s).",   # seit 1.6.4 ohne Eingabewert
+                                format(prep$dates[max(obs)])))
   }
 
   # Produktrenditen ab Verkettung (mit Lueckenbehandlung)
@@ -759,7 +898,7 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
       po <- which(!is.na(pv))
       lv <- rep(NA_real_, length(seg)); lv[po] <- log(pv[po])
       lr <- log1p(pmax(ifelse(is.finite(r_mod[seg]), r_mod[seg], 0), -0.999999))
-      for (j in seq_len(length(po) - 1L)) {
+      for (j in seq_len(length(po) - 1L)[diff(po) > 1L]) {     # seit 1.6.4 nur die Luecken (B-107)
         a0 <- po[j]; a1 <- po[j + 1L]
         if (a1 - a0 > 1L) {
           step <- lr[(a0 + 1L):a1]
@@ -909,6 +1048,7 @@ plot.SimLevBackcastFit <- function(x, ...) {
 #' @rdname SimLevBackcast-methods
 #' @export
 plot.SimLevBackcast <- function(x, log = TRUE, ...) {
+  chk_bool1(log, "plot.SimLevBackcast", "log")                    # seit 1.6.4 (B-051)
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
   graphics::par(mar = c(4, 4.6, 2.5, 1), mgp = c(2.9, 0.7, 0), las = 1)
   ok <- is.finite(x$value)

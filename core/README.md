@@ -13,12 +13,12 @@ double-Aufrufen); die öffentliche Schnittstelle (`slc.h`, `slc_*.h`, `simlev_ca
 Aufruf über Dateigrenzen Ausnahmepfade an und ordnete die heiße Schleife des MS-GARCH-Gradienten anders (Julia-Fit
 7 % langsamer). Mit ihr ist der Maschinencode jeder Kerndatei gleich dem mit `-fno-exceptions`. Belegt bitgleich gegen R 1.5.2
 (Gleichlauf und Zufallsprüfungen gegen `rlib152`, Ergebnisse der Bench-Aufgaben Byte für Byte); seit 1.6.2 mit
-genaueren Formeln (expm1/log1p, CAGR, Copula-Dichte) und Householder + QL statt Jacobi, Referenz R 1.6.2 (`rlib162`), seit 1.6.3 R 1.6.3 (`rlib163`, Zufallsreferenzen inhaltlich gleich 1.6.2).
+genaueren Formeln (expm1/log1p, CAGR, Copula-Dichte) und Householder + QL statt Jacobi, Referenz R 1.6.2 (`rlib162`), seit 1.6.3 R 1.6.3 (`rlib163`, Zufallsreferenzen inhaltlich gleich 1.6.2), seit 1.6.4 R 1.6.4 (`rlib164`).
 
 | Datei | Inhalt |
 |---|---|
 | `slc.h` | öffentliche Schnittstelle (C-ABI, `extern "C"`): Kontext `sl_ctx`, Generator `sl_rng`, Ziehungen, Verteilungen |
-| `slc_internal.h` | interne Hilfen: Gleitkomma-Schutz, Abbruchprüfung; seit 1.6.3 Quantil Typ 7 (`slc_quantile7`, für Bandbreite und CDaR) |
+| `slc_internal.h` | interne Hilfen: Gleitkomma-Schutz, Abbruchprüfung; seit 1.6.3 Quantil Typ 7 (`slc_quantile7`, für Bandbreite und CDaR); seit 1.6.4 die NaN-Regeln `slc_quiet`/`slc_lnan` (für `slc_prep.cpp`, `slc_bootpath.cpp`, `slc_rbase.cpp`) |
 | `slc_constants.h` | **erzeugt** von `gen_constants.py` (nicht von Hand ändern) |
 | `slc_ctx.cpp` | Fehler, Warnungen, Benutzerabbruch ohne `longjmp` |
 | `slc_rng.cpp` | xoshiro256**, SplitMix64-Seeding, Sprung um 2^128, Ströme, Gleichverteilung |
@@ -26,7 +26,7 @@ genaueren Formeln (expm1/log1p, CAGR, Copula-Dichte) und Householder + QL statt 
 | `slc_normal.cpp` | `erfc`, `pnorm`, `qnorm`, `dnorm` |
 | `slc_special.cpp` | `lgamma`, unvollständige Beta, `pt`, `qt`, `plogis`, `qlogis` |
 | `slc_linalg.h` | Schnittstelle von linearer Algebra, Matrixprodukt, kleinsten Quadraten, Stineman, Spline und Kerndichte (eingebunden von `slc.h`) |
-| `slc_la_internal.h` | kompensierte Summen (Neumaier), Normen, NA, stabile Sortierung |
+| `slc_la_internal.h` | kompensierte Summen (Neumaier), Normen, NA, stabile Sortierung; seit 1.6.4 Mittel und Stichprobenvarianz `slc_mean`/`slc_var_m` (GARCH, MS-GARCH, GPD, Kerndichte) |
 | `slc_linalg.cpp` | Cholesky, Band-Cholesky, Dreieckslöser, SPD-Löser, log det, symmetrische Eigenwerte (Householder-Tridiagonalisierung und implizites QL, seit 1.6.2; bis 1.6.1 zyklisches Jacobi) |
 | `slc_matmul.cpp` | Matrixprodukt `A B`, `X'Y`, `X Y'` mit fester Summationsreihenfolge |
 | `slc_lsq.cpp` | kleinste Quadrate (Householder-QR, begrenzte Spaltenpivotisierung), Logit-IRLS |
@@ -68,7 +68,8 @@ der Kern alle Läufe; die bis 1.3.0 eigenen Engines der Sprachen und die Engine-
 `fifo_core_impl.h`, `tax_core_impl.h` mit ihren Hüllen sind entfallen. Hüllen: `r/src/engine_core.cpp`, `python/src/_ext_engine.cpp`
 (`sim_engine_run`), `simlev_cabi.cpp` (`simlev_c_engine_*`). Seit 1.6.3 kompakte Lot-Ausgabe (`Engine::open_lots_n`/
 `open_lots_out`: nur die offenen Lots spaltenweise; mit den Zählern statt der Einzelobjekte je Lot, Verkauf und
-Steuerbuchung): R `inp$compact`, Python 17. Argument `compact`, Julia `simlev_c_engine_open_lots_n`/`_open_lots`. Summen wie R in long double über `sl_r_sum`
+Steuerbuchung): R `inp$compact`; der Python-Zweig `compact` und die Julia-Exporte `simlev_c_engine_open_lots_n`/`_open_lots`
+ohne Aufrufer entfallen seit 1.6.4. Summen wie R in long double über `sl_r_sum`
 (`slc_rbase.cpp`, dafür auch in `r/src/`). Prüfung: Gleichlauf `sim_fuzz.R` gegen R 1.3.0.
 
 **Vorbereitung:** `prepare_core_impl.h` rechnet vor der Tagesschleife die Termine (`calculate_dates_flags`
@@ -141,6 +142,12 @@ bleiben, solange der Baustein nicht über Paketfunktionen geprüft wird.
   `.sl_garch11_fit`, `.sl_ms_garch_starts`, `.sl_erfc`, `.sl_plogis`, `.sl_qlogis`, `.sl_hmm_viterbi` und die
   gleichnamigen Hüllen in Python und Julia; nur in R zusätzlich `.sl_backsolve`, `.sl_ms_garch_filter`,
   `.sl_state_hex`.
+- **Wege einer Paketfunktion, die nur die Prüfungen nutzen (seit 1.6.4 gekennzeichnet):** der numerische Gradient
+  `sl_numgrad` (`slc_opt.cpp`, Aufrufer nur `sl_opt_test_numgrad`), die Spaltenpivotisierung `pivot = 2` von `sl_lsfit`
+  mit `swap_cols` (`slc_lsq.cpp`; die Pakete rufen nur `pivot = 1`, geprüft in `slc.R` Fall `voll_piv2` und
+  `test-slc.R`) und die nicht glatten Verluste 3–5 von `bc_loss` in `sl_backcast_fit` (`slc_backcast.cpp`; die Hosts
+  rufen den C-Fit nur für rmse/mse/hybrid, mae/median/max laufen über `.sl_optim`). Sie bleiben als Prüfzugang,
+  weil Gleichlauffälle und das Argument `pivot` der drei `lsfit`-Hüllen sie nutzen.
 
 ## Regeln
 

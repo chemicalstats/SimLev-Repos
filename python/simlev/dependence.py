@@ -73,6 +73,199 @@ def _boot_idx_stationary(n_src, n_out, L, stream):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Eingabeprüfung Abhängigkeit, Regime, Optimierung, Backcast, Szenarien (seit 1.6.4, K42 E4; Hilfen in
+# _pruefen.py, Bausteine e4.* der Tabelle eingabe). Gegenstücke in dependence.R und dependence.jl.
+# ═════════════════════════════════════════════════════════════════════════════
+
+from ._pruefen import (chk_bool1, chk_cols, chk_col_nofactor, chk_df, chk_fmt, chk_int1,  # noqa: E402
+                       chk_is_factor, chk_max, chk_msg, chk_name1, chk_nofactor, chk_num1, chk_scalar, chk_stop,
+                       SL_MAX_N)
+
+def _e4_isna(v):
+    from ._sim_base import _isna
+    return _isna(v)
+
+
+def _e4_names(x, fn, arg, null_ok=False, no_date=True):
+    """Vektor nicht leerer Namen (Spalten) ohne NA und ohne doppelte, mindestens einer; mit ``no_date`` nicht
+    ``'date'`` (R ``.e4_names``). Ergebnis als Liste."""
+    if x is None and null_ok:
+        return None
+    chk_nofactor(x, fn, arg)                                   # Entscheidung 15
+    v = [x] if isinstance(x, str) else (list(x) if isinstance(x, (list, tuple, pd.Series, pd.Index)) or
+                                        (isinstance(x, np.ndarray) and x.ndim == 1) else None)
+    if not v or not all(isinstance(c, str) and c != "" for c in v):
+        chk_stop("e3.namen", fn, arg)
+    v = [str(c) for c in v]
+    if len(set(v)) < len(v):
+        chk_stop("e2.doppelt", fn, arg)                        # B-052
+    if no_date and "date" in v:
+        chk_stop("e4.date", fn, arg)                           # B-052, B-055
+    return v
+
+
+def _e4_numscalar(v):
+    return isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_))
+
+
+def _e4_vec(x, fn, arg):
+    """Numerischer Vektor (keine Matrix, Tabelle, Liste aus Feldern, kein Text, keine Wahrheitswerte, keine Kategorie);
+    NA erlaubt; eine einzelne Zahl zählt als Vektor der Länge 1 (R ``.e4_vec``)."""
+    chk_nofactor(x, fn, arg)
+    ok = False
+    if _e4_numscalar(x):
+        ok = True
+    elif isinstance(x, pd.Series):
+        ok = len(x) >= 1 and pd.api.types.is_numeric_dtype(x.dtype) and not pd.api.types.is_bool_dtype(x.dtype)
+    elif isinstance(x, np.ndarray):
+        if x.ndim == 1 and x.size >= 1:
+            ok = x.dtype.kind in "fiu" or (x.dtype == object and all(_e4_numscalar(v) or _e4_isna(v) for v in x)
+                                           and any(_e4_numscalar(v) for v in x))
+    elif isinstance(x, (list, tuple)):
+        ok = len(x) >= 1 and all(_e4_numscalar(v) or _e4_isna(v) for v in x) and any(_e4_numscalar(v) for v in x)
+    if not ok:
+        chk_stop("zahlen", fn, arg)
+    return x
+
+
+def _e4_numcol(data, col, fn):
+    """Zahlenspalte (keine Kategorie, kein Text, keine Wahrheitswerte); eine Spalte nur aus NA gilt als
+    Zahlenspalte (Entscheidung 14; R ``.e4_numcol``)."""
+    from ._sim_base import _column
+    k, a = _column(data[col])
+    if k == "factor":
+        chk_stop("spalte_faktor", fn, col)                     # Entscheidung 15, B-009
+    if not (k == "numeric" or all(_e4_isna(v) for v in a)):
+        chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
+    return data
+
+
+def _e4_data(data, cols, fn):
+    """Kursdaten: Tabelle (Entscheidung 6) mit Spalte ``date`` (keine Kategorie) und den Zahlenspalten ``cols``
+    (R ``.e4_data``; B-015, B-040)."""
+    chk_df(data, fn, "data")
+    chk_cols(data, ["date"] + list(cols), fn)
+    chk_col_nofactor(data, "date", fn)
+    for k in cols:
+        _e4_numcol(data, k, fn)
+    return data
+
+
+def _e4_disjoint(a, b, fn, arg_a, arg_b):
+    """Keine gemeinsame Spalte in ``a`` und ``b`` (B-013; R ``.e4_disjoint``)."""
+    if set(a or []) & set(b or []):
+        chk_stop("e4.gemeinsam", fn, arg_a, arg_b)
+    return a
+
+
+def _e4_count(x, fn, arg, lo=1, hi=None, null_ok=False):
+    """Anzahl: ganze Zahl >= lo, höchstens hi (Entscheidung 16 sinngemäß; R ``.e4_count``). Ergebnis: Einzelwert."""
+    x = chk_scalar(x)
+    if x is None and null_ok:
+        return x
+    chk_int1(x, fn, arg, lo=lo)
+    chk_max(x, SL_MAX_N if hi is None else hi, fn, arg)
+    return x
+
+
+def _e4_probs(x, fn, arg):
+    """Vektor von Anteilen echt zwischen 0 und 1 ohne doppelte Werte (B-054; R ``.e4_probs``). Ergebnis: float64-Feld."""
+    chk_nofactor(x, fn, arg)
+    try:
+        _e4_vec(x, fn, arg)
+        a = np.atleast_1d(np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x, dtype=np.float64))
+    except (ValueError, TypeError):
+        a = None
+    if a is None or not (np.isfinite(a).all() and ((a > 0) & (a < 1)).all() and np.unique(a).size == a.size):
+        chk_stop("e4.anteile", fn, arg)
+    return a
+
+
+def _e4_breaks(breaks, conditions, fn):
+    """breaks: ``None`` oder nach Spalten aus ``conditions`` benannte Liste (dict) streng steigender Zahlengrenzen
+    ohne NA (Länge >= 2; B-014; R ``.e4_breaks``)."""
+    if breaks is None:
+        return breaks
+    if not isinstance(breaks, Mapping) or not all(isinstance(k, str) and k != "" for k in breaks):
+        chk_stop("e4.breaks", fn)
+    for k, b in breaks.items():
+        if k not in (conditions or []):
+            chk_stop("e4.breaks_name", fn, k)
+        ok = not chk_is_factor(b)
+        if ok:
+            try:
+                _e4_vec(b, fn, "breaks")
+                a = np.atleast_1d(np.asarray(b.to_numpy() if isinstance(b, pd.Series) else b, dtype=np.float64))
+                ok = a.size >= 2 and not np.isnan(a).any() and bool((np.diff(a) > 0).all())
+            except (ValueError, TypeError):
+                ok = False
+        if not ok:
+            chk_stop("e4.breaks", fn)
+    return breaks
+
+
+def _e4_pick(v, nm, fn, arg):
+    """Auswahl als Name aus ``nm`` oder ganze Zahl 1 bis ``len(nm)`` (B-007; R ``.e4_pick``). Ergebnis: Einzelwert."""
+    v = chk_scalar(v)
+    if isinstance(v, str):
+        if v not in nm:
+            chk_stop("auswahl", fn, arg, ", ".join('"%s"' % c for c in nm))
+    else:
+        chk_int1(v, fn, arg, lo=1, hi=len(nm))
+    return v
+
+
+_E4_TRUE = ("T", "TRUE", "true", "True")
+_E4_FALSE = ("F", "FALSE", "false", "False")
+
+
+def _e4_cond(cond, fn):
+    """Bedingung als Wahrheitswerte wie R ``as.logical`` (Text ``"TRUE"``/``"FALSE"`` usw., Zahlen ungleich 0 = wahr,
+    anderer Text NA), NA = False (mildere Regel bis zur Antwort auf Frage F1, B-008, B-034); Kategorie, Datum, Matrix
+    und andere Objekte sind ein Fehler (R ``.e4_cond``). Ergebnis: bool-Feld."""
+    if chk_is_factor(cond):
+        chk_stop("e4.bedingung", fn)
+    if isinstance(cond, (pd.Series, pd.Index)):
+        if isinstance(cond.dtype, pd.CategoricalDtype) or pd.api.types.is_datetime64_any_dtype(cond.dtype):
+            chk_stop("e4.bedingung", fn)
+        if isinstance(cond.dtype, np.dtype) and cond.dtype.kind in "biuf":
+            cond = cond.to_numpy()                             # seit 1.6.4 ohne object (B-066), Regel wie unten
+        else:
+            cond = cond.to_numpy(dtype=object)
+    if isinstance(cond, (bool, np.bool_)) or _e4_numscalar(cond) or cond is None or cond is pd.NA:
+        cond = [cond]
+    if isinstance(cond, np.ndarray) and cond.ndim == 1 and cond.dtype.kind in "biuf":
+        # seit 1.6.4 (B-066) für Wahrheitswert- und Zahlenfelder ohne Umweg über object: dieselbe Regel wie unten
+        # (NA/NaN = False, Zahl ungleich 0 = True)
+        if cond.dtype.kind == "b":
+            return cond.astype(bool, copy=True)
+        if cond.dtype.kind == "f":
+            return ~np.isnan(cond) & (cond != 0)
+        return cond != 0
+    try:
+        ca = np.asarray(cond, dtype=object)
+    except (TypeError, ValueError):
+        chk_stop("e4.bedingung", fn)
+    if ca.ndim != 1:
+        chk_stop("e4.bedingung", fn)
+    out = np.zeros(ca.size, dtype=bool)
+    for i, v in enumerate(ca):
+        if _e4_isna(v):
+            continue
+        if isinstance(v, (bool, np.bool_)):
+            out[i] = bool(v)
+        elif _e4_numscalar(v):
+            out[i] = float(v) != 0.0
+        elif isinstance(v, str):
+            if v not in _E4_TRUE and v not in _E4_FALSE:
+                chk_stop("e4.bedingung_text", fn)              # Entscheidung 68: nicht lesbarer Text ist ein Fehler
+            out[i] = v in _E4_TRUE
+        else:
+            chk_stop("e4.bedingung", fn)
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Kleine R-Hilfen (base-Semantik)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -359,8 +552,9 @@ def _dep_check_prices(v, a, d):
     bad = np.nonzero(~np.isnan(v) & (~np.isfinite(v) | (v <= 0)))[0]
     if bad.size:
         more = " und %d weitere Werte" % (bad.size - 1) if bad.size > 1 else ""
-        raise ValueError("Kursspalte '%s': Kurse müssen positiv und endlich sein, gefunden %s am %s%s "
-                         "(fehlende Kurse als NA angeben)." % (a, _fmt1(float(v[bad[0]])), _date_str(_dates_arr(d)[bad[0]]), more))
+        # seit 1.6.4 ohne den Wert (Entscheidung 8), mit dem Datum als Ort in data
+        raise ValueError("Kursspalte '%s': Kurse müssen positiv und endlich sein, gefunden am %s%s "
+                         "(fehlende Kurse als NA angeben)." % (a, _date_str(_dates_arr(d)[bad[0]]), more))
     return v
 
 
@@ -368,6 +562,28 @@ def _period_keys(d, frequency):
     """``format(d, "%G-%V")`` bzw. ``"%Y-%m"`` als vergleichbare Schlüssel."""
     s = _fmt.format_date(_dates_arr(d), "%G-%V" if frequency == "week" else "%Y-%m")
     return [str(v) for v in np.asarray(s, dtype=object).ravel()]
+
+
+def _period_codes(d, frequency):
+    """Ganzzahlige Periodenschlüssel mit derselben Gleichheit wie :func:`_period_keys` (seit 1.6.4, B-103; wie R
+    ``.date_key``): Tag des Montags der ISO-Woche bzw. Monatsindex (``datetime64[M]``); ``None`` bei fehlenden Daten
+    (dann Text wie bisher)."""
+    da = _dates_arr(d)
+    if np.isnat(da).any():
+        return None
+    if frequency == "week":
+        z = (da - np.datetime64("1970-01-01", "D")).astype(np.int64)
+        return z - (z + 3) % 7
+    return da.astype("datetime64[M]").astype(np.int64)
+
+
+def _period_breaks(d, frequency):
+    """``key[i + 1] != key[i]`` für i = 0..n-2 (Periodenwechsel nach Zeile i) als bool-Feld."""
+    c = _period_codes(d, frequency)
+    if c is None:
+        key = _period_keys(d, frequency)
+        return np.array([key[i + 1] != key[i] for i in range(len(key) - 1)], dtype=bool)
+    return c[1:] != c[:-1]
 
 
 def _dep_returns(data, assets, conditions=None, frequency="week", drop_flat=True):
@@ -385,8 +601,8 @@ def _dep_returns(data, assets, conditions=None, frequency="week", drop_flat=True
     if frequency == "day":
         end = np.arange(nr)
     else:
-        key = _period_keys(d, frequency)
-        end = np.array([i for i in range(nr) if i == nr - 1 or key[i + 1] != key[i]], dtype=np.int64)
+        # letzte Zeile je Periode; seit 1.6.4 über ganzzahlige Schlüssel (B-103), gleiche Enden
+        end = np.flatnonzero(np.r_[_period_breaks(d, frequency), True]) if nr else np.zeros(0, dtype=np.int64)
     V = np.empty((nr, len(assets)))
     for j, a in enumerate(assets):
         V[:, j] = _fill_na(_dep_check_prices(_num(data[a]), a, d), "locf", keep_leading=True)
@@ -627,6 +843,7 @@ def copula_fit(x, y, *, families=None):
     Args:
         x, y: Numerische Vektoren gleicher Länge (z. B. Renditen; nur die Ränge zählen). Paare mit nicht endlichen
             Werten werden entfernt; mindestens 20 Paare nötig.
+            Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).
         families: Zeichenvektor der Familien: ``"gaussian"``, ``"t"``, ``"clayton"``, ``"gumbel"``, ``"frank"``,
             jeweils optional mit Rotation ``"_90"``, ``"_180"`` oder ``"_270"`` (z. B. ``"clayton_180"``).
             ``None`` (Standard) = Auswahl nach dem Vorzeichen von Kendalls Tau: bei Tau >= 0 ``gaussian``, ``t``,
@@ -634,6 +851,7 @@ def copula_fit(x, y, *, families=None):
             ``frank``, ``clayton_90``, ``clayton_270``, ``gumbel_90``, ``gumbel_270``. Rotationen gibt es nur für
             ``clayton`` und ``gumbel`` (Gauß-, t- und Frank-Copula sind radialsymmetrisch); andere Namen sind ein
             Fehler, ebenso eine konstante Reihe.
+            Seit 1.6.4 nicht leer.
 
     Returns:
         DataFrame mit einer Zeile je Familie, aufsteigend nach AIC sortiert (erste Zeile = beste Familie):
@@ -660,6 +878,10 @@ def copula_fit(x, y, *, families=None):
         w = np.sqrt(rng.chisquare(4, 1000) / 4)
         print(simlev.copula_fit(z[:, 0] / w, z[:, 1] / w)[["family", "par1", "par2", "aic"]])
     """
+    _e4_vec(x, "copula_fit", "x")                              # seit 1.6.4 (B-009, B-010, B-050)
+    _e4_vec(y, "copula_fit", "y")
+    if families is not None:                                   # B-035
+        families = _e4_names(families, "copula_fit", "families", no_date=False)
     lx, ly = len(np.atleast_1d(x)), len(np.atleast_1d(y))
     if lx != ly:
         raise ValueError("copula_fit: x und y müssen gleich lang sein (%d bzw. %d Werte)." % (lx, ly))
@@ -735,6 +957,7 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
     Args:
         x, y: Numerische Vektoren gleicher Länge (z. B. Periodenrenditen). Paare mit nicht endlichen Werten werden
             entfernt.
+            Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).
         q: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil echt zwischen 0 und 1 (0.05 = die unteren
             bzw. oberen 5 % der Beobachtungen).
 
@@ -754,12 +977,16 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
         z = rng.normal(size=2000)
         print(simlev.tail_dependence(z + rng.normal(size=2000), z + rng.normal(size=2000), q=[0.05, 0.10]))
     """
+    _e4_vec(x, "tail_dependence", "x")                         # seit 1.6.4 (B-009, B-010, B-050)
+    _e4_vec(y, "tail_dependence", "y")
     lx, ly = len(np.atleast_1d(x)), len(np.atleast_1d(y))
     if lx != ly:
         raise ValueError("tail_dependence: x und y müssen gleich lang sein (%d bzw. %d Werte)." % (lx, ly))
-    qa = np.atleast_1d(np.asarray(q))
-    if qa.dtype.kind not in "fiu" or not qa.size or (~np.isfinite(qa.astype(float)) | (qa <= 0) | (qa >= 1)).any():
-        raise ValueError("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen (erhalten: %s)." % _fmt1(q))
+    chk_nofactor(q, "tail_dependence", "q")
+    qa = np.atleast_1d(np.asarray(q.to_numpy() if isinstance(q, pd.Series) else q))
+    if (qa.ndim != 1 or qa.dtype.kind not in "fiu" or not qa.size
+            or (~np.isfinite(qa.astype(float)) | (qa <= 0) | (qa >= 1)).any()):   # seit 1.6.4 ohne Wert
+        raise ValueError("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen.")
     qa = qa.astype(np.float64)
     x, y = _finite_pairs(x, y)
     n = x.size
@@ -767,20 +994,56 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
         raise ValueError("tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.")
     u = _pobs(x)
     v = _pobs(y)
+    rows = []
+    for p in qa.tolist():
+        r = _tail_dep_core(x, y, u, v, n, p)
+        rows.append({"q": p, "lower": r[0], "upper": r[1], "exceed_lower": r[2], "exceed_upper": r[3],
+                     "n_lower": r[4], "n_upper": r[5]})
+    return pd.DataFrame(rows, columns=["q", "lower", "upper", "exceed_lower", "exceed_upper", "n_lower", "n_upper"])
 
+
+def _tail_dep_core(x, y, u, v, n, p):
+    """Kern von ``tail_dependence`` für ein p auf endlichen Paaren (seit 1.6.4, B-064; R ``.tail_dep_core``): je Reihe
+    ein Quantilaufruf für p und 1 - p (dieselben Ordnungsstatistiken; die Quantile gehen nur in Vergleiche ein).
+    Ergebnis (lower, upper, exceed_lower, exceed_upper, n_lower, n_upper)."""
     def ec(s):
         if s.sum() >= 8 and r_sd(x[s]) > 0 and r_sd(y[s]) > 0:
             return _cor1(x[s], y[s])
         return _NAN
-    rows = []
-    for p in qa.tolist():
-        lo = (u <= p) & (v <= p)
-        hi = (u > 1 - p) & (v > 1 - p)
-        el = (x <= _q1(x, p)) & (y <= _q1(y, p))
-        eh = (x >= _q1(x, 1 - p)) & (y >= _q1(y, 1 - p))
-        rows.append({"q": p, "lower": int(lo.sum()) / (n * p), "upper": int(hi.sum()) / (n * p),
-                     "exceed_lower": ec(el), "exceed_upper": ec(eh), "n_lower": int(lo.sum()), "n_upper": int(hi.sum())})
-    return pd.DataFrame(rows, columns=["q", "lower", "upper", "exceed_lower", "exceed_upper", "n_lower", "n_upper"])
+    lo = (u <= p) & (v <= p)
+    hi = (u > 1 - p) & (v > 1 - p)
+    qx = np.atleast_1d(np.asarray(_quantile(x, [p, 1 - p]), dtype=np.float64))
+    qy = np.atleast_1d(np.asarray(_quantile(y, [p, 1 - p]), dtype=np.float64))
+    el = (x <= float(qx[0])) & (y <= float(qy[0]))
+    eh = (x >= float(qx[1])) & (y >= float(qy[1]))
+    nl = int(lo.sum())
+    nh = int(hi.sum())
+    return nl / (n * p), nh / (n * p), ec(el), ec(eh), nl, nh
+
+
+def _tail_dep_fun(q):
+    """``tail_dependence(x, y, q=q)`` als (lower, upper, exceed_lower) für ein geprüftes q in Schleifen
+    (``dependence_validate``, ``dependence_analysis``; x, y float-Felder): gleiche Filterung und Meldung ohne
+    DataFrame (seit 1.6.4, B-064; R ``.tail_dep_fun``). q wie in ``tail_dependence`` umgewandelt; ein q, das dort
+    nicht als ein Wert durchgeht, läuft wie bisher über ``tail_dependence``."""
+    qa = np.atleast_1d(np.asarray(q.to_numpy() if isinstance(q, pd.Series) else q))
+    if qa.ndim != 1 or qa.size != 1 or qa.dtype.kind not in "fiu" or chk_is_factor(q):
+        def slow(x, y):
+            td = tail_dependence(x, y, q=q)
+            return float(td["lower"].iloc[0]), float(td["upper"].iloc[0]), float(td["exceed_lower"].iloc[0])
+        return slow
+    p = qa.astype(np.float64).tolist()[0]
+    if not (math.isfinite(p) and 0 < p < 1):
+        return lambda x, y: tail_dependence(x, y, q=q)       # Meldung von tail_dependence
+
+    def fast(x, y):
+        x, y = _finite_pairs(x, y)
+        n = x.size
+        if n < 2:
+            raise ValueError("tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.")
+        r = _tail_dep_core(x, y, _pobs(x), _pobs(y), n, p)
+        return float(r[0]), float(r[1]), float(r[2])
+    return fast
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -805,6 +1068,7 @@ def dependence_dcc(R):
             Korrelationen hängen nicht davon ab. Spaltennamen werden übernommen (sonst ``V1``, ``V2``, ...).
             Konstante oder (nahezu) perfekt korrelierte Reihen (singuläre Korrelationsmatrix der standardisierten
             Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler.
+            Seit 1.6.4 geprüft: nur Zahlen, alle endlich.
 
     Returns:
         Liste mit ``a``, ``b`` (DCC-Parameter), ``loglik`` (Korrelationsteil der Quasi-Log-Likelihood),
@@ -824,7 +1088,15 @@ def dependence_dcc(R):
         fit = simlev.dependence_dcc(np.column_stack([a, b]))
         print(fit["a"], fit["b"])
     """
+    # seit 1.6.4: nur Zahlen (Matrix oder Tabelle mit Zahlenspalten), endlich (Doku: keine fehlenden Werte)
+    if isinstance(R, pd.DataFrame):
+        for k in R.columns:
+            _e4_numcol(R, k, "dependence_dcc")
+    elif not (isinstance(R, np.ndarray) and R.ndim == 2 and R.dtype.kind in "fiu"):
+        chk_stop("e4.matrix", "dependence_dcc")
     Rm, nm = _as_matrix(R)
+    if not np.isfinite(Rm).all():
+        chk_stop("e3.werte", "dependence_dcc", "R")
     if Rm.shape[1] < 2 or Rm.shape[0] < 100:
         raise ValueError("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
     if nm is None:
@@ -971,28 +1243,35 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
             keine Renditen) und Zustandsspalten (z. B. mit ``series_align()`` und ``series_align_macro()``
             vorbereitet).
         assets: Zeichenvektor der Kursspalten (mindestens zwei).
+            Seit 1.6.4 ohne doppelte Namen und ohne 'date'.
         conditions: Zeichenvektor der Zustandsspalten (Drittvariablen, in ihrer eigenen Einheit); gehen um eine
             Periode verzögert ein. ``None`` (Standard) = keine bedingte Analyse.
+            Seit 1.6.4 ohne doppelte Namen und keine Spalte aus assets.
         frequency: Renditefrequenz: ``"week"`` (Standard; ISO-Woche, vermeidet Effekte unterschiedlicher
             Handelszeiten), ``"day"`` oder ``"month"``.
         quantiles: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil (Standard ``[0.05, 0.10]``) für die
             Tail-Kennzahlen über die ganze Stichprobe (siehe ``tail_dependence()``).
+            Seit 1.6.4 echt zwischen 0 und 1, ohne doppelte Werte.
         breaks: Optional benannte Liste von Grenzen je Zustandsvariable in deren Einheit, z. B. ``{"inflation":
             [-Inf, 2, 4, Inf]}``; Intervalle links geschlossen, rechts offen. ``None`` (Standard) bzw. fehlender
             Eintrag = ``n_regimes`` gleich besetzte Quantilsgruppen.
+            Seit 1.6.4 nur Namen aus conditions, Grenzen streng steigend ohne NA.
         n_regimes: Anzahl Regime ohne ``breaks`` (ganze Zahl, Standard 3: niedrig, mittel, hoch). Fallen
             Quantilsgrenzen zusammen oder bliebe eine Quantilsgruppe leer (diskrete Zustände wie 1/2 aus
             ``regime_states()``), entstehen weniger Regime. Leere Regime aus vorgegebenen ``breaks`` erscheinen
             mit ``n = 0`` und ``NA``-Kennzahlen.
         window: Fenster der rollierenden Pearson-Korrelation in Perioden der gewählten Frequenz. ``None``
             (Standard) = Anzahl Perioden je Jahr (aus den Daten ermittelt, mindestens 10).
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
         dcc: Logisch: DCC(1,1) mit ``dependence_dcc()`` schätzen (nur bei mindestens 100 Perioden; Fehler werden
             als Meldung ausgegeben).
         copulas: Logisch: Copula-Fits mit ``copula_fit()`` je Paar (und je Regime ab 40 Perioden).
         B: Anzahl Bootstrap-Wiederholungen für die Regime-Vergleiche (ganze Zahl, Standard 499; 0 = aus).
+            Seit 1.6.4 höchstens 10^8.
         block: Mittlere Blocklänge des stationären Bootstraps in Perioden. ``None`` (Standard) =
             Politis-White-Schätzung auf dem Produkt der standardisierten Renditen (Maximum über die Paare,
             begrenzt auf 2 bis n / 10).
+            Seit 1.6.4 eine Zahl ≥ 1.
         tail_q: Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) für die Tail-Kennzahlen je Regime.
         seed: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
             reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal
@@ -1051,10 +1330,23 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
         print(da["correlation"])
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    assets = _as_names(assets)
+    fn = "dependence_analysis"                                 # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _e4_names(assets, fn, "assets")
     if len(assets) < 2:
         raise ValueError("dependence_analysis: mindestens zwei Anlagen.")
-    conditions = _as_names(conditions) if conditions is not None else None
+    conditions = _e4_names(conditions, fn, "conditions", null_ok=True)
+    _e4_disjoint(assets, conditions, fn, "assets", "conditions")   # B-013
+    _e4_data(data, assets + (conditions or []), fn)
+    quantiles = _e4_probs(quantiles, fn, "quantiles")          # B-054
+    _e4_breaks(breaks, conditions, fn)                         # B-014
+    n_regimes = _e4_count(n_regimes, fn, "n_regimes")          # B-032
+    window = _e4_count(window, fn, "window", null_ok=True)     # B-012
+    dcc = chk_bool1(dcc, fn, "dcc")                            # B-051
+    copulas = chk_bool1(copulas, fn, "copulas")
+    B = _e4_count(B, fn, "B", lo=0)                            # B-011, B-032
+    block = chk_num1(block, fn, "block", lo=1, null_ok=True)
+    tail_q = chk_num1(tail_q, fn, "tail_q", lo=0, hi=1, lo_open=True, hi_open=True)   # B-011
+    td_fun = _tail_dep_fun(tail_q)                             # seit 1.6.4 ohne DataFrame je Paar und Regime (B-064)
     rd = _dep_returns(data, assets, conditions, frequency)
     X = rd[assets].to_numpy(dtype=np.float64)
     n = X.shape[0]
@@ -1153,7 +1445,7 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
                     s = np.nonzero(code == li + 1)[0]
                     x = Xk[s, i]
                     y = Xk[s, j]
-                    td = tail_dependence(x, y, q=tail_q) if s.size >= 20 else None
+                    td = td_fun(x, y) if s.size >= 20 else None   # seit 1.6.4 ohne DataFrame (B-064)
                     kt = _kendall(x, y) if s.size >= 2 else _NAN
                     fams = (["t", "gaussian", "clayton_90", "clayton_270"] if s.size >= 2 and kt < 0
                             else ["t", "gaussian", "clayton", "gumbel"])
@@ -1170,9 +1462,9 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
                         "pearson": _cor1(x, y) if s.size >= 10 else _NAN,
                         "spearman": _cor1(x, y, "spearman") if s.size >= 10 else _NAN,
                         "kendall": _kendall(x, y) if s.size >= 10 else _NAN,
-                        "lambda_lower": float(td["lower"].iloc[0]) if td is not None else _NAN,
-                        "lambda_upper": float(td["upper"].iloc[0]) if td is not None else _NAN,
-                        "exceed_lower": float(td["exceed_lower"].iloc[0]) if td is not None else _NAN,
+                        "lambda_lower": td[0] if td is not None else _NAN,
+                        "lambda_upper": td[1] if td is not None else _NAN,
+                        "exceed_lower": td[2] if td is not None else _NAN,
                         "t_rho": float(tt["par1"].iloc[0]) if tt is not None and len(tt) else _NAN,
                         "t_nu": float(tt["par2"].iloc[0]) if tt is not None and len(tt) else _NAN,
                         "copula": tc["family"].iloc[0] if tc is not None else None,
@@ -1183,7 +1475,7 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
                 # seed=None -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed=k
                 if seed is None:
                     seed = _sl().next_seed()
-                S = _sl().main_stream(seed)
+                S = _sl().main_stream(seed, "dependence_analysis")
                 boot = []
                 for _b in range(int(B)):
                     idx = np.asarray(_boot_idx_stationary(nk, nk, block, S), dtype=np.int64) - 1
@@ -1353,6 +1645,9 @@ def _plot_dependence(x, type=("overview", "rolling", "tail", "conditional", "sca
     from .svg import _jl_log10
     type = _match_arg(type, ("overview", "rolling", "tail", "conditional", "scatter"), "type")  # noqa: A001
     pn = [str(v) for v in x["pairs"]["pair"]]
+    pair = _e4_pick(pair, pn, "plot.SimLevDependence", "pair")   # seit 1.6.4 (B-007)
+    if x["conditional"]:
+        condition = _e4_pick(condition, list(x["conditional"].keys()), "plot.SimLevDependence", "condition")
     i = pn.index(pair) if isinstance(pair, str) else int(pair) - 1
     ab = pn[i].split(" ~ ")
     X = x["returns"]
@@ -1431,7 +1726,7 @@ def _plot_dependence(x, type=("overview", "rolling", "tail", "conditional", "sca
 
     fns = {"rolling": p_roll, "tail": p_tail, "conditional": p_cond, "scatter": p_scatter}
     ks = ["rolling", "tail", "conditional", "scatter"] if type == "overview" else [type]
-    svg = _grid_svg(ks, lambda k: fns[k], width=width, height=height).svg
+    svg = _grid_svg(ks, lambda k: fns[k], width=width, height=height)
     return svg, data
 
 
@@ -1464,7 +1759,7 @@ def _plot_tail_regression(x, width=900, height=400):
             data[dv] = pd.DataFrame({"quantile": qv, "estimate": est, "lower": lo, "upper": hi})
         return f
 
-    svg = _grid_svg(drv, make, ncol=len(drv), width=width, height=height).svg
+    svg = _grid_svg(drv, make, ncol=len(drv), width=width, height=height)
     return svg, data
 
 
@@ -1488,7 +1783,7 @@ def _plot_covar(x, width=800, height=450):
     series = [(_days(dts[av == aj]), dc[av == aj], cols[j % 5], aj) for j, aj in enumerate(a)]
     svg = _grid_svg(["x"], lambda _: (lambda c, box: _grid_lines(
         c, box, series, dates=True, ylabel="Delta-CoVaR (%)",
-        title=_sprintf("Delta-CoVaR für '%s' (q = %g)", x["system"], x["q"]))), width=width, height=height).svg
+        title=_sprintf("Delta-CoVaR für '%s' (q = %g)", x["system"], x["q"]))), width=width, height=height)
     data = {"delta_covar": pd.DataFrame({"asset": np.concatenate([av[av == aj] for aj in a]) if a else av,
                                          "date": np.concatenate([dts[av == aj] for aj in a]) if a else dts,
                                          "delta_covar": np.concatenate([dc[av == aj] for aj in a]) if a else dc})}
@@ -1542,7 +1837,9 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
         intercept: Logisch: Konstante aufnehmen (Standard ``True``).
         tol: Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich kein Koeffizient um mehr als ``tol * (1
             + max|beta|)`` ändert (in den ersten drei Stufen wird höchstens 1e-7 verlangt). Standard 1e-10.
+            Seit 1.6.4 eine Zahl > 0.
         maxit: Höchstzahl der Iterationen je MM-Stufe (ganze Zahl, Standard 2000).
+            Seit 1.6.4 höchstens 10^8.
 
     Returns:
         Benannter numerischer Koeffizientenvektor in der Einheit von ``y`` je Einheit des Regressors:
@@ -1562,17 +1859,25 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
         print(simlev.quantile_regression(y, X=x, tau=0.9))
     """
     tv = np.atleast_1d(np.asarray(tau, dtype=object))
-    if (tv.size != 1 or isinstance(tv[0], (bool, np.bool_, str)) or tv[0] is None
+    if (chk_is_factor(tau) or tv.size != 1 or isinstance(tv[0], (bool, np.bool_, str)) or tv[0] is None
             or not isinstance(tv[0], (int, float, np.integer, np.floating))
-            or not math.isfinite(float(tv[0])) or float(tv[0]) <= 0 or float(tv[0]) >= 1):
-        raise ValueError("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: %s)." % _fmt1(tau))
+            or not math.isfinite(float(tv[0])) or float(tv[0]) <= 0 or float(tv[0]) >= 1):   # seit 1.6.4 ohne Wert
+        raise ValueError("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein.")
     tau = float(tv[0])
-    ya = np.asarray(y.to_numpy() if isinstance(y, pd.Series) else y)
-    if ya.dtype.kind not in "fiu":
+    if chk_is_factor(y):
         raise ValueError("quantile_regression: y muss numerisch sein.")
+    ya = np.asarray(y.to_numpy() if isinstance(y, pd.Series) else y)
+    if ya.dtype.kind not in "fiu" or ya.ndim > 1:              # seit 1.6.4 Vektor
+        raise ValueError("quantile_regression: y muss numerisch sein.")
+    fn = "quantile_regression"
+    if chk_is_factor(X):
+        chk_stop("faktor", fn, "X")                            # Entscheidung 15
+    intercept = chk_bool1(intercept, fn, "intercept")         # B-051
+    tol = chk_num1(tol, fn, "tol", lo=0, lo_open=True)        # B-032
+    maxit = _e4_count(maxit, fn, "maxit")                      # B-032
     y = ya.astype(np.float64).ravel()
     if isinstance(X, pd.DataFrame):
-        nn = [str(c) for c in X.columns if X[c].dtype.kind not in "fiu"]
+        nn = [str(c) for c, dt in zip(X.columns, X.dtypes) if dt.kind not in "fiu"]   # auch doppelte Namen
         if nn:
             raise ValueError("quantile_regression: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() "
                              "in Indikatorspalten umwandeln)." % ", ".join("'%s'" % c for c in nn))
@@ -1668,9 +1973,11 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         data: DataFrame mit Spalte ``date`` (Date), Kursspalte (Kursniveaus, keine Renditen) und Zustandsspalten.
         asset: Name der Kursspalte (Zeichenkette).
         drivers: Zeichenvektor der Zustandsspalten (Drittvariablen).
+            Seit 1.6.4 mindestens einer, ohne doppelte Namen und nicht asset.
         quantiles: Numerischer Vektor der Quantile als Anteil (Standard ``[0.05, 0.25, 0.5, 0.75, 0.95]``).
         frequency: Renditefrequenz: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
         B: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 = keine Standardfehler und Intervalle).
+            Seit 1.6.4 höchstens 10^8.
         block: Mittlere Blocklänge des stationären Bootstraps in Perioden. ``None`` (Standard) =
             Politis-White-Schätzung auf den absoluten Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n /
             10).
@@ -1706,8 +2013,16 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         print(tr["coefficients"])
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    drivers = _as_names(drivers)
-    quantiles = np.atleast_1d(np.asarray(quantiles, dtype=np.float64))
+    fn = "tail_regression"                                     # seit 1.6.4 vor der Rechnung (K42 E4, B-054)
+    asset = chk_name1(asset, fn, "asset")
+    if asset == "date":
+        chk_stop("e4.date", fn, "asset")
+    drivers = _e4_names(drivers, fn, "drivers")
+    _e4_disjoint([asset], drivers, fn, "asset", "drivers")     # B-013
+    _e4_data(data, [asset] + drivers, fn)
+    quantiles = _e4_probs(quantiles, fn, "quantiles")
+    B = _e4_count(B, fn, "B", lo=0)                            # B-032
+    block = chk_num1(block, fn, "block", lo=1, null_ok=True)
     rd = _dep_returns(data, [asset], drivers, frequency)
     ok = _complete_rows(*[rd[c].to_numpy() for c in [asset] + drivers])
     rd = rd.loc[ok].reset_index(drop=True) if not ok.all() else rd
@@ -1730,7 +2045,7 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         if block is None:
             block = _rmin(_rmax(2, float(_boot()._pw_block(np.abs(y - r_mean(y)))["stationary"])), n / 10)
 
-        S = _sl().main_stream(seed)                     # Hauptstrom
+        S = _sl().main_stream(seed, "tail_regression")                     # Hauptstrom
         bs = []
         for _b in range(int(B)):
             idx = np.asarray(_boot_idx_stationary(n, n, block, S), dtype=np.int64) - 1
@@ -1825,6 +2140,7 @@ def tail_covar(data, system, assets, *, state=None, q=0.05, frequency=("week", "
         assets: Zeichenvektor der Kursspalten der einzelnen Anlagen.
         state: Optionaler Zeichenvektor der Zustandsspalten (in ihrer eigenen Einheit). ``None`` (Standard) =
             zeitkonstante Quantile.
+            Seit 1.6.4 keine Spalte aus system oder assets.
         q: Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
         frequency: Renditefrequenz: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
 
@@ -1857,8 +2173,15 @@ def tail_covar(data, system, assets, *, state=None, q=0.05, frequency=("week", "
         print(simlev.tail_covar(d, "portfolio", ["aktien", "anleihen"], q=0.05))
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    assets = _as_names(assets)
-    state = _as_names(state) if state is not None else None
+    fn = "tail_covar"                                          # seit 1.6.4 vor der Rechnung (K42 E4)
+    system = chk_name1(system, fn, "system")
+    if system == "date":
+        chk_stop("e4.date", fn, "system")
+    assets = _e4_names(assets, fn, "assets")
+    state = _e4_names(state, fn, "state", null_ok=True)
+    _e4_disjoint([system] + assets, state, fn, "system/assets", "state")   # B-013
+    _e4_data(data, list(dict.fromkeys([system] + assets + (state or []))), fn)
+    q = chk_num1(q, fn, "q", lo=0, hi=1, lo_open=True, hi_open=True)
     cols = list(dict.fromkeys([system] + assets))
     rd = _dep_returns(data, cols, state, frequency)
     ok = _complete_rows(*[rd[c].to_numpy() for c in rd.columns])
@@ -1922,9 +2245,11 @@ def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
         data: Historische Daten wie für ``bootstrap()`` (DataFrame oder Matrix mit den Spalten der Konfiguration).
         agg: Zeilen je Periode für die Aggregation (ganze Zahl, Standard 5; z. B. 5 Handelstage oder 7
             Kalendertage ergibt Wochen; 1 = keine Aggregation).
+            Seit 1.6.4 eine ganze Zahl ≥ 1, höchstens 10^8.
         q: Tail-Wahrscheinlichkeit als Anteil für die Tail-Kennzahlen (Standard 0.10, siehe
             ``tail_dependence()``).
         max_paths: Höchstens so viele Pfade auswerten (die ersten ``max_paths`` Pfade; Standard 200).
+            Seit 1.6.4 eine ganze Zahl ≥ 1 oder Inf (alle Pfade).
 
     Returns:
         DataFrame mit einer Zeile je Indexpaar und Kennzahl: ``pair``, ``metric`` (``"kendall"``, ``"pearson"``,
@@ -1953,6 +2278,13 @@ def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
     rc = getattr(boot, "r_class", ())
     if "bootstrap_result" not in tuple(rc):
         raise ValueError("boot muss ein bootstrap_result sein.")
+    fn = "dependence_validate"                                 # seit 1.6.4 (B-033, B-053)
+    agg = _e4_count(agg, fn, "agg")
+    q = chk_num1(q, fn, "q", lo=0, hi=1, lo_open=True, hi_open=True)
+    max_paths = chk_scalar(max_paths)
+    if not (_e4_numscalar(max_paths) and (float(max_paths) == math.inf or (math.isfinite(float(max_paths)) and
+                                          float(max_paths) == math.trunc(float(max_paths)) and float(max_paths) >= 1))):
+        chk_stop("e1.ganz_inf", fn, "max_paths", chk_fmt(1))
     cfg = boot["config"]
     idx_names = _as_names(cfg["index_names"])
     if len(idx_names) < 2:
@@ -1967,18 +2299,21 @@ def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
             raise ValueError("Zu wenige Perioden nach Aggregation.")
         return _rowsum_blocks(L, agg, k)
 
+    td_fun = _tail_dep_fun(q)
+
     def stats_of(L):
         A = aggr(L)
         out = []
         for i, j in _combn2(A.shape[1]):
             x = A[:, i]
             y = A[:, j]
-            td = tail_dependence(x, y, q=q)
-            out += [_kendall(x, y), _cor1(x, y), float(td["lower"].iloc[0]), float(td["upper"].iloc[0]),
-                    float(td["exceed_lower"].iloc[0])]
+            td = td_fun(x, y)                                  # seit 1.6.4 ohne DataFrame (B-064)
+            out += [_kendall(x, y), _cor1(x, y), td[0], td[1], td[2]]
         return np.array(out, dtype=np.float64)
     h = stats_of(hist)
-    paths = list(boot["paths"])[: int(max_paths)]
+    paths = list(boot["paths"])
+    if float(max_paths) != math.inf:                           # Inf = alle Pfade
+        paths = paths[: int(max_paths)]
     cols = []
     for pth in paths:
         if isinstance(pth, pd.DataFrame):
@@ -2032,6 +2367,10 @@ def regime_subset(data, condition, *, min_run=1, env=None):
             wie 1.002 und Zusatzreihen). Eine Spalte ``date`` ist optional.
         condition: Logischer Vektor der Länge ``nrow(data)`` (NA = False) oder Ausdruck als Zeichenkette, der in
             ``data`` ausgewertet wird, z. B. ``"inflation >= 4"``.
+            Seit 1.6.4 in allen Sprachen wie R as.logical gelesen (NA = FALSE); nicht lesbarer Text, Faktor, Datum, Liste oder Matrix sind ein Fehler; auch das Ergebnis des Ausdrucks.
+            Seit 1.6.4 gelten Texte in R, Python und Julia gleich im gemeinsamen Umfang der Regeltexte von
+            ``tactical_rules()`` (bis 1.6.3 in R jeder R-Ausdruck); ``condition`` kann auch eine Funktion von ``data``
+            sein (Ergebnis wie oben).
         min_run: Mindestlänge einer Episode in Zeilen (ganze Zahl, Standard 1); kürzere zusammenhängende
             Abschnitte werden verworfen.
         env: Mapping für freie Variablen und Funktionen in ``condition`` (Voreinstellung: Namensraum des
@@ -2051,28 +2390,33 @@ def regime_subset(data, condition, *, min_run=1, env=None):
         s = simlev.regime_subset(d, "infl >= 4", min_run=10)
         print(len(s))
     """
+    fn = "regime_subset"                                       # seit 1.6.4 (K42 E4, B-008, B-034, B-036)
+    chk_df(data, fn, "data")
+    if isinstance(condition, (list, tuple, np.ndarray, pd.Series)) and len(condition) and \
+            all(isinstance(v, str) for v in (condition.tolist() if hasattr(condition, "tolist") else condition)):
+        if len(condition) != 1:
+            chk_stop("e4.bedingung", fn)
+        condition = chk_scalar(condition)
+    min_run = _e4_count(min_run, fn, "min_run")
+    if isinstance(condition, str) and not condition.strip():
+        chk_stop("e4.bedingung", fn)                           # leerer Ausdruck: in R Ergebnis NULL
     if isinstance(condition, str) or callable(condition):
         cond = _eval_condition(condition, data, env)
-        if isinstance(condition, str):
-            from ._r import rexpr as _rexpr
-            cond = _rexpr.as_logical(cond)
     else:
         cond = condition
-    if isinstance(cond, (pd.Series, pd.Index)):
-        cond = cond.to_numpy()
-    ca = np.atleast_1d(np.asarray(cond, dtype=object))
-    c = np.array([False if (v is None or (isinstance(v, float) and math.isnan(v))) else bool(v) for v in ca], dtype=bool)
+    if hasattr(cond, "values") and not isinstance(cond, (pd.Series, pd.Index, np.ndarray, dict)):
+        cond = getattr(cond, "values")                          # RVector des Auswerters
+    c = _e4_cond(cond, fn)
     if c.size != len(data):
         raise ValueError("condition muss die Länge nrow(data) haben.")
-    # rle
-    vals, lens = [], []
-    for v in c.tolist():
-        if vals and vals[-1] == v:
-            lens[-1] += 1
-        else:
-            vals.append(v)
-            lens.append(1)
-    lens = np.array(lens, dtype=np.int64)
+    # rle (seit 1.6.4 vektorisiert, B-066; bis 1.6.3 Listenschleife je Element, gleiche Läufe)
+    if c.size:
+        st = np.flatnonzero(np.r_[True, c[1:] != c[:-1]])
+        lens = np.diff(np.r_[st, c.size]).astype(np.int64)
+        vals = c[st]
+    else:
+        lens = np.zeros(0, dtype=np.int64)
+        vals = np.zeros(0, dtype=bool)
     ends = np.cumsum(lens)
     starts = ends - lens + 1
     keep = np.array(vals, dtype=bool) & (lens >= min_run)

@@ -53,7 +53,9 @@ int sl_fmin_ask(double *ws, double *x_eval)
     xm = (a + b) * .5;
     tol1 = ws[F_EPS] * fabs(x) + ws[F_TOL3];
     t2 = tol1 * 2.;
-    if (fabs(x - xm) <= t2 - (b - a) * .5) { ws[F_PH] = 2; *x_eval = x; return 0; }
+    /* seit 1.6.4 (B-005): auch fertig, wenn der Vergleich NaN ergibt (nicht endliche Grenzen, Intervallbreite Inf oder
+     * tol = NaN); bis 1.6.3 lief die Suche dann endlos. Fuer endliche Werte wie R's Brent_fmin. */
+    if (!(fabs(x - xm) > t2 - (b - a) * .5)) { ws[F_PH] = 2; *x_eval = x; return 0; }
     p = 0.; q = 0.; r = 0.;
     if (fabs(e) > tol1) {                          /* Parabel durch x, v, w */
         r = (x - w) * (fx - fv);

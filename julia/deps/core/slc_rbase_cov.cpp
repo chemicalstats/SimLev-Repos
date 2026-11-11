@@ -26,8 +26,8 @@
  * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
  *                     (laut Kopf der jeweiligen R-Quelle)
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
- * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
- *                     des R-Pakets); bei use = "everything" mit NA-Spalte stilles NA statt des
+ * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (seit 1.6.4
+ *                     auch für R: cov/cor/var/sd in r/R/slc_stats.R); bei use = "everything" mit NA-Spalte stilles NA statt des
  *                     speicherabhängigen Ergebnisses von R (siehe Quellen).
  * Prüforakel: R 4.3.3 (Gleichlauf: rbase_fuzz.R).
  */

@@ -17,13 +17,13 @@ from typing import Any
 
 import numpy as np
 
-from ._r.rformat import r_deparse, r_format, r_round, r_sprintf
+from ._r.rformat import r_round, r_sprintf
 from . import _ext
-from ._r.rnum import NA_REAL, r_cumprod, r_cumsum, r_mean, r_pow, r_prod, r_sd
-from ._util import _pow_rec
+from ._r.rnum import NA_REAL, r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_prod, r_sd
+from ._util import _na as _isnan, _pow_rec
 from .svg import (SimLevPlot, _MONATE_KURZ, _Canvas, _Panel, _alpha, _area, _check_svg_file, _col, _col2rgba,
-                  _date_ticks, _decimate, _empty_panel, _frame, _line, _polyline, _px, _py, _r_range, _rect,
-                  _c, _svg, _svg_close, _svg_open, _svgcol, _svgop, _text, _title, _to_days, _warn_unknown_kw,
+                  _date_ticks, _decimate, _empty_panel, _frame, _line, _polyline, _px, _py, _r_ramp_rgb, _r_range, _rect,
+                  _c, _svg, _svg_close, _svg_open, _svgcol, _svgop, _text, _title, _to_days,
                   _write_svg, _yaxis, r_pretty)
 from ._r.rformat import r_format1
 
@@ -66,10 +66,6 @@ def _len(v: Any) -> int:
         return 1
 
 
-def _isnan(v: Any) -> bool:
-    return v is None or (isinstance(v, (float, np.floating)) and math.isnan(v))
-
-
 def _is_true(v: Any) -> bool:
     """``isTRUE(v)``."""
     return isinstance(v, (bool, np.bool_)) and bool(v)
@@ -84,14 +80,6 @@ def _dash_custom_layout(n: int) -> np.ndarray:
 
 
 # ── Farben ──────────────────────────────────────────────────────────────────
-def _deparse_col(v: Any) -> str:
-    if v is None:          # None steht für NA (ein NULL-Element gäbe es in einer R-Liste nicht)
-        return "NA"
-    if isinstance(v, (float, np.floating)) and math.isnan(v):
-        return "NA_real_"
-    return r_deparse(v)
-
-
 def _check_colors(colors: Any) -> dict:
     if colors is None:
         return dict(DEFAULT_COLORS)
@@ -104,7 +92,7 @@ def _check_colors(colors: Any) -> dict:
         if isinstance(colors, pd.Series):
             names = [str(k) for k in colors.index]
             items = list(zip(names, colors.tolist()))
-    if names is None or any(k == "" for k in names):
+    if names is None or not names or any(k == "" for k in names):   # seit 1.6.4 leer wie R ein Fehler (B-057)
         _stop("plot.SimLevResult: colors muss eine benannte Liste (oder ein benannter Zeichenvektor) sein, "
               "z. B. list(primary = \"#003366\"); möglich: %s." % ", ".join(DEFAULT_COLORS))
     unk = [k for k in dict.fromkeys(names) if k not in DEFAULT_COLORS]
@@ -133,7 +121,7 @@ def _check_colors(colors: Any) -> dict:
     if bad:
         _stop("plot.SimLevResult: ungültige Farbe(n) in colors: %s; erwartet je Element ein R-Farbname "
               "(z. B. \"navy\", siehe grDevices::colors()) oder ein Hex-Code \"#RRGGBB\" bzw. \"#RRGGBBAA\"."
-              % ", ".join("%s = %s" % (k, _deparse_col(v)) for k, v in bad))
+              % ", ".join("'%s'" % k for k, v in bad))   # seit 1.6.4 nur die Namen (Entscheidung 8)
     out = dict(DEFAULT_COLORS)
     for k, v in items:
         out[k] = v[0] if isinstance(v, (list, tuple, np.ndarray)) else v
@@ -246,7 +234,7 @@ def _tot_ret(r: Any) -> float:
 def _ann_vol(r: Any) -> float:
     sd = _get(r, "statistics")["sd"]
     if _isnan(sd):
-        return math.nan
+        return NA_REAL                     # seit 1.6.4 NA wie R und Julia („NA%“, B-102; bis 1.6.3 NaN)
     return sd * math.sqrt(_dashboard_returns(r)["ppy"])
 
 
@@ -323,7 +311,8 @@ def _comparison_rows(x: Any, compare: Any, colors: dict | None = None) -> list[d
 
 
 def _rolling_returns(x: Any) -> dict | None:
-    """Rollierende Renditen (bis 30 Tage, kalendergenau annualisiert); ``None`` bei zu wenigen Daten."""
+    """Rollierende Renditen (bis 30 Tage, kalendergenau annualisiert): ``dict`` mit ``window``, ``values`` und ``idx``;
+    bei zu wenigen Daten ist ``values`` ``None`` (ohne ``idx``)."""
     worth = np.asarray(_get(x, "worth"), dtype=float)
     n_days = worth.size
     dates = _dates_of(x, n_days).astype(np.int64)
@@ -484,10 +473,14 @@ def _panel_distribution(c, cell, x, dash):
         br = [lo, lo + 1 if hi == lo else hi]
     counts = [0] * (len(br) - 1)
     bra = np.asarray(br)
-    for v in rets.tolist():
-        j = int(np.searchsorted(bra, v, side="left")) - 1      # rechts geschlossene Klassen (wie hist())
-        j = min(max(j, 0), len(counts) - 1)
-        counts[j] += 1
+    # seit 1.6.4 mit der Toleranz von hist.default (B-061, Entscheidung 99): fuzz = 1e-7 median(diff(br)), erste
+    # Grenze - fuzz, übrige + fuzz (bis 1.6.3 ohne; Werte auf einer Grenze fielen in die Nachbarklasse)
+    fz = 1e-7 * r_median(np.diff(bra))
+    fba = bra + fz
+    fba[0] = bra[0] - fz
+    # rechts geschlossene Klassen (wie hist()); seit 1.6.4 für alle Werte in einem Aufruf (B-085; gleiche Klassen)
+    jj = np.clip(np.searchsorted(fba, np.asarray(rets, dtype=np.float64), side="left") - 1, 0, len(counts) - 1)
+    counts = np.bincount(jj, minlength=len(counts)).tolist()
     ymax = max(counts) * 1.04
     p = _Panel(*cell, br[0], br[-1], 0.0, ymax)
     yt, yl = _yaxis(0.0, max(counts))
@@ -510,7 +503,8 @@ def _panel_distribution(c, cell, x, dash):
         xsq = [lo + (hi - lo) * i / 99 for i in range(100)]
         from . import _lib
         dn = _lib.dnorm(np.array(xsq, dtype=np.float64), mu, sd)   # Normaldichte der C-Bibliothek slc (wie R)
-        yn = [float(d) * n * (hi - lo) / 50 for d in dn]
+        bw = br[1] - br[0]                 # seit 1.6.4 Klassenbreite der Balken (B-001, Entscheidung 91; bis 1.6.3 (hi - lo) / 50)
+        yn = [float(d) * n * bw for d in dn]
         _polyline(c, p, xsq, yn, color=_col(col["secondary"]), width=2, dash="6,4")
     _line(c, _px(p, mu), p.y0, _px(p, mu), p.y0 + p.h, color=_col(col["positive"]), width=2, dash="6,4")
     st = _get(x, "statistics")
@@ -563,15 +557,15 @@ def _panel_monthly(c, cell, x):
     ny = len(years)
     p = _Panel(*cell, 0.5, 12.5, 0.5, ny + 0.5)
     _title(c, p, "Monatsrenditen (%)")
-    neg = _col2rgba(col["negative"])
-    pos = _col2rgba(col["positive"])
-    white = (1.0, 1.0, 1.0)
+    # seit 1.6.4 wie R's image(breaks = seq(-10, 10, length.out = 21)) mit colorRampPalette(c(negative, "white",
+    # positive))(20) (B-062, Entscheidung 99): Klassen rechts geschlossen (.bincode), Farben abgeschnitten
+    # (bis 1.6.3 floor-Klassen und gerundete Farben, jede ganze Zahl eine Stufe höher)
+    pal = _r_ramp_rgb([_col2rgba(col["negative"]), (1.0, 1.0, 1.0), _col2rgba(col["positive"])], 20)
+    hbr = np.arange(-10, 11, dtype=np.float64)
 
     def heat(v):
-        t = (min(max(v, -10.0), 10.0) + 10) / 20
-        k = min(max(math.floor(t * 20), 0), 19) / 19       # 20 Farbstufen
-        a, b, u = (neg, white, k * 2) if k < 0.5 else (white, pos, (k - 0.5) * 2)
-        return _svgcol((a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u, 1.0))
+        k = int(np.searchsorted(hbr, min(max(v, -10.0), 10.0), side="left")) - 1
+        return pal[min(max(k, 0), 19)]
     cw = p.w / 12
     ch = p.h / max(ny, 1)
     ry, rm, rv = [], [], []
@@ -691,11 +685,12 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
 
     ``style``: ``"full"`` (alle Panels), ``"compact"`` (4 Kern-Panels) oder ``"custom"``
     (Panels aus ``panels``; eindeutige Abkürzungen erlaubt). ``compare``: zweites Ergebnis über
-    dieselben Tage. ``colors``: ``dict`` mit eigenen Farben (R-Farbname oder Hex-Code),
-    nicht genannte aus dem Standard. ``width``, ``height``: Größe in Pixeln (Standard 1400 und
+    dieselben Tage. ``colors``: ``dict`` mit eigenen Farben (R-Farbname oder Hex-Code; Farbnummer als Text nur
+    aus ASCII-Ziffern, z. B. ``"3"``, seit 1.6.4 nicht ``"3.0"``/``"0x1"``),
+    nicht genannte aus dem Standard. ``width``, ``height``: Größe in Pixeln, je 300 bis 10000 (3 bis 100 Zoll; Standard 1400 und
     10/14 bzw. 8/12 der Breite). ``file``: zusätzlich als SVG-Datei speichern (nur Endung
-    ``.svg``); ohne ``file`` wird nichts geschrieben. Unbekannte Schlüsselwörter ergeben eine
-    Warnung. Auch über ``res.plot(...)`` bzw. ``simlev.plot(res, ...)``.
+    ``.svg``); ohne ``file`` wird nichts geschrieben. Unbekannte Schlüsselwörter sind seit 1.6.4 ein
+    Fehler (wie in R; bis 1.6.3 eine Warnung). Auch über ``res.plot(...)`` bzw. ``simlev.plot(res, ...)``.
 
     ``data`` des Ergebnisses enthält je gezeichnetem Panel (Zeichenreihenfolge) eine Tabelle:
     ``performance`` (``date``, ``strategy``, ggf. ``compare``, ``invested``), ``drawdown``
@@ -704,7 +699,16 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
     (``section``, ``label``, ``value``), ``correlation`` (``date``, ``correlation``),
     ``comparison`` (``label``, ``value``, ``compare``, ``diff``).
     """
-    _warn_unknown_kw("plot_dashboard", list(kwargs))
+    from ._pruefen import chk_dots as _chk_dots
+    _chk_dots(list(kwargs), (), "plot.SimLevResult")   # seit 1.6.4 (Entscheidung 57; bis 1.6.3 Warnung)
+    # seit 1.6.4 (K42 E5, B-027, C-010): x Ergebnis von simulation(), Größe 300 bis 10000 Pixel = 3 bis 100 Zoll
+    # (Entscheidungen 54, 62)
+    from .result import SimLevResult as _SR
+    from ._pruefen import chk_num1, chk_stop as _chk_stop
+    if not isinstance(x, _SR):
+        _chk_stop("klasse", "plot_dashboard", "x", "simulation()")
+    width = chk_num1(width, "plot_dashboard", "width", lo=300, hi=10000)
+    height = chk_num1(height, "plot_dashboard", "height", lo=300, hi=10000, null_ok=True)
     if file is not None:
         _check_svg_file(file, "plot_dashboard")
     from ._util import _match_arg, _pmatch
@@ -714,10 +718,8 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
         panels = list(_DEFAULT_PANELS)
     pv = [panels] if isinstance(panels, str) else panels
     if not isinstance(pv, (list, tuple, np.ndarray)) or not len(pv) or not all(isinstance(p, str) for p in pv):
-        shown = "" if pv is None else ", ".join(r_format(list(pv) if isinstance(pv, (list, tuple, np.ndarray))
-                                                          else [pv]))
-        _stop("plot.SimLevResult: panels muss ein Zeichenvektor sein (erhalten: %s); möglich: %s."
-              % (shown, ", ".join('"%s"' % p for p in _ALL_PANELS)))
+        _stop("plot.SimLevResult: panels muss ein Zeichenvektor sein; möglich: %s."   # seit 1.6.4 ohne Wert
+              % ", ".join('"%s"' % p for p in _ALL_PANELS))
     pm = [_pmatch(p, _ALL_PANELS) for p in pv]
     if any(i is None for i in pm):
         _stop("plot.SimLevResult: unbekannte(s) Panel(s) %s in panels; möglich: %s."
@@ -732,13 +734,11 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
     from .result import SimLevResult
     xw = _get(x, "worth")
     if compare is not None and (not isinstance(compare, SimLevResult) or _len(_get(compare, "worth")) != _len(xw)):
-        if not isinstance(compare, SimLevResult):
-            from .engine import _r_class_name
-            why = "erhalten: Objekt der Klasse '%s'" % _r_class_name(compare)
-        else:
-            why = "%d statt %d Tage" % (_len(_get(compare, "worth")), _len(xw))
-        _stop("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein (%s); "
-              "NULL = kein Vergleich." % why)
+        if not isinstance(compare, SimLevResult):   # seit 1.6.4 ohne Klasse der Eingabe (Entscheidung 8)
+            _stop("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein; "
+                  "NULL = kein Vergleich.")
+        _stop("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein (%d statt %d Tage); "
+              "NULL = kein Vergleich." % (_len(_get(compare, "worth")), _len(xw)))
     skipped: list[str] = []
     if style == "custom" and compare is None and any(p in ("correlation", "comparison") for p in panels):
         skipped = [p for p in panels if p in ("correlation", "comparison")]
@@ -782,8 +782,7 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
     else:
         with np.errstate(all="ignore"):
             dash = _dashboard_returns(x)
-            order = [p for p in ("performance", "drawdown", "distribution", "rolling", "monthly", "stats",
-                                 "correlation", "comparison") if p in selected]
+            order = [p for p in _ALL_PANELS if p in selected]
             for slot, pn in enumerate(order, start=1):
                 cell = cell_of(slot)
                 if pn == "performance":
@@ -798,9 +797,9 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
                     data[pn] = _panel_monthly(c, cell, x)
                 elif pn == "stats":
                     data[pn] = _panel_stats(c, cell, x, compare)
-                elif pn == "correlation" and compare is not None:
+                elif pn == "correlation":       # nur mit compare ausgewählt (oben)
                     data[pn] = _panel_correlation(c, cell, x, compare)
-                elif pn == "comparison" and compare is not None:
+                elif pn == "comparison":
                     data[pn] = _panel_comparison(c, cell, x, compare)
     d = SimLevPlot(_svg_close(c), data, x, "SimLevResult")
     if file is not None:
@@ -815,6 +814,16 @@ def export_dashboard(x, filename: str = "dashboard.svg", width: float = 14, heig
     Eine andere Dateiendung bricht vor dem Zeichnen mit einer Meldung ab. Meldung wie in R nach
     ``stderr``.
     """
+    # seit 1.6.4 (K42 E5, B-027, C-010): Prüfung vor dem Zeichnen; kwargs nur Argumente von plot.SimLevResult
+    from .result import SimLevResult as _SR
+    from ._pruefen import chk_dots, chk_name1, chk_num1, chk_stop as _chk_stop
+    fn = "export_dashboard"
+    if not isinstance(x, _SR):
+        _chk_stop("klasse", fn, "x", "simulation()")
+    filename = chk_name1(filename, fn, "filename")
+    width = chk_num1(width, fn, "width", lo=3, hi=100)
+    height = chk_num1(height, fn, "height", lo=3, hi=100)
+    chk_dots(list(kwargs), ("style", "panels", "compare", "colors"), fn)
     _check_svg_file(filename, "export_dashboard")
     d = plot_dashboard(x, width=width * 100, height=height * 100, **kwargs)
     _write_svg(filename, d, "export_dashboard")

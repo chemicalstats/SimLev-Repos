@@ -19,19 +19,8 @@
 
 namespace {
 
-/* Tagesengine (core/engine_core_impl.h, flache Eingabe struct Input). Aufruf aus simlev/_sim_engine.py:
- *   sim_engine_run(flags, dca_n, day, prices, sig_buy, sig_sell, event_w, base_rates, ai, ad, st0, ci, cd, fees,
- *                  tot0, tariff_par, zve, reports)
- *   flags int32[n], dca_n/day float64[n]; prices, sig_buy, sig_sell: Listen je Asset (float64[n]);
- *   event_w, base_rates: None oder Liste je Asset (None bzw. float64[n]); ai int32[AI_N na], ad float64[AD_N na],
- *   st0 float64[8 na], ci int32[CI_N], cd float64[CD_N], fees float64[10], tot0 float64[TT_N], tariff_par float64[],
- *   zve float64[2 k] (Jahr, zvE); reports: Liste von 5 na beschreibbaren float64[n] (worth, money, flows, total,
- *   share je Asset).
- * Rueckgabe: (status [8 na], totals [TT_N], lots je Asset [7 k], sells je Asset [8 k], taxes je Asset [8 k],
- *   prices je Asset (None oder [n], nach Splits), fee_paid, tax_unpaid, rows [TR_N k], ks [2 k], refund_due,
- *   events [(code, site, day, asset, aux, (Jahre bzw. Assets), d0, d1, (Werte))], error (site, day, asset, code,
- *   d0) bzw. None); details-Ereignisse (code >= 200) mit Werten;
- *   Zahlenfelder als bytearray (float64). Der Kern laeuft ohne GIL. */
+/* Hilfen fuer die Tagesengine (core/engine_core_impl.h); Aufruf und Rueckgabe von sim_engine_run stehen bei
+ * e_engine_run (seit 1.6.4 ohne die veraltete Fassung der Argumentliste von vor 1.4.0 an dieser Stelle). */
 // Puffer oder None (dann nullptr); len >= 0: Laenge pruefen
 bool get_opt(PyObject* o, ext::Buf& b, char kind, const char* fn, const char* name, Py_ssize_t len = -1) {
     return o == Py_None || ext::get(o, b, kind, false, fn, name, len);
@@ -72,31 +61,20 @@ bool get_prep(PyObject* o, ext::Buf* b, Py_ssize_t n, Py_ssize_t na, simlev_prep
  *   tot0 float64[TT_N], tariff_par float64[], zve float64[2 k] (Jahr, zvE); reports: Liste von 5 na beschreibbaren
  *   float64[n] (worth, money, flows, total, share je Asset).
  * Rueckgabe: (status [8 na], totals [TT_N], lots je Asset [7 k], sells je Asset [8 k], taxes je Asset [8 k],
- *   prices je Asset (None oder [n], nach Splits), fee_paid, tax_unpaid, rows [TR_N k], ks [2 k], refund_due,
+ *   prices je Asset (None oder [n], nach Splits), fee_paid, tax_unpaid, rows [TR_N k], ks [2 k],
  *   events [(code, site, day, asset, aux, (Jahre bzw. Assets), d0, d1, (Werte))], error (site, day, asset, code,
  *   d0) bzw. None, flags (Tagesflags, int32[n])); details-Ereignisse (code >= 200) mit Werten;
  *   Zahlenfelder als bytearray (float64). Der Kern laeuft ohne GIL.
- * Seit 1.6.3 optional als 17. Argument compact (0 wie bisher): 1 bzw. 2 geben statt der Lots, Verkaeufe und
- *   Steuerbuchungen je Asset None bzw. (2) in lots die offenen Lots (remaining > 0) spaltenweise [4 k]: date,
- *   units, price, vp (0 ohne Vorabpauschale; Engine::open_lots_out); sells/taxes je Asset None; am Ende als
- *   15. Element (n_buys, n_sells, n_taxes), je ein Tupel mit na ganzen Zahlen. */
+ * Seit 1.6.4 ohne das optionale 17. Argument compact (kompakte Lot-Ausgabe von 1.6.3, ohne Aufrufer) und ohne
+ *   refund_due in der Rueckgabe (ohne Leser). */
 PyObject* e_engine_run(PyObject*, PyObject* a) {
     using namespace simlev_engine;
     PyObject *o_prep, *o_day, *o_prices, *o_sb, *o_ss, *o_ew, *o_br, *o_ai, *o_ad, *o_ci, *o_cd, *o_fees, *o_tot0,
-        *o_tp, *o_zve, *o_rep, *o_compact = nullptr;
-    if (!PyArg_UnpackTuple(a, "sim_engine_run", 16, 17, &o_prep, &o_day, &o_prices, &o_sb, &o_ss, &o_ew, &o_br, &o_ai,
-                           &o_ad, &o_ci, &o_cd, &o_fees, &o_tot0, &o_tp, &o_zve, &o_rep, &o_compact))
+        *o_tp, *o_zve, *o_rep;
+    if (!PyArg_UnpackTuple(a, "sim_engine_run", 16, 16, &o_prep, &o_day, &o_prices, &o_sb, &o_ss, &o_ew, &o_br, &o_ai,
+                           &o_ad, &o_ci, &o_cd, &o_fees, &o_tot0, &o_tp, &o_zve, &o_rep))
         return nullptr;
     const char* fn = "sim_engine_run";
-    long compact = 0;
-    if (o_compact && o_compact != Py_None) {
-        compact = PyLong_AsLong(o_compact);
-        if (compact == -1 && PyErr_Occurred()) return nullptr;
-        if (compact < 0 || compact > 2) {
-            PyErr_SetString(PyExc_ValueError, "sim_engine_run: compact muss 0, 1 oder 2 sein");
-            return nullptr;
-        }
-    }
     if (!PyList_Check(o_prices) || !PyList_Check(o_sb) || !PyList_Check(o_ss) || !PyList_Check(o_rep) ||
         (o_ew != Py_None && !PyList_Check(o_ew)) || (o_br != Py_None && !PyList_Check(o_br))) {
         PyErr_SetString(PyExc_TypeError, "sim_engine_run: Listen erwartet");
@@ -183,36 +161,18 @@ PyObject* e_engine_run(PyObject*, PyObject* a) {
     };
     if (!status || !totals || !rows || !ks || !lots || !sells || !taxes || !prices || !evs) return drop();
     for (Py_ssize_t k = 0; k < na; k++) {
-        if (compact) {   // seit 1.6.3: offene Lots spaltenweise (compact 2) bzw. None; Verkaeufe/Steuern None
-            PyObject* bl;
-            if (compact == 2) {
-                const Py_ssize_t ko = (Py_ssize_t) E.open_lots_n((int) k);
-                bl = ext::new_doubles(4 * ko, &p);
-                if (!bl) return drop();
-                if (ko > 0) E.open_lots_out((int) k, p);
-            } else {
-                Py_INCREF(Py_None);
-                bl = Py_None;
-            }
-            PyList_SET_ITEM(lots, k, bl);
-            Py_INCREF(Py_None);
-            PyList_SET_ITEM(sells, k, Py_None);
-            Py_INCREF(Py_None);
-            PyList_SET_ITEM(taxes, k, Py_None);
-        } else {
-            PyObject* bl = ext::new_doubles(7 * (Py_ssize_t) E.buys[(std::size_t) k].size(), &p);
-            if (!bl) return drop();
-            E.lots_out((int) k, p);
-            PyList_SET_ITEM(lots, k, bl);
-            PyObject* sv = ext::new_doubles(8 * (Py_ssize_t) E.sells[(std::size_t) k].size(), &p);
-            if (!sv) return drop();
-            E.sells_out((int) k, p);
-            PyList_SET_ITEM(sells, k, sv);
-            PyObject* tv = ext::new_doubles(8 * (Py_ssize_t) E.taxes[(std::size_t) k].size(), &p);
-            if (!tv) return drop();
-            E.taxes_out((int) k, p);
-            PyList_SET_ITEM(taxes, k, tv);
-        }
+        PyObject* bl = ext::new_doubles(7 * (Py_ssize_t) E.buys[(std::size_t) k].size(), &p);
+        if (!bl) return drop();
+        E.lots_out((int) k, p);
+        PyList_SET_ITEM(lots, k, bl);
+        PyObject* sv = ext::new_doubles(8 * (Py_ssize_t) E.sells[(std::size_t) k].size(), &p);
+        if (!sv) return drop();
+        E.sells_out((int) k, p);
+        PyList_SET_ITEM(sells, k, sv);
+        PyObject* tv = ext::new_doubles(8 * (Py_ssize_t) E.taxes[(std::size_t) k].size(), &p);
+        if (!tv) return drop();
+        E.taxes_out((int) k, p);
+        PyList_SET_ITEM(taxes, k, tv);
         PyObject* pv;
         if (E.px_changed[(std::size_t) k]) {
             pv = ext::new_doubles(n, &p);
@@ -229,13 +189,30 @@ PyObject* e_engine_run(PyObject*, PyObject* a) {
         const Event& e = E.events[i];
         PyObject* ints = PyTuple_New(e.ny);
         if (!ints) return drop();
-        for (int j = 0; j < e.ny; j++) PyTuple_SET_ITEM(ints, j, PyLong_FromLong(E.ev_ints[(std::size_t) (e.y_off + j)]));
+        // seit 1.6.4 (K43 T1-N4): jede neue Zahl geprueft; bei Speichermangel Tupel freigeben (leere Plaetze sind
+        // erlaubt) und MemoryError statt eines NULL-Eintrags im Tupel
+        for (int j = 0; j < e.ny; j++) {
+            PyObject* o = PyLong_FromLong(E.ev_ints[(std::size_t) (e.y_off + j)]);
+            if (!o) {
+                Py_DECREF(ints);
+                return drop();
+            }
+            PyTuple_SET_ITEM(ints, j, o);
+        }
         PyObject* vals = PyTuple_New(e.nv);
         if (!vals) {
             Py_DECREF(ints);
             return drop();
         }
-        for (int j = 0; j < e.nv; j++) PyTuple_SET_ITEM(vals, j, PyFloat_FromDouble(E.ev_vals[(std::size_t) (e.v_off + j)]));
+        for (int j = 0; j < e.nv; j++) {
+            PyObject* o = PyFloat_FromDouble(E.ev_vals[(std::size_t) (e.v_off + j)]);
+            if (!o) {
+                Py_DECREF(ints);
+                Py_DECREF(vals);
+                return drop();
+            }
+            PyTuple_SET_ITEM(vals, j, o);
+        }
         PyObject* t = Py_BuildValue("(iiiiiNddN)", e.code, e.site, e.day, e.asset, e.aux, ints, e.d0, e.d1, vals);
         if (!t) return drop();
         PyList_SET_ITEM(evs, (Py_ssize_t) i, t);
@@ -249,33 +226,8 @@ PyObject* e_engine_run(PyObject*, PyObject* a) {
         Py_DECREF(err);
         return drop();
     }
-    if (!compact)
-        return Py_BuildValue("(NNNNNNddNNdNNN)", status, totals, lots, sells, taxes, prices, E.fee_paid, E.tax_unpaid,
-                             rows, ks, E.refund_due, evs, err, flags);
-    // compact: dazu (n_buys, n_sells, n_taxes) als Tupel von na ganzen Zahlen je Art
-    PyObject* cnt = PyTuple_New(3);
-    if (!cnt) {
-        Py_DECREF(err);
-        Py_DECREF(flags);
-        return drop();
-    }
-    for (int j = 0; j < 3; j++) {
-        PyObject* t = PyTuple_New(na);
-        if (!t) {
-            Py_DECREF(cnt);
-            Py_DECREF(err);
-            Py_DECREF(flags);
-            return drop();
-        }
-        for (Py_ssize_t k = 0; k < na; k++) {
-            const std::size_t c = j == 0 ? E.buys[(std::size_t) k].size()
-                                         : j == 1 ? E.sells[(std::size_t) k].size() : E.taxes[(std::size_t) k].size();
-            PyTuple_SET_ITEM(t, k, PyLong_FromSize_t(c));
-        }
-        PyTuple_SET_ITEM(cnt, j, t);
-    }
-    return Py_BuildValue("(NNNNNNddNNdNNNN)", status, totals, lots, sells, taxes, prices, E.fee_paid, E.tax_unpaid, rows,
-                         ks, E.refund_due, evs, err, flags, cnt);
+    return Py_BuildValue("(NNNNNNddNNNNN)", status, totals, lots, sells, taxes, prices, E.fee_paid, E.tax_unpaid, rows,
+                         ks, evs, err, flags);
 }
 
 /* calculate_dates_flags() ueber den Kern (prepare_core_impl.h, dates_flags):
@@ -427,7 +379,7 @@ PyMethodDef simlev_ext_engine_methods[] = {
     {"sim_engine_run", e_engine_run, METH_VARARGS,
      "sim_engine_run(prep, day, prices, sig_buy, sig_sell, event_w, base_rates, ai, ad, ci, cd, fees, tot0,\n"
      "               tariff_par, zve, reports) -> (status, totals, lots, sells, taxes, prices, fee_paid,\n"
-     "               tax_unpaid, rows, ks, refund_due, events, error, flags)  (Vorbereitung und Tagesengine)"},
+     "               tax_unpaid, rows, ks, events, error, flags)  (Vorbereitung und Tagesengine)"},
     {"sim_dates_flags", e_dates_flags, METH_VARARGS,
      "sim_dates_flags(dates, si, start, days, dcode, liquidate) -> int32-Flags  (Termine)"},
     {"sim_evaluate", e_evaluate, METH_VARARGS,

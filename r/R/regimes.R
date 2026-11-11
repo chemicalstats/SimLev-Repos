@@ -62,7 +62,7 @@
 .hmm_init_cl <- function(X, cl, k, ridge) {
   d <- ncol(X)
   list(mu = matrix(vapply(seq_len(k), function(j) colMeans(X[cl == j, , drop = FALSE]), numeric(d)), k, d, byrow = TRUE),
-       S = lapply(seq_len(k), function(j) stats::cov(X[cl == j, , drop = FALSE]) + ridge),
+       S = lapply(seq_len(k), function(j) .sl_cov(X[cl == j, , drop = FALSE]) + ridge),
        A = matrix(0.1 / max(1, k - 1), k, k) + diag(0.9 - 0.1 / max(1, k - 1), k))
 }
 
@@ -104,6 +104,7 @@
 #' @param k Anzahl Zustaende (ganze Zahl >= 2, Standard 2); es werden
 #'   mindestens \code{50 * k} Perioden benoetigt. Spalten ohne Schwankung
 #'   (z. B. konstante Kurse) sind ein Fehler.
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param frequency Periodenlaenge der Renditen: \code{"week"} (Standard,
 #'   ISO-Wochen), \code{"day"} oder \code{"month"}. Bei \code{"day"} entfallen
 #'   Tage, an denen alle Renditen 0 sind (z. B. fortgeschriebene
@@ -111,10 +112,12 @@
 #' @param n_start Anzahl Startwerte (ganze Zahl, Standard 5): der erste aus
 #'   Quantilen einer rollierenden Volatilitaet, die uebrigen zufaellig; es
 #'   zaehlt das Ergebnis mit der hoechsten Log-Likelihood.
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param max_iter,tol Hoechstzahl Baum-Welch-Iterationen je Start (Standard
 #'   300) und relative Abbruchschranke: Abbruch, wenn sich die
 #'   Log-Likelihood um weniger als \code{tol * (1 + |logL|)} aendert
 #'   (Standard 1e-7).
+#'   Seit 1.6.4 max_iter eine ganze Zahl von 0 bis 10^8, tol eine Zahl >= 0.
 #' @param seed Startwert (Standard 1) fuer die zufaelligen Startzuordnungen (nur bei
 #'   \code{n_start > 1}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 #'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
@@ -193,19 +196,25 @@
 regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "month"), n_start = 5L,
                        max_iter = 300L, tol = 1e-7, seed = 1L) {
   frequency <- match.arg(frequency)
-  if (!is.numeric(k) || length(k) != 1 || !is.finite(k) || k != round(k) || k < 2)
-    stop(sprintf("regime_hmm: k muss eine ganze Zahl >= 2 sein (erhalten: %s); ein Zustand w\u00e4re eine einzige Normalverteilung ohne Regime.",
-                 paste(format(k), collapse = ", ")))
+  fn <- "regime_hmm"                                              # seit 1.6.4 vor der Rechnung (K42 E4)
+  if (is.factor(k) || !is.numeric(k) || length(k) != 1 || !is.finite(k) || k != round(k) || k < 2)   # seit 1.6.4 ohne Wert
+    stop("regime_hmm: k muss eine ganze Zahl >= 2 sein; ein Zustand w\u00e4re eine einzige Normalverteilung ohne Regime.")
+  chk_max(k, SL_MAX_N, fn, "k")                   # B-054 (bis 1.6.3 R: sprintf-Fehler bei k = 1e9)
+  .e4_names(columns, fn, "columns")
+  .e4_data(data, columns, fn)                                     # B-015
+  .e4_count(n_start, fn, "n_start")                               # B-032
+  .e4_count(max_iter, fn, "max_iter", lo = 0)
+  chk_num1(tol, fn, "tol", lo = 0)
   k <- as.integer(k)
   rd <- .dep_returns(data, columns, NULL, frequency)
   X <- as.matrix(rd[, columns, drop = FALSE]); Tn <- nrow(X); d <- ncol(X)
-  if (Tn < 50 * k) stop(sprintf("regime_hmm: zu wenige Perioden f\u00fcr die Zustandszahl (%d Perioden, mindestens %d f\u00fcr k = %d).", Tn, 50 * k, k))
-  flat <- columns[apply(X, 2, stats::sd) == 0]
+  if (Tn < 50 * k) stop(sprintf("regime_hmm: zu wenige Perioden f\u00fcr die Zustandszahl (%d Perioden, mindestens %d).", Tn, 50 * k))
+  flat <- columns[apply(X, 2, .sl_sd) == 0]
   if (length(flat)) stop(sprintf("regime_hmm: Spalte(n) %s ohne Schwankung (alle Periodenrenditen gleich, z. B. konstante Kurse); kein Modell sch\u00e4tzbar.",
                                  paste0("'", flat, "'", collapse = ", ")))
   ppy <- (Tn - 1) / (as.numeric(rd$date[Tn] - rd$date[1]) / 365.25)
-  ridge <- diag(1e-10 + 1e-6 * mean(apply(X, 2, stats::var)), d)
-  rs <- if (isTRUE(n_start >= 2)) .sl_main_stream(seed) else NULL   # Hauptstrom, nur bei Zufallsstarts
+  ridge <- diag(1e-10 + 1e-6 * mean(apply(X, 2, .sl_var)), d)
+  rs <- if (isTRUE(n_start >= 2)) .sl_main_stream(seed, "regime_hmm") else NULL   # Hauptstrom, nur bei Zufallsstarts
   inits <- lapply(seq_len(n_start), function(s) {
     if (s == 1) .hmm_init_rank(X, k, max(4, round(ppy / 12)), ridge)
     else .hmm_init_cl(X, .sl_sample(k, Tn, replace = TRUE, stream = rs), k, ridge)
@@ -277,9 +286,11 @@ plot.SimLevHMM <- function(x, data = NULL, ...) {
 #'   Anteil; nicht mit \code{type = "viterbi"}).
 #' @param state_prob Zustandsnummer (1 bis k) fuer \code{output =
 #'   "probability"}; Standard \code{x$k}, der unruhigste Zustand.
+#'   Seit 1.6.4 eine ganze Zahl von 1 bis k.
 #' @param lag Verzoegerung in Kalendertagen (Standard 1): Der Wert einer
 #'   Periode gilt ab Periodenende + \code{lag} Tage; 0 = schon am
 #'   Periodenende.
+#'   Seit 1.6.4 eine ganze Zahl >= 0.
 #' @return Vektor mit einem Wert je Datum in \code{dates}: ganze Zahlen
 #'   (Zustand) bzw. Wahrscheinlichkeiten als Anteil; \code{NA} vor dem ersten
 #'   Periodenende + \code{lag}.
@@ -299,8 +310,15 @@ plot.SimLevHMM <- function(x, data = NULL, ...) {
 regime_states <- function(x, dates, type = c("filtered", "smoothed", "viterbi"), output = c("state", "probability"),
                           state_prob = x$k, lag = 1L) {
   type <- match.arg(type); output <- match.arg(output)
+  fn <- "regime_states"                                           # seit 1.6.4 vor der Rechnung (K42 E4)
+  if (!inherits(x, "SimLevHMM")) chk_stop("klasse", fn, "x", "regime_hmm()")
+  if (is.data.frame(dates)) { chk_cols(dates, "date", fn); dv <- dates$date } else dv <- dates   # B-054
+  if (is.factor(dv) || is.list(dv) || !is.null(dim(dv)) || !(inherits(dv, c("Date", "POSIXt")) || is.character(dv)) || !length(dv))
+    chk_stop("e4.daten", fn)                                      # Entscheidung 7 und 15 (keine Zahl, kein Faktor)
+  chk_int1(state_prob, fn, "state_prob", lo = 1, hi = x$k)        # B-007
+  chk_int1(lag, fn, "lag", lo = 0)                                # B-012
   if (type != "filtered") warning("Gegl\u00e4ttete bzw. Viterbi-Zust\u00e4nde nutzen Zukunftsdaten - nur zur Beschreibung verwenden.")
-  d <- .to_date(if (is.data.frame(dates)) dates$date else dates, "regime_states: dates")
+  d <- .to_date(dv, "regime_states: dates")
   P <- switch(type, filtered = x$filtered, smoothed = x$smoothed, viterbi = NULL)
   v <- if (output == "probability") { if (is.null(P)) stop("Wahrscheinlichkeit nicht f\u00fcr Viterbi.") ; P[, state_prob] }
        else if (is.null(P)) x$viterbi else max.col(P, ties.method = "first")

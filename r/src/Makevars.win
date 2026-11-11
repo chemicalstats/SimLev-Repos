@@ -58,8 +58,16 @@ slc_r_models.o: slc_r_models.cpp
 	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r_models.cpp -o slc_r_models.o
 slc_r_opt.o: slc_r_opt.cpp
 	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r_opt.cpp -o slc_r_opt.o
+slc_r_stats.o: slc_r_stats.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r_stats.cpp -o slc_r_stats.o
 slc_rbase.o: slc_rbase.cpp
 	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rbase.cpp -o slc_rbase.o
+slc_rbase_clust.o: slc_rbase_clust.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rbase_clust.cpp -o slc_rbase_clust.o
+slc_rbase_cov.o: slc_rbase_cov.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rbase_cov.cpp -o slc_rbase_cov.o
+slc_rbase_smooth.o: slc_rbase_smooth.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rbase_smooth.cpp -o slc_rbase_smooth.o
 slc_rng.o: slc_rng.cpp
 	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rng.cpp -o slc_rng.o
 slc_sample.o: slc_sample.cpp

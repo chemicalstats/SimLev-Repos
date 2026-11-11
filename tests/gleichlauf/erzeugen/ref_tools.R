@@ -252,7 +252,7 @@ ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = N
 
 # Tabelle = ein Test mit mehreren Zeilen „Eingabe -> erwarteter Wert bzw. erwartete Meldung“. Jede Zeile ist ein
 # eigener Aufruf in frischer Umgebung (ein Fehler bricht nur seine Zeile ab); gemeinsame Eingaben einmal je Tabelle.
-# zeilen: Liste von list(z = <Zeilenname>, r =, py =, jl =[, print =][, quelle =][, inputs = <eigene Eingaben>]).
+# zeilen: Liste von list(z = <Zeilenname>, r =, py =, jl =[, print =][, quelle =][, inputs = <eigene Eingaben>][, nur = "py" | "jl"]).
 ref_tabelle <- function(id, zeilen, inputs = list(), note = NULL) {
   if (!.ref_in_subset(id)) return(invisible(NULL))
   zs <- vapply(zeilen, function(z) z$z, "")
@@ -262,7 +262,9 @@ ref_tabelle <- function(id, zeilen, inputs = list(), note = NULL) {
     inp <- inputs; inp[names(z$inputs)] <- z$inputs          # eigene Eingaben der Zeile vor den gemeinsamen
     ev <- .ref_eval(z$r, inp, if (is.null(z$print)) NA else z$print)
     zi <- if (length(z$inputs)) lapply(z$inputs, function(x) .ref_input(enc(x)))
-    c(Filter(Negate(is.null), list(z = z$z, quelle = z$quelle, inputs = zi, r = z$r, py = z$py, jl = z$jl)), ev$fields)
+    stopifnot(is.null(z$nur) || z$nur %in% c("py", "jl"))   # Zeile nur für eine Sprache (seit 1.6.4, wie ref_case)
+    c(Filter(Negate(is.null), list(z = z$z, quelle = z$quelle, inputs = zi, r = z$r,
+                                   py = if (!identical(z$nur, "jl")) z$py, jl = if (!identical(z$nur, "py")) z$jl, nur = z$nur)), ev$fields)
   })
   case <- list(id = id, module = .ref$module, note = note,
                inputs = lapply(inputs, function(x) .ref_input(enc(x))), tabelle = rows)

@@ -38,9 +38,9 @@ test_that("plot(colors =) akzeptiert R-Farbnamen, prueft Farbwerte, Transparenz 
   expect_silent(plot(r, colors = list(negative = "darkred", positive = "forestgreen")))
   expect_silent(plot(r, colors = list(primary = "#00336680")))            # eigene Transparenz wird multipliziert
   # vorher: invalid RGB specification (bzw. kryptisch je nach Farbe)
-  expect_error(plot(r, colors = list(primary = "navyy")), "ung\u00fcltige Farbe\\(n\\) in colors: primary = \"navyy\"")
-  expect_error(plot(r, colors = list(primary = "#12345")), "primary = \"#12345\"")
-  expect_error(plot(r, colors = list(grid = NA)), "grid = NA")
+  expect_error(plot(r, colors = list(primary = "navyy")), "ung\u00fcltige Farbe\\(n\\) in colors: 'primary'")   # seit 1.6.4 ohne Wert (Entscheidung 8)
+  expect_error(plot(r, colors = list(primary = "#12345")), "in colors: 'primary'")   # seit 1.6.4 ohne Wert
+  expect_error(plot(r, colors = list(grid = NA)), "in colors: 'grid'")   # seit 1.6.4 ohne Wert
   expect_error(plot(r, colors = list(primary = c("red", "blue"))), "ung\u00fcltige Farbe")
   # Standardfarben: adjustcolor() ergibt dieselben RGBA-Werte wie das fruehere Hex-Suffix
   for (cl in c("#2E86AB", "#D62246")) for (a in c("30", "40", "80"))

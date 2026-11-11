@@ -19,13 +19,9 @@ from __future__ import annotations
 import numpy as np
 
 from . import _ext
+from ._r.rnum import _c64 as _c1   # zusammenhängendes float64-Feld (seit 1.6.4 eine Fassung)
 
 __all__ = ["proj_box_simplex", "qp_box_simplex", "min_cvar_core", "min_cdar_core"]
-
-
-def _c1(x):
-    """Zahlenvektor als zusammenhängendes float64-Feld für den gemeinsamen Kern."""
-    return np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
 
 
 def _mat(R):

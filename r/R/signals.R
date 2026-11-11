@@ -35,8 +35,28 @@
   if (n < 1L || n > m) return(out)
   a <- 2 / (n + 1)
   out[n] <- mean(x[1:n])
-  if (n < m) out[(n + 1L):m] <- stats::filter(a * x[(n + 1L):m], 1 - a, method = "recursive", init = out[n])
+  if (n < m) out[(n + 1L):m] <- .sl_filter(a * x[(n + 1L):m], 1 - a, method = "recursive", init = out[n])
   out
+}
+
+#' Eingaben der Signal-Bausteine pruefen (seit 1.6.4, B-009 bis B-012, B-016, B-024)
+#'
+#' x: numerischer Vektor (keine Matrix, keine Tabelle, kein Text, kein Faktor; leer erlaubt; ein Vektor nur aus NA
+#' zaehlt als Zahlenvektor, Entscheidung 14). Fenster (n, fast, slow, window) eine einzelne endliche Zahl >= 1, lag
+#' >= 0, jeweils hoechstens .Machine$integer.max; seit 1.6.4 ganze Zahlen (Entscheidungen 19 und 32; bis dahin wurden
+#' gebrochene Werte abgeschnitten).
+#' @keywords internal
+#' @noRd
+.sig_x <- function(x, fn) {
+  chk_nofactor(x, fn, "x")   # Entscheidung 15
+  ok <- is.null(dim(x)) && (is.numeric(x) || (is.logical(x) && all(is.na(x))))
+  if (!ok) chk_stop("zahlen", fn, "x")
+  invisible(x)
+}
+# seit 1.6.4 ganze Zahl (Entscheidungen 19, 32; bis 1.6.3 z. B. 20.7 auf 20 abgeschnitten)
+.sig_win <- function(x, fn, arg, lo = 1, null_ok = FALSE) {
+  chk_num1(x, fn, arg, lo = lo, hi = .Machine$integer.max, null_ok = null_ok)
+  chk_int1(x, fn, arg, lo = lo, null_ok = null_ok)
 }
 
 #' Signale um k Zeilen verzoegern und NA bereinigen
@@ -46,6 +66,7 @@
   lag <- as.integer(lag)
   if (lag > 0L) {
     m <- length(buy)
+    lag <- min(lag, m)   # seit 1.6.4 (B-024): lag >= Laenge ergibt nur FALSE (bis 1.6.3 R-Fehler, Python falsche Laenge)
     buy <- c(rep(FALSE, lag), buy[seq_len(m - lag)])
     sell <- c(rep(FALSE, lag), sell[seq_len(m - lag)])
   }
@@ -74,6 +95,16 @@
 #' Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei
 #' \code{signal_drawdown} nur die Zeile mit NA (das Hoch wird ohne sie
 #' fortgefuehrt).
+#'
+#' Eingaben (seit 1.6.4 geprueft): \code{x} ein numerischer Vektor (keine Matrix,
+#' Tabelle, kein Text, Faktor oder Wahrheitswert; leer erlaubt); \code{n},
+#' \code{fast}, \code{slow}, \code{window} je eine endliche Zahl \code{>= 1},
+#' \code{lag >= 0} (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; \code{lag} ab der
+#' Laenge von \code{x} ergibt nur \code{FALSE}); \code{band >= 0};
+#' \code{sell_dd}, \code{buy_dd} groesser 0 und hoechstens 100; bei
+#' \code{signal_volatility} \code{threshold >= 0} und \code{ppy > 0}; bei
+#' \code{signal_combine} \code{buy} und \code{sell} je TRUE/FALSE oder 0/1
+#' (\code{NA} bleibt \code{NA}).
 #'
 #' \code{band} wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind
 #' beide Signale \code{FALSE}, der Zustand in [simulation()] bzw.
@@ -163,6 +194,8 @@ NULL
 #' @rdname signals
 #' @export
 signal_sma <- function(x, n = 200, band = 0, lag = 0) {
+  fn <- "signal_sma"
+  .sig_x(x, fn); .sig_win(n, fn, "n"); chk_num1(band, fn, "band", lo = 0); .sig_win(lag, fn, "lag", lo = 0)
   s <- .roll_mean(as.numeric(x), n)
   .sig_out(x >= s * (1 + band / 100), x < s * (1 - band / 100), lag)
 }
@@ -170,6 +203,8 @@ signal_sma <- function(x, n = 200, band = 0, lag = 0) {
 #' @rdname signals
 #' @export
 signal_ema <- function(x, n = 200, band = 0, lag = 0) {
+  fn <- "signal_ema"
+  .sig_x(x, fn); .sig_win(n, fn, "n"); chk_num1(band, fn, "band", lo = 0); .sig_win(lag, fn, "lag", lo = 0)
   s <- .ema(as.numeric(x), n)
   .sig_out(x >= s * (1 + band / 100), x < s * (1 - band / 100), lag)
 }
@@ -177,8 +212,11 @@ signal_ema <- function(x, n = 200, band = 0, lag = 0) {
 #' @rdname signals
 #' @export
 signal_crossover <- function(x, fast = 50, slow = 200, type = c("sma", "ema"), band = 0, lag = 0) {
+  fn <- "signal_crossover"
+  .sig_x(x, fn); .sig_win(fast, fn, "fast"); .sig_win(slow, fn, "slow")
   type <- match.arg(type)
   if (fast >= slow) stop("fast muss kleiner als slow sein.")
+  chk_num1(band, fn, "band", lo = 0); .sig_win(lag, fn, "lag", lo = 0)
   f <- if (type == "sma") .roll_mean(as.numeric(x), fast) else .ema(as.numeric(x), fast)
   s <- if (type == "sma") .roll_mean(as.numeric(x), slow) else .ema(as.numeric(x), slow)
   .sig_out(f >= s * (1 + band / 100), f < s * (1 - band / 100), lag)
@@ -187,6 +225,9 @@ signal_crossover <- function(x, fast = 50, slow = 200, type = c("sma", "ema"), b
 #' @rdname signals
 #' @export
 signal_momentum <- function(x, n = 250, threshold = 0, band = 0, lag = 0) {
+  fn <- "signal_momentum"
+  .sig_x(x, fn); .sig_win(n, fn, "n"); chk_num1(threshold, fn, "threshold"); chk_num1(band, fn, "band", lo = 0)
+  .sig_win(lag, fn, "lag", lo = 0)
   x <- as.numeric(x); m <- length(x); n <- as.integer(n)
   r <- rep(NA_real_, m)
   if (n < m) r[(n + 1L):m] <- 100 * (x[(n + 1L):m] / x[1:(m - n)] - 1)
@@ -196,6 +237,11 @@ signal_momentum <- function(x, n = 250, threshold = 0, band = 0, lag = 0) {
 #' @rdname signals
 #' @export
 signal_drawdown <- function(x, sell_dd = 20, buy_dd = 10, window = NULL, lag = 0) {
+  fn <- "signal_drawdown"
+  .sig_x(x, fn)
+  chk_num1(sell_dd, fn, "sell_dd", lo = 0, lo_open = TRUE, hi = 100)
+  chk_num1(buy_dd, fn, "buy_dd", lo = 0, lo_open = TRUE, hi = 100)
+  .sig_win(window, fn, "window", null_ok = TRUE); .sig_win(lag, fn, "lag", lo = 0)
   x <- as.numeric(x)
   if (buy_dd > sell_dd) stop("buy_dd darf nicht gr\u00f6\u00dfer als sell_dd sein.")
   xp <- ifelse(is.na(x), -Inf, x)                              # NA unterbricht das Hoch nicht (nur die eigene Zeile ohne Signal)
@@ -213,7 +259,12 @@ signal_drawdown <- function(x, sell_dd = 20, buy_dd = 10, window = NULL, lag = 0
 #' @rdname signals
 #' @export
 signal_volatility <- function(x, n = 20, threshold = 25, band = 0, ppy = 365.25, lag = 0) {
-  x <- as.numeric(x); r <- c(NA, diff(log(x)))
+  fn <- "signal_volatility"
+  .sig_x(x, fn); .sig_win(n, fn, "n"); chk_num1(threshold, fn, "threshold", lo = 0); chk_num1(band, fn, "band", lo = 0)
+  chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE); .sig_win(lag, fn, "lag", lo = 0)
+  x <- as.numeric(x)
+  if (!length(x)) return(list(buy = logical(0), sell = logical(0)))   # seit 1.6.4 (B-016): leer statt eines Phantomwerts
+  r <- c(NA, diff(log(x)))
   r0 <- r; r0[is.na(r0)] <- 0
   v <- 100 * sqrt(pmax(.roll_var(r0, n), 0) * n / max(n - 1, 1) * ppy)
   v[seq_len(min(n, length(v)))] <- NA
@@ -226,6 +277,17 @@ signal_combine <- function(..., op = c("and", "or")) {
   op <- match.arg(op)
   s <- list(...)
   if (!length(s)) stop("Keine Signale \u00fcbergeben.")
+  # seit 1.6.4 (B-008, Entscheidung 1): je Signal eine Liste mit buy und sell, jeweils TRUE/FALSE oder 0/1 (NA
+  # erlaubt, bleibt NA); 0/1 als Wahrheitswerte (bis 1.6.3 wandelte R Zahlen mit Warnung, Python las NaN und Text
+  # als TRUE)
+  sig_ok <- function(v) is.null(dim(v)) && (is.logical(v) || (is.numeric(v) && !is.factor(v) && all(is.na(v) | v == 0 | v == 1)))
+  for (i in seq_along(s)) {
+    z <- s[[i]]
+    if (!is.list(z) || is.data.frame(z) || !all(c("buy", "sell") %in% names(z)) || !sig_ok(z$buy) || !sig_ok(z$sell))
+      chk_stop("e1.signal", "signal_combine", i)
+    if (is.numeric(z$buy)) s[[i]]$buy <- as.logical(z$buy)
+    if (is.numeric(z$sell)) s[[i]]$sell <- as.logical(z$sell)
+  }
   len <- vapply(s, function(z) length(z$buy), 1L)
   if (any(len != len[1]) || any(vapply(s, function(z) length(z$sell), 1L) != len))
     stop(sprintf("signal_combine: Signale haben unterschiedliche L\u00e4ngen (%s); alle aus derselben Kursreihe erzeugen.",

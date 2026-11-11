@@ -33,7 +33,8 @@
 //   quantile_reg_core  lineare Quantilsregression (MM-Algorithmus,
 //                      Hunter & Lange 2000, mit exakter Ecken-Politur bzw.
 //                      Austauschschritten bis zum Optimalitaetsnachweis)
-//   hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
+//   hmm_fb_raw          skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch; der Einstieg
+//                      hmm_forward_backward ohne Aufrufer im Paket entfaellt seit 1.6.4)
 //   hmm_em              Baum-Welch-EM aus einem Startwert (seit 1.5.0)
 //   goal_dp             Rueckwaertsrekursion von planning_goal() (seit 1.5.0)
 //   pbo_cscv            Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0)
@@ -155,7 +156,12 @@ static auto qp_box_simplex(simlev_host::NumMat Q, simlev_host::NumVec cvec, siml
 // ---------------------------------------------------------------------------
 
 static inline double softplus(double z) { return z > 30.0 ? z : std::log1p(std::exp(z)); }
-static inline double logistic(double z) { return z >= 0.0 ? 1.0 / (1.0 + std::exp(-z)) : std::exp(z) / (1.0 + std::exp(z)); }
+// seit 1.6.4 fuer z < 0 exp(z) einmal (B-077; derselbe Wert wie zwei Aufrufe)
+static inline double logistic(double z) {
+  if (z >= 0.0) return 1.0 / (1.0 + std::exp(-z));
+  const double e = std::exp(z);
+  return e / (1.0 + e);
+}
 
 static auto min_cvar_core(simlev_host::NumMat R, double alpha, simlev_host::NumVec lo, simlev_host::NumVec hi, simlev_host::NumVec w0, double zeta0, simlev_host::NumVec scales, int maxit) {
   const int T = R.nrow(), N = R.ncol();
@@ -175,15 +181,22 @@ static auto min_cvar_core(simlev_host::NumMat R, double alpha, simlev_host::NumV
       for (int s = 0; s < T; ++s) acc += softplus((loss[s] - z[N]) / sc);
       return z[N] + sc * acc / aT;
     };
-    auto grad = [&](const std::vector<double>& z, std::vector<double>& gr) {
-      port_loss(z); std::fill(gr.begin(), gr.end(), 0.0); double sp = 0.0;
-      for (int s = 0; s < T; ++s) { const double p = logistic((loss[s] - z[N]) / sc); loss[s] = p; sp += p; }
-      for (int i = 0; i < N; ++i) { double acc = 0.0; for (int s = 0; s < T; ++s) acc += R(s, i) * loss[s]; gr[i] = -acc / aT; }
+    // Gradient und Wert am selben Punkt (seit 1.6.4, B-077; bis 1.6.3 grad und danach f, also port_loss zweimal):
+    // je s dieselben Ausdruecke, beide Summen in derselben Folge wie in f bzw. grad
+    auto grad_f = [&](const std::vector<double>& z, std::vector<double>& gr) {
+      port_loss(z); std::fill(gr.begin(), gr.end(), 0.0); double sp = 0.0, acc = 0.0;
+      for (int s = 0; s < T; ++s) {
+        const double u = (loss[s] - z[N]) / sc;
+        acc += softplus(u);
+        const double p = logistic(u); loss[s] = p; sp += p;
+      }
+      for (int i = 0; i < N; ++i) { double a = 0.0; for (int s = 0; s < T; ++s) a += R(s, i) * loss[s]; gr[i] = -a / aT; }
       gr[N] = 1.0 - sp / aT;
+      return z[N] + sc * acc / aT;
     };
     yv = x; double t = 1.0, L = 1.0 / (alpha * sc);
     for (int it = 0; it < maxit; ++it) {
-      grad(yv, g); const double fy = f(yv); L /= 2.0;
+      const double fy = grad_f(yv, g); L /= 2.0;
       for (int ls = 0; ls < 60; ++ls) {
         for (int i = 0; i <= N; ++i) tmp[i] = yv[i] - g[i] / L;
         proj_box_simplex(tmp.data(), lo.begin(), hi.begin(), N, xn.data()); xn[N] = tmp[N];
@@ -235,6 +248,9 @@ static auto min_cdar_core(simlev_host::NumMat R, double alpha, simlev_host::NumV
     for (int s = 0; s < T; ++s) { double a = 0.0; for (int i = 0; i < N; ++i) a += R(s, i) * z[i]; r[s] = a; }
   };
   port(w); double fbest = cdar_of(r, alpha, D); best = w;
+  // seit 1.6.4 (K43 T2-N6): lauter Nullrenditen (sc = 0): kein Schritt, Ergebnis der Start (bis dahin Schrittweite Inf,
+  // Inf * 0 = NaN und std::sort ueber NaN in proj_box_simplex; Ergebnis zufaellig derselbe Start)
+  if (sc == 0.0) return SIMLEV_COPY(best.begin(), best.end());
   const double sqN = std::sqrt((double) N);
   for (int it = 1; it <= iters; ++it) {
     double pk = -INFINITY; int am = 0;
@@ -565,6 +581,8 @@ static auto quantile_reg_core(simlev_host::NumVec y, simlev_host::NumMat X, doub
   const int n = X.nrow(), p = X.ncol();
   std::vector<double> beta(beta0.begin(), beta0.end()), nb(p), A(p * p), c1(p, 0.0), r(n), w(n);
   if (p == 0) return SIMLEV_DONE(SIMLEV_NUM(0));
+  // seit 1.6.4 (B-030): tau in [0, 1] (bis 1.6.3 lieferte tau = NaN still Zahlen); die Aufrufer pruefen vorher
+  if (!(tau >= 0.0 && tau <= 1.0)) SIMLEV_FAIL("Quantilsregression: tau muss in [0, 1] liegen.");
   bool proven = false;
   for (int j = 0; j < p; ++j) { double s = 0.0; for (int i = 0; i < n; ++i) s += X(i, j); c1[j] = s * (tau - 0.5); }
   const double epss[4] = {1e-2, 1e-4, 1e-6, 1e-8};
@@ -628,14 +646,6 @@ static void hmm_fb_raw(int T, int K, const double* B, const double* A, int lda, 
   sl_hmm_fb(T, K, B, A, lda, p0, al, be, ga, xi, cs, tmp.data());
 }
 
-static auto hmm_forward_backward(simlev_host::NumMat B, simlev_host::NumMat A, simlev_host::NumVec p0) {
-  const int T = B.nrow(), K = B.ncol();
-  auto al = SIMLEV_MATRIX(T, K), be = SIMLEV_MATRIX(T, K), ga = SIMLEV_MATRIX(T, K), xi = SIMLEV_MATRIX(K, K);
-  auto cs = SIMLEV_NUM(T);
-  hmm_fb_raw(T, K, &B(0, 0), &A(0, 0), A.nrow(), &p0[0], &al(0, 0), &be(0, 0), &ga(0, 0), &xi(0, 0), &cs[0]);
-  return SIMLEV_LIST("filtered", al, "smoothed", ga, "xi", xi, "scale", cs);
-}
-
 // ---------------------------------------------------------------------------
 // Hidden-Markov-Modell: Baum-Welch-EM aus einem Startwert (seit 1.5.0; bis 1.4.3 .hmm_em/_hmm_em in den Sprachen)
 // ---------------------------------------------------------------------------
@@ -659,6 +669,7 @@ static int hmm_em(int Tn, int d, int k, const double* X, double* mu, double* S, 
       lcs(T), w(T), xw(T * D), cmu(D), C(D * D), rsx(K);
   sl_ctx cx;
   const double c0 = 0.5 * d * std::log(2 * M_PI);
+  if (n_iter < 0) return 1;   // seit 1.6.4 (B-030): bis 1.6.3 Erfolg mit iter = -1
   for (int j = 0; j < k; ++j) p0[j] = 1.0 / k;
   double ll = 0.0, ll_old = -std::numeric_limits<double>::infinity();
   auto estep = [&]() -> int {
@@ -742,6 +753,10 @@ static int64_t goal_dp(int S, int K, const double* R, int ng, const double* grid
   const std::size_t NG = (std::size_t) ng, NS = (std::size_t) S;
   sl_ctx cx;
   bool bad = false;
+  // seit 1.6.4 (B-030): Renditen und Startvermoegen endlich (bis 1.6.3 still Wahrscheinlichkeiten 1e-12/0/1); Fehler
+  // wie bei der Normalverteilung (Rueckgabe -1), die Aufrufer pruefen vorher
+  if (!std::isfinite(sv)) return -1;
+  for (std::size_t i = 0; i < NS * (std::size_t) K; ++i) if (!std::isfinite(R[i])) return -1;
   // log(grid) und die Bindungen von approx (regularize.values mit ties = mean)
   std::vector<double> lg(NG);
   for (std::size_t i = 0; i < NG; ++i) lg[i] = sl_r_log1(grid[i]);
@@ -871,16 +886,48 @@ static void pbo_cscv(int S, int N, int C, const double* B, const double* T, cons
                      double* lam, double* isb, double* oosb, double* oosm) {
   const std::size_t SN = (std::size_t) S * N, H = (std::size_t) (S / 2);
   const double na = SIMLEV_NA;
-  std::vector<double> Ind, I(5), IS, OOS, row((std::size_t) N);
+  std::vector<double> Ind, I(5), IS, OOS, row((std::size_t) N), acc((std::size_t) N);
   std::vector<std::vector<double>> Im(5);
+  // Seit 1.6.4 (B-076): sind alle Blocksummen endlich, die In-Sample-Summen direkt als Summe der gewaehlten Bloecke in
+  // aufsteigender Folge ab 0.0 (B zeilenweise umgelegt); das ist Bit fuer Bit sl_matmul mit der 0/1-Matrix Ind, weil
+  // x + 0 b = x fuer endliches b (auch fuer +-0: die Summe ab +0.0 wird nie -0). Mit nicht endlichen Werten (0 Inf =
+  // NaN wie R's %*%) oder nicht aufsteigenden Kombinationen wie bisher ueber sl_matmul.
+  bool fin = true;
+  for (std::size_t i = 0; i < 5 * SN && fin; ++i) fin = std::isfinite(B[i]);
+  std::vector<double> Bt;
+  if (fin) {
+    Bt.resize(5 * SN);
+    for (int b = 0; b < 5; ++b)
+      for (std::size_t j = 0; j < (std::size_t) N; ++j)
+        for (std::size_t l = 0; l < (std::size_t) S; ++l) Bt[SN * b + l * N + j] = B[SN * b + l + (std::size_t) S * j];
+  }
   for (int st = 0; st < C; st += 2000) {
     SIMLEV_CHECK_INTERRUPT();
     const int k = std::min(C, st + 2000) - st;
     const std::size_t K = (std::size_t) k;
-    Ind.assign(K * S, 0.0);
-    for (std::size_t r = 0; r < K; ++r)
-      for (std::size_t q = 0; q < H; ++q) Ind[r + K * (std::size_t) (combos[q + H * (st + r)] - 1)] = 1.0;
-    for (int b = 0; b < 5; ++b) { Im[b].resize(K * N); sl_matmul(k, S, N, Ind.data(), B + SN * b, Im[b].data()); }
+    bool asc = fin;
+    for (std::size_t r = 0; r < K && asc; ++r)
+      for (std::size_t q = 1; q < H; ++q)
+        if (combos[q + H * (st + r)] <= combos[q - 1 + H * (st + r)]) { asc = false; break; }
+    if (asc) {
+      for (int b = 0; b < 5; ++b) {
+        Im[b].resize(K * N);
+        const double* Bb = Bt.data() + SN * b;
+        for (std::size_t r = 0; r < K; ++r) {
+          std::fill(acc.begin(), acc.end(), 0.0);
+          for (std::size_t q = 0; q < H; ++q) {
+            const double* br = Bb + (std::size_t) (combos[q + H * (st + r)] - 1) * N;
+            for (std::size_t j = 0; j < (std::size_t) N; ++j) acc[j] += br[j];
+          }
+          for (std::size_t j = 0; j < (std::size_t) N; ++j) Im[b][r + K * j] = acc[j];
+        }
+      }
+    } else {
+      Ind.assign(K * S, 0.0);
+      for (std::size_t r = 0; r < K; ++r)
+        for (std::size_t q = 0; q < H; ++q) Ind[r + K * (std::size_t) (combos[q + H * (st + r)] - 1)] = 1.0;
+      for (int b = 0; b < 5; ++b) { Im[b].resize(K * N); sl_matmul(k, S, N, Ind.data(), B + SN * b, Im[b].data()); }
+    }
     IS.resize(K * N); OOS.resize(K * N);
     for (std::size_t j = 0; j < (std::size_t) N; ++j)
       for (std::size_t r = 0; r < K; ++r) {
@@ -1035,6 +1082,9 @@ static double kt_ratio(long long num, long long A, long long B) {
 static double kendall_tau_core(simlev_host::NumVec x, simlev_host::NumVec y) {
   const int n = x.size();
   if (n < 2) return SIMLEV_NA;
+  // seit 1.6.4 (B-030): NaN/NA ergibt NA wie R .kendall (bis 1.6.3 sortierte std::sort mit NaN ohne strenge Ordnung,
+  // ein undefiniertes Verhalten, und lieferte still Zahlen); die Aufrufer filtern vorher
+  for (int i = 0; i < n; ++i) if (x[i] != x[i] || y[i] != y[i]) return SIMLEV_NA;
   std::vector<int> o(n); std::iota(o.begin(), o.end(), 0);
   std::sort(o.begin(), o.end(), [&](int a, int b) { return x[a] < x[b] || (x[a] == x[b] && y[a] < y[b]); });
   std::vector<double> ys(n), buf(n);

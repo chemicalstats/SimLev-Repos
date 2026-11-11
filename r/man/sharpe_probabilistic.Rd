@@ -9,7 +9,8 @@ sharpe_probabilistic(r, benchmark = 0, ppy = 52)
 \arguments{
 \item{r}{Numerischer Vektor einfacher Periodenrenditen als Anteil
 (0.01 = 1 \%); nicht endliche Werte werden entfernt. Ein risikoloser
-Zins wird nicht abgezogen.}
+Zins wird nicht abgezogen.
+Seit 1.6.4 mindestens zwei endliche Werte, die nicht alle gleich sind (sonst Fehler).}
 
 \item{benchmark}{Vergleichs-Sharpe-Ratio \eqn{SR^*} p. a. (Standard 0);
 intern durch \eqn{\sqrt{ppy}} geteilt.}

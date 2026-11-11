@@ -31,8 +31,11 @@ from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _a
 from ._util import _dates, _days, _match_arg
 from ._util import _ext
 from ._util import _cagr_q, _geo_ann
-from ._util import _match_days, _pow_rec
+from ._util import _is_num_scalar, _match_days, _pow_rec
+from ._util import _fp_quiet
 from .backcast import _fill_na
+from .data_prep import _duplicated
+from ._pruefen import chk_fmt, chk_is_factor, chk_num1, chk_scalar, chk_stop
 
 __all__ = ["result_analysis", "SimLevAnalysis"]
 
@@ -108,6 +111,13 @@ def _cor(x, y=None):
     return float(np.asarray(r, dtype=np.float64).ravel()[0])
 
 
+def _rdiv(a, b):
+    """``a / b`` wie in R (IEEE: Division durch 0 ergibt ±Inf bzw. NaN, ohne ZeroDivisionError; seit 1.6.4,
+    Entscheidung 156). Bei b != 0 gleiche Bits wie ``/``."""
+    with np.errstate(all="ignore"):
+        return float(np.float64(a) / np.float64(b))
+
+
 def _cov(x, y):
     f = _stats("cov")
     r = f(np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64))
@@ -126,10 +136,6 @@ def _mean_lgl(b):
     if b.size == 0:
         return _NAN
     return r_mean_int(b.astype(np.int64))
-
-
-def _is_num_scalar(x):
-    return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, (bool, np.bool_))
 
 
 def _is_result(x):
@@ -155,46 +161,12 @@ def _col_is_numeric(v):
     return bool(pd.api.types.is_numeric_dtype(dt)) and dt.kind != "c"
 
 
-def _r_class(v):
-    """``class(v)[1]`` einer data.frame-Spalte (für Meldungen)."""
-    dt = v.dtype
-    if isinstance(dt, pd.CategoricalDtype):
-        return "factor"
-    if pd.api.types.is_bool_dtype(dt):
-        return "logical"
-    if dt.kind == "M":
-        return "Date"
-    if dt.kind in "iu":
-        return "integer"
-    if dt.kind == "f":
-        return "numeric"
-    if dt == object:
-        vals = [e for e in v.tolist() if e is not None]
-        if vals and all(isinstance(e, (bool, np.bool_)) for e in vals):
-            return "logical"
-    return "character"
-
-
 def _as_numeric_col(v):
     if isinstance(v.dtype, pd.CategoricalDtype):
         return v.cat.codes.to_numpy().astype(np.float64) + 1.0
     if v.dtype.kind == "f":
         return v.to_numpy(dtype=np.float64, copy=True)          # NA/NaN-Bitmuster erhalten
     return pd.to_numeric(v, errors="coerce").to_numpy(dtype=np.float64, na_value=NA_REAL)
-
-
-def _duplicated_last(d):
-    """``duplicated(d, fromLast = TRUE)``."""
-    seen = set()
-    out = np.zeros(len(d), dtype=bool)
-    for i in range(len(d) - 1, -1, -1):
-        k = d[i]
-        k = "NA" if (isinstance(k, float) and math.isnan(k)) else k
-        if k in seen:
-            out[i] = True
-        else:
-            seen.add(k)
-    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -247,11 +219,15 @@ def _da_series(x, name):
                     name, num[0], ", ".join(num[1:])))
             vc = num[0]
         col = x[vc]
+        if isinstance(getattr(col, "dtype", None), pd.CategoricalDtype):   # Entscheidung 15
+            chk_stop("spalte_faktor", "result_analysis", vc)
         if not _col_is_numeric(col):
             if len(_ext("data_prep", "_num_text_cols")(x[[vc]])):
                 _ext("data_prep", "_num_text_stop")(x, vc, name)
-            raise ValueError("'%s': Wertspalte '%s' ist nicht numerisch (Klasse %s)." % (name, vc, _r_class(col)))
+            raise ValueError("'%s': Wertspalte '%s' ist nicht numerisch." % (name, vc))   # seit 1.6.4 ohne Klasse
         v = _as_numeric_col(col)
+        if chk_is_factor(x["date"]):   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
+            chk_stop("spalte_faktor", "result_analysis", "date")
         d = _to_date_days(x["date"], "'%s': Spalte 'date'" % name)
         fm = x.attrs.get("filled") if hasattr(x, "attrs") else None
         fl = np.zeros(len(v), dtype=bool)
@@ -275,7 +251,7 @@ def _da_series(x, name):
         idx = np.flatnonzero(~np.isnan(d))
         idx = idx[np.argsort(d[idx], kind="stable")]
         d, v, fl = d[idx], v[idx], fl[idx]
-        dup = _duplicated_last(list(d))
+        dup = _duplicated(d, from_last=True)   # duplicated(d, fromLast = TRUE) (data_prep; seit 1.6.4 ohne Liste, B-078)
         if dup.any():
             _message("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet." % (name, int(dup.sum())))
             d, v, fl = d[~dup], v[~dup], fl[~dup]
@@ -290,8 +266,8 @@ def _da_series(x, name):
         bad = np.flatnonzero(~np.isfinite(v) | (v <= 0))
         if bad.size:
             raise ValueError("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexstände, keine "
-                             "Renditen); %d Werte <= 0, z. B. %s am %s." % (
-                                 name, vc, bad.size, _fmt.format(float(v[bad[0]])), _fmt_date1(d[bad[0]])))
+                             "Renditen); %d Werte <= 0, z. B. am %s." % (
+                                 name, vc, bad.size, _fmt_date1(d[bad[0]])))   # seit 1.6.4 ohne den Wert
         if len(v) < 2:
             raise ValueError("'%s': mindestens zwei Daten mit Wert nötig." % name)
         return {"name": name, "date": d, "value": v, "filled": fl, "worth": None, "flows": None, "result": None}
@@ -348,10 +324,19 @@ def _da_deflate(s, inflation):
 
 
 def _da_period_values(date, value, unit):
-    """Wertreihe auf Perioden-Endwerte reduzieren (letzter verfügbarer Tag)."""
-    key = _key_month(date) if unit == "month" else _key_year(date)
-    last = _last_of_key(key)
-    return {"key": [key[i] for i in last], "date": np.asarray(date)[last], "value": np.asarray(value)[last],
+    """Wertreihe auf Perioden-Endwerte reduzieren (letzter verfügbarer Tag). Seit 1.6.4 (B-078) über ganzzahlige
+    Perioden (Monat bzw. Jahr des Tages wie ``_dates``) und Text nur für die Periodenenden (``format_date`` wie
+    bisher, also auch für Jahre < 1000 wie R); bei fehlenden Daten wie bisher über Text je Tag."""
+    dd = _dates(date)
+    if dd.size and not np.isnat(dd).any():
+        k = dd.astype("datetime64[M]" if unit == "month" else "datetime64[Y]").astype(np.int64)
+        last = np.flatnonzero(np.r_[k[1:] != k[:-1], True])
+        key = [str(s) for s in _fmt.format_date(dd[last], "%Y-%m" if unit == "month" else "%Y")]
+    else:
+        key = _key_month(date) if unit == "month" else _key_year(date)
+        last = _last_of_key(key)
+        key = [key[i] for i in last]
+    return {"key": key, "date": np.asarray(date)[last], "value": np.asarray(value)[last],
             "start_value": float(value[0]), "start_date": float(date[0])}
 
 
@@ -403,13 +388,9 @@ def _da_drawdowns(date, value, top=10):
         return pd.DataFrame({"start": e, "trough": e, "end": e, "depth": np.zeros(0), "days_to_trough": np.zeros(0),
                              "days_to_recover": np.zeros(0), "days_total": np.zeros(0)})
     en = np.flatnonzero(neg & ~nxt)
-    seg = np.cumsum(neg & ~prev)[neg]
-    rows = np.flatnonzero(neg)
-    tr = []
-    for k in range(1, int(seg.max()) + 1):
-        r = rows[seg == k]
-        tr.append(int(r[int(np.argmin(dd[r]))]))
-    tr = np.array(tr, dtype=np.int64)
+    # Tiefpunkt je Episode (erstes Minimum); seit 1.6.4 je Episode nur ihre Zeilen st..en (B-079; bis 1.6.3 je
+    # Episode ein Vergleich über alle Zeilen, gleiche Indizes)
+    tr = np.array([int(a) + int(np.argmin(dd[a:b + 1])) for a, b in zip(st, en)], dtype=np.int64)
     s0 = np.maximum(0, st - 1)
     rec = en + 1
     opn = rec > n - 1          # 0-basiert: Erholungszeile hinter dem Ende = offen
@@ -447,8 +428,9 @@ def _sum_any(v):
     return float(np.sum(np.asarray(v, dtype=np.float64)))
 
 
-def _da_metrics(s, rate, ppy, var_levels):
-    """Kennzahlen einer Reihe (``.da_metrics``) als ``pandas.Series``."""
+def _da_metrics(s, rate, ppy, var_levels, dd_memo=None):
+    """Kennzahlen einer Reihe (``.da_metrics``) als ``pandas.Series``. ``dd_memo`` (Liste, seit 1.6.4, B-079): dort
+    ``(s, Episodentabelle)``, wenn sie ohne Gleitkomma-Meldung entstand (für ``drawdowns`` deren Kopf)."""
     val = s["value"]
     fl = s["filled"]
     kk = np.concatenate([[0], np.flatnonzero(~fl[1:]) + 1]).astype(np.int64)
@@ -467,19 +449,21 @@ def _da_metrics(s, rate, ppy, var_levels):
     ulcer = math.sqrt(r_mean(dd * dd))
     mr = _period_returns(_da_period_values(s["date"], val, "month"))
     yr = _period_returns(_da_period_values(s["date"], val, "year"))
-    var_d, cvar_d, var_m, cvar_m = [], [], [], []
-    for a in var_levels:
-        q = _q1(r, a)
-        var_d.append(-q)
-    for a in var_levels:
-        q = _q1(r, a)
-        cvar_d.append(-r_mean(r[r <= q]))
-    for a in var_levels:
-        var_m.append(-_q1(mr, a))
-    for a in var_levels:
-        q = _q1(mr, a)
-        cvar_m.append(-r_mean(mr[mr <= q]))
-    ddt = _da_drawdowns(s["date"], val, top=1e6)
+    # seit 1.6.4 je Stufe ein Quantil für VaR und CVaR (B-110; bis 1.6.3 zweimal, gleiche Werte)
+    qd = [_q1(r, a) for a in var_levels]
+    var_d = [-q for q in qd]
+    cvar_d = [-r_mean(r[r <= q]) for q in qd]
+    qm = [_q1(mr, a) for a in var_levels]
+    var_m = [-q for q in qm]
+    cvar_m = [-r_mean(mr[mr <= q]) for q in qm]
+    if dd_memo is None:
+        ddt = _da_drawdowns(s["date"], val, top=1e6)
+    else:
+        ddt, q = _fp_quiet(lambda: _da_drawdowns(s["date"], val, top=1e6))
+        if not q:
+            ddt = _da_drawdowns(s["date"], val, top=1e6)
+        elif len(ddt) < 1e6:
+            dd_memo.append((s, ddt))
     rf_ann = rfl["ann"]
     sdex = r_sd(ex)
     out = {
@@ -487,7 +471,7 @@ def _da_metrics(s, rate, ppy, var_levels):
         "years": yrs, "total_return": val[-1] / val[0] - 1,
         "cagr": cagr, "mwrr": _da_mwrr(s), "volatility": vol,
         "sharpe": r_mean(ex) * ppy / (sdex * math.sqrt(ppy)) if sdex > 0 else _NA,
-        "sortino": (r_mean(ex) * ppy / (math.sqrt(r_mean(np.minimum(ex, 0) * np.minimum(ex, 0))) * math.sqrt(ppy))
+        "sortino": (_rdiv(r_mean(ex) * ppy, math.sqrt(r_mean(np.minimum(ex, 0) * np.minimum(ex, 0))) * math.sqrt(ppy))
                     if down.size else _NA),
         "calmar": cagr / mdd if mdd > 0 else _NA,
         "max_drawdown": mdd,
@@ -544,7 +528,10 @@ def _da_benchmark(s, b, rate, ppy, cagr_s, cagr_b):
     rf = rfl["r"]
     es = rs - rf
     eb = rb - rf
-    beta = _cov(es, eb) / r_var(eb)
+    # seit 1.6.4 (Entscheidung 146) Division wie R: Benchmark ohne Schwankung ergibt Beta NaN (0/0) statt
+    # ZeroDivisionError, Alpha NaN und Treynor NA
+    with np.errstate(all="ignore"):
+        beta = float(np.float64(_cov(es, eb)) / np.float64(r_var(eb)))
     alpha = (r_mean(es) - beta * r_mean(eb)) * ppy
     te = r_sd(rs - rb) * math.sqrt(ppy)
     mrs = _period_returns(_da_period_values(common, vs, "month"))
@@ -555,9 +542,11 @@ def _da_benchmark(s, b, rate, ppy, cagr_s, cagr_b):
 
     up = mrb > 0
     dn = mrb < 0
-    upc = gm(mrs[up]) / gm(mrb[up]) if up.any() else _NA
-    dnc = gm(mrs[dn]) / gm(mrb[dn]) if dn.any() else _NA
-    sharpe_s = r_mean(es) * ppy / (r_sd(es) * math.sqrt(ppy))
+    upc = _rdiv(gm(mrs[up]), gm(mrb[up])) if up.any() else _NA
+    dnc = _rdiv(gm(mrs[dn]), gm(mrb[dn])) if dn.any() else _NA
+    # seit 1.6.4 (Entscheidung 156) Division wie R: Reihe ohne Schwankung (risk_free = 0) ergibt NaN statt
+    # ZeroDivisionError; ebenso die Quotienten oben, deren Nenner 0 werden kann
+    sharpe_s = _rdiv(r_mean(es) * ppy, r_sd(es) * math.sqrt(ppy))
     rf_ann = rfl["ann"]
     c = _cor(rs, rb)
     vals = [alpha, beta, c, c * c,
@@ -566,7 +555,7 @@ def _da_benchmark(s, b, rate, ppy, cagr_s, cagr_b):
             upc, dnc, upc - dnc, cagr_s - cagr_b, te,
             r_mean(rs - rb) * ppy / te if te > 0 else _NA,
             sharpe_s * r_sd(rb) * math.sqrt(ppy) + rf_ann,
-            (r_mean(es) * ppy) / beta if beta != 0 else _NA]
+            (r_mean(es) * ppy) / beta if (beta == beta and beta != 0) else _NA]
     return np.array([float(v) for v in vals], dtype=np.float64)
 
 
@@ -574,8 +563,10 @@ def _da_monthly_table(s):
     """Monatsrenditen-Tabelle (Jahr x Monat, plus Jahr) als ``DataFrame``."""
     m = _da_period_values(s["date"], s["value"], "month")
     mr = _period_returns(m)
-    yy = [int(k[:4]) for k in m["key"]]
-    mm = [int(k[5:7]) for k in m["key"]]
+    # Schlüssel "JJJJ-MM": Jahr = alles vor "-MM" (seit 1.6.4, RP; bis 1.6.3 fest die ersten vier Zeichen, damit
+    # Abbruch vor dem Jahr 1000 und falsche Jahre ab 10000)
+    yy = [int(k[:-3]) for k in m["key"]]
+    mm = [int(k[-2:]) for k in m["key"]]
     years = sorted(set(yy))
     pos = {y: i for i, y in enumerate(years)}
     M = np.full((len(years), 12), _NA)
@@ -675,7 +666,10 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
             Monate; Standard 3).
         var_levels: Wahrscheinlichkeiten für VaR und CVaR als Anteile (Standard ``[0.01, 0.05, 0.10]``);
             historisch aus Tages- und Monatsrenditen.
-        top_drawdowns: Anzahl Einträge der Drawdown-Tabelle je Reihe (Standard 10, nach Tiefe sortiert).
+        top_drawdowns: Anzahl Einträge der Drawdown-Tabelle je Reihe (Standard 10, nach Tiefe sortiert); eine ganze
+            Zahl ``>= 0`` oder ``inf`` (alle). Seit 1.6.4 geprüft: ``rolling_years`` endlich, ``var_levels`` ohne
+            doppelte Werte, ``risk_free`` und ``inflation`` als einzelne Zahl endlich (``inflation > -100``), keine
+            Kategorie-Spalten.
         inflation: Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 %) oder ein Preisindex-Niveau als
             ``data.frame(date, value)`` bzw. benannter Vektor mit Datumsnamen (z. B. mit ``series_align_macro()``
             vorbereitet). Dann werden alle Kennzahlen real (in Kaufkraft des Startdatums) berechnet, auch die MWRR
@@ -693,6 +687,8 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
           ``r_squared``, ``correlation_up``, ``correlation_down``, ``up_capture``, ``down_capture``,
           ``capture_spread``, ``active_return``, ``tracking_error``, ``information_ratio``, ``m2``, ``treynor``;
           ``None`` ohne Benchmark.
+          Seit 1.6.4 rechnet die Funktion auch mit einem Benchmark ohne Schwankung (Überschussrendite konstant):
+          ``alpha`` und ``beta`` sind dann NaN, ``treynor`` NA (bis 1.6.3 Abbruch in R und Python).
         - benchmark: Name der Benchmark-Reihe oder ``None``.
         - annual: Matrix Jahr x Reihe der Jahresrenditen (Anteile); Zeilen = alle Jahre aller Reihen, NA, wo eine
           Reihe kein Jahr hat.
@@ -772,19 +768,38 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
     else:
         vals = list(x)
         keys = ["S%d" % (i + 1) for i in range(len(vals))]
+    fn = "result_analysis"
     ry = rolling_years
     ry_arr = np.atleast_1d(np.asarray(ry.to_numpy() if isinstance(ry, pd.Series) else ry, dtype=object))
     ry_num = all(_is_num_scalar(e) for e in ry_arr)
     if not ry_num or ry_arr.size != 1 or math.isnan(float(ry_arr[0])) or _fmt.r_round(12 * float(ry_arr[0])) < 2:
-        txt = _fmt.format(np.asarray(ry_arr, dtype=np.float64)) if ry_num and ry_arr.size else _fmt.format(ry_arr)
-        txt = [str(t) for t in np.atleast_1d(txt)]
-        raise ValueError("".join("rolling_years muss mindestens 2/12 (zwei Monate) betragen (ist: %s)." % t for t in txt))
+        raise ValueError("rolling_years muss mindestens 2/12 (zwei Monate) betragen.")   # seit 1.6.4 ohne Eingabewert
     rolling_years = float(ry_arr[0]) if not isinstance(ry_arr[0], (int, np.integer)) else ry_arr[0]
+    chk_num1(rolling_years, fn, "rolling_years")   # seit 1.6.4 endlich
     vl = np.atleast_1d(np.asarray(var_levels, dtype=object))
     if (not vl.size or not all(_is_num_scalar(e) for e in vl)
             or any(math.isnan(float(e)) for e in vl) or any(float(e) <= 0 or float(e) >= 1 for e in vl)):
         raise ValueError("var_levels: Wahrscheinlichkeiten als Anteile zwischen 0 und 1, z. B. c(0.01, 0.05).")
     var_levels = np.asarray(vl, dtype=np.float64)
+    # seit 1.6.4 (B-052, B-045, B-012): var_levels ohne doppelte Werte, top_drawdowns eine ganze Zahl >= 0 oder Inf,
+    # risk_free und inflation als einzelne Zahl endlich (inflation > -100)
+    if len(set(var_levels.tolist())) != var_levels.size:
+        chk_stop("e1.doppelt", fn, "var_levels")
+    td = chk_scalar(top_drawdowns)
+    if not (_is_num_scalar(td) and not math.isnan(float(td))
+            and (float(td) == math.inf or (math.isfinite(float(td)) and float(td) == math.trunc(float(td))
+                                           and float(td) >= 0))):
+        chk_stop("e1.ganz_inf", fn, "top_drawdowns", chk_fmt(0))
+    top_drawdowns = td
+    from .bonds import _no_factor
+    _no_factor(risk_free, fn, "risk_free")
+    _no_factor(inflation, fn, "inflation")
+    rf1 = chk_scalar(risk_free) if isinstance(risk_free, (list, tuple, np.ndarray)) else risk_free
+    if _is_num_scalar(rf1) or rf1 is pd.NA:
+        chk_num1(rf1, fn, "risk_free")
+    if1 = chk_scalar(inflation) if isinstance(inflation, (list, tuple, np.ndarray)) else inflation
+    if _is_num_scalar(if1) or if1 is pd.NA:
+        chk_num1(if1, fn, "inflation", lo=-100, lo_open=True)
     ser = {}
     order = []
     for k, v in zip(keys, vals):
@@ -821,14 +836,28 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
             bser = ser[bname]
     resolve = _ext("backcast", "_resolve_series")
 
+    rf_memo = []
+
     def rf_of(s):
-        return np.asarray(resolve(risk_free, pd.DataFrame({"date": _dates(s["date"])}), "risk_free"), dtype=np.float64)
+        # seit 1.6.4 je Reihe einmal (B-110), wenn ohne Gleitkomma-Meldung gerechnet (sonst je Aufruf wie bisher)
+        for e in rf_memo:
+            if e[0] is s:
+                return e[1]
+
+        def calc():
+            return np.asarray(resolve(risk_free, pd.DataFrame({"date": _dates(s["date"])}), "risk_free"), dtype=np.float64)
+        v, q = _fp_quiet(calc)
+        if not q:
+            return calc()
+        rf_memo.append((s, v))
+        return v
 
     def ppy_of(s):
         k = int((~s["filled"][1:]).sum())
         return k / (float(s["date"][-1] - s["date"][0]) / 365.25)
 
-    mets = {k: _da_metrics(ser[k], rf_of(ser[k]), ppy_of(ser[k]), var_levels) for k in order}
+    dd_memo = []
+    mets = {k: _da_metrics(ser[k], rf_of(ser[k]), ppy_of(ser[k]), var_levels, dd_memo) for k in order}
     met = pd.DataFrame({k: mets[k].to_numpy() for k in order}, index=list(mets[order[0]].index))
     bm = None
     if bser is not None:
@@ -848,7 +877,13 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
     annual = pd.DataFrame({k: _year_col(monthly[k]) for k in order}, index=yrs_all, columns=order)
     seasonality = pd.DataFrame({k: _col_means(monthly[k].iloc[:, :12].to_numpy(dtype=np.float64), na_rm=True)
                                 for k in order}, index=_MONTH_ABB, columns=order)
-    dds = {k: _da_drawdowns(ser[k]["date"], ser[k]["value"], top_drawdowns) for k in order}
+    def dd_of(sk):
+        # seit 1.6.4 Kopf der in _da_metrics gemerkten Episodentabelle (B-079; gleiche stabile Sortierung)
+        for e in dd_memo:
+            if e[0] is sk:
+                return e[1].iloc[:max(0, int(min(top_drawdowns, len(e[1]))))].reset_index(drop=True)
+        return _da_drawdowns(sk["date"], sk["value"], top_drawdowns)
+    dds = {k: dd_of(ser[k]) for k in order}
     w = int(_fmt.r_round(12 * float(rolling_years)))
     rolling = {}
     for k in order:

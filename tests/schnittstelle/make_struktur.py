@@ -18,7 +18,7 @@ import os
 SCHICHTEN = [
     ("0", "R-Grundfunktionen, Hüllen der C-Bibliothek", "(R selbst), `slc*.R`", "`simlev/_r/`, `_lib*.py`", "`src/r/`, `slib*.jl`"),
     ("1", "Daten und Strategie", "`data_prep.R`, `strategy.R` …", "`data_prep.py`, `config.py`", "`data_prep.jl`, `config.jl`"),
-    ("2", "Engine", "`simulation.R`, `sim_*.R`, Kerne", "`engine.py`, `_sim_*.py`, `_core.py`, `result.py`", "`engine.jl`, `sim_*.jl`"),
+    ("2", "Engine", "`simulation.R`, `sim_*.R`, Kerne", "`engine.py`, `_sim_*.py`, `result.py`", "`engine.jl`, `sim_*.jl`"),
     ("3", "Analysen", "je eine `.R`", "je ein Modul", "je eine Datei"),
     ("4", "Ausgabe", "`print`-Methoden, `plot_dashboard.R`", "`svg.py`, `dashboard.py`", "`svg.jl`, `dashboard.jl`"),
 ]

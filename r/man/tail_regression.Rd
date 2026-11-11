@@ -21,7 +21,7 @@ tail_regression(
 
 \item{asset}{Name der Kursspalte (Zeichenkette).}
 
-\item{drivers}{Zeichenvektor der Zustandsspalten (Drittvariablen).}
+\item{drivers}{Zeichenvektor der Zustandsspalten (Drittvariablen). Seit 1.6.4 mindestens einer, ohne doppelte Namen und nicht asset.}
 
 \item{quantiles}{Numerischer Vektor der Quantile als Anteil (Standard
 \code{c(0.05, 0.25, 0.5, 0.75, 0.95)}).}
@@ -30,7 +30,7 @@ tail_regression(
 \code{"day"} oder \code{"month"}.}
 
 \item{B}{Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 =
-keine Standardfehler und Intervalle).}
+keine Standardfehler und Intervalle). Seit 1.6.4 hoechstens 10^8.}
 
 \item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
 \code{NULL} (Standard) = Politis-White-Schaetzung auf den absoluten

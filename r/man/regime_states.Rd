@@ -29,11 +29,11 @@ wahrscheinlichsten Zustands bzw. Viterbi-Zustand) oder
 Anteil; nicht mit \code{type = "viterbi"}).}
 
 \item{state_prob}{Zustandsnummer (1 bis k) fuer \code{output =
-"probability"}; Standard \code{x$k}, der unruhigste Zustand.}
+"probability"}; Standard \code{x$k}, der unruhigste Zustand. Seit 1.6.4 eine ganze Zahl von 1 bis k.}
 
 \item{lag}{Verzoegerung in Kalendertagen (Standard 1): Der Wert einer
 Periode gilt ab Periodenende + \code{lag} Tage; 0 = schon am
-Periodenende.}
+Periodenende. Seit 1.6.4 eine ganze Zahl >= 0.}
 }
 \value{
 Vektor mit einem Wert je Datum in \code{dates}: ganze Zahlen

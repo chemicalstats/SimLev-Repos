@@ -61,7 +61,8 @@ void   sl_r_cummin(int64_t n, const double *x, double *out) SL_NOTHROW;
 void   sl_r_colsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, double *out) SL_NOTHROW;
 int    sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, double *out) SL_NOTHROW;
 /* wie sl_r_colsums auf x[idx, ] (seit 1.6.3, ohne Kopie): Element (r, j) bei x[r rs + j cs], m Zeilennummern idx ab
- * base (0 oder 1), out nc Werte; SL_OK, SL_EARG (Zeile ausserhalb 0..nr-1), SL_ENOMEM */
+ * base (0 oder 1), out nc Werte; SL_OK, SL_EARG (Zeile ausserhalb 0..nr-1); seit 1.6.4 ohne Hilfsspeicher (kein
+ * SL_ENOMEM mehr, B-073) */
 int    sl_r_colsums_idx(int64_t nr, int64_t nc, const double *x, int64_t rs, int64_t cs, int64_t m, const int64_t *idx,
                         int64_t base, int narm, int mean, double *out) SL_NOTHROW;
 /* wie sl_r_rowsums, Spalte j bei cols[j] (je nr Werte; seit 1.6.3, ohne Kopie in eine Matrix) */
@@ -69,7 +70,7 @@ int    sl_r_rowsums_cols(int64_t nr, int64_t nc, const double *const *cols, int 
 /* x ^ y elementweise (R's Operator ^ für Doubles); y mit Länge 1 */
 void   sl_r_pow(int64_t n, const double *x, double y, double *out) SL_NOTHROW;
 double sl_r_pow1(double x, double y) SL_NOTHROW;
-void   sl_r_pow_rec(int64_t nx, const double *x, int64_t ny, const double *y, double *out) SL_NOTHROW;   /* mit Recycling */
+int64_t sl_r_pow_rec(int64_t nx, const double *x, int64_t ny, const double *y, double *out) SL_NOTHROW;   /* mit Recycling; Rückgabe: Zahl der Warnungen (-Inf)^y, y > 2^64 */
 /* R's log für ein Double (arithmetic.c R_log über math1): x > 0 log(x), 0 -> -Inf, NaN bleibt x (Nutzlast),
  * sonst R_NaN (0x7FF8000000000000). Seit 1.6.3 eine Fassung für sl_r_math1, hmm_em (research_core_impl.h) und
  * die Entnahme (withdrawal_core_impl.h); vorher je eine Kopie (dort quiet_NaN(), unter GCC/Clang dieselben Bits). */
@@ -88,7 +89,8 @@ static inline double sl_r_log1(double x)
 double sl_r_fround(double x, double digits) SL_NOTHROW;
 double sl_r_fprec(double x, double digits) SL_NOTHROW;
 void   sl_r_round_vec(int kind, int64_t nx, const double *x, int64_t nd, const double *digits, double *out) SL_NOTHROW;
-/* libm elementweise wie R's math1 (seit 1.5.2; Python-Hülle simlev._r.libm) */
+/* libm elementweise wie R's math1, log2/log10 wie math2/logbase (seit 1.5.2; Python-Hülle simlev._r.libm; NaN-Regeln
+ * seit 1.6.4 wie R, C-068, siehe slc_rbase.cpp) */
 enum { SL_R_EXP = 0, SL_R_LOG = 1, SL_R_LOG1P = 2, SL_R_EXPM1 = 3, SL_R_LOG2 = 4, SL_R_LOG10 = 5 };
 void   sl_r_math1(int kind, int64_t n, const double *x, double *out) SL_NOTHROW;
 /* Nullstelle nach Brent wie R_zeroin2 (stats::uniroot): f im Intervall [ax, bx] mit den

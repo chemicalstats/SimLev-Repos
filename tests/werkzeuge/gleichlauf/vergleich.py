@@ -5,7 +5,8 @@ und compare_golden.py).
 Aufruf: python3 tests/werkzeuge/gleichlauf/vergleich.py [--protokoll P] <datei.jsonl.gz | ordner> ... [-k muster] [-v]
 
 Ohne Pfad der Katalog ``tests/<gruppe>/faelle``. Ordner: alle ``*.jsonl.gz`` darin. Vergleich wie die Tests
-(``tests/lib/faelle.py``): Modulfälle mit ``tests/lib/reftree.py``, Engine-Fälle mit ``run_engine``.
+(``tests/lib/faelle.py``): Modulfälle mit ``tests/lib/reftree.py`` (mit der Toleranzstufe aus ``tests/lib/toleranz.tsv``,
+seit 1.6.4), Engine-Fälle mit ``run_engine``.
 Ausgabe je Modul ``<modul> <ok>/<n> bitgleich`` und ``Gesamt: <ok>/<n>``; Ende 1 bei einer Abweichung. Die Fälle
 werden einzeln gelesen und geprüft (seit 1.6.3; bis 1.6.2 alle einer Datei zugleich).
 

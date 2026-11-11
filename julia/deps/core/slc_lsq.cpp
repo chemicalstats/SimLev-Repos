@@ -147,7 +147,16 @@ int sl_lsfit(sl_ctx *cx, int m, int n, const double *X, const double *y, const d
         x1 = A[IX(k, k, m)];
         alpha = x1 >= 0.0 ? -sigma : sigma;          /* R_kk */
         vk = x1 - alpha;                             /* = x1 + sign(x1) sigma */
-        beta = 1.0 / (sigma * (sigma + fabs(x1)));
+        beta = sigma * (sigma + fabs(x1));
+        if (isfinite(beta)) beta = 1.0 / beta;
+        else {
+            /* seit 1.6.4 (B-002): ab |x| ~ 1.3e154 liefe sigma (sigma + |x1|) über (beta = 0, Spiegel ohne Wirkung).
+             * Dann normiert wie LAPACK dlarfg: v / vk (erste Komponente 1) und tau = beta vk^2 = (sigma + |x1|) / sigma;
+             * sonst unverändert (bitgleich) */
+            for (i = k + 1; i < m; i++) A[IX(i, k, m)] /= vk;
+            beta = (sigma + fabs(x1)) / sigma;
+            vk = 1.0;
+        }
         vks[k] = vk; betas[k] = beta;
         for (j = k + 1; j < n; j++) apply_house(m, k, A, vk, beta, A + (size_t) j * (size_t) m);
         apply_house(m, k, A, vk, beta, b);

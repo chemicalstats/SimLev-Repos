@@ -21,7 +21,7 @@ wrapper_nav(data, wrapper, splits = NULL)
 }
 \arguments{
   \item{data}{
-    \code{data.frame} mit Spalte \code{date} und den Kursspalten (und ggf. Signal- und
+    \code{data.frame} (nur Tabelle; Python \code{pandas.DataFrame}, Julia \code{RFrame}) mit Spalte \code{date} und den Kursspalten (und ggf. Signal- und
     Ereignisspalten) der inneren Strategie. \code{date} wird wie in
     \code{simulation()} als Datum gelesen; unsortierte Zeilen werden nach Datum sortiert.
   }

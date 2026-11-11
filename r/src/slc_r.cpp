@@ -32,29 +32,12 @@ extern "C" {
 
 /* ── weitere Hilfen ── */
 
-static SEXP new_state(const sl_rng *r)
-{
-    SEXP s = PROTECT(Rf_allocVector(RAWSXP, 32));
-    memcpy(RAW(s), r->s, 32);
-    UNPROTECT(1);
-    return s;
-}
-
 static int64_t count1(SEXP x, const char *what)
 {
     double v = num1(x, what);
     if (!(v >= 0 && v <= 4503599627370496.0) || v != (double) (int64_t) v)
         Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine ganze Zahl >= 0 sein", what);
     return (int64_t) v;
-}
-
-static SEXP pair(SEXP a, const sl_rng *r)
-{
-    SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
-    SET_VECTOR_ELT(out, 0, a);
-    SET_VECTOR_ELT(out, 1, new_state(r));
-    UNPROTECT(1);
-    return out;
 }
 
 /* ── Zustand ── */

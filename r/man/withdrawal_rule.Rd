@@ -72,7 +72,7 @@ Standard 10 / 10): \code{cut} fuer \code{guyton_klinger}, \code{raise} fuer
 
 \item{cpr_years}{Guyton-Klinger: Anzahl Jahre (Standard 15). Die
 Capital-Preservation-Rule greift nur, solange mehr als \code{cpr_years}
-Restjahre (einschliesslich des aktuellen) bleiben.}
+Restjahre (einschliesslich des aktuellen) bleiben. Seit 1.6.4 hoechstens 100.}
 
 \item{inflation_cap}{Guyton-Klinger: maximaler Inflationsausgleich je Jahr
 in Prozent (Standard \code{Inf} = unbegrenzt, wie in der Fassung von 2006).}
@@ -106,7 +106,7 @@ also 0.5 / 25 = 0.02 = 2 \%).}
 (Standard 1.5 = 150 \%), ab dem erhoeht wird.}
 
 \item{ratchet_gap}{\code{ratchet}: Mindestabstand zwischen Erhoehungen in
-Jahren (Standard 3).}
+Jahren (Standard 3). Seit 1.6.4 hoechstens 100.}
 
 \item{extra}{\code{sensible}: Anteil des realen Depotzuwachses in Prozent
 (Standard 10).}

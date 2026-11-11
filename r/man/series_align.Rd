@@ -38,7 +38,8 @@ vorhandenes Datum).}
 
 \item{max_gap}{Hoechste Luecke in Kalendertagen zwischen zwei vorhandenen
 Werten, die noch gefuellt wird; laengere Luecken bleiben NA (mit
-Hinweis). Standard \code{Inf} = alle Luecken fuellen.}
+Hinweis). Standard \code{Inf} = alle Luecken fuellen.
+Seit 1.6.4 Zahl >= 0 oder Inf.}
 
 \item{start, end}{Optional Beginn und Ende des Zeitraums (Date oder
 \code{"JJJJ-MM-TT"}); \code{NULL} = durch \code{range} bestimmt.}

@@ -15,7 +15,7 @@ bootstrap(
   path_length = NULL,
   max_tries = 10L,
   seed = NULL,
-  cores = 1L,
+  cores = "auto",
   progress = TRUE
 )
 }
@@ -24,7 +24,10 @@ bootstrap(
 Spalten (Index-Spalten als Brutto-Renditen je Zeile oder, bei
 \code{input = "prices"}, als Kursniveaus; Zusatzreihen beliebig). Jede
 Zeile ist ein Simulationsschritt ("Tag"); eine Datumsspalte wird nicht
-ausgewertet.}
+ausgewertet.
+Seit 1.6.4 keine Faktorspalten (Kategorien).
+Seit 1.6.4 muessen die Spalten aus config Zahlen enthalten (Text, auch Zahlen als Text, ist ein
+Fehler).}
 
 \item{config}{Objekt aus \code{\link[=bootstrap_config]{bootstrap_config()}}.}
 
@@ -50,7 +53,9 @@ entsprechen.}
 \item{n}{Anzahl Pfade (Standard 1000); bei \code{ess = TRUE} das
 Gesamtbudget, das auf die Parameterkombinationen verteilt wird.
 Pfade, die nach \code{max_tries} Versuchen ungueltig bleiben, fehlen im
-Ergebnis.}
+Ergebnis.
+Seit 1.6.4 eine ganze Zahl >= 1.
+Seit 1.6.4 hoechstens 10^8.}
 
 \item{params}{Benannte Liste von Verfahrensparametern; nicht angegebene
 Eintraege erhalten den Standardwert (Standard \code{list()} = alle
@@ -90,29 +95,37 @@ je Regime: "sGARCH" (GARCH(1,1)) oder "gjrGARCH" (GJR-GARCH(1,1),
 Standard je "gjrGARCH"); andere Werte sind ein Fehler.}
 }
 Der Eintrag \code{garch_order} (Standard \code{c(1, 1)}) ist vorhanden,
-aendert aber nichts: die GARCH-Verfahren schaetzen immer GARCH(1,1).}
+aendert aber nichts: die GARCH-Verfahren schaetzen immer GARCH(1,1).
+Seit 1.6.4 geprueft: n_regimes ganze Zahl >= 1, vol_window ganze Zahl >= 2, tail_prob > 0 und < 0.5, both_tails TRUE oder FALSE, MS-GARCH-Regime hoechstens 64.}
 
 \item{ess}{Logisch (Standard \code{FALSE}): ESS-gewichtete Gittersuche
 ueber Hyperparameter (wie im Original). Das Budget \code{n} wird invers
 zur effektiven Stichprobengroesse (ESS) je Kombination verteilt; die
 Pfade erhalten Gewichte (Mittel 1), mit denen \code{\link[=bootstrap_probability]{bootstrap_probability()}}
 und \code{summary()} rechnen. Fuer "raw", "garch" und "gjr_garch" gibt es
-kein Standardgitter (dann normaler Bootstrap).}
+kein Standardgitter (dann normaler Bootstrap).
+Seit 1.6.4 nur TRUE oder FALSE.
+Seit 1.6.4 braucht ess = TRUE mit dem Standardgitter bei stationary, block und circular mindestens 4
+Renditen (sonst Fehler).}
 
 \item{ess_grid}{Benannte Liste von Wertevektoren je Hyperparameter (z. B.
 \code{list(L = c(20, 50, 100))}); \code{NULL} (Standard) = Standardgitter
 des Verfahrens (z. B. \code{L} bzw. \code{block_length} 5, 10, 20, 30,
 50, 75, 100 Zeilen, begrenzt auf die halbe Historienlaenge). Nur bei
-\code{ess = TRUE} verwendet.}
+\code{ess = TRUE} verwendet.
+Seit 1.6.4 eine benannte Liste nicht leerer Wertevektoren (kein Faktor).
+Seit 1.6.4 nur Zahlen (und Wahrheitswerte); Text wie ms_garch_model ist ein Fehler.}
 
 \item{path_length}{Pfadlaenge in Zeilen (simulierte Schritte, ganze Zahl,
 mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie. Damit lassen sich
 z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
-\code{path_length + 1} Zeilen (Startzeile plus Schritte).}
+\code{path_length + 1} Zeilen (Startzeile plus Schritte).
+Seit 1.6.4 hoechstens 36600 (100 Jahre in Tagen).}
 
 \item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
 ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
-Hebelprodukts macht den Pfad nicht ungueltig.}
+Hebelprodukts macht den Pfad nicht ungueltig.
+Seit 1.6.4 eine ganze Zahl >= 1.}
 
 \item{seed}{Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
 einmal aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}; ganze Zahl von 0
@@ -125,13 +138,29 @@ dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von Sim
 unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
 \code{set.seed()} wirkt nicht.}
 
-\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
-Windows). Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
-\code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen
-Threads; das Ergebnis haengt davon nicht ab.}
+\item{cores}{Anzahl Prozesse (Fork auf Unix, PSOCK-Cluster auf Windows):
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
+Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
+\code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen Threads (mit
+\code{"auto"} auf den Kern-Threads: Zahl der Prozessoren bzw. SIMLEV_THREADS); das Ergebnis haengt davon nicht ab.}
 
 \item{progress}{Logisch: Fortschritts- und Abschlussmeldung per
-\code{message()} ausgeben (Standard \code{TRUE}).}
+\code{message()} ausgeben (Standard \code{TRUE}).
+Seit 1.6.4 nur TRUE oder FALSE.}
 }
 \value{
 Objekt der Klasse \code{bootstrap_result}, eine Liste mit

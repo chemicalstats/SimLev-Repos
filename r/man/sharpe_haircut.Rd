@@ -24,12 +24,14 @@ angeben).}
 
 \item{n_obs}{Anzahl Perioden \eqn{T}, auf denen die Sharpe Ratios
 beruhen (Perioden der Laenge, die \code{ppy} beschreibt); nur und
-zwingend bei Vektor-Eingabe. Sonst die Zeilenzahl nach Aggregation.}
+zwingend bei Vektor-Eingabe. Sonst die Zeilenzahl nach Aggregation.
+Seit 1.6.4 ganze Zahl >= 1; die Sharpe Ratios in x muessen endlich sein.}
 
 \item{n_tests}{Gesamtzahl der Versuche \eqn{M} (ganze Zahl).
 \code{NULL} (Standard) = Anzahl Sharpe Ratios bzw. Punkte; bei
 frueheren Suchen entsprechend hoeher ansetzen (fehlende Versuche gehen
-mit p = 1 in die Korrektur ein).}
+mit p = 1 in die Korrektur ein).
+Seit 1.6.4 ganze Zahl von 1 bis 10^8, mindestens die Anzahl Sharpe Ratios bzw. Punkte (sonst ein Fehler).}
 
 \item{frequency, dates, risk_free}{Aggregation, Datum und risikoloser Zins
 (Prozent p. a.) wie bei \code{\link[=overfit_pbo]{overfit_pbo()}}; nur bei Suche oder Matrix.}

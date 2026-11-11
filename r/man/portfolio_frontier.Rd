@@ -28,7 +28,7 @@ Spalten der Matrix.}
 
 \item{n}{Anzahl der Risikoaversionen (ganze Zahl, Standard 40). Punkte mit
 (auf 6 Stellen) gleicher Rendite und Volatilitaet werden nur einmal
-behalten; das Ergebnis kann daher weniger Zeilen haben.}
+behalten; das Ergebnis kann daher weniger Zeilen haben. Seit 1.6.4 hoechstens 10^6.}
 
 \item{lower, upper}{Unter- und Obergrenzen der Gewichte als Anteil (0.6 =
 60 \%): Skalar fuer alle Anlagen, benannter Vektor (nicht genannte

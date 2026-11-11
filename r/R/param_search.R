@@ -35,7 +35,7 @@
 #' @param lower,upper Bereichsgrenzen (Zahlen in der Einheit des Parameters,
 #'   \code{lower <= upper}; bei \code{log = TRUE} \code{lower > 0}).
 #' @param n Anzahl Rasterpunkte des Bereichs bei \code{method = "grid"}
-#'   (ganze Zahl >= 1, Standard 5); wird ignoriert, wenn \code{step}
+#'   (ganze Zahl von 1 bis 1e6, Standard 5); wird ignoriert, wenn \code{step}
 #'   angegeben ist.
 #' @param step Schrittweite des Rasters in der Einheit des Parameters
 #'   (\code{seq(lower, upper, by = step)}, > 0); hat Vorrang vor \code{n} und
@@ -62,18 +62,27 @@ param_space <- function(...) {
   if (!length(d) || is.null(names(d)) || any(names(d) == "")) stop("param_space: alle Dimensionen m\u00fcssen benannt sein.")
   for (k in names(d)) if (!inherits(d[[k]], "SimLevParamRange") && (!is.atomic(d[[k]]) || !length(d[[k]])))
     stop(sprintf("param_space: Dimension '%s' muss ein Vektor oder param_range() sein.", k))
+  for (k in names(d)) chk_nofactor(d[[k]], "param_space", k)   # seit 1.6.4 (Entscheidung 15)
   structure(d, class = "SimLevParamSpace")
 }
 
 #' @rdname param_space
 #' @export
 param_range <- function(lower, upper, n = 5, step = NULL, integer = FALSE, log = FALSE) {
-  if (!is.numeric(lower) || !is.numeric(upper) || upper < lower) stop("param_range: lower <= upper erforderlich.")
+  # seit 1.6.4: Grenzen je eine endliche Zahl (vorher NaN/Inf in Python/Julia als Stufe), integer/log TRUE/FALSE,
+  # Meldungen ohne Eingabewert
+  if (!is.numeric(lower) || !is.numeric(upper)) stop("param_range: lower <= upper erforderlich.")
+  chk_num1(lower, "param_range", "lower")
+  chk_num1(upper, "param_range", "upper")
+  if (upper < lower) stop("param_range: lower <= upper erforderlich.")
+  chk_bool1(integer, "param_range", "integer")
+  chk_bool1(log, "param_range", "log")
   if (log && lower <= 0) stop("param_range: log = TRUE erfordert lower > 0.")
   if (is.null(step) && (!is.numeric(n) || length(n) != 1 || !is.finite(n) || n < 1 || n != round(n)))
-    stop(sprintf("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein (erhalten: %s).", paste(format(n), collapse = ", ")))
+    stop("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein.")
+  if (is.null(step)) chk_max(n, SL_MAX_GITTER, "param_range", "n")   # seit 1.6.4 (B-004, wie n_grid; Entscheidung 16)
   if (!is.null(step) && (!is.numeric(step) || length(step) != 1 || !is.finite(step) || step <= 0))
-    stop(sprintf("param_range: step muss eine Zahl > 0 sein (erhalten: %s).", paste(format(step), collapse = ", ")))
+    stop("param_range: step muss eine Zahl > 0 sein.")
   structure(list(lower = lower, upper = upper, n = as.integer(n), step = step, integer = integer, log = log),
             class = "SimLevParamRange")
 }
@@ -186,6 +195,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #' @param data data.frame wie in [simulation()] (Spalte \code{date} und
 #'   Kursspalten als Niveaus), inklusive Vorlauf fuer Signale (siehe
 #'   \code{burn_in}).
+#'   Seit 1.6.4 mindestens eine Datenzeile (vorab geprueft).
 #' @param builder Funktion \code{function(p)}, die aus einer benannten Liste
 #'   \code{p} (ein Punkt des Raums) entweder eine Strategie oder eine Liste
 #'   \code{list(strategy, signal, args, map, data)} liefert:
@@ -211,6 +221,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   Standard 50); bei \code{"grid"} ignoriert. Doppelte Punkte werden
 #'   entfernt und in hoechstens 20 Runden nachgezogen; es koennen weniger
 #'   Punkte entstehen.
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param constraint Optional \code{function(p)}, die \code{TRUE} fuer
 #'   zulaessige Punkte liefert (z. B. Gewichte summieren sich hoechstens zu
 #'   1); Punkte ohne \code{TRUE} entfallen. \code{NULL} (Standard) = alle
@@ -228,13 +239,25 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   Vektor (Standard [bootstrap_study_metrics()]: u. a. \code{cagr},
 #'   \code{max_drawdown} als Anteil, \code{sharpe}; \code{cagr} ist mit
 #'   Sparplan geldgewichtet, XIRR).
+#'   Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen keiner festen Spalte des
+#'   Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
 #' @param objective Name der Zielgroesse (Element von \code{metrics}, Standard
 #'   \code{"sharpe"}) fuer Ranking, Plateau und [param_bootstrap()].
 #' @param maximize Logisch: Zielgroesse maximieren (Standard \code{TRUE};
 #'   \code{FALSE} z. B. fuer \code{max_drawdown}).
-#' @param cores Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
-#'   Unix per Fork (\code{parallel::mclapply}), unter Windows per
-#'   PSOCK-Cluster.
+#' @param cores Anzahl paralleler Prozesse (unter Unix per Fork, unter Windows per PSOCK-Cluster):
+#'   \code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+#'   Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+#'   dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+#'   Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+#'   viele, wie der freie Speicher traegt, und
+#'   nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+#'   einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+#'   erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+#'   Eine feste Zahl rechnet wie bis 1.6.3; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
+#'   begrenzt.
+#'   Das Ergebnis haengt nicht von cores ab.
+#'   Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
 #' @param seed Startwert fuer den Versuchsplan bei \code{"random"}/\code{"lhs"} (Standard
 #'   \code{NULL}; bei \code{"grid"} ohne Bedeutung). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 #'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
@@ -285,14 +308,35 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
                          method = c("grid", "random", "lhs"), n = 50L, constraint = NULL,
                          sim_args = list(), burn_in = 0L, metrics = bootstrap_study_metrics,
                          objective = "sharpe", maximize = TRUE, keep_returns = c("day", "none"), seed = NULL,
-                         cores = 1L) {
+                         cores = "auto") {
   own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
+  .e5_choice(method, c("grid", "random", "lhs"), "param_search", "method")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   method <- match.arg(method)
   # Text statt Logisch (bis 1.0.0), ohne Alias
   if (is.logical(keep_returns))
     stop("param_search: keep_returns ist \"day\" oder \"none\" (fr\u00fcher TRUE/FALSE).", call. = FALSE)
+  .e5_choice(keep_returns, c("day", "none"), "param_search", "keep_returns")
   keep_returns <- match.arg(keep_returns)
   keep_ret <- keep_returns == "day"
+  # einheitliche Eingabepruefung (seit 1.6.4); data/strategy mit den Meldungen von simulation()
+  fn <- "param_search"
+  if (!is.data.frame(data))
+    stop(sprintf("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).",
+                 chk_msg("tabelle.formen")))
+  if (!nrow(data)) chk_stop("zeilen_keine", fn, "data")   # seit 1.6.4 vorab (Entscheidung 38)
+  if (!is.null(builder) && !is.function(builder)) chk_stop("e2.funktion", fn, "builder")
+  if (missing(space)) chk_stop("fehlt", fn, "space")
+  if (!inherits(space, "SimLevParamSpace") && !is.list(space) && !is.atomic(space)) chk_stop("liste", fn, "space")
+  if (is.null(builder) && !is.null(strategy)) .e2_check_strategy(strategy)
+  chk_int1(n, fn, "n")
+  chk_max(n, SL_MAX_N, fn, "n")   # seit 1.6.4 (Entscheidungen 16 und 36)
+  if (!is.null(constraint) && !is.function(constraint)) chk_stop("e2.funktion", fn, "constraint")
+  if (!is.null(sim_args) && !is.list(sim_args)) chk_stop("liste", fn, "sim_args")
+  chk_int1(burn_in, fn, "burn_in", lo = 0)
+  if (!is.function(metrics)) chk_stop("e2.funktion", fn, "metrics")
+  chk_name1(objective, fn, "objective")
+  chk_bool1(maximize, fn, "maximize")
+  cores <- chk_cores(cores, fn)   # seit 1.6.4 hoechstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
   if (!inherits(space, "SimLevParamSpace")) space <- do.call(param_space, as.list(space))
   if (is.null(builder)) {
     if (is.null(strategy)) stop("param_search: 'builder' oder 'strategy' angeben.")
@@ -301,7 +345,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   }
   sim_run_args <- .sim_args_set(list(), sim_args, "param_search")
   # Zufall nur im Versuchsplan (Hauptstrom); die Auswertung je Punkt ist deterministisch
-  design <- .ps_design(space, method, n, constraint, if (method == "grid") NULL else .sl_main_stream(seed))
+  design <- .ps_design(space, method, n, constraint, if (method == "grid") NULL else .sl_main_stream(seed, "param_search"))
   t0 <- Sys.time()
   run <- function(i) {
     p <- as.list(design[i, , drop = FALSE])
@@ -316,8 +360,11 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   out <- .par_lapply(seq_len(nrow(design)), run, cores)
   okm <- Filter(function(o) !is.null(o$m), out)
   if (!length(okm)) stop(sprintf("param_search: alle Punkte fehlgeschlagen, z. B.: %s", out[[1]]$err))
+  # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
+  # feste Spalte (id, Parameter, error); geprueft nach dem Rechnen, bei jedem cores gleich
+  for (o in okm) chk_kennzahlen(names(o$m), length(o$m), c("id", names(design), "error"), fn)
   mnames <- names(okm[[1]]$m)
-  if (!objective %in% mnames) stop(sprintf("objective '%s' nicht in metrics(): %s", objective, paste(mnames, collapse = ", ")))
+  if (!objective %in% mnames) chk_stop("rs.objective", fn, objective, paste(mnames, collapse = ", "))
   M <- t(vapply(out, function(o) if (is.null(o$m)) rep(NA_real_, length(mnames)) else as.numeric(o$m[mnames]),
                 numeric(length(mnames))))
   if (length(mnames) == 1L) M <- t(M)
@@ -347,7 +394,31 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
 .ps_neighbours <- function(x, radius = 1L, k = 5L) {
   P <- x$results[, x$params, drop = FALSE]
   if (x$method == "grid") {
-    L <- do.call(cbind, lapply(x$params, function(p) match(P[[p]], .ps_levels(x$space[[p]]))))
+    lev <- lapply(x$params, function(p) .ps_levels(x$space[[p]]))
+    L <- do.call(cbind, lapply(seq_along(lev), function(j) match(P[[x$params[j]]], lev[[j]])))
+    n <- nrow(L); d <- ncol(L); nl <- lengths(lev)
+    # seit 1.6.4 (B-074) ueber die Zellen der (2 radius + 1)^d Nachbarversaetze statt paarweise, wenn es weniger
+    # Versaetze als Punkte gibt: dieselben Zeilen (alle Stufen vorhanden, Abstand <= radius je Dimension) in
+    # aufsteigender Folge; Zeilen mit fehlender Stufe bleiben ohne Nachbarn wie bisher
+    if (n > 0L && (2 * radius + 1)^d <= n && prod(as.numeric(nl)) <= 2^52) {
+      mult <- cumprod(c(1, as.numeric(nl)[-d]))
+      lin <- rep(1, n); for (j in seq_len(d)) lin <- lin + (L[, j] - 1) * mult[j]   # Zellnummer, NA bei fehlender Stufe
+      oi <- which(!is.na(lin)); ukey <- unique(lin[oi])
+      cells <- split(oi, match(lin[oi], ukey)); names(cells) <- NULL
+      Lk <- L[oi, , drop = FALSE]; nk <- length(oi)
+      offs <- as.matrix(expand.grid(rep(list(-radius:radius), d)))
+      I <- J <- vector("list", nrow(offs))
+      for (o in seq_len(nrow(offs))) {
+        Lo <- Lk + rep(unname(offs[o, ]), each = nk)
+        inb <- rowSums(Lo >= 1 & Lo <= rep(nl, each = nk)) == d
+        cl <- rep(1, sum(inb)); for (j in seq_len(d)) cl <- cl + (Lo[inb, j] - 1) * mult[j]
+        hit <- cells[match(cl, ukey)]
+        I[[o]] <- rep(oi[inb], lengths(hit)); J[[o]] <- unlist(hit, use.names = FALSE)
+      }
+      I <- as.integer(unlist(I)); J <- as.integer(unlist(J)); o <- order(I, J)
+      out <- split(J[o], factor(I[o], levels = seq_len(n))); names(out) <- NULL
+      return(out)
+    }
     # je Punkt die Zeilen mit Abstand <= radius in jeder Dimension; seit 1.6.3 spaltenweise mit & statt apply(, 1, all)
     # je Zeile (gleiche Treffer: NA verknuepft sich wie in all(), which() laesst NA weg)
     return(lapply(seq_len(nrow(L)), function(i) {
@@ -359,7 +430,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   Z <- vapply(P, function(col) { r <- rank(if (is.numeric(col)) col else as.numeric(factor(col)))
                                   if (max(r) > min(r)) (r - min(r)) / (max(r) - min(r)) else r * 0 }, numeric(nrow(P)))
   if (!is.matrix(Z)) Z <- matrix(Z, ncol = 1)
-  D <- as.matrix(stats::dist(Z))
+  D <- as.matrix(.sl_dist(Z))
   lapply(seq_len(nrow(Z)), function(i) order(D[i, ])[seq_len(min(k, nrow(Z)))])
 }
 
@@ -408,7 +479,12 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
 #' param_plateau(ps, metric = "cagr")
 #' @export
 param_plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
-  if (!inherits(x, "SimLevParamSearch")) stop("x muss ein SimLevParamSearch sein.")
+  if (!inherits(x, "SimLevParamSearch")) chk_stop("klasse", "param_plateau", "x", "param_search()")
+  # seit 1.6.4: metric als Spalte der Ergebnisse (vorher still NULL), radius und k als ganze Zahlen
+  chk_name1(metric, "param_plateau", "metric")
+  if (!metric %in% names(x$results)) chk_stop("e2.spalte_von", "param_plateau", "metric", "x$results")
+  chk_int1(radius, "param_plateau", "radius", lo = 0)
+  chk_int1(k, "param_plateau", "k")
   tab <- x$results; v <- tab[[metric]]
   nb <- .ps_neighbours(x, radius, k)
   # unguenstigster Wert: Zielgroesse nach x$maximize, sonst kleiner = besser bei Drawdown-Kennzahlen
@@ -472,6 +548,8 @@ print.SimLevParamSearch <- function(x, ...) { print(summary(x, ...)); invisible(
 #'   Grafik (Standard: Zielgroesse). Beim Raster werden die Zellen
 #'   beschriftet, \code{cagr}, \code{ttwror}, \code{max_drawdown} und
 #'   \code{avg_drawdown} in Prozent.
+#'   Seit 1.6.4 ein Fehler, wenn die Spalte keinen endlichen Wert hat (vorher R Grafikfehler, Python und Julia ein
+#'   leeres Bild).
 #' @param params Ein oder zwei Parameternamen fuer die Achsen (Standard: die
 #'   ersten beiden); weitere Dimensionen werden mit \code{fun}
 #'   zusammengefasst. Ein Parameter: Linie; zwei: Heatmap (Raster) bzw.
@@ -481,6 +559,9 @@ print.SimLevParamSearch <- function(x, ...) { print(summary(x, ...)); invisible(
 #' @export
 plot.SimLevParamSearch <- function(x, metric = x$objective, params = utils::head(x$params, 2), fun = max, ...) {
   tab <- x$results
+  # seit 1.6.4 (Entscheidung 40): ohne endlichen Wert der Zielgroesse ein Fehler in allen Sprachen (bis 1.6.3 R mit
+  # Grafikfehler, Python und Julia ein leeres Bild)
+  if (!any(is.finite(suppressWarnings(as.numeric(tab[[metric]]))))) chk_stop("grafik_leer", "plot", metric)
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
   graphics::par(mar = c(4.2, 4.6, 2.6, 1), mgp = c(2.6, 0.6, 0), las = 1, cex.axis = 0.85)
   agg_fun <- function(v) { v <- v[is.finite(v)]; if (length(v)) fun(v) else NA_real_ }

@@ -15,6 +15,7 @@ r² und den Welch-Test selbst (C-Bibliothek slc, :mod:`simlev._lib`).
 """
 from __future__ import annotations
 
+import math
 
 import numpy as np
 
@@ -52,9 +53,26 @@ def p_adjust(p, method="holm", n=None):
     if n <= 1:
         return _vec_out(p0, nm) if (nm is not None or p0.size != 1) else float(p0[0])
     r = np.empty(lp)   # C-Kern sl_r_p_adjust (seit 1.6.0)
-    _ext.slc_r_p_adjust(np.ascontiguousarray(pp), float(n), _PADJ_CODE[method], r)
+    # seit 1.6.4 (C-017) wie R: hommel und BY brauchen n Werte (rep.int(1, n - lp) bzw. 1/(1L:n)); n = Inf ist dort
+    # ein Fehler, ohne Speicher die Meldung von R (bis 1.6.3 undefinierte Umwandlung, Absturz bzw. ganzer Speicher)
+    if method in ("hommel", "BY") and not (method == "hommel" and n == 2) and not math.isfinite(n):
+        raise RError("invalid 'times' value" if method == "hommel" else "result would be too long a vector")
+    try:
+        _ext.slc_r_p_adjust(np.ascontiguousarray(pp), float(n), _PADJ_CODE[method], r)
+    except MemoryError:
+        raise RError(_r_alloc_msg(math.floor(n - lp if method == "hommel" else n) * 8.0)) from None
     p0[nna] = r
     return _vec_out(p0, nm) if (nm is not None or p0.size != 1) else float(p0[0])
+
+
+def _r_alloc_msg(nbytes):
+    """Meldung von R, wenn ein Vektor von nbytes Bytes nicht angelegt werden kann (memory.c, allocVector)."""
+    kb = nbytes / 1024.0
+    if kb > 1024.0 * 1024.0:
+        return "cannot allocate vector of size %0.1f Gb" % (kb / 1024.0 / 1024.0)
+    if kb > 1024.0:
+        return "cannot allocate vector of size %0.1f Mb" % (kb / 1024.0)
+    return "cannot allocate vector of size %0.f Kb" % kb
 
 
 _PADJ_CODE = {"holm": 0, "hochberg": 1, "hommel": 2, "bonferroni": 3, "BH": 4, "BY": 5, "none": 6}

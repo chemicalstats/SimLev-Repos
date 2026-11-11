@@ -105,7 +105,7 @@ function wrapper_config(strategy; rebalance = nothing, costs = funds_costs(), or
         error("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die create_strategy() annimmt).")
     if !inherits(strategy, "strategy")
         (_is_mapping(strategy) || strategy isa Union{AbstractVector,Tuple}) ||
-            error("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein, nicht $(_r_class1(strategy)).")
+            error("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein.")   # seit 1.6.4 ohne Klasse
         strategy = create_strategy(; assets = strategy)
     end
     strategy_validate(strategy)
@@ -116,12 +116,14 @@ function wrapper_config(strategy; rebalance = nothing, costs = funds_costs(), or
     abs(total - 1) > 1e-6 &&
         error(r_sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.4f, müssen aber 1 ergeben.", total))
     (rebalance === nothing || inherits(rebalance, "SimLevRebalancePlan")) ||
-        error("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein, nicht $(_blk_cls(rebalance)).")
+        error("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.")
     inherits(costs, "SimLevFundsCosts") ||
-        error("wrapper_config: costs muss ein Objekt aus funds_costs() sein, nicht $(costs === nothing ? "NULL" : _blk_cls(costs)).")
-    fs = _fee_spec(order_fee)
+        error("wrapper_config: costs muss ein Objekt aus funds_costs() sein.")
+    order_fee = _blk_fee_check(order_fee, "wrapper_config", "order_fee")   # seit 1.6.4 (A-046)
+    fs = _fee_spec(order_fee, "wrapper_config", "order_fee")
+    volume = chk_scalar(volume)   # Länge 1 wie Einzelwert (Entscheidung 4)
     if volume !== nothing && (!_blk_one(volume) || volume <= 0)
-        error("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR), nicht $(_blk_show(volume)).")
+        error("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR).")
     end
     if fs !== nothing && volume === nothing && (fs.fixed > 0 || fs.min > 0 || isfinite(fs.max))
         error("wrapper_config: order_fee enthält feste Beträge in EUR (fixed, min oder max); dafür ist das Fondsvolumen " *
@@ -308,7 +310,7 @@ verwendet dieselbe Rechnung für Wrapper-Assets; `wrapper_nav()` dient für eige
 als Renditequelle für `withdrawal_simulation` (`x = wrapper_nav(...)`) und zur Prüfung.
 
 # Argumente
-- `data`: `data.frame` mit Spalte `date` und den Kursspalten (und ggf. Signal- und Ereignisspalten) der
+- `data`: `RFrame` (nur Tabelle) mit Spalte `date` und den Kursspalten (und ggf. Signal- und Ereignisspalten) der
   inneren Strategie. `date` wird wie in `simulation()` als Datum gelesen; unsortierte Zeilen werden nach Datum
   sortiert.
 - `wrapper`: Objekt aus `wrapper_config`.
@@ -382,13 +384,14 @@ println(nv["nav"][end] / nv["gross"][end] - 1)   # Kosten über die Laufzeit
 """
 function wrapper_nav(data, wrapper; splits = nothing)
     @nospecialize
+    # seit 1.6.4 Meldungen ohne Klasse (Entscheidung 8); data nur als RFrame, die Meldung nennt die Umwandlung
+    # (Entscheidung 6, wie simulation(); bis 1.6.3 auch NamedTuple, Dict und Paare)
     inherits(wrapper, "SimLevWrapperConfig") ||
-        error("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein, nicht $(wrapper === nothing ? "NULL" : _blk_cls(wrapper)).")
+        error("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.")
     (splits === nothing || inherits(splits, "SimLevSplitRule")) ||
-        error("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein, nicht $(_blk_cls(splits)).")
-    data = as_rframe(data)
-    (data isa RFrame && haskey(data, "date")) ||
-        error("wrapper_nav: data muss ein data.frame mit Spalte 'date' und den Kursspalten der inneren Strategie sein.")
+        error("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.")
+    (data isa RFrame && haskey(data, "date")) || chk_stop("e1.tabelle_spalten", "wrapper_nav", chk_msg("tabelle.formen"))
+    data["date"] isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", "wrapper_nav", "date")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     fa = get(attrs(data), "filled", nothing)
     dates = SimLev.DataPrep._to_date(data["date"], "wrapper_nav: data\$date")
     i_na = findfirst(ismissing, dates)

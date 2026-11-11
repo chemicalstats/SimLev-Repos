@@ -22,6 +22,7 @@
 # Nachbildung von R's Zufall (RRng, Export set_seed) ist seit 1.0.0 entfallen.
 module SLib
 
+import ..SimLev   # chk_stop (Meldung ut1.seed, seit K43 T1-R5; erst zur Laufzeit gebraucht)
 const _DEPS = joinpath(@__DIR__, "..", "deps", "deps.jl")
 isfile(_DEPS) || error("SimLev: C-Bibliothek fehlt – Pkg.build(\"SimLev\") mit C-Compiler ausführen")
 include(_DEPS)
@@ -72,12 +73,15 @@ end
 
 # ── Seed, Ströme ───────────────────────────────────────────────
 
-_seed_text(seed) = seed isa Integer && !(seed isa Bool) ? string(seed) : (t = repr(seed); length(t) <= 60 ? t : first(t, 57) * "...")
-
-"Seed prüfen: `Integer` (kein `Bool`) mit |seed| < 2^53."
-function check_seed(seed)
-    ok = seed isa Integer && !(seed isa Bool) && abs(big(seed)) < big(2)^53
-    ok || error("seed: ganze Zahl erwartet (erhalten: $(_seed_text(seed)))")
+"""Seed prüfen: ganze Zahl mit |seed| < 2^53 wie R (`Integer` oder ganzzahlige Gleitkommazahl, kein `Bool`; Länge 1
+wie Einzelwert). Seit 1.6.4 ohne Eingabewert in der Meldung (Entscheidung 8, C-096) und wie R auch `42.0` (bis
+1.6.3 nur `Integer`); seit K43 T1-R5 mit dem Namen `fn` der Funktion (Baustein `ut1.seed`; bis dahin "seed: ganze
+Zahl erwartet")."""
+function check_seed(seed, fn::AbstractString = "simlev_seed")
+    (seed isa Union{AbstractArray,Tuple} && length(seed) == 1) && (seed = first(seed))
+    ok = seed isa Real && !(seed isa Bool) && (seed isa Integer ? abs(big(seed)) < big(2)^53 :
+         (isfinite(Float64(seed)) && Float64(seed) == trunc(Float64(seed)) && abs(Float64(seed)) < 2.0^53))
+    ok || SimLev.chk_stop("ut1.seed", fn)
     Int64(seed)
 end
 
@@ -168,10 +172,10 @@ function next_seed()
 end
 
 "`nothing` → `next_seed()`, sonst geprüft (G bleibt unberührt)."
-resolve_seed(seed) = seed === nothing ? next_seed() : check_seed(seed)
+resolve_seed(seed, fn::AbstractString = "simlev_seed") = seed === nothing ? next_seed() : check_seed(seed, fn)
 
-"Hauptstrom einer zufälligen Funktion: `Stream(resolve_seed(seed))`."
-main_stream(seed) = Stream(resolve_seed(seed))
+"Hauptstrom einer zufälligen Funktion: `Stream(resolve_seed(seed, fn))` (`fn` für die Meldung eines ungültigen `seed`)."
+main_stream(seed, fn::AbstractString = "simlev_seed") = Stream(resolve_seed(seed, fn))
 
 "Ströme je Einheit U_i = J^i(S_0), i = 1 … n."
 function streams(stream, n::Integer)
@@ -311,8 +315,69 @@ for (jl, c) in ((:_pt, :sl_pt_mt), (:_qt, :sl_qt_mt))
     end
 end
 
-"Threads der elementweisen Kerne (seit 1.6.0; `SIMLEV_THREADS`, gelesen in REnv): 0 = Zahl der Prozessoren."
-nthreads() = parentmodule(@__MODULE__).REnv.threads()
+"""Höchstwert für Parallelität (seit 1.6.4, Entscheidung 41b; `cores` und Kern-Threads): Zahl der Prozessoren,
+mindestens 1, aus dem Kern (`sl_nprocs`; eine Quelle für R, Python und Julia)."""
+nprocs() = Int(ccall((:sl_nprocs, LIBSLC), Cint, ()))
+
+const _THREADS_HINT = Ref(false)
+
+"""Threads der elementweisen Kerne (seit 1.6.0; `SIMLEV_THREADS`, gelesen in REnv): 0 = Höchstwert (Zahl der Prozessoren;
+bis 1.6.3 höchstens 8). Seit 1.6.4 (Entscheidung 41b) wird mehr als der Höchstwert mit einem Hinweis
+(einmal je Sitzung) begrenzt; wie `.sl_nthreads` in R. Seit 1.6.4 (Entscheidung 41c) zusätzlich je
+`par_lapply`-Aufgabe höchstens `RParallel.thread_cap()` Threads, auch bei gesetztem `SIMLEV_THREADS`."""
+function nthreads()
+    S = parentmodule(@__MODULE__)
+    n = S.REnv.threads()
+    mx = nprocs()
+    if n > mx
+        if S.RParallel.defer_hint()      # cores = "auto": Hinweis bei der Wiedergabe wie nacheinander (seit 1.6.4)
+        elseif !_THREADS_HINT[]
+            _THREADS_HINT[] = true
+            println(S.RParallel.r_stderr(), S.chk_msg("hinweis.prozessoren", "SIMLEV_THREADS", mx))
+        end
+        n = mx
+    end
+    cap = S.RParallel.thread_cap()
+    cap === nothing || (n = n == 0 ? cap : min(n, cap))
+    return n
+end
+
+"""Kern-Threads außerhalb paralleler Einheiten als Zahl ≥ 1 (`cores = "auto"` für die Starts des MS-GARCH-Fits, seit
+1.6.4): `nthreads()`, 0 = Zahl der Prozessoren (R `.sl_auto_threads`)."""
+auto_threads() = (v = nthreads(); v == 0 ? nprocs() : v)
+
+"Freier Arbeitsspeicher in Bytes laut System (-1 unbekannt; Kern `sl_mem_avail`, seit 1.6.4)."
+mem_avail() = ccall((:sl_mem_avail, LIBSLC), Float64, ())
+
+"Arbeitsspeicher des eigenen Prozesses in Bytes (-1 unbekannt; Kern `sl_mem_self`, seit 1.6.4)."
+mem_self() = ccall((:sl_mem_self, LIBSLC), Float64, ())
+
+"Messzeit vor dem Plan (Kern `sl_par_probe`): Start eines weiteren Laufs des Systems in Sekunden (seit 1.6.4)."
+par_probe(sys = 2, self_bytes = mem_self()) = ccall((:sl_par_probe, LIBSLC), Float64, (Cint, Float64), Cint(sys), Float64(self_bytes))
+
+"Laufende Prozesse laut System einschließlich des eigenen (-1 unbekannt; Kern `sl_load_running`, seit 1.6.4, Entscheidung 112)."
+load_running() = ccall((:sl_load_running, LIBSLC), Float64, ())
+
+"""
+    par_plan(n, unit_s, unit_bytes = 0.0; sys = 2, np = nprocs(), max_runs = np, env = REnv.threads(), mem = mem_avail(),
+             self_bytes = mem_self(), running = load_running())
+
+Planer für `cores = "auto"` (seit 1.6.4, Kern `sl_par_plan`; gleiche Regel wie R `.sl_par_plan`): `(Läufe, Kern-Threads
+je Lauf)` für `n` weitere Einheiten mit Rechenzeit `unit_s` (Sekunden) und Ergebnisgröße `unit_bytes` je Einheit.
+`sys` 2 = Julia (Task); `np` (Zahl der Prozessoren), `mem`, `self_bytes`, `running` (laufende Prozesse, Entscheidung
+112) und `env` lassen sich für Proben der Regel vorgeben (Testschalter für andere Rechnergrößen und Fremdlast, nicht
+öffentlich).
+"""
+function par_plan(n, unit_s, unit_bytes = 0.0; sys = 2, np::Integer = nprocs(), max_runs::Integer = np,
+                  env::Integer = parentmodule(@__MODULE__).REnv.threads(), mem::Real = mem_avail(),
+                  self_bytes::Real = mem_self(), running::Real = load_running())
+    th = Ref{Cint}(1)
+    c = ccall((:sl_par_plan, LIBSLC), Cint,
+              (Cint, Cint, Cint, Cint, Int64, Float64, Float64, Float64, Float64, Float64, Ref{Cint}),
+              Cint(sys), Cint(np), Cint(max_runs), Cint(env), Int64(n), Float64(unit_s), Float64(unit_bytes),
+              Float64(mem), Float64(self_bytes), Float64(running), th)
+    return (Int(c), Int(th[]))
+end
 
 pnorm(q, mean = 0.0, sd = 1.0; lower_tail = true) = _pnorm(q, Float64(mean), Float64(sd), Bool(lower_tail))
 qnorm(p, mean = 0.0, sd = 1.0; lower_tail = true) = _qnorm(p, Float64(mean), Float64(sd), Bool(lower_tail))

@@ -23,9 +23,14 @@ from .param_search import (_expand_grid, _isna, _match_arg, _py, _quiet, _seq_by
                            _cond_msg)
 from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
 from ._util import _ext, _which_max
+from .data_prep import _e5_choice  # seit 1.6.4 (K43 T2-N4)
 from ._util import _fmt_vec
 from ._dates import days_from_civil as _days_from_civil
 from .backcast import _fill_locf
+from ._r.rlist import _PrintFormat
+from ._pruefen import (chk_bool1, chk_cols, chk_cores, chk_col_nofactor, chk_col_type, chk_df, chk_int1, chk_max, chk_msg, chk_name1, chk_num1,  # 1.6.4
+                       chk_range_text, chk_scalar, chk_stop)
+from ._pruefen import SL_MAX_JAHRE, SL_MAX_MONATE, chk_kennzahlen  # seit 1.6.4 (Entscheidungen 43 und 46)
 
 __all__ = ["sensitivity_grid", "sensitivity_rebalancing", "planning_lumpsum_vs_dca", "series_leverage",
            "sensitivity_leverage", "SimLevSensitivity", "SimLevLumpSum"]
@@ -48,6 +53,67 @@ def _simulation():
 def _args_set(args, over, who):
     from ._sim_blocks import _sim_args_set
     return _sim_args_set(args, over, who)
+
+
+def _sens_check_sim(data, strategy):
+    """``data`` und ``strategy`` für ``simulation()`` früh mit dessen Meldungen prüfen (R: ``.sens_check_sim``)."""
+    from ._sim_base import _Frame
+    if not isinstance(data, (pd.DataFrame, _Frame)):
+        raise ValueError("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s)."
+                         % chk_msg("tabelle.formen"))
+    _e2_check_strategy(strategy)
+
+
+def _e2_check_strategy(strategy):
+    """``strategy`` wie ``simulation()``: nicht leer, alle Assets benannt; gleiche Meldungen (R: ``.e2_check_strategy``)."""
+    try:
+        n = 0 if strategy is None else len(strategy)
+    except TypeError:
+        n = 1
+    if n == 0:
+        raise ValueError("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein "
+                         "(z. B. aus create_strategy()).")
+    if not isinstance(strategy, Mapping) or any(k is None or str(k) == "" for k in strategy.keys()):
+        raise ValueError("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
+
+
+def _e2_sim_args(sim_args, fn):
+    """``sim_args`` wie R ``is.list``: ``None``, ``dict`` oder Liste/Tupel (R: unbenannte Liste; Einträge ohne Namen
+    meldet ``_sim_args_set``); sonst Meldung ``liste``."""
+    if sim_args is None or isinstance(sim_args, Mapping):
+        return sim_args
+    if isinstance(sim_args, (list, tuple)):
+        return {"": sim_args[0]} if len(sim_args) else {}
+    chk_stop("liste", fn, "sim_args")
+
+
+def _sens_check_common(fn, sim_args, cores, metrics=None, check_metrics=True):
+    """``sim_args`` als Liste, ``metrics`` als Funktion (``None`` = Standard), ``cores`` ganze Zahl >= 1."""
+    _e2_sim_args(sim_args, fn)
+    if check_metrics and metrics is not None and not callable(metrics):
+        chk_stop("e2.funktion", fn, "metrics")
+    return chk_cores(cores, fn)   # seit 1.6.4 höchstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
+
+
+def _lev_check(fn, data, index, rate, expense, spread):
+    """Hebelreihe: ``data`` mit date und Indexspalte, Zins, Kosten (R: ``.lev_check``)."""
+    chk_df(data, fn, "data")
+    index = chk_name1(index, fn, "index")
+    chk_cols(data, ["date", index], fn)
+    chk_col_nofactor(data, "date", fn)   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
+    chk_col_nofactor(data, index, fn)   # Entscheidung 15
+    chk_col_type(data, index, fn, "numerisch")
+    r1 = chk_scalar(rate)
+    if isinstance(r1, (int, float, np.integer, np.floating)) and not isinstance(r1, (bool, np.bool_)):
+        chk_num1(r1, fn, "rate")
+    elif isinstance(r1, str) and r1 in [str(c) for c in data.columns]:
+        chk_col_nofactor(data, r1, fn)
+        chk_col_type(data, r1, fn, "numerisch")
+    elif (isinstance(rate, pd.Categorical) or (isinstance(rate, pd.Series) and isinstance(rate.dtype, pd.CategoricalDtype))):
+        chk_stop("faktor", fn, "rate")
+    chk_num1(expense, fn, "expense")
+    chk_num1(spread, fn, "spread")
+    return index
 
 
 def _metrics_default(metrics):
@@ -124,7 +190,7 @@ def _cell(v):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @_study_scope
-def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_results=False, cores=1):
+def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_results=False, cores="auto"):
     """``simulation`` über ein Parameterraster.
 
     Ruft ``simulation()`` für jede Kombination von ``grid`` auf denselben Daten und derselben Strategie auf und
@@ -147,6 +213,7 @@ def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_
             einen Fehler mit den möglichen Bausteinen und Parametern. Alternativ ein DataFrame mit einer Zeile je
             Lauf. Listen-Spalten (z. B. ``splits.thresh``) sind erlaubt. ``NA`` lässt das Argument weg
             (Standardwert bzw. Wert aus ``sim_args``).
+            Seit 1.6.4 geprüft: benannte Liste oder data.frame ohne Faktorspalten.
         sim_args: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard ``{}``); Werte aus ``grid`` haben
             Vorrang. Argumente von ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B.
             ``dca = dca_plan(100, 1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine
@@ -154,9 +221,30 @@ def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_
             B. ``dca_value``) ergeben einen Fehler, der den Baustein nennt.
         metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
             ``bootstrap_study_metrics()``).
+            Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen keiner festen Spalte
+            des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
         keep_results: Logisch (Standard ``False``): Ergebnisse der Läufe zusätzlich als Attribut ``results``
             zurückgeben.
-        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+            Seit 1.6.4 nur TRUE oder FALSE.
+        cores: Anzahl Prozesse (Fork auf Unix):
+            ``"auto"`` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+            Mit ``"auto"`` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+            die Zahl der Prozesse und der Kern-Threads je Lauf selbst (Planer, gleiche Regel in R, Python
+            und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder höherer Priorität), so viele,
+            wie der freie Speicher trägt, und nur, wenn die
+            Startkosten kleiner sind als der Gewinn (kleine Rechnungen bleiben bei einem Prozess; ohne ``fork``
+            (Windows, macOS) immer einer).
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
+            Einheitenreihenfolge.
+            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
+            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            In Julia erscheinen Ausgaben, die
+            eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
+            Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
+            hängt nicht von cores ab.
+            Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
 
     Returns:
         DataFrame: Rasterspalten (Listen-Spalten als Text "a/b"), die Kennzahlen aus ``metrics`` (bei
@@ -178,10 +266,28 @@ def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_
                                     sim_args={"rebalance": simlev.rebalance_plan(span=1)})
         print(g[["rebalance.unit", "cagr", "trades"]])
     """
+    _sens_check_sim(data, strategy)
+    # grid: DataFrame oder benannte Liste (R nannte unbenannte Elemente "Var1"); seit 1.6.4
+    if not isinstance(grid, pd.DataFrame) and not (isinstance(grid, Mapping) and len(grid) > 0 and
+                                                   all(isinstance(k, str) and k != "" for k in grid.keys())):
+        chk_stop("e2.benannt", "sensitivity_grid", "grid")
+    gk = [str(c) for c in grid.columns] if isinstance(grid, pd.DataFrame) else [str(k) for k in grid.keys()]
+    if len(set(gk)) != len(gk):
+        chk_stop("e2.doppelt", "sensitivity_grid", "grid")
+    if isinstance(grid, pd.DataFrame):   # Entscheidung 15
+        for k in grid.columns:
+            chk_col_nofactor(grid, str(k), "sensitivity_grid")
+    else:
+        for k, v in grid.items():
+            if (isinstance(v, pd.Categorical) or (isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype))):
+                chk_stop("faktor", "sensitivity_grid", "grid$%s" % k)
+    cores = _sens_check_common("sensitivity_grid", sim_args, cores, metrics)
+    sim_args = _e2_sim_args(sim_args, "sensitivity_grid")
+    keep_results = chk_bool1(keep_results, "sensitivity_grid", "keep_results")
     metrics = _metrics_default(metrics)
     design = _grid_frame(grid)
     if not len(design):
-        raise ValueError("Leeres Raster.")
+        chk_stop("rs.raster_leer", "sensitivity_grid")
     from ._sim_blocks import _sim_check_names
     _sim_check_names([str(k) for k in design.columns], "sensitivity_grid")   # Argumente bzw. Pfade wie "dca.value"
     sim_args = _args_set({}, sim_args, "sensitivity_grid")
@@ -202,6 +308,10 @@ def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_
     okm = [o["m"] for o in out if o["m"] is not None]
     if not okm:
         raise ValueError("sensitivity_grid: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg([o["err"] for o in out])))
+    # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
+    # Spalte des Rasters bzw. error; geprüft nach dem Rechnen, bei jedem cores gleich (R: gleiche Prüfung)
+    for m in okm:
+        chk_kennzahlen(list(m.index), len(m), [str(k) for k in design.columns] + ["error"], "sensitivity_grid")
     mnames = [str(k) for k in okm[0].index]
     M = np.array([[_NAN] * len(mnames) if o["m"] is None else [float(o["m"][k]) if k in o["m"].index else _NAN for k in mnames]
                   for o in out], dtype=np.float64).reshape(len(out), len(mnames))
@@ -233,7 +343,7 @@ def _all_equal_num(t, c):
     return all_equal_numeric(np.asarray(t, dtype=np.float64), np.asarray(c, dtype=np.float64)) is True
 
 
-class _RFrame(pd.DataFrame):
+class _RFrame(pd.DataFrame, _PrintFormat):
     """data.frame mit R-Klasse und eigener Druckausgabe."""
 
     _metadata = []
@@ -250,10 +360,6 @@ class _RFrame(pd.DataFrame):
 
     def __str__(self):
         return self.format()
-
-    def print(self):
-        print(self.format())
-        return self
 
 
 class SimLevSensitivity(_RFrame):
@@ -388,7 +494,7 @@ def _vec(v):
 @_study_scope
 def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, bands=_NAN,
                             band_type=("absolute", "relative"), include_none=True, sim_args=None, metrics=None,
-                            cores=1):
+                            cores="auto"):
     """Rebalancing-Sensitivität.
 
     Vergleicht Rebalancing-Frequenzen, Versatz vor dem Periodenende und Toleranzbänder (absolut oder relativ) für
@@ -404,15 +510,19 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
             = Anzahl Einheiten zwischen den Terminen (``unit`` und ``span`` von ``rebalance_plan()``). Standard:
             monatlich, zweimonatlich, quartalsweise, viermonatlich, halbjährlich, jährlich (Namen monthly,
             bimonthly, quarterly, four_monthly, semiannual, yearly).
+            Seit 1.6.4 geprüft: benannte Liste, je Eintrag Einheit und Abstand.
         offsets: Numerischer Vektor: Kalendertage vor dem Ende des Monats, Dreimonatsblocks bzw. Jahres, in dem
             der Termin liegt (0 = letzter Tag; ``rebalance_plan(anchor = "end", days = offset + 1)``). ``None``
             (Standard) rebalanciert am Periodenanfang.
+            Seit 1.6.4 ganze Zahlen ≥ 0.
         bands: Toleranzbänder in Prozent (5 = 5 Prozent); ``NA`` (Standard) = an jedem Termin rebalancieren.
             Mehrere Werte, auch gemischt mit ``NA``, sind möglich.
+            Seit 1.6.4 Werte ≥ 0 oder NA.
         band_type: "absolute" (Standard; Prozentpunkte Abweichung vom Zielgewicht) oder "relative" (Prozent des
             Zielgewichts), siehe ``thresh_type`` von ``rebalance_plan()``.
         include_none: Logisch (Standard ``True``): zusätzlich einen Lauf ohne Rebalancing (Zeile ``frequency =
             "none"``).
+            Seit 1.6.4 nur TRUE oder FALSE.
         sim_args: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard ``{}``): Argumente von
             ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100,
             1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``, siehe
@@ -424,7 +534,27 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
             Rebalancing setzt ``rebalance = None``.
         metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
             ``bootstrap_study_metrics()``).
-        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+            Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen keiner festen Spalte
+            des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
+        cores: Anzahl Prozesse (Fork auf Unix):
+            ``"auto"`` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+            Mit ``"auto"`` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+            die Zahl der Prozesse und der Kern-Threads je Lauf selbst (Planer, gleiche Regel in R, Python
+            und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder höherer Priorität), so viele,
+            wie der freie Speicher trägt, und nur, wenn die
+            Startkosten kleiner sind als der Gewinn (kleine Rechnungen bleiben bei einem Prozess; ohne ``fork``
+            (Windows, macOS) immer einer).
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
+            Einheitenreihenfolge.
+            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
+            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            In Julia erscheinen Ausgaben, die
+            eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
+            Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
+            hängt nicht von cores ab.
+            Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
 
     Returns:
         DataFrame der Klasse ``SimLevSensitivity`` mit den Spalten ``frequency``, ``offset``, ``band``,
@@ -444,8 +574,30 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
         print(simlev.sensitivity_rebalancing(d, st, frequencies={"monthly": ["month", 1], "yearly": ["year", 1]},
                                              bands=[np.nan, 5]))
     """
+    _e5_choice(band_type, ("absolute", "relative"), "sensitivity_rebalancing", "band_type")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     band_type = _match_arg(band_type, ("absolute", "relative"), "band_type")
     frequencies = _FREQ if frequencies is None else frequencies
+    fn = "sensitivity_rebalancing"
+    _sens_check_sim(data, strategy)
+    if not (isinstance(frequencies, Mapping) and len(frequencies) > 0 and
+            all(isinstance(k, str) and k != "" for k in frequencies.keys())):
+        chk_stop("e2.benannt", fn, "frequencies")
+    for k, f in frequencies.items():
+        if not isinstance(f, (list, tuple, np.ndarray, pd.Series)) or len(f) != 2:
+            chk_stop("e2.frequenz", fn, k)
+    if offsets is not None:
+        ov = _vec(offsets)
+        if not (ov and all(isinstance(z, (int, float)) and not isinstance(z, bool) and np.isfinite(z)
+                           and z == np.trunc(z) and z >= 0 for z in ov)):
+            chk_stop("ganz_vektor", fn, "offsets", chk_range_text(lo=0))
+    bv = _vec(bands)
+    num_b = [z for z in bv if not _isna(z)]
+    if not (bv and all(isinstance(z, (int, float)) and not isinstance(z, bool) for z in num_b)
+            and all(np.isfinite(z) and z >= 0 for z in num_b)):
+        chk_stop("e2.zahlen_na", fn, "bands", chk_range_text(lo=0))
+    include_none = chk_bool1(include_none, fn, "include_none")
+    cores = _sens_check_common(fn, sim_args, cores, metrics)
+    sim_args = _e2_sim_args(sim_args, fn)
     sim_args = _args_set({}, sim_args, "sensitivity_rebalancing")
     metrics = _metrics_default(metrics)
     rows = []
@@ -480,6 +632,9 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
     if not any(ok):
         raise ValueError("sensitivity_rebalancing: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg(out)))
     good = [o for o, k in zip(out, ok) if k]
+    # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte
+    for m in good:
+        chk_kennzahlen(list(m.index), len(m), ["frequency", "offset", "band", "band_type"], "sensitivity_rebalancing")
     mnames = [str(k) for k in good[0].index]
     lab = [r["label"] for r, k in zip(rows, ok) if k]
     cols = {"frequency": np.array([l_[0] for l_ in lab], dtype=object),
@@ -529,7 +684,7 @@ def _report_get(rep, a, key):
 
 
 @_study_scope
-def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=10, step=1, sim_args=None, cores=1):
+def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=10, step=1, sim_args=None, cores="auto"):
     """Einmalanlage gegen gestreckten Einstieg (Lump Sum vs. DCA).
 
     Vergleicht für rollierende Starttermine (jeweils am Monatsersten) die sofortige Anlage eines Betrags mit einem
@@ -540,16 +695,40 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
             Strategie aus ``create_strategy()``.
         amount: Anlagebetrag in Währungseinheiten (Standard 10000); bei DCA in ``months`` Raten von ``amount /
             months`` aufgeteilt.
+            Seit 1.6.4 eine Zahl > 0.
         months: Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
+            Seit 1.6.4 höchstens 1200.
         horizon: Vergleichshorizont in Jahren ab Start (Standard 10).
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
+            Seit 1.6.4 höchstens 100.
         step: Jeder wievielte mögliche Starttermin verwendet wird (Standard 1 = jeder Monat; 12 = jährlich).
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
         sim_args: Benannte Liste weiterer Argumente für ``simulation()`` (z. B. ``tax = tax_profile()``):
             Argumente von ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca =
             dca_plan(100, 1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``,
             siehe ``sensitivity_grid``). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``)
             ergeben einen Fehler, der den Baustein nennt. ``start_value`` und ``dca`` (auch Pfade ``"dca.*"`` und
             die alten ``dca_*``) setzt die Funktion selbst (in ``sim_args`` ein Fehler).
-        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+        cores: Anzahl Prozesse (Fork auf Unix):
+            ``"auto"`` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+            Mit ``"auto"`` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+            die Zahl der Prozesse und der Kern-Threads je Lauf selbst (Planer, gleiche Regel in R, Python
+            und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder höherer Priorität), so viele,
+            wie der freie Speicher trägt, und nur, wenn die
+            Startkosten kleiner sind als der Gewinn (kleine Rechnungen bleiben bei einem Prozess; ohne ``fork``
+            (Windows, macOS) immer einer).
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
+            Einheitenreihenfolge.
+            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
+            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            In Julia erscheinen Ausgaben, die
+            eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
+            Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
+            hängt nicht von cores ab.
+            Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
 
     Returns:
         DataFrame der Klasse ``SimLevLumpSum`` mit einer Zeile je Start: ``start`` (Datum), ``lump_sum`` und
@@ -591,14 +770,25 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
                                             amount=12000, months=12, horizon=3, step=6)
         print(ld.head())
     """
+    fn = "planning_lumpsum_vs_dca"
+    _sens_check_sim(data, strategy)
+    amount = chk_num1(amount, fn, "amount", lo=0, lo_open=True)   # seit 1.6.4
+    months = chk_int1(months, fn, "months")
+    horizon = chk_int1(horizon, fn, "horizon")
+    # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46): Laufzeiten bis 100 Jahre (months in Monaten)
+    chk_max(months, SL_MAX_MONATE, fn, "months")
+    chk_max(horizon, SL_MAX_JAHRE, fn, "horizon")
+    step = chk_int1(step, fn, "step")
+    cores = _sens_check_common(fn, sim_args, cores, check_metrics=False)
+    sim_args = _e2_sim_args(sim_args, fn)
     sim_args = {} if sim_args is None else dict(sim_args)
     own = [k for k in sim_args if k in ("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip")
            or str(k).startswith("dca.")]
     if own:
-        raise ValueError("planning_lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag über amount, Raten über months)."
-                         % ", ".join(own))
+        chk_stop("rs.sim_args_eigen", fn, ", ".join(own))
     sim_args = _args_set({}, sim_args, "planning_lumpsum_vs_dca")
     data = data.copy()
+    chk_col_nofactor(data, "date", "planning_lumpsum_vs_dca")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     data["date"] = _to_date(data["date"], "planning_lumpsum_vs_dca: data$date")
     data = data.iloc[np.argsort(_days(data["date"].to_numpy()), kind="stable")].reset_index(drop=True)
     _memo_seed_dates(data["date"])     # Prüf-Cache: die Fenster sind Ausschnitte dieser Datumsspalte (seit 1.5.1)
@@ -611,10 +801,10 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
     firsts = d[dd == 1]
     last_ok = _seq_date_2nd(d.max(), "-" + _r_num_str(horizon) + " years")
     starts = firsts[firsts <= last_ok]
+    if not len(starts):   # seit 1.6.4 vor seq (vorher "wrong sign in 'by' argument")
+        chk_stop("rs.horizont_kurz", fn)
     sel = _seq_by(1, len(starts), step)
     starts = starts[sel.astype(np.int64) - 1]
-    if not len(starts):
-        raise ValueError("Historie zu kurz für den Horizont.")
     simulation = _simulation()
     result_index = _ext("withdrawal", "result_index")
     wmod = importlib.import_module("simlev.wrapper")
@@ -710,13 +900,16 @@ def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, sta
 
     Args:
         data: DataFrame mit Spalte ``date`` und der Indexspalte.
+            Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).
         index: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
+            Seit 1.6.4 geprüft: Zahlenspalte in data (kein Faktor).
         leverage: Hebel L als Zahl (Standard 2; negativ für Short).
         rate: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge
             ``nrow(data)``, ``data.frame(date, value)`` oder benannter Vektor mit Datumsnamen.
         expense: TER in Prozent p. a. (Standard 0).
         spread: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
         start: Startwert der Reihe in der ersten Zeile (Standard 100).
+            Seit 1.6.4 eine Zahl > 0.
 
     Returns:
         Numerischer Vektor (Niveau, Länge ``nrow(data)``); fällt eine Tagesrendite auf -100 Prozent oder darunter,
@@ -733,6 +926,12 @@ def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, sta
         d["l2"] = simlev.series_leverage(d, "idx", leverage=2, rate="zins", expense=0.6, spread=0.3)
         print(d.tail(2))
     """
+    index = _lev_check("series_leverage", data, index, rate, expense, spread)   # seit 1.6.4
+    if len(data) == 0:   # seit 1.6.4 (Entscheidung 38; bis 1.6.3 Fehler je Sprache verschieden, R 100)
+        chk_stop("zeilen_keine", "series_leverage", "data")
+    leverage = chk_num1(leverage, "series_leverage", "leverage")
+    start = chk_num1(start, "series_leverage", "start", lo=0, lo_open=True)
+    rate, expense, spread = chk_scalar(rate), chk_scalar(expense), chk_scalar(spread)
     idx = _fill_locf(np.asarray(data[index], dtype=np.float64))
     dts = _days(_to_date(data["date"], "data$date")).astype(np.float64)
     dd = np.concatenate([[1.0], np.diff(dts)])
@@ -753,7 +952,7 @@ def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, sta
 
 @_study_scope
 def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spread=0, strategy=None, sim_args=None,
-                         metrics=None, cores=1):
+                         metrics=None, cores="auto"):
     """Kennzahlen über den Hebel.
 
     Erzeugt für jeden Hebel eine Reihe mit ``series_leverage()``, simuliert sie als Buy-and-Hold (oder mit einer
@@ -765,6 +964,7 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
         data: DataFrame mit Spalte ``date`` und der Indexspalte.
         index: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
         leverages: Numerischer Vektor der zu prüfenden Hebel (Standard ``seq(0.5, 4, by = 0.25)``).
+            Seit 1.6.4 endliche Zahlen.
         rate: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge
             ``nrow(data)``, ``data.frame(date, value)`` oder benannter Vektor mit Datumsnamen.
         expense: TER in Prozent p. a. (Standard 0).
@@ -778,12 +978,32 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
             ergeben einen Fehler, der den Baustein nennt.
         metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
             ``bootstrap_study_metrics()``).
-        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+            Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen keiner festen Spalte
+            des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
+        cores: Anzahl Prozesse (Fork auf Unix):
+            ``"auto"`` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+            Mit ``"auto"`` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+            die Zahl der Prozesse und der Kern-Threads je Lauf selbst (Planer, gleiche Regel in R, Python
+            und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder höherer Priorität), so viele,
+            wie der freie Speicher trägt, und nur, wenn die
+            Startkosten kleiner sind als der Gewinn (kleine Rechnungen bleiben bei einem Prozess; ohne ``fork``
+            (Windows, macOS) immer einer).
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
+            Einheitenreihenfolge.
+            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
+            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            In Julia erscheinen Ausgaben, die
+            eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
+            Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
+            hängt nicht von cores ab.
+            Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
 
     Returns:
         DataFrame der Klasse ``SimLevSensitivity`` mit ``leverage`` und den Kennzahlen aus ``metrics``
         (fehlgeschlagene Läufe fehlen); Attribut ``optimal`` (benannter Vektor ``cagr``, ``sharpe``: Hebel mit
-        maximaler CAGR bzw. Sharpe Ratio) und ``kind = "leverage"``. Mit Sparplan (``sim_args``) ist ``cagr``
+        maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert) und ``kind = "leverage"``. Mit Sparplan (``sim_args``) ist ``cagr``
         geldgewichtet (XIRR). Ausgabe und Grafik über ``print()`` und ``plot()``.
 
     Beispiel::
@@ -796,6 +1016,17 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
         lv = simlev.sensitivity_leverage(d, "idx", leverages=[1, 1.5, 2, 3], rate=2, expense=0.5)
         print(lv)
     """
+    fn = "sensitivity_leverage"
+    index = _lev_check(fn, data, index, rate, expense, spread)   # seit 1.6.4
+    if leverages is not None:
+        lv = _vec(leverages)
+        if not (lv and all(isinstance(z, (int, float)) and not isinstance(z, bool) and np.isfinite(z) for z in lv)):
+            chk_stop("e2.zahlen_endlich", fn, "leverages")
+    if strategy is not None:
+        _sens_check_sim(data, strategy)
+    cores = _sens_check_common(fn, sim_args, cores, metrics)
+    sim_args = _e2_sim_args(sim_args, fn)
+    rate, expense, spread = chk_scalar(rate), chk_scalar(expense), chk_scalar(spread)
     leverages = _seq_by(0.5, 4, 0.25) if leverages is None else np.atleast_1d(np.asarray(leverages, dtype=np.float64))
     sim_args = _args_set({}, sim_args, "sensitivity_leverage")
     metrics = _metrics_default(metrics)
@@ -817,6 +1048,9 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
     out = list(_par_lapply(list(leverages), run, cores))
     ok = np.array([o is not None for o in out], dtype=bool)
     good = [o for o in out if o is not None]
+    # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und nicht leverage
+    for m in good:
+        chk_kennzahlen(list(m.index), len(m), ["leverage"], fn)
     cols = {"leverage": leverages[ok]}
     if good:
         mnames = [str(k) for k in good[0].index]
@@ -828,15 +1062,9 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
     jc = _which_max(tab["cagr"].to_numpy(dtype=np.float64)) if "cagr" in tab.columns else None
     js = _which_max(tab["sharpe"].to_numpy(dtype=np.float64)) if "sharpe" in tab.columns else None
     lv = tab["leverage"].to_numpy(dtype=np.float64)
-    # R: c(cagr = lev[which.max(cagr)], sharpe = ...): ein leeres which.max lässt das Element weg
-    opt = {}
-    if jc is not None:
-        opt["cagr"] = lv[jc]
-    if "sharpe" in tab.columns:
-        if js is not None:
-            opt["sharpe"] = lv[js]
-    else:
-        opt["sharpe"] = _NA
+    # seit 1.6.4 (K43 T2-N3) immer cagr und sharpe, NA ohne Spalte bzw. ohne Wert (bis dahin fehlte cagr ohne Spalte
+    # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR)
+    opt = {"cagr": lv[jc] if jc is not None else _NA, "sharpe": lv[js] if js is not None else _NA}
     tab.attrs["optimal"] = pd.Series(opt, dtype=np.float64)
     return tab
 

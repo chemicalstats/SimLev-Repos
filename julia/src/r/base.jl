@@ -92,11 +92,13 @@ r_cummin(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cummin(v), nm))
 
 "`mean(x)` auch für Matrizen/data.frames (alle Elemente spaltenweise), Integer wie R."
 function mean(x; na_rm::Bool = false)
-    if x isa RFrame
-        a, _, _ = _mat(x)
-        return r_mean(vec(a); na_rm = na_rm)
-    end
+    # seit 1.6.4 wie R mean.default (C-066): data.frame, Faktor, Text und NULL ergeben NA mit Warnung
     xx = x isa RVector ? x.values : x isa NamedMat ? x.data : x
+    if x isa RFrame || x === nothing || x isa SimLev.RFmt.RFactor || xx isa AbstractString ||
+       (xx isa AbstractArray && !isempty(xx) && !all(v -> v === missing || (v isa Real), xx))
+        @warn "argument is not numeric or logical: returning NA"
+        return NA
+    end
     if (xx isa AbstractArray && eltype(xx) <: Union{Integer,Bool}) || xx isa Integer || xx isa Bool
         return r_mean_int(vec(collect(xx)))
     end
@@ -109,6 +111,8 @@ function _pext(args, na_rm::Bool, greater::Bool)
     vals = [_vec(a) for a in args]
     any(isempty(v) for (v, _) in vals) && return Float64[]
     n = maximum(length(v) for (v, _) in vals)
+    # seit 1.6.4 wie R do_pmin (C-094), eine Warnung je Aufruf
+    any(n % length(v) != 0 for (v, _) in vals) && @warn "an argument will be fractionally recycled"
     first_, nm = vals[1]
     out = Float64[first_[mod1(i, length(first_))] for i in 1:n]
     for (t, _) in vals[2:end]
@@ -123,6 +127,13 @@ function _pext(args, na_rm::Bool, greater::Bool)
     end
     if nm !== nothing && length(nm) == n
         return RVector(out; names = nm)
+    end
+    # seit 1.6.4 wie R mostattributes(): Form (dim, dimnames) des ersten Arguments, wenn die Länge passt (C-094)
+    a1 = args[1]
+    if a1 isa NamedMat && length(a1) == n
+        return NamedMat(reshape(out, size(a1)); rownames = a1.rownames, colnames = a1.colnames)
+    elseif a1 isa AbstractArray && ndims(a1) >= 2 && length(a1) == n
+        return reshape(out, size(a1))
     end
     return out
 end

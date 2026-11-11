@@ -93,25 +93,10 @@ static const double grid_g[GRID_NG][3] = {{0.03, 0.06, 0.90}, {0.05, 0.10, 0.82}
 
 /* ── Hilfen ── */
 
-static double mean_c(int n, const double *x)
-{
-    slc_acc a;
-    int i;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) slc_acc_add(&a, x[i]);
-    return slc_acc_val(&a) / n;
-}
-
-/* Stichprobenvarianz (Nenner n - 1), zwei Durchgänge, kompensiert */
-static double var_c(int n, const double *x, double m)
-{
-    slc_acc a;
-    int i;
-    if (n < 2) return NAN;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) { double d = x[i] - m; slc_acc_add(&a, d * d); }
-    return slc_acc_val(&a) / (n - 1);
-}
+/* Mittelwert und Stichprobenvarianz (Nenner n - 1, zwei Durchgänge, kompensiert): slc_mean, slc_var_m
+ * (slc_la_internal.h, seit 1.6.4) */
+static inline double mean_c(int n, const double *x) { return slc_mean(n, x); }
+static inline double var_c(int n, const double *x, double m) { return slc_var_m(n, x, m); }
 
 static int check_series(sl_ctx *cx, int n, const double *e, int nmin, const char *who)
 {
@@ -737,16 +722,16 @@ static int fit_sgarch(sl_ctx *cx, int n, const double *e, double m, double v, co
  * nur den Speicher. Alle sieben Starts laufen bis zum Ende: Ein kurzer Vorlauf mit Fortsetzung nur der besten
  * Starts sparte 13–35 %, traf aber auf neuen Reihen nicht immer das Optimum. Von nur einem Start blieb
  * BFGS auf fast unabhängigen Reihen an der Grenze beta -> 1 hängen, daher sieben Starts.
- * sGARCH bis 1.1.0 ebenso mit sg_fg und demselben Speicher (seitdem eigener Löser, fit_sgarch). */
+ * sGARCH bis 1.1.0 ebenso mit sg_fg und demselben Speicher (seitdem eigener Löser, fit_sgarch); seit 1.6.4 rufen
+ * fg_obj/fg_gr daher nur noch gjr_fg (5 Parameter; der sGARCH-Zweig war seit 1.1.0 unerreichbar). */
 typedef struct { const garch_data *d; double xc[5], gc[5]; int have; } fg_cache;
 
 static double fg_obj(const double *th, void *data)
 {
     fg_cache *k = (fg_cache *) data;
     const garch_data *d = k->d;
-    const size_t sz = (size_t) sl_garch11_npar(d->gjr) * sizeof(double);
-    double f = d->gjr ? gjr_fg(d->n, d->e, th, d->s2_init, k->gc) : sg_fg(d->n, d->e, th, d->s2_init, k->gc);
-    memcpy(k->xc, th, sz);
+    double f = gjr_fg(d->n, d->e, th, d->s2_init, k->gc);
+    memcpy(k->xc, th, 5 * sizeof(double));
     k->have = 1;
     return f;
 }
@@ -755,10 +740,8 @@ static void fg_gr(const double *th, double *g, void *data)
 {
     fg_cache *k = (fg_cache *) data;
     const garch_data *d = k->d;
-    const size_t sz = (size_t) sl_garch11_npar(d->gjr) * sizeof(double);
-    if (k->have && memcmp(k->xc, th, sz) == 0) memcpy(g, k->gc, sz);
-    else if (d->gjr) gjr_fg(d->n, d->e, th, d->s2_init, g);
-    else sg_fg(d->n, d->e, th, d->s2_init, g);
+    if (k->have && memcmp(k->xc, th, 5 * sizeof(double)) == 0) memcpy(g, k->gc, 5 * sizeof(double));
+    else gjr_fg(d->n, d->e, th, d->s2_init, g);
 }
 
 static int fit_gjr(sl_ctx *cx, garch_data *d, double m, double v, const sl_opt_ctrl *ctrl, double *par,

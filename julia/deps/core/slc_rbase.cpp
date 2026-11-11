@@ -18,8 +18,11 @@
  *               colSums/colMeans auch über ausgewählte Zeilen (sl_r_colsums_idx, colMeans(x[idx, ]) ohne Kopie).
  *             - pow: R's ^ für Doubles: y == 2 → x·x, x == 1 oder y == 0 → 1, sonst libm pow mit
  *               R's Randfällen (?Arithmetic: 1^y und y^0 sind 1, auch für NA/NaN).
- *             - math1 (seit 1.5.2): exp, log, log1p, expm1, log2, log10 elementweise mit libm wie R's math1
- *               (?log: log(0) = -Inf, negative Werte NaN; NA/NaN bleiben erhalten).
+ *             - math1 (seit 1.5.2): exp, log, log1p, expm1 elementweise mit libm wie R's math1 (?log: log(0) =
+ *               -Inf, negative Werte R_NaN bzw. bei log1p(< -1) das NaN der libm; ein NaN in x bleibt Bit für Bit
+ *               x, auch NA 0x7FF0…07A2), log2 und log10 wie R's math2/logbase (NA ergibt NA_real_, jedes andere
+ *               NaN und x < 0 R_NaN 0x7FF8…); seit 1.6.4 (C-068), bis 1.6.3 exp/expm1(NA) das ruhige NA
+ *               0x7FF8…07A2 und log2/log10(NaN) x selbst (auch -NaN).
  *             - round/signif (seit 1.6.3 hier, vorher slc_rbase_fmt.cpp): siehe den Block unten.
  *             - zeroin2: Brent-Verfahren (inverse quadratische bzw. lineare Interpolation mit
  *               Bisektion als Rückfall) wie R_zeroin2 hinter stats::uniroot, Schritt für Schritt in derselben
@@ -70,13 +73,6 @@ static int is_na(double x)
     if (x == x) return 0;
     memcpy(&u, &x, sizeof u);
     return (u & UINT64_C(0xFFFFFFFF)) == 1954;
-}
-
-static double quiet(double x)
-{
-    uint64_t u;
-    memcpy(&u, &x, sizeof u);
-    return bits_d(u | UINT64_C(0x0008000000000000));
 }
 
 #define R_NA  bits_d(UINT64_C(0x7FF00000000007A2))
@@ -226,46 +222,29 @@ void sl_r_colsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, d
  * Reihenfolge von idx, Wiederholungen erlaubt), ohne sie zu bilden. Element (r, j) bei x[r rs + j cs] (spaltenweise
  * rs = 1, cs = nr; zeilenweise rs = nc, cs = 1). idx: m Zeilennummern ab base (0 oder 1). Je Spalte dieselben
  * Summanden in derselben Reihenfolge wie sl_r_colsums auf der Kopie (long double, Mittel durch die Anzahl): Bit
- * fuer Bit gleich; bei rs > cs laeuft die Schleife zeilenweise mit einem Akkumulator je Spalte (gleiche Folge je
- * Spalte). Rueckgabe SL_OK, SL_EARG (Zeilennummer ausserhalb, out unveraendert), SL_ENOMEM. */
+ * fuer Bit gleich. Seit 1.6.4 (B-073) fuer alle rs, cs dieselbe Spaltenschleife mit der Summe im Register (bis 1.6.3
+ * bei rs > cs zeilenweise mit einem long-double-Akkumulator je Spalte im Speicher: gleiche Folge je Spalte, aber
+ * langsamer; die Aufrufer uebergeben die Matrix spaltenweise). Rueckgabe SL_OK, SL_EARG (Zeilennummer ausserhalb,
+ * out unveraendert). */
 int sl_r_colsums_idx(int64_t nr, int64_t nc, const double *x, int64_t rs, int64_t cs, int64_t m, const int64_t *idx,
                      int64_t base, int narm, int mean, double *out)
 {
     int64_t i, j;
     if (nr < 0 || nc < 0 || m < 0) return SL_EARG;
+    /* seit 1.6.4 (C-019): Vergleich ohne Subtraktion (bis 1.6.3 lief idx[i] - base bei idx = INT64_MIN ueber) */
+    if (base < 0 || base > 1) return SL_EARG;
     for (i = 0; i < m; i++)
-        if (idx[i] - base < 0 || idx[i] - base >= nr) return SL_EARG;
-    if (rs <= cs) {
-        for (j = 0; j < nc; j++) {
-            const double *c = x + j * cs;
-            ldouble s = 0.0L;
-            int64_t cnt = 0;
-            for (i = 0; i < m; i++) {
-                const double v = c[(idx[i] - base) * rs];
-                if (!narm || !isnan(v)) { s += v; cnt++; }
-            }
-            if (mean && !isnan((double) s)) s /= (ldouble) cnt;
-            out[j] = (double) s;
-        }
-        return SL_OK;
-    }
-    {
-        ldouble *acc = (ldouble *) calloc((size_t) (nc > 0 ? nc : 1), sizeof(ldouble));
-        int64_t *cnt = (int64_t *) calloc((size_t) (nc > 0 ? nc : 1), sizeof(int64_t));
-        if (acc == NULL || cnt == NULL) { free(acc); free(cnt); return SL_ENOMEM; }
+        if (idx[i] < base || idx[i] >= nr + base) return SL_EARG;
+    for (j = 0; j < nc; j++) {
+        const double *c = x + j * cs;
+        ldouble s = 0.0L;
+        int64_t cnt = 0;
         for (i = 0; i < m; i++) {
-            const double *row = x + (idx[i] - base) * rs;
-            for (j = 0; j < nc; j++) {
-                const double v = row[j * cs];
-                if (!narm || !isnan(v)) { acc[j] += v; cnt[j]++; }
-            }
+            const double v = c[(idx[i] - base) * rs];
+            if (!narm || !isnan(v)) { s += v; cnt++; }
         }
-        for (j = 0; j < nc; j++) {
-            ldouble s = acc[j];
-            if (mean && !isnan((double) s)) s /= (ldouble) cnt[j];
-            out[j] = (double) s;
-        }
-        free(acc); free(cnt);
+        if (mean && !isnan((double) s)) s /= (ldouble) cnt;
+        out[j] = (double) s;
     }
     return SL_OK;
 }
@@ -485,8 +464,8 @@ static double r_pow1(double x, double y)
         return y;                                   /* NaN */
     }
     if (isfinite(x) && isfinite(y)) return pow(x, y);   /* negative Basis, gebrochener Exponent: NaN von pow */
-    if (isnan(y)) return quiet(y);                  /* NaN-Operand: der von y gewinnt, sonst der von x (wie R) */
-    if (isnan(x)) return quiet(x);
+    if (isnan(y)) return slc_quiet(y);                  /* NaN-Operand: der von y gewinnt, sonst der von x (wie R) */
+    if (isnan(x)) return slc_quiet(x);
     if (!isfinite(x)) {
         if (x > 0) return y < 0.0 ? 0.0 : INFINITY;
         if (isfinite(y) && y == floor(y))
@@ -513,32 +492,48 @@ void sl_r_pow(int64_t n, const double *x, double y, double *out)
     for (i = 0; i < n; i++) out[i] = r_pow1(x[i], y);
 }
 
-/* x ^ y elementweise mit R-Recycling (nx, ny >= 1; Länge max(nx, ny)) */
-void sl_r_pow_rec(int64_t nx, const double *x, int64_t ny, const double *y, double *out)
+/* x ^ y elementweise mit R-Recycling (nx, ny >= 1; Länge max(nx, ny)). Rückgabe (seit 1.6.4, T4-R2): Zahl der
+ * Elemente (-Inf)^y mit endlichem y > 2^64, für die R's R_pow über myfmod(y, 2) je Element „probable complete loss of
+ * accuracy in modulus“ warnt (|y / 2| * LDBL_EPSILON > 1); die Werte sind unverändert. */
+int64_t sl_r_pow_rec(int64_t nx, const double *x, int64_t ny, const double *y, double *out)
 {
-    int64_t i, n = nx > ny ? nx : ny;
-    for (i = 0; i < n; i++) out[i] = r_pow1(x[i % nx], y[i % ny]);
+    int64_t i, n = nx > ny ? nx : ny, nw = 0;
+    for (i = 0; i < n; i++) {
+        double a = x[i % nx], b = y[i % ny];
+        out[i] = r_pow1(a, b);
+        if (a == -INFINITY && b > 18446744073709551616.0 && b < INFINITY) nw++;
+    }
+    return nw;
 }
 
-/* libm elementweise mit den Randregeln von R (arithmetic.c R_log, math1): NaN in x bleibt x
- * (Nutzlast erhalten), log(0) = -Inf, log(< 0) = NaN, log1p(-1) = -Inf, log1p(< -1) = NaN; exp, expm1 direkt
- * (Überlauf Inf, NaN von libm). kind: SL_R_EXP, SL_R_LOG, SL_R_LOG1P, SL_R_EXPM1, SL_R_LOG2, SL_R_LOG10. */
+/* libm elementweise mit den Randregeln von R (arithmetic.c): exp, log, log1p, expm1 wie math1 (NaN in x bleibt x
+ * Bit für Bit, auch NA; log(0) = -Inf, log(< 0) = R_NaN, log1p(-1) = -Inf, log1p(< -1) = R_NaN; exp, expm1 sonst
+ * direkt, Überlauf Inf), log2 und log10 wie math2 mit logbase (NA ergibt NA_real_, jedes andere NaN R_NaN;
+ * log(0) = -Inf, x < 0 R_NaN). Seit 1.6.4 (C-068); bis 1.6.3 exp/expm1 auch für NaN direkt (NA kam als ruhiges NA
+ * 0x7FF8…07A2 zurück) und log2/log10 gaben ein NaN unverändert zurück (auch mit Vorzeichen).
+ * kind: SL_R_EXP, SL_R_LOG, SL_R_LOG1P, SL_R_EXPM1, SL_R_LOG2, SL_R_LOG10. */
 void sl_r_math1(int kind, int64_t n, const double *x, double *out)
 {
     int64_t i;
     double v;
     switch (kind) {
-    case SL_R_EXP:   for (i = 0; i < n; i++) out[i] = exp(x[i]); break;
-    case SL_R_EXPM1: for (i = 0; i < n; i++) out[i] = expm1(x[i]); break;
+    case SL_R_EXP:   for (i = 0; i < n; i++) { v = x[i]; out[i] = isnan(v) ? v : exp(v); } break;
+    case SL_R_EXPM1: for (i = 0; i < n; i++) { v = x[i]; out[i] = isnan(v) ? v : expm1(v); } break;
     case SL_R_LOG:   for (i = 0; i < n; i++) out[i] = sl_r_log1(x[i]); break;
     case SL_R_LOG1P:
         for (i = 0; i < n; i++) { v = x[i]; out[i] = v > -1 ? log1p(v) : v == -1 ? -INFINITY : isnan(v) ? v : R_NAN; }
         break;
     case SL_R_LOG2:
-        for (i = 0; i < n; i++) { v = x[i]; out[i] = v > 0 ? log2(v) : v == 0 ? -INFINITY : isnan(v) ? v : R_NAN; }
+        for (i = 0; i < n; i++) {
+            v = x[i];
+            out[i] = v > 0 ? log2(v) : v == 0 ? -INFINITY : is_na(v) ? R_NA : R_NAN;
+        }
         break;
     case SL_R_LOG10:
-        for (i = 0; i < n; i++) { v = x[i]; out[i] = v > 0 ? log10(v) : v == 0 ? -INFINITY : isnan(v) ? v : R_NAN; }
+        for (i = 0; i < n; i++) {
+            v = x[i];
+            out[i] = v > 0 ? log10(v) : v == 0 ? -INFINITY : is_na(v) ? R_NA : R_NAN;
+        }
         break;
     default:
         for (i = 0; i < n; i++) out[i] = R_NAN;

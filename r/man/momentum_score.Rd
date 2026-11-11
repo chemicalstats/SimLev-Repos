@@ -13,12 +13,14 @@ momentum_score(
 }
 \arguments{
 \item{data}{data.frame mit Spalte \code{date} (Klasse Date) und
-Kursspalten (Niveaus).}
+Kursspalten (Niveaus).
+Seit 1.6.4 Datum aufsteigend ohne NA, Kursspalten numerisch (kein Faktor).}
 
 \item{assets}{Zeichenvektor der Kursspalten.}
 
 \item{lookbacks}{Rueckblicke in Kalendermonaten (Standard
-\code{c(1, 3, 6, 12)}); bei \code{type = "13612w"} ignoriert.}
+\code{c(1, 3, 6, 12)}); bei \code{type = "13612w"} ignoriert.
+Seit 1.6.4 ganze Zahlen von 1 bis 1200 (kein Blick in die Zukunft).}
 
 \item{type}{\code{"average"} (Standard; ungewichtetes Mittel der
 Renditen) oder \code{"13612w"} (gewichtet, Rueckblicke fest 1, 3, 6, 12).}

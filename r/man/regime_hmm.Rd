@@ -32,7 +32,7 @@ mehreren ein multivariates Modell mit Kovarianzmatrix je Zustand).}
 
 \item{k}{Anzahl Zustaende (ganze Zahl >= 2, Standard 2); es werden
 mindestens \code{50 * k} Perioden benoetigt. Spalten ohne Schwankung
-(z. B. konstante Kurse) sind ein Fehler.}
+(z. B. konstante Kurse) sind ein Fehler. Seit 1.6.4 hoechstens 10^8.}
 
 \item{frequency}{Periodenlaenge der Renditen: \code{"week"} (Standard,
 ISO-Wochen), \code{"day"} oder \code{"month"}. Bei \code{"day"} entfallen
@@ -41,12 +41,12 @@ Wochenenden).}
 
 \item{n_start}{Anzahl Startwerte (ganze Zahl, Standard 5): der erste aus
 Quantilen einer rollierenden Volatilitaet, die uebrigen zufaellig; es
-zaehlt das Ergebnis mit der hoechsten Log-Likelihood.}
+zaehlt das Ergebnis mit der hoechsten Log-Likelihood. Seit 1.6.4 hoechstens 10^8.}
 
 \item{max_iter, tol}{Hoechstzahl Baum-Welch-Iterationen je Start (Standard
 300) und relative Abbruchschranke: Abbruch, wenn sich die
 Log-Likelihood um weniger als \code{tol * (1 + |logL|)} aendert
-(Standard 1e-7).}
+(Standard 1e-7). Seit 1.6.4 max_iter eine ganze Zahl von 0 bis 10^8, tol eine Zahl >= 0.}
 
 \item{seed}{Startwert (Standard 1) fuer die zufaelligen Startzuordnungen (nur bei
 \code{n_start > 1}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der

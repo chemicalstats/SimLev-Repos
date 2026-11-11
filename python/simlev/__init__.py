@@ -125,6 +125,11 @@ def isna_strict(x):
     """True nur für R's ``NA`` (nicht für ``NaN``); Skalar oder elementweise für Arrays."""
     import numpy as _np
     from ._r.rnum import r_isna, r_isna_arr
+    from ._pruefen import chk_stop
+    # seit 1.6.4 (K42 E5): nur Zahlen bzw. Zahlenfelder (Text und None mit Meldung statt TypeError/ValueError)
+    a = _np.asarray(x) if not isinstance(x, str) else None
+    if a is None or a.dtype.kind not in "biuf":
+        chk_stop("zahlen", "isna_strict", "x")
     if _np.ndim(x) == 0:
         return r_isna(x)
     return r_isna_arr(x)
@@ -179,7 +184,7 @@ _LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULE
 def __dir__():
     return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
 
-__version__ = "1.6.3"
+__version__ = "1.6.4"
 
 __all__ = [
     "AssetConfig",
@@ -368,7 +373,7 @@ def export_dashboard(x, *, filename: str = "dashboard.svg", width: float = 14, h
     Renditeverteilung, rollierende Renditen, Monatsrenditen-Heatmap, Kennzahlen, Korrelation, Strategievergleich).
     Korrelation und Strategievergleich gibt es nur mit ``compare``.
 
-    ``export_dashboard`` speichert das Dashboard als PDF.
+    ``export_dashboard`` speichert das Dashboard als SVG-Datei (in R als PDF).
 
     ``print`` gibt die wichtigsten Kennzahlen und ggf. die Steuerzusammenfassung auf der Konsole aus. ``summary``
     liefert eine Liste der Klasse ``"summary.SimLevResult"`` und druckt nicht selbst; ihre Methode ``print`` zeigt
@@ -377,7 +382,7 @@ def export_dashboard(x, *, filename: str = "dashboard.svg", width: float = 14, h
 
     Args:
         x: Ein ``"SimLevResult"``-Objekt (bei ``print.summary.SimLevResult``: das Ergebnis von ``summary``).
-        filename: Character. Pfad der Ausgabedatei. Standard: ``"dashboard.pdf"``.
+        filename: Character. Pfad der Ausgabedatei (Endung ``.svg``). Standard: ``"dashboard.svg"``.
         width: Numerisch. Breite in Zoll. Standard: ``14``.
         height: Numerisch. Höhe in Zoll. Standard: ``10``.
         **kwargs: Für ``plot``, ``print``, ``summary``: wird ignoriert. Für ``export_dashboard``: wird an
@@ -406,8 +411,8 @@ def export_dashboard(x, *, filename: str = "dashboard.svg", width: float = 14, h
         - ``print.summary.SimLevResult``: Unsichtbar ``x``; gibt die kompakte Zusammenfassung aus (nicht
           definierte Kennzahlen als „nicht definiert (Ursache)“).
 
-        - ``export_dashboard``: Unsichtbar ``None`` (PDF-Datei wird geschrieben; das PDF-Gerät wird auch bei einem
-          Fehler wieder geschlossen).
+        - ``export_dashboard``: Unsichtbar ``None`` (die SVG-Datei wird geschrieben; seit 1.6.4 werden ``x``,
+          ``filename``, ``width`` und ``height`` (Zahlen von 3 bis 100 Zoll) und die weiteren Argumente vor dem Zeichnen geprüft).
 
     Details:
         Die Kennzahlen des Dashboards entsprechen ``x["statistics"]``: Die Sharpe Ratio ist
@@ -460,7 +465,8 @@ def summary(object, *args, **kwargs):  # noqa: A002 - R-Name
     meth = getattr(type(object), "summary", None)
     if callable(meth):
         return meth(object, *args, **kwargs)
-    raise TypeError("summary(): keine Methode f\u00fcr %s" % type(object).__name__)
+    from ._pruefen import chk_stop
+    chk_stop("e5.methode", "summary")   # seit 1.6.4 ohne Typ (Entscheidung 8)
 
 
 def plot(x, *args, **kwargs):
@@ -471,4 +477,5 @@ def plot(x, *args, **kwargs):
     meth = getattr(type(x), "plot", None)
     if callable(meth):
         return meth(x, *args, **kwargs)
-    raise TypeError("plot(): keine Methode f\u00fcr %s" % type(x).__name__)
+    from ._pruefen import chk_stop
+    chk_stop("e5.methode", "plot")   # seit 1.6.4 ohne Typ (Entscheidung 8)

@@ -7,15 +7,17 @@ liefern die Ausgabe der R-``print``-Methode.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 import warnings
 from typing import Any, Iterable, Mapping
 
 import numpy as np
 
-from ._r.rlist import RList
+from ._r.rlist import RList, _PrintFormat
 from ._r.rformat import r_deparse, r_format1, r_sprintf
 from ._r.rnum import r_sum
 from ._util import _match_arg   # seit 1.5.2 in _util (auch für _sim_base.py)
+from ._pruefen import _to_float, chk_bool1, chk_df, chk_dots, chk_msg, chk_name1, chk_scalar, chk_stop
 
 __all__ = [
     "AssetConfig",
@@ -40,6 +42,17 @@ def _is_num1(x: Any) -> bool:
         and x == x
 
 
+def _is_date_like(x: Any) -> bool:
+    """Datum, Zeitpunkt oder Text, auch als Folge der Länge 1 (R: ``Date``, ``POSIXt`` oder ``character``)."""
+    if isinstance(x, (list, tuple, np.ndarray)) and not isinstance(x, str):
+        if len(x) != 1:
+            return False
+        x = list(x)[0]
+    if isinstance(x, np.datetime64):
+        return not np.isnat(x)
+    return isinstance(x, (str, _dt.date))
+
+
 def _to_date(x: Any) -> _dt.date | None:
     from .engine import _as_date
     z = _as_date(x)
@@ -56,18 +69,6 @@ _AC_MSG_WRAPPER_SIGNAL = ("asset_config: mit wrapper ist nur trading = \"bnh\" m
 def _is_wrapper(x: Any) -> bool:
     """``inherits(x, "SimLevWrapperConfig")`` (Fonds-Wrapper aus :func:`simlev.wrapper_config`)."""
     return "SimLevWrapperConfig" in (getattr(x, "r_class", None) or ())
-
-
-def _cls_all(x: Any) -> str:
-    """``paste(class(x), collapse = "/")`` für Meldungen."""
-    rc = getattr(x, "r_class", None)
-    if isinstance(rc, tuple) and rc:
-        return "/".join(rc)
-    if x is None:
-        return "NULL"
-    if isinstance(x, Mapping) or isinstance(x, (list, tuple)):
-        return "list"
-    return _r_class(x)
 
 
 def _fmt15(x: Any) -> str:
@@ -97,7 +98,7 @@ def _wrapper_assets_text(strategy: Mapping[str, Any]) -> str:
     return ", ".join("%s %s %%" % (nm, _fmt15(100 * a["share"])) for nm, a in strategy.items())
 
 
-class AssetConfig(RList):
+class AssetConfig(RList, _PrintFormat):
     """Validierte Konfiguration eines Assets (R-Klasse ``asset_config``)."""
 
     r_class = ("asset_config", "list")
@@ -118,10 +119,6 @@ class AssetConfig(RList):
                          % (_wrapper_assets_text(w["strategy"]), _fmt15(w["costs"]["fee"]),
                             _fmt15(w["costs"]["performance_fee"])))
         return "\n".join(lines)
-
-    def print(self) -> "AssetConfig":
-        print(self.format())
-        return self
 
     def summary(self) -> "AssetConfig":
         """``summary.asset_config``: wie ``print``."""
@@ -170,8 +167,8 @@ def asset_config(
         deliverable: Logisch. Physisch lieferbar (relevant für ETC/ETN: ``True`` → ``"private_sale"``-Regime wie
             Xetra-Gold)? Standard: ``False``.
         start: Date, Character (``"JJJJ-MM-TT"``) oder ``None``. Frühestmögliches Kaufdatum für dieses Asset (für
-            gestaffelte Asset-Starts); wird als ``Date`` gespeichert, ein ungültiges Datum führt zu einem Fehler.
-            In ``simulation`` erhält das Asset ab diesem Tag sein volles Zielgewicht ``share``: Am Starttag wird
+            gestaffelte Asset-Starts); wird als ``Date`` gespeichert, ein ungültiges Datum führt zu einem Fehler,
+            ebenso jede andere Angabe (z. B. eine Zahl als Tage seit 1970). In ``simulation`` erhält das Asset ab diesem Tag sein volles Zielgewicht ``share``: Am Starttag wird
             immer auf die Zielgewichte umgeschichtet (Verkauf der übrigen Assets, Erstkauf des neuen Assets; mit
             Steuern, Spreads und Gebühren wie bei jedem Rebalancing), auch ohne ``balance_mode``; ein zusätzlicher
             Handelsblock läuft an diesem Tag nicht. Mit ``balance_mode = True`` gilt danach der normale Rhythmus,
@@ -181,10 +178,12 @@ def asset_config(
             ``"capital_gains"`` (§ 20 EStG, keine VP), ``"private_sale"`` (§ 23 EStG, 1-Jahres-Frist). ``None`` =
             wird automatisch aus ``asset_class`` und ``deliverable`` abgeleitet. Andere Werte führen zu einem
             Fehler.
-        signal_buy: Character oder ``None``. Name der Spalte in ``data`` mit dem Kaufsignal (logisch, ``True`` =
-            kaufen). Bei ``trading = "signal"`` Pflicht (sonst Fehler).
-        signal_sell: Character oder ``None``. Name der Spalte in ``data`` mit dem Verkaufssignal (logisch,
-            ``True`` = verkaufen). Bei ``trading = "signal"`` Pflicht (sonst Fehler).
+        signal_buy: Character oder ``None``. Name der Spalte in ``data`` mit dem Kaufsignal (``True``/``False``
+            oder ``0``/``1``, NA erlaubt; ``True`` bzw. ``1`` = kaufen; andere Zahlen führen in ``simulation`` zu
+            einem Fehler). Bei ``trading = "signal"`` Pflicht (sonst Fehler).
+        signal_sell: Character oder ``None``. Name der Spalte in ``data`` mit dem Verkaufssignal
+            (``True``/``False`` oder ``0``/``1``, NA erlaubt; ``True`` bzw. ``1`` = verkaufen). Bei
+            ``trading = "signal"`` Pflicht (sonst Fehler).
         wrapper: ``None`` oder ein Objekt aus ``wrapper_config``: Das Asset ist dann ein Fonds-Wrapper (Zertifikat
             oder Fonds über eine innere Strategie). Sein Name ist **keine** Kursspalte; ``simulation`` rechnet die
             Kurse als Anteilswert (``wrapper_nav``) aus den inneren Spalten. Eine Spalte gleichen Namens in
@@ -222,6 +221,10 @@ def asset_config(
     """
     asset_class = _match_arg(asset_class, _ASSET_CLASSES, "asset_class")
     trading = _match_arg(trading, _ACTION_TYPES, "trading")
+    # seit 1.6.4 Vektoren der Länge 1 wie Einzelwerte (Entscheidung 4; R: c(0.5) ist 0.5)
+    share, spread, partial_exemption, deliverable, start, tax_regime, signal_buy, signal_sell = (
+        chk_scalar(v) for v in (share, spread, partial_exemption, deliverable, start, tax_regime, signal_buy,
+                                signal_sell))
     if asset_class == "etn_standard":
         warnings.warn("asset_config: asset_class = \"etn_standard\" ist veraltet; stattdessen asset_class = \"etn\" mit "
                       "deliverable = FALSE verwenden.", stacklevel=2)
@@ -234,46 +237,49 @@ def asset_config(
         deliverable = True
     for x, arg in ((share, "share"), (spread, "spread"), (partial_exemption, "partial_exemption")):
         if not _is_num1(x):
-            raise ValueError("asset_config: %s muss eine einzelne Zahl sein, nicht %s." % (arg, r_deparse(x)))
-    if share <= 0 or share > 1:
-        raise ValueError("asset_config: share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für "
-                         "60 %%), nicht %s%s." % (r_format1(share),
-                                                  ("; für %s %% share = %s angeben"
-                                                   % (r_format1(share), r_format1(share / 100)))
-                                                  if 1 < share <= 100 else ""))
+            raise ValueError("asset_config: %s muss eine einzelne Zahl sein." % arg)   # seit 1.6.4 ohne Eingabewert
+    if share <= 0 or share > 1:   # bei 1 < share <= 100 wertfreier Hinweis (Entscheidung 12; seit 1.6.4, K43 KE)
+        raise ValueError("asset_config: share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %)"
+                         + (chk_msg("ke.prozent_teilen") if 1 < share <= 100 else "") + ".")
     if spread < 0:
-        raise ValueError("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %%), "
-                         "nicht %s." % r_format1(spread))
+        raise ValueError("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %).")
+    # seit 1.6.4: Spread endlich (bis 1.6.3 still angenommen); seit K43 T1-B1 über die Umwandlung geprüft (10**400)
+    if not math.isfinite(_to_float(spread)):
+        chk_stop("zahl", "asset_config", "spread")
     if partial_exemption < 0 or partial_exemption > 100:
         raise ValueError("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 "
-                         "für 30 %%), nicht %s." % r_format1(partial_exemption))
+                         "für 30 %).")
     if 0 < partial_exemption < 1:
         warnings.warn("asset_config: partial_exemption = %s wird als %s %% Teilfreistellung gelesen (Prozent-Konvention); "
                       "gemeint war vermutlich %s." % (r_format1(partial_exemption), r_format1(partial_exemption),
                                                      r_format1(partial_exemption * 100)), stacklevel=2)
     if start is not None:
-        st = _to_date(start) if not isinstance(start, (list, tuple)) or len(start) == 1 else None
+        # seit 1.6.4 nur Datum, Zeitpunkt oder Text (bis 1.6.3 auch Zahlen als Tage seit 1970; Entscheidung 7)
+        st = _to_date(start) if _is_date_like(start) else None
         if st is None:
-            raise ValueError("asset_config: start = %s ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\")."
-                             % r_deparse(start))
+            raise ValueError("asset_config: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
         start = st
     if trading == "signal" and (signal_buy is None or signal_sell is None):
         raise ValueError("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden "
                          "(Namen der Signalspalten in data).")
     if wrapper is not None:   # Fonds-Wrapper: keine Signale auf den Anteilswert
         if not _is_wrapper(wrapper):
-            raise ValueError("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht %s."
-                             % _cls_all(wrapper))
+            raise ValueError("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein.")
         if trading == "signal":
             raise ValueError(_AC_MSG_WRAPPER_SIGNAL)
+    # seit 1.6.4: Signalspalten als einzelner Name, deliverable nur True/False (bis 1.6.3 ungeprüft; Text "FALSE"
+    # galt als wahr)
+    chk_name1(signal_buy, "asset_config", "signal_buy", null_ok=True)
+    chk_name1(signal_sell, "asset_config", "signal_sell", null_ok=True)
+    chk_bool1(deliverable, "asset_config", "deliverable")
     if tax_regime is None:
         tax_regime = {"etf": "investment_fund",
                       "etn": "private_sale" if deliverable else "capital_gains",
                       "etc": "private_sale" if deliverable else "capital_gains",
                       "certificate": "capital_gains"}[asset_class]
-    elif tax_regime not in _VALID_REGIMES:
-        raise ValueError("asset_config: tax_regime = %s ist ungültig; erlaubt sind %s (oder NULL: aus asset_class "
-                         "abgeleitet)." % (r_deparse(tax_regime), ", ".join(_VALID_REGIMES)))
+    elif not isinstance(tax_regime, str) or tax_regime not in _VALID_REGIMES:   # seit 1.6.4 nur ein Text
+        raise ValueError("asset_config: tax_regime ist ungültig; erlaubt sind %s (oder NULL: aus asset_class "
+                         "abgeleitet)." % ", ".join(_VALID_REGIMES))
     cfg = AssetConfig()
     for k, v in (("asset_class", asset_class), ("trading", trading), ("share", share),
                  ("spread", spread), ("partial_exemption", partial_exemption), ("deliverable", deliverable),
@@ -285,6 +291,19 @@ def asset_config(
     return cfg
 
 
+def _asset_list_fields(a: Mapping, nm: str, fn: str) -> None:
+    """Feldnamen eines Listen-Assets prüfen (seit 1.6.4, K43 T1-N1; Entscheidungen 8, 11, 21; R ``.asset_list_fields``):
+    unbenannte und unbekannte Felder sind ein Fehler (Schlüssel eines dict sind eindeutig). Bis dahin gab
+    ``create_strategy()`` R's Rohmeldung "unused argument (foo = 1)" mit Eingabewert, ``simulation()`` übersprang
+    unbekannte Felder still."""
+    keys = [str(k) for k in a.keys()]
+    if any(k == "" for k in keys):
+        chk_stop("ut1.asset_unbenannt", fn, nm)
+    bad = [k for k in keys if k not in _FIELDS]
+    if bad:
+        chk_stop("ut1.asset_feld", fn, bad[0], nm)
+
+
 def _call_asset_config(m: Mapping[str, Any]) -> AssetConfig:
     """``do.call(asset_config, <Liste>)`` (unbekannte Felder sind ein Fehler wie in R)."""
     unknown = [k for k in m if k not in _FIELDS]
@@ -294,7 +313,7 @@ def _call_asset_config(m: Mapping[str, Any]) -> AssetConfig:
     return asset_config(**{k: v for k, v in m.items()})
 
 
-class Strategy(RList):
+class Strategy(RList, _PrintFormat):
     """Geordnete Sammlung benannter :class:`AssetConfig`-Objekte (R-Klasse ``strategy``)."""
 
     r_class = ("strategy", "list")
@@ -309,10 +328,6 @@ class Strategy(RList):
                                    asset["share"] * 100, asset["tax_regime"],
                                    (" | Wrapper: %s" % ", ".join(w["strategy"].keys())) if _is_wrapper(w) else ""))
         return "\n".join(lines)
-
-    def print(self) -> "Strategy":
-        print(self.format())
-        return self
 
     def summary_text(self) -> str:
         """Text von ``summary.strategy``."""
@@ -375,7 +390,7 @@ def create_strategy(*args: Any, assets: Mapping[str, Any] | None = None, **named
         (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
         ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
-        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        hat, sowie ``wrapper`` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; ``wrapper = None`` entfernt
         einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
         unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
         wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
@@ -404,8 +419,8 @@ def create_strategy(*args: Any, assets: Mapping[str, Any] | None = None, **named
     dots: list = [(None, a) for a in args] + list(named.items())
     if assets is not None:
         if not isinstance(assets, Mapping):
-            raise ValueError("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data), nicht %s."
-                             % ("eine unbenannte Liste" if isinstance(assets, (list, tuple)) else type(assets).__name__))
+            # seit 1.6.4 ohne Klasse (bis 1.6.3 Python-Typname, z. B. "int" statt "numeric")
+            raise ValueError("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data).")
         dots = list(assets.items())
     if not dots:
         raise ValueError("create_strategy: mindestens eine Asset-Konfiguration angeben, z. B. create_strategy(ETF = "
@@ -419,27 +434,11 @@ def create_strategy(*args: Any, assets: Mapping[str, Any] | None = None, **named
         if isinstance(cfg, AssetConfig):
             out[name] = cfg
         elif isinstance(cfg, Mapping):
+            _asset_list_fields(cfg, name, "create_strategy")   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
             out[name] = _call_asset_config(cfg)
         else:
-            raise ValueError("create_strategy: Asset '%s' muss ein asset_config()-Objekt oder eine Liste sein, nicht %s."
-                             % (name, _r_class(cfg)))
+            raise ValueError("create_strategy: Asset '%s' muss ein asset_config()-Objekt oder eine Liste sein." % name)
     return out
-
-
-def _r_class(x: Any) -> str:
-    if x is None:
-        return "NULL"
-    if isinstance(x, bool):
-        return "logical"
-    if isinstance(x, (int, float)):
-        return "numeric"
-    if isinstance(x, str):
-        return "character"
-    if isinstance(x, RList) and x.r_class:
-        return x.r_class[0]
-    if isinstance(x, Mapping):
-        return "list"
-    return type(x).__name__
 
 
 def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
@@ -450,8 +449,9 @@ def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
 
     Args:
         strategy: Ein ``"strategy"``-Objekt.
-        data: ``data.frame`` oder ``None``. Falls angegeben, prüft ``strategy_validate`` ob alle Asset-Spalten und
-            Signal-Spalten in ``data`` vorhanden sind.
+        data: ``data.frame`` (``pandas.DataFrame``) oder ``None``; nur Tabellen, ein ``dict`` von Spalten vorher
+            mit ``pandas.DataFrame()`` umwandeln. Falls angegeben, prüft ``strategy_validate`` ob alle Asset-Spalten
+            und Signal-Spalten in ``data`` vorhanden sind.
 
     Returns:
         - ``create_strategy``: Objekt der Klasse ``"strategy"``.
@@ -475,7 +475,7 @@ def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
         (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
         ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
-        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        hat, sowie ``wrapper`` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; ``wrapper = None`` entfernt
         einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
         unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
         wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
@@ -500,12 +500,11 @@ def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
         print(simlev.strategy_validate(st, data=d))
     """
     if not isinstance(strategy, Strategy):
-        raise ValueError("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), "
-                         "nicht %s." % _r_class(strategy))
+        raise ValueError("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
     for name, a in strategy.items():
         if not isinstance(a, AssetConfig):
-            raise ValueError("strategy_validate: Asset '%s' ist kein asset_config()-Objekt (Klasse %s)."
-                             % (name, _r_class(a)))
+            raise ValueError("strategy_validate: Asset '%s' ist kein asset_config()-Objekt." % name)
+    chk_df(data, "strategy_validate", "data", null_ok=True)   # seit 1.6.4 (bis 1.6.3: Liste/Matrix je Sprache anders)
     if data is not None:
         cols = [str(c) for c in (data.columns if hasattr(data, "columns") else data.keys())]
         # Fonds-Wrapper: der Asset-Name ist keine Kursspalte, geprüft werden die Spalten der inneren Strategie
@@ -533,7 +532,8 @@ def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
 
 
 def strategy_add_asset(strategy: Strategy, name: str, asset: AssetConfig) -> Strategy:
-    """Asset hinzufügen bzw. ersetzen (gibt eine neue Strategie zurück).
+    """Asset hinzufügen (gibt eine neue Strategie zurück); ein schon vorhandener Name ist ein Fehler (ändern mit
+    ``strategy_update_asset``).
 
     Funktionen zum Erstellen, Validieren und Bearbeiten von ``"strategy"``-Objekten. Eine Strategie ist eine
     benannte Liste von ``asset_config``-Konfigurationen, die an ``simulation`` übergeben wird.
@@ -565,7 +565,7 @@ def strategy_add_asset(strategy: Strategy, name: str, asset: AssetConfig) -> Str
         (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
         ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
-        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        hat, sowie ``wrapper`` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; ``wrapper = None`` entfernt
         einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
         unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
         wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
@@ -586,10 +586,14 @@ def strategy_add_asset(strategy: Strategy, name: str, asset: AssetConfig) -> Str
         print(list(st))
     """
     if not isinstance(strategy, Strategy):
-        raise ValueError("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s."
-                         % _r_class(strategy))
+        raise ValueError("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
     if not isinstance(asset, AssetConfig):
-        raise ValueError("strategy_add_asset: asset muss ein asset_config()-Objekt sein, nicht %s." % _r_class(asset))
+        raise ValueError("strategy_add_asset: asset muss ein asset_config()-Objekt sein.")
+    name = chk_name1(name, "strategy_add_asset", "name")   # seit 1.6.4 (bis 1.6.3: Zahl oder None als Schlüssel)
+    # seit 1.6.4 kein stilles Überschreiben (Entscheidung 5): Ändern geht über strategy_update_asset()
+    if name in strategy:
+        raise ValueError("strategy_add_asset: Ein Asset mit diesem Namen ist schon in der Strategie; zum Ändern "
+                         "strategy_update_asset() verwenden.")
     out = Strategy(strategy)
     out[name] = asset
     return out
@@ -631,7 +635,7 @@ def strategy_update_asset(strategy: Strategy, name: str, **updates: Any) -> Stra
         (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
         ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
-        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        hat, sowie ``wrapper`` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; ``wrapper = None`` entfernt
         einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
         unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
         wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
@@ -652,12 +656,14 @@ def strategy_update_asset(strategy: Strategy, name: str, **updates: Any) -> Stra
         print(st["MSCI"]["share"])
     """
     if not isinstance(strategy, Strategy):
-        raise ValueError("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), "
-                         "nicht %s." % _r_class(strategy))
+        raise ValueError("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    name = chk_name1(name, "strategy_update_asset", "name")   # seit 1.6.4 (Länge 1 wie Einzelwert)
     if name not in strategy:
         raise ValueError("strategy_update_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s)."
                          % (name, ", ".join(strategy.keys())))
     asset = dict(strategy[name])
+    # seit 1.6.4 (K43 T1-R14, Entscheidung 21): unbekannte Angaben sind ein Fehler (bis dahin nur eine Warnung)
+    chk_dots(list(updates), list(asset) + ["wrapper"], "strategy_update_asset")   # wrapper: nur bei Wrapper-Assets
     if any(k in updates for k in ("asset_class", "deliverable")) and "tax_regime" not in updates:
         try:
             with warnings.catch_warnings():
@@ -670,10 +676,6 @@ def strategy_update_asset(strategy: Strategy, name: str, **updates: Any) -> Stra
         if derived == asset.get("tax_regime"):
             asset["tax_regime"] = None
     for param, value in updates.items():
-        if param not in asset and param != "wrapper":   # wrapper: Feld nur bei Wrapper-Assets vorhanden
-            warnings.warn("strategy_update_asset: unbekannter Parameter '%s' wird ignoriert (möglich: %s)."
-                          % (param, ", ".join(asset.keys())), stacklevel=2)
-            continue
         asset[param] = value
     out = Strategy(strategy)
     out[name] = _call_asset_config(asset)
@@ -712,7 +714,7 @@ def strategy_remove_asset(strategy: Strategy, name: str) -> Strategy:
         (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
 
         ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
-        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        hat, sowie ``wrapper`` werden übernommen (unbekannte sind seit 1.6.4 ein Fehler; ``wrapper = None`` entfernt
         einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
         unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
         wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
@@ -732,8 +734,8 @@ def strategy_remove_asset(strategy: Strategy, name: str) -> Strategy:
         print(list(simlev.strategy_remove_asset(st, "BOND")))
     """
     if not isinstance(strategy, Strategy):
-        raise ValueError("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), "
-                         "nicht %s." % _r_class(strategy))
+        raise ValueError("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    name = chk_name1(name, "strategy_remove_asset", "name")   # seit 1.6.4 (Länge 1 wie Einzelwert)
     if name not in strategy:
         raise ValueError("strategy_remove_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s)."
                          % (name, ", ".join(strategy.keys())))

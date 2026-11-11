@@ -18,7 +18,8 @@ Unbenannte Bedingungen werden nach ihrem Ausdruck benannt.}
 Strategiename mit einer benannten Liste von Ausdruecken (\code{quote()}),
 z. B. \code{list(sma = list(ziel = quote(cagr >= 0.08)))}. Fuer eine hier
 genannte Strategie ersetzen diese Bedingungen die Bedingungen aus
-\code{...} (strategiespezifische Schwellen).}
+\code{...} (strategiespezifische Schwellen).
+Seit 1.6.4 geprueft: benannte Liste benannter Listen; ohne Bedingung (weder hier noch in ...) bricht die Funktion ab.}
 }
 \value{
 data.frame mit einer Zeile je Strategie und Bedingung:

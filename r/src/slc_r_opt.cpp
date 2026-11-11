@@ -26,13 +26,6 @@ extern "C" {
 
 #include "huelle_r.h"   /* Kontext, Rueckmeldungen, Argumentpruefungen (seit 1.6.3 gemeinsam) */
 
-static int int1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != INTSXP || XLENGTH(x) != 1 || INTEGER(x)[0] == NA_INTEGER)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine ganze Zahl (integer, Laenge 1) sein", what);
-    return INTEGER(x)[0];
-}
-
 static void need_real_n(SEXP x, R_xlen_t n, const char *what)
 {
     if (TYPEOF(x) != REALSXP || (n >= 0 && XLENGTH(x) != n))
@@ -46,6 +39,9 @@ static void get_ctrl(SEXP ctrl, SEXP parscale, int n, sl_opt_ctrl *c, int method
     sl_opt_ctrl_default(c, method);
     need_real_n(ctrl, 6, "ctrl");
     v = REAL(ctrl);
+    /* seit 1.6.4 (B-028): nur Werte im Bereich von int umwandeln (bis 1.6.3 undefiniert ab 2^31) */
+    if (!(v[0] >= -2147483648.0 && v[0] <= 2147483647.0) || !(v[1] >= -2147483648.0 && v[1] <= 2147483647.0))
+        Rf_errorcall(R_NilValue, "interner Fehler: maxit/maxfev ausserhalb des Bereichs von int");
     c->maxit = (int) v[0];
     c->maxfev = (int) v[1];
     c->reltol = v[2];
@@ -65,7 +61,7 @@ static const double *opt_bound(SEXP b, int n, const char *what)
     return REAL(b);
 }
 
-static void check_ws(SEXP ws)
+static void check_ws_r(SEXP ws)
 {
     if (TYPEOF(ws) != REALSXP || XLENGTH(ws) < 64 || sl_opt_dim(REAL(ws)) < 1 ||
         XLENGTH(ws) < sl_opt_wsize(SL_OPT_BFGS, sl_opt_dim(REAL(ws))))
@@ -75,7 +71,7 @@ static void check_ws(SEXP ws)
 /* Arbeitsfeld anlegen und initialisieren */
 SEXP C_sl_opt_init(SEXP method, SEXP x0, SEXP lo, SEXP hi, SEXP ctrl, SEXP parscale, SEXP have_grad)
 {
-    int m = int1(method, "method"), n, st;
+    int m = int1_strict(method, "method"), n, st;
     int64_t len;
     sl_opt_ctrl c;
     sl_ctx cx;
@@ -88,7 +84,7 @@ SEXP C_sl_opt_init(SEXP method, SEXP x0, SEXP lo, SEXP hi, SEXP ctrl, SEXP parsc
     ws = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t) len));
     ctx_init(&cx);
     st = sl_opt_init(&cx, m, n, REAL(x0), opt_bound(lo, n, "lower"), opt_bound(hi, n, "upper"), &c,
-                     int1(have_grad, "have_grad"), REAL(ws));
+                     int1_strict(have_grad, "have_grad"), REAL(ws));
     finish(&cx, st, 1);
     UNPROTECT(1);
     return ws;
@@ -101,7 +97,7 @@ SEXP C_sl_opt_next(SEXP ws, SEXP val)
     sl_ctx cx;
     int need, st, n;
     SEXP x, out;
-    check_ws(ws);
+    check_ws_r(ws);
     ctx_init(&cx);
     n = sl_opt_dim(REAL(ws));
     if (val != R_NilValue) {
@@ -147,7 +143,7 @@ SEXP C_sl_opt_result(SEXP ws)
     int n, code, iter, nfev, ngev, reason, ntot;
     double f;
     SEXP par, out;
-    check_ws(ws);
+    check_ws_r(ws);
     n = sl_opt_dim(REAL(ws));
     par = PROTECT(Rf_allocVector(REALSXP, n));
     sl_opt_result(REAL(ws), REAL(par), &f, &code, &iter, &nfev, &ngev);
@@ -161,11 +157,11 @@ SEXP C_sl_opt_result(SEXP ws)
 
 SEXP C_sl_opt_testfn(SEXP id, SEXP x, SEXP grad)
 {
-    int k = int1(id, "id"), n, g;
+    int k = int1_strict(id, "id"), n, g;
     SEXP out, gv;
     need_real_n(x, -1, "x");
     n = (int) XLENGTH(x);
-    g = int1(grad, "grad");
+    g = int1_strict(grad, "grad");
     if (!g) return Rf_ScalarReal(sl_opt_testfn(k, n, REAL(x), NULL));
     gv = PROTECT(Rf_allocVector(REALSXP, n));
     out = PROTECT(Rf_allocVector(VECSXP, 2));
@@ -178,7 +174,7 @@ SEXP C_sl_opt_testfn(SEXP id, SEXP x, SEXP grad)
 /* direkter C-Weg (sl_minimize) mit einer Pruefffunktion */
 SEXP C_sl_opt_minimize_test(SEXP id, SEXP method, SEXP x0, SEXP lo, SEXP hi, SEXP ctrl, SEXP parscale, SEXP use_grad)
 {
-    int m = int1(method, "method"), n, st, code = 0, iter = 0, nfev = 0, ntot = 0;
+    int m = int1_strict(method, "method"), n, st, code = 0, iter = 0, nfev = 0, ntot = 0;
     double f = 0.0;
     sl_opt_ctrl c;
     sl_ctx cx;
@@ -188,8 +184,8 @@ SEXP C_sl_opt_minimize_test(SEXP id, SEXP method, SEXP x0, SEXP lo, SEXP hi, SEX
     get_ctrl(ctrl, parscale, n, &c, m);
     x = PROTECT(Rf_duplicate(x0));
     ctx_init(&cx);
-    st = sl_opt_test_minimize(&cx, int1(id, "id"), m, n, REAL(x), opt_bound(lo, n, "lower"), opt_bound(hi, n, "upper"),
-                              &c, int1(use_grad, "use_grad"), &f, &code, &iter, &nfev, &ntot);
+    st = sl_opt_test_minimize(&cx, int1_strict(id, "id"), m, n, REAL(x), opt_bound(lo, n, "lower"), opt_bound(hi, n, "upper"),
+                              &c, int1_strict(use_grad, "use_grad"), &f, &code, &iter, &nfev, &ntot);
     finish(&cx, st, 1);
     out = result_list(REAL(x), n, f, code, iter, nfev, NA_INTEGER, ntot, -1);
     UNPROTECT(1);
@@ -206,7 +202,7 @@ SEXP C_sl_numgrad_test(SEXP id, SEXP x, SEXP lo, SEXP hi)
     n = (int) XLENGTH(x);
     g = PROTECT(Rf_allocVector(REALSXP, n));
     ctx_init(&cx);
-    st = sl_opt_test_numgrad(&cx, int1(id, "id"), n, REAL(x), opt_bound(lo, n, "lower"), opt_bound(hi, n, "upper"),
+    st = sl_opt_test_numgrad(&cx, int1_strict(id, "id"), n, REAL(x), opt_bound(lo, n, "lower"), opt_bound(hi, n, "upper"),
                              REAL(g), &cnt);
     finish(&cx, st, 1);
     UNPROTECT(1);

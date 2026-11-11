@@ -8,8 +8,8 @@
 #
 # Erzeugt <n> Fälle im Format der Referenzfälle (tests/gleichlauf/erzeugen/ref_tools.R) als Modul libm_fuzz. Werte mit
 # NA, NaN, ±Inf, ±0, subnormalen Zahlen, Werten um -1 und an den Grenzen von exp(). Warnungen und Fehler mit ihren
-# Aufrufen (r_calls) wie sim_fuzz.R; die libm-Hüllen der Ports warnen nicht ("NaNs produced" melden ihre Aufrufer),
-# daher dort suppressWarnings().
+# Aufrufen (r_calls) wie sim_fuzz.R; seit 1.6.4 ohne suppressWarnings() (die libm-Hüllen der Ports warnen wie R:
+# "NaNs produced" nach Entscheidung 80, "probable complete loss of accuracy in modulus" bei (-Inf)^y mit y > 2^64, T4-R2).
 #
 # Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): abgelegte Referenz (seit 1.6.2 aus R 1.6.2, run.py --ref-erzeugen 162), R neu mit
 # tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
@@ -36,7 +36,7 @@ for (kk in seq_len(N)) {
     x <- werte(n); y <- if (coin(0.5)) werte(pick(c(1, n))) else round(werte(pick(c(1, n))))
     b <- pick(c(3, 10, 2, 0.5, exp(1)))
     fuzz_case(sprintf("l%05d", kk),
-      r = sprintf("suppressWarnings(list(exp(x), log(x), log1p(x), expm1(x), log2(x), log10(x), x^y, abs(x)^y, log(x, %.17g)))", b),
+      r = sprintf("list(exp(x), log(x), log1p(x), expm1(x), log2(x), log10(x), x^y, abs(x)^y, log(x, %.17g))", b),
       py = sprintf("L = simlev._r.libm\nresult = [L.exp(x), L.log(x), L.log1p(x), L.expm1(x), L.log2(x), L.log10(x), L.pow(x, y), L.pow(np.abs(x), y), L.log(x, %.17g)]", b),
       jl = sprintf("L = SL.RLibm\nresult = [L.exp(x), L.log(x), L.log1p(x), L.expm1(x), L.log2(x), L.log10(x), L.pow(x, y), L.pow(abs.(x), y), L.log(x, %.17g)]", b),
       inputs = list(x = x, y = y))

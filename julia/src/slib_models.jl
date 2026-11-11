@@ -12,7 +12,7 @@
 const _GARCH_METHODS = ("konstant", "ml", "momente")
 # SL_MSGARCH_MAXSTART in slc_models.h: 20 (bis 1.0.0 12)
 
-_fv(x) = Vector{Float64}(vec(collect(Float64, x)))
+_fv(x) = vec(collect(Float64, x))      # seit 1.6.4 eine Kopie (B-105; bis 1.6.3 zwei), neues Feld wie bisher
 _iv(x) = Vector{Int32}(vec(collect(x)))
 function _fm(x)
     m = x isa AbstractMatrix ? Matrix{Float64}(x) : reshape(_fv(x), :, 1)
@@ -33,7 +33,9 @@ end
 
 "NLL an par = (mu, omega, alpha, beta[, gamma]); s2_init `nothing`: Stichprobenvarianz."
 function garch11_nll(e, par; gjr = false, s2_init = nothing)
-    p = zeros(5); pv = _fv(par); p[1:min(5, length(pv))] = pv[1:min(5, length(pv))]
+    p = zeros(5); pv = _fv(par)
+    length(pv) in (4, 5) || error("garch11_nll: par muss 4 oder 5 Werte haben (mu, omega, alpha, beta[, gamma]).")   # seit 1.6.4 wie R (B-095)
+    p[1:length(pv)] = pv
     ev = _fv(e); v = Ref{Float64}(0.0)
     cx = _ctx()
     st = ccall((:sl_garch11_nll, LIBSLC), Cint, (Ptr{Cvoid}, Cint, Ptr{Float64}, Cint, Ptr{Float64}, Float64, Ref{Float64}),
@@ -241,7 +243,8 @@ end
 function ms_garch_starts(y, K, model; h1 = nothing, all = false)
     g = _gjr(model); yv = _fv(y)
     2 <= K <= 64 || error("MS-GARCH: Anzahl Regime muss zwischen 2 und 64 liegen (erhalten: $(K))")
-    np = _npar(K, g); out = Vector{Float64}(undef, 20 * np); ns = Ref{Cint}(0)   # SL_MSGARCH_MAXSTART 20
+    # Puffer npar x SL_MSGARCH_MAXSTART; die Grenze fragt Julia seit 1.6.4 beim Kern ab (B-132, wie Python)
+    np = _npar(K, g); out = Vector{Float64}(undef, Int(ccall((:sl_msgarch_maxstart, LIBSLC), Cint, ())) * np); ns = Ref{Cint}(0)
     cx = _ctx()
     st = ccall((:sl_msgarch_starts, LIBSLC), Cint, (Ptr{Cvoid}, Cint, Ptr{Float64}, Cint, Cint, Float64, Cint, Ref{Cint}, Ptr{Float64}),
                cx, Cint(length(yv)), yv, Cint(K), Cint(g), _h1(h1), Cint(all), ns, out)
@@ -263,6 +266,7 @@ end
 
 # Zahl der Threads aus cores wie `.sl_threads` (ganze Zahl; ungültig oder < 1 -> 1)
 function _threads(cores)
+    cores isa AbstractString && cores == "auto" && return auto_threads()   # seit 1.6.4: wie außerhalb paralleler Einheiten
     c = cores isa AbstractVector || cores isa Tuple ? (isempty(cores) ? NaN : first(cores)) : cores
     v = try Float64(c) catch; NaN end
     (isfinite(v) && abs(v) < 2.0^31) || return 1
@@ -302,6 +306,7 @@ end
 function hmm_viterbi(lB, lA, lp0)
     b = _fm(lB); a = _fm(lA); n, K = size(b); p = _fv(lp0)
     size(a) == (K, K) || error("interner Fehler: lA muss K x K sein")
+    length(p) == K || error("interner Fehler: lp0 muss die Länge K haben")   # seit 1.6.4 (B-029; bis 1.6.3 ungeprüft)
     out = Vector{Int32}(undef, n)
     cx = _ctx()
     st = ccall((:sl_hmm_viterbi, LIBSLC), Cint, (Ptr{Cvoid}, Cint, Cint, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Int32}),

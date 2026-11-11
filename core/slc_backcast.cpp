@@ -54,7 +54,7 @@ typedef struct {
     double *rr, *w, *D, *e, *q, *a;   /* Arbeitsfelder */
 } bc_prob;
 
-static int cmp_abs(const void *pa, const void *pb)
+static int cmp_double(const void *pa, const void *pb)
 {
     const double x = *(const double *) pa, y = *(const double *) pb;
     return (x > y) - (x < y);
@@ -91,7 +91,7 @@ static double bc_loss(int loss, int L, const double *e, double *q, double *a)
         int j = 0, lo, hi;
         double mlo, mhi;
         for (i = 0; i < L; i++) if (isfinite(e[i])) a[j++] = fabs(e[i]);
-        qsort(a, (size_t) n, sizeof(double), cmp_abs);
+        qsort(a, (size_t) n, sizeof(double), cmp_double);
         lo = (n - 1) / 2; hi = n / 2;
         mlo = a[lo]; mhi = a[hi];
         v = (lo == hi) ? mlo : 0.5 * (mlo + mhi);

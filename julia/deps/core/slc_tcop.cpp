@@ -234,6 +234,11 @@ int sl_tcop_nu(sl_ctx *cx, int64_t Tn, int k, const double *U, const double *Ri,
     const int64_t m = Tn * (int64_t) k;
     *flag = 0;
     if (Tn < 1 || k < 1) return sl_fail(cx, SL_EARG, "tcop_nu: leere Eingabe");
+    /* seit 1.6.4 (B-030, C-020): Suchintervall endlich mit lower < upper und tol endlich > 0 (bis 1.6.3 hing die
+     * Brent-Suche bei lower = NaN, upper = Inf oder tol <= 0 bzw. NaN) */
+    if (!(isfinite(lower) && isfinite(upper) && lower < upper && isfinite(upper - lower)))
+        return sl_fail(cx, SL_EARG, "tcop_nu: lower und upper muessen endlich sein mit lower < upper");
+    if (!(tol > 0.0 && isfinite(tol))) return sl_fail(cx, SL_EARG, "tcop_nu: tol muss eine endliche Zahl > 0 sein");
     memset(&N, 0, sizeof N);
     N.cx = cx; N.Tn = Tn; N.k = k; N.nthreads = nthreads; N.U = U; N.Ri = Ri; N.ldR = ldR; N.st = SL_OK;
     N.Z = (double *) malloc(sizeof(double) * (size_t) (2 * m + 3 * Tn));

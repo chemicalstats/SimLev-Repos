@@ -90,19 +90,13 @@ int sl_kde(sl_ctx *cx, int64_t n, const double *x, const double *w, double bw,
 
 int sl_kde_bw(sl_ctx *cx, int64_t n, const double *x, double *bw)
 {
-    int64_t i;
     double *xs = NULL, mean, sd, iqr, q75, lo;
-    slc_acc a;
     if (n < 2) return sl_fail(cx, SL_ESMALL, "bw.nrd0: mindestens 2 Werte nötig");
     if (!slc_all_finite(n, x)) return sl_fail(cx, SL_ENONFINITE, "bw.nrd0: NA/NaN/Inf in x");
     xs = (double *) malloc(sizeof(double) * (size_t) n);
     if (!xs) return sl_fail(cx, SL_ENOMEM, "bw.nrd0: kein Speicher");
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) slc_acc_add(&a, x[i]);
-    mean = slc_acc_val(&a) / (double) n;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) slc_acc_add(&a, (x[i] - mean) * (x[i] - mean));
-    sd = sqrt(slc_acc_val(&a) / (double) (n - 1));
+    mean = slc_mean(n, x);                  /* n >= 2 (oben geprüft) */
+    sd = sqrt(slc_var_m(n, x, mean));
     /* Quartile ohne Sortieren (seit 1.6.3, slc_quantile7; gleiche Ordnungsstatistiken, nur das Vorzeichen einer
      * Null kann wechseln, und eine IQR von ±0 führt unten gleich zu sd) */
     memcpy(xs, x, sizeof(double) * (size_t) n);

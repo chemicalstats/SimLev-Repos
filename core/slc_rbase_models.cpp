@@ -42,9 +42,22 @@ static int order_inv(int64_t n, const double *x, int dec, int64_t *o, int64_t *r
 
 int sl_r_p_adjust(int64_t lp, const double *p, double n, int method, double *out)
 {
-    int64_t i, j, nn = (int64_t) n, m = lp > nn ? lp : nn;
-    int64_t *o = (int64_t *) malloc((size_t) (2 * (m > 0 ? m : 1)) * sizeof(int64_t)), *ro;
-    double *a = (double *) calloc((size_t) (3 * (m > 0 ? m : 1)), sizeof(double)), *b, *c;
+    int64_t i, j, nn, m;
+    int64_t *o, *ro;
+    double *a, *b, *c;
+    /* seit 1.6.4 (C-017): n nur fuer hommel und BY ganzzahlig (zur Null hin) und dann endlich und < 2^62, sonst
+     * SL_EARG; die Felder nur fuer diese beiden Verfahren n lang, sonst lp (bis 1.6.3 (int64_t) Inf/NaN und
+     * 3 max(lp, n) Werte fuer jedes Verfahren). Die Huellen melden n = Inf vorher wie R. */
+    if (method == SL_PADJ_HOMMEL || method == SL_PADJ_BY) {
+        if (!(n >= 0.0 && n < 4.6e18)) return SL_EARG;
+        nn = (int64_t) n;
+    } else {
+        if (!(n >= 0.0)) return SL_EARG;
+        nn = 0;
+    }
+    m = lp > nn ? lp : nn;
+    o = (int64_t *) malloc((size_t) (2 * (m > 0 ? m : 1)) * sizeof(int64_t));
+    a = (double *) calloc((size_t) (3 * (m > 0 ? m : 1)), sizeof(double));
     if (!o || !a) { free(o); free(a); return SL_ENOMEM; }
     ro = o + (m > 0 ? m : 1);
     b = a + (m > 0 ? m : 1);

@@ -17,15 +17,32 @@
 # zum C-Kern sl_r_sprintf (core/slc_rbase_fmt.cpp) wie RFmt.sprintf.
 # ─────────────────────────────────────────────────────────────────────────────
 
-"Wert als Text wie R's `as.character()` in `%s` (Zahlen 15 Stellen, Datum JJJJ-MM-TT)."
+"""Datumstext wie R as.character/format für Tage seit 1970-01-01: `"%d-%02d-%02d"` mit dem Jahr ohne Auffüllen
+(`"53-06-19"`, `"-1-01-01"`, `"12345-01-01"`). Seit 1.6.4 (C-005, Entscheidung 97); bis 1.6.3 `Dates.format` mit
+vierstelligem, abgeschnittenem Jahr."""
+function _r_date_text(z::Integer)
+    z += 719468
+    era = fld(z, 146097)
+    doe = z - era * 146097
+    yoe = div(doe - div(doe, 1460) + div(doe, 36524) - div(doe, 146096), 365)
+    doy = doe - (365 * yoe + div(yoe, 4) - div(yoe, 100))
+    mp = div(5 * doy + 2, 153)
+    d = doy - div(153 * mp + 2, 5) + 1
+    m = mp < 10 ? mp + 3 : mp - 9
+    return string(yoe + era * 400 + (m <= 2)) * "-" * lpad(m, 2, '0') * "-" * lpad(d, 2, '0')
+end
+
+"Wert als Text wie R's `as.character()` in `%s` (Zahlen 15 Stellen, Datum wie R ohne aufgefülltes Jahr)."
 function _as_str(@nospecialize(v))
     v === nothing && return "NULL"
     v === missing && return "NA"
     v isa AbstractString && return String(v)
     v isa AbstractChar && return string(v)
     v isa Bool && return v ? "TRUE" : "FALSE"
-    v isa Date && return Dates.format(v, dateformat"yyyy-mm-dd")
-    v isa DateTime && return Dates.format(v, dateformat"yyyy-mm-dd HH:MM:SS")
+    v isa Date && return _r_date_text(Dates.value(v - Date(1970, 1, 1)))
+    # seit 1.6.4 wie R as.character(<POSIXct>) (C-050): Mitternacht nur als Datum, sonst mit Uhrzeit
+    v isa DateTime && return _r_date_text(Dates.value(Date(v) - Date(1970, 1, 1))) *
+                             (Dates.Time(v) == Dates.Time(0) ? "" : " " * Dates.format(v, dateformat"HH:MM:SS"))
     v isa Real && return r_as_character(v)
     v isa Symbol && return String(v)
     return string(v)
@@ -49,16 +66,31 @@ struct _SPBuf
 end
 _SPBuf() = _SPBuf(Vector{Cint}(undef, 16), Vector{Float64}(undef, 16), Vector{Int32}(undef, 16),
                   Vector{Ptr{UInt8}}(undef, 16), Vector{UInt8}(undef, 1024), Ref{Cint}(0))
-const _SPBUFS = _SPBuf[]
+# Seit 1.6.4 (K43 T2-B3): Bis dahin füllte der erste Aufruf die Puffer schon beim Vorkompilieren (ein Thread); nach
+# dem Laden blieb es bei einem Platz, und r_sprintf warf auf Thread >= 2 einen BoundsError. Jetzt: beim Laden neu
+# aufgesetzt (__init__), bei Bedarf unter der Sperre ergänzt. Ein veröffentlichter Vektor wird nie verändert:
+# Ergänzen legt einen neuen an (alte Puffer bleiben) und setzt ihn atomar, so dass Leser ohne Sperre auskommen.
+mutable struct _SPBufs
+    @atomic v::Vector{_SPBuf}
+end
+const _SPBUFS = _SPBufs(_SPBuf[])
 const _SPLOCK = ReentrantLock()
 function _spbuf()
-    if isempty(_SPBUFS)
+    while true
+        tid = Threads.threadid()      # nach der Sperre neu lesen: die Aufgabe kann dort den Thread gewechselt haben
+        v = @atomic :acquire _SPBUFS.v
+        tid <= length(v) && return @inbounds v[tid]
         lock(_SPLOCK) do
-            isempty(_SPBUFS) && append!(_SPBUFS, [_SPBuf() for _ in 1:Threads.maxthreadid()])
+            w = @atomic :acquire _SPBUFS.v
+            k = max(tid, Threads.maxthreadid())
+            length(w) < k && (@atomic :release _SPBUFS.v = vcat(w, [_SPBuf() for _ in length(w)+1:k]))
         end
     end
-    return _SPBUFS[Threads.threadid()]
 end
+"Puffer für alle Threads beim Laden neu aufsetzen (kein Stand aus dem Vorkompilieren)."
+_spbuf_init!() = (@atomic :release _SPBUFS.v = [_SPBuf() for _ in 1:Threads.maxthreadid()]; nothing)
+# Modul SimLev (rformat.jl ist dort direkt eingebunden): einzige __init__-Funktion des Hauptmoduls
+__init__() = _spbuf_init!()
 
 function r_sprintf(fmt::AbstractString, @nospecialize(args...))
     n = length(args)
@@ -120,17 +152,14 @@ end
 
 # ── formatReal (R's format.c) ───────────────────────────────────────────────
 
-_libm_log10(x::Float64) = ccall((:log10, _LIBM), Float64, (Float64,), x)   # dashboard.jl
+const _libm_log10 = RFmt._log10   # glibc log10 (dashboard.jl); seit 1.6.4 eine ccall-Zeile (r/_fmt_core.jl)
 
-# Seit 1.5.2 rechnen formatReal, encodeReal und Drop0 die Funktionen von RFmt (_fmt_core.jl; bis 1.5.1 eine
-# zweite Nachbildung hier); NA-Maske wie R (isna_strict).
+# Seit 1.5.2 rechnen formatReal und encodeReal die Funktionen von RFmt (_fmt_core.jl; bis 1.5.1 eine zweite Nachbildung
+# hier; Drop0 für as.character seit 1.6.4 im C-Kern sl_r_as_character_real); NA-Maske wie R (isna_strict).
 _format_real(xs::AbstractVector{Float64}, digits::Int = 7, nsmall::Int = 0, scipen::Int = 0) =
     RFmt._format_real(xs, Bool[isna_strict(x) for x in xs], digits, nsmall, scipen)
 
-function _encode_real(x::Float64, w::Int, d::Int, e::Int; drop0::Bool = false)
-    s = RFmt._encode_real(x, w, d, e, ".", isna_strict(x))
-    return drop0 && isfinite(x) ? RFmt._drop0(s) : s
-end
+_encode_real(x::Float64, w::Int, d::Int, e::Int) = RFmt._encode_real(x, w, d, e, ".", isna_strict(x))
 
 function _insert_big_mark(s::String, mark::String)
     m = match(r"^(\s*[-+]?)(\d+)(.*)$", s)
@@ -148,6 +177,16 @@ end
 
 _isnumval(v) = v isa Real && !(v isa Bool)
 
+# seit 1.6.4 (RP, C-049): Werte ohne Gegenstück in R (komplexe Zahlen) ergeben einen Fehler; gemischte Zahlen und
+# Wahrheitswerte wie R's c(): Wahrheitswerte als 1/0 (bis 1.6.3 "TRUE" neben Zahlen)
+function _rp_vals(vals::Vector{Any}, who::AbstractString)
+    any(v -> v isa Complex, vals) && error(SimLev.chk_msg("rp.wert_typ", who))
+    if any(v -> v isa Bool, vals) && any(_isnumval, vals) && all(v -> v === missing || v === nothing || v isa Real, vals)
+        vals = Any[v isa Bool ? Int(v) : v for v in vals]
+    end
+    return vals
+end
+
 """
     r_format(x; digits = 7, nsmall = 0, big_mark = "", scientific = nothing, width = nothing)
 
@@ -159,11 +198,15 @@ function r_format(x; digits = nothing, nsmall::Int = 0, big_mark::AbstractString
     x === nothing && return String[]
     vals = x isa AbstractVector ? collect(Any, x) : x isa Tuple ? collect(Any, x) : Any[x]
     isempty(vals) && return String[]
-    dg = digits === nothing ? 7 : Int(digits)
+    vals = _rp_vals(vals, "r_format")
+    # seit 1.6.4 (C-012, Entscheidung 77) digits 1 bis 22 und nsmall 0 bis 20 wie R format()
+    dg = digits === nothing ? 7 : RFmt._chk_digits(digits)
+    nsmall = RFmt._chk_nsmall(nsmall)
     scipen = scientific === nothing ? 0 : scientific isa Bool ? (scientific ? -99 : 310) : Int(scientific)
     if all(v -> _isnumval(v) || v === missing || v === nothing, vals) && any(_isnumval, vals)
         fv = Float64[_isnumval(v) ? Float64(v) : NA for v in vals]
-        if all(v -> v isa Integer || v === missing || v === nothing, vals)
+        # ganze Zahlen wie R-integer nur im int-Bereich (seit 1.6.4, Entscheidung 63, C-090), sonst wie double
+        if all(v -> (v isa Integer && abs(v) < 2^31) || v === missing || v === nothing, vals)
             out = String[v isa Integer ? string(v) : "NA" for v in vals]
             ww = maximum(length, out)
             out = [lpad(s, ww) for s in out]
@@ -186,6 +229,8 @@ function r_format(x; digits = nothing, nsmall::Int = 0, big_mark::AbstractString
         return [lpad(s, ww) for s in out]
     end
     out = String[v === missing || v === nothing ? "NA" : _as_str(v) for v in vals]
+    # Datumswerte ohne gemeinsame Breite wie R format.Date (seit 1.6.4 mit Jahren ohne Auffüllen, C-005)
+    all(v -> v === missing || v === nothing || v isa Date, vals) && return out
     ww = max(width === nothing ? 0 : Int(width), maximum(length, out))
     return [rpad(s, ww) for s in out]
 end
@@ -205,21 +250,55 @@ function r_as_character(x)
     xf = Float64(x)
     isnan(xf) && return isna_strict(xf) ? "NA" : "NaN"
     isinf(xf) && return xf > 0 ? "Inf" : "-Inf"
-    w, d, e = _format_real([xf], 15, 0, 0)
-    return _encode_real(xf, 0, d, e; drop0 = true)
+    # C-Kern sl_r_as_character_real mit scipen fest 0 und "." (seit 1.6.4; bis 1.6.3 formatReal + encodeReal + Drop0
+    # hier nachgebaut, gleiche Texte)
+    return _rb_as_character_real([xf], 0, ".")[1]
+end
+
+"""Text in Anführungszeichen wie R `deparse` (EncodeString in UTF-8; seit 1.6.4, C-089): `\\`, `\"` und
+`\\a \\b \\f \\n \\r \\t \\v`, andere ASCII-Steuerzeichen oktal (`\\001`), nicht druckbare Zeichen als
+`\\uxxxx`/`\\Uxxxxxxxx`, ungültige Bytes als `\\xNN`; `\$` bleibt."""
+function r_deparse_str(s::AbstractString)
+    io = IOBuffer()
+    write(io, '"')
+    for c in s
+        if !isvalid(c)
+            for b in codeunits(string(c))
+                write(io, "\\x", string(b; base = 16, pad = 2))
+            end
+            continue
+        end
+        k = UInt32(c)
+        e = c == '\a' ? "\\a" : c == '\b' ? "\\b" : c == '\f' ? "\\f" : c == '\n' ? "\\n" : c == '\r' ? "\\r" :
+            c == '\t' ? "\\t" : c == '\v' ? "\\v" : c == '\\' ? "\\\\" : c == '"' ? "\\\"" : nothing
+        if e !== nothing
+            write(io, e)
+        elseif k < 0x80
+            0x20 <= k < 0x7F ? write(io, c) : write(io, "\\", string(k; base = 8, pad = 3))
+        elseif _wct_print(c)
+            write(io, c)
+        else
+            write(io, k > 0xFFFF ? "\\U" * string(k; base = 16, pad = 8) : "\\u" * string(k; base = 16, pad = 4))
+        end
+    end
+    write(io, '"')
+    return String(take!(io))
 end
 
 "`paste(deparse(x), collapse = \"\")` für einfache Werte."
 function r_deparse(@nospecialize(x))
     one(v) = v === nothing || v === missing ? "NA" :
-             v isa AbstractString ? "\"" * replace(String(v), "\\" => "\\\\", "\"" => "\\\"") * "\"" :
+             v isa AbstractString ? r_deparse_str(v) :   # seit 1.6.4 wie R mit Steuerzeichen (C-089)
              v isa Bool ? (v ? "TRUE" : "FALSE") :
              v isa Date ? "\"" * _as_str(v) * "\"" :
-             v isa Integer ? string(v) :
+             v isa Integer && abs(v) < 2^31 ? string(v) :   # wie R-integer (Entscheidung 63, C-090)
              v isa Real ? (isnan(v) ? (isna_strict(Float64(v)) ? "NA" : "NaN") : isinf(v) ? (v > 0 ? "Inf" : "-Inf") :
                            (r = _format_real([Float64(v)], 15, 0, 0); _encode_real(Float64(v), r...))) :
              v isa Symbol ? String(v) : repr(v)
     x === nothing && return "NULL"
+    x isa Complex && error(SimLev.chk_msg("rp.wert_typ", "r_deparse"))
+    # seit 1.6.4 wie R (RP, C-049): Datum als structure(<Tage>, class = "Date") (bis 1.6.3 Text in Anführungszeichen)
+    x isa Date && return "structure(" * one(Float64(Dates.value(x - Date(1970, 1, 1)))) * ", class = \"Date\")"
     if x isa AbstractDict || x isa NamedTuple || x isa AbstractVector{<:Pair}
         ps = x isa NamedTuple ? collect(pairs(x)) : collect(x)
         isempty(ps) && return "list()"
@@ -230,6 +309,17 @@ function r_deparse(@nospecialize(x))
         isempty(vals) && return x isa AbstractVector{<:Real} ? "numeric(0)" : "NULL"
         any(v -> v isa Union{AbstractVector,Tuple,AbstractDict,NamedTuple}, vals) &&
             return "list(" * join((r_deparse(v) for v in vals), ", ") * ")"
+        vals = _rp_vals(vals, "r_deparse")
+        # seit 1.6.4 wie R (RP, C-049): Datumsvektor als structure(c(<Tage>), class = "Date"); mit Text wie c() alles als
+        # Text (bis 1.6.3 Datum als Text in Anführungszeichen, Zahlen neben Text ohne Anführungszeichen)
+        if all(v -> v === missing || v === nothing || v isa Date, vals) && any(v -> v isa Date, vals)
+            d = Any[v isa Date ? Float64(Dates.value(v - Date(1970, 1, 1))) : NA for v in vals]
+            inner = length(d) == 1 ? one(d[1]) : "c(" * join((one(t) for t in d), ", ") * ")"
+            return "structure(" * inner * ", class = \"Date\")"
+        end
+        if any(v -> v isa AbstractString, vals) && !any(v -> v isa Union{Date,DateTime}, vals)
+            vals = Any[v === missing || v === nothing || v isa AbstractString ? v : _as_str(v) for v in vals]
+        end
         # R (deparse.c): sind alle Elemente eines double-Vektors NA (nicht NaN), heißt jedes NA_real_
         # (bzw. NA_character_ bei Zeichenvektoren), sonst NA
         if all(v -> v isa AbstractFloat && isna_strict(Float64(v)), vals)

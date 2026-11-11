@@ -24,10 +24,11 @@ oder benannter numerischer Vektor mit Datumsnamen. \code{date} ist der
 Referenzzeitpunkt (z. B. Monatsanfang des Referenzmonats).}
 
 \item{name}{Name der neuen Spalte, wenn \code{data} ein data.frame ist
-(Standard \code{"macro"}).}
+(Standard \code{"macro"}); seit 1.6.4 darf es keine Spalte von \code{data} sein.}
 
 \item{lag}{Veroeffentlichungsverzug als Zahl in Einheiten von
-\code{lag_unit} (Standard 0 = ab dem Referenzdatum bekannt).}
+\code{lag_unit} (Standard 0 = ab dem Referenzdatum bekannt).
+Seit 1.6.4 ganze Zahl >= 0 (kein Blick in die Zukunft), hoechstens 36600 Tage bzw. 1200 Monate.}
 
 \item{lag_unit}{Einheit von \code{lag}: \code{"day"} (Standard;
 Kalendertage) oder \code{"month"} (Kalendermonate; der Tag wird auf das
@@ -45,7 +46,8 @@ mittleren Datumsabstand geschaetzt (1, 4, 12, 52 oder 252, z. B. 12 fuer
 Monatsdaten). Bei 1, 4 und 12 wird der Bezugswert per Datum gesucht
 (Vorjahr bzw. Vormonat/-quartal desselben Kalenders; fehlt er, etwa bei
 einem fehlenden Monat, ist das Ergebnis NA), sonst per Zeile
-(\code{periods} bzw. eine Zeile zurueck).}
+(\code{periods} bzw. eine Zeile zurueck).
+Seit 1.6.4 ganze Zahl >= 1; ohne Angabe braucht macro mindestens zwei Werte.}
 }
 \value{
 Bei Datumsvektor ein numerischer Vektor gleicher Laenge, sonst

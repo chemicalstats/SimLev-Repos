@@ -28,18 +28,21 @@ import pandas as pd
 from ._r import libm as _libm
 from . import _lib
 from ._r import fmt as _fmt
-from ._r.rlist import RList
+from ._r.rlist import RList, _PrintFormat
 from . import _dependence_core as _dcore
 from ._r.rnum import r_colsums, r_rowmeans, r_mean, r_mean_int, r_median, r_pow_vec, r_prod, r_cumprod, r_sum, r_var, r_sd
+from ._r.rnum import r_colmeans, r_rowsums
 # Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
-from ._util import _match_arg
 from ._util import _geo_ann, _geo_ret
 from ._util import _which_max
 from ._util import _ext
 from ._util import _fmt_vec
 from ._util import _colmeans, _rank_avg
+from collections.abc import Mapping
+from ._pruefen import (chk_bool1, chk_dots, chk_fmt, chk_int1, chk_max, chk_nofactor, chk_num1,
+                       chk_scalar, chk_stop)
 
 __all__ = ["overfit_pbo", "sharpe_probabilistic", "sharpe_deflated", "overfit_walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
@@ -116,7 +119,9 @@ def _cor(M):
 
 
 def _p_adjust(p, method, n):
-    return np.asarray(_stats("p_adjust")(p, method=method, n=n), dtype=np.float64)
+    # seit 1.6.4 (K43 UT2-N1) immer ein Vektor: p_adjust gibt für einen einzelnen unbenannten Wert eine Zahl zurück
+    # (bis dahin brach sharpe_haircut mit genau einer Sharpe Ratio mit IndexError ab, R rechnet)
+    return np.atleast_1d(np.asarray(_stats("p_adjust")(p, method=method, n=n), dtype=np.float64))
 
 
 def _sprintf(f, *a):
@@ -132,13 +137,13 @@ def _is_param_search(x):
     return isinstance(x, SimLevParamSearch)
 
 
-def _as_return_matrix(x):
+def _as_return_matrix(x, fn="overfit_reality_check"):
     """``as.matrix(x)`` einer numerischen Eingabe → (Matrix, Spaltennamen oder None, Zeilennamen)."""
     rn = None
     if isinstance(x, pd.DataFrame):
         ok = all(pd.api.types.is_numeric_dtype(x[c]) and not pd.api.types.is_bool_dtype(x[c]) for c in x.columns)
         if not ok:
-            raise ValueError("x muss ein SimLevParamSearch oder eine numerische Renditematrix sein.")
+            chk_stop("ut2.of_x", fn)
         cn = None if isinstance(x.columns, pd.RangeIndex) else [str(c) for c in x.columns]
         if not isinstance(x.index, pd.RangeIndex):
             rn = [str(i) for i in x.index]
@@ -146,14 +151,17 @@ def _as_return_matrix(x):
     if isinstance(x, pd.Series):
         a = x.to_numpy()
         if a.dtype.kind not in "iuf":
-            raise ValueError("x muss ein SimLevParamSearch oder eine numerische Renditematrix sein.")
+            chk_stop("ut2.of_x", fn)
         rn = None if isinstance(x.index, pd.RangeIndex) else [str(i) for i in x.index]
         return a.astype(np.float64).reshape(-1, 1), None, rn
+    from ._pruefen import chk_is_factor
+    if chk_is_factor(x):
+        chk_stop("ut2.of_x", fn)
     a = np.asarray(x)
     if a.dtype.kind not in "iuf":
-        raise ValueError("x muss ein SimLevParamSearch oder eine numerische Renditematrix sein.")
+        chk_stop("ut2.of_x", fn)
     a = a.astype(np.float64)
-    if a.ndim == 1:
+    if a.ndim <= 1:   # seit 1.6.4 auch eine Zahl wie R as.matrix (1 x 1; B-043)
         a = a.reshape(-1, 1)
     return a, None, None
 
@@ -179,18 +187,17 @@ def _combn(S, k):
 
 
 def _log1p(R):
-    """``log1p(R)`` mit R's Warnung "NaNs produced" (Werte unter -1, -Inf; seit 1.5.1)."""
-    out = _libm.log1p(R)
-    if np.any(np.isnan(out) & ~np.isnan(R)):
-        warnings.warn("NaNs produced", UserWarning, stacklevel=3)
-    return out
+    """``log1p(R)`` mit R's Warnung "NaNs produced" (Werte unter -1, -Inf; seit 1.5.1; seit 1.6.4 warnt die libm selbst,
+    C-094)."""
+    return _libm.log1p(R)
 
 
-def _of_returns_np(x, frequency, dates=None, risk_free=0):
-    """Wie ``.of_returns``; liefert ``(R, Spaltennamen, Zeilennamen, dates, ppy, cols)`` mit numpy."""
+def _of_returns_np(x, frequency, dates=None, risk_free=0, fn="overfit_reality_check"):
+    """Wie ``.of_returns``; liefert ``(R, Spaltennamen, Zeilennamen, dates, ppy, cols)`` mit numpy. ``fn``:
+    Funktionsname für die Meldungen (seit 1.6.4; Standard für den Aufrufer ``overfit_reality_check``)."""
     if _is_param_search(x):
         if x.get("returns") is None:
-            raise ValueError("Suche ohne gespeicherte Renditen (keep_returns = \"none\").")
+            chk_stop("rs.ps_ohne_renditen", fn)
         ret = x["returns"]
         if isinstance(ret, pd.DataFrame):
             R = ret.to_numpy(dtype=np.float64, na_value=_NA)
@@ -203,26 +210,37 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0):
         rn = None
         dates = x.get("dates")
     else:
-        R, cn, rn = _as_return_matrix(x)
+        R, cn, rn = _as_return_matrix(x, fn)
         if cn is None:
             cn = ["p%d" % (j + 1) for j in range(R.shape[1])]
+        if dates is not None:                     # seit 1.6.4: Länge, keine Kategorie, aufsteigend ohne NA (B-020)
+            chk_nofactor(dates, fn, "dates")
+            dl = 1 if isinstance(dates, (str, _dt_types())) else len(dates)
+            if dl != R.shape[0]:
+                chk_stop("laenge", fn, "dates", chk_fmt(R.shape[0]))
     keep = np.isfinite(R).sum(axis=0) > 0
     R = R[:, keep]
     cn = [c for c, k in zip(cn, keep) if k]
     if dates is not None:
         dates = _to_date(dates, "dates")
+        dd = np.asarray(_days(dates), dtype=np.float64)
+        if np.isnan(dd).any() or (dd.size > 1 and (np.diff(dd) < 0).any()):
+            chk_stop("e5.datum_vektor", fn, "dates")
     if dates is not None and frequency != "day":
-        key = _fmt.format_date(dates, "%G-%V" if frequency == "week" else "%Y-%m")
-        key = [str(k) for k in key]
-        if len(key) != R.shape[0]:
+        # seit 1.6.4 (B-103) Gruppen über ganzzahlige Schlüssel (Daten aufsteigend: jede Periode ein Lauf, in
+        # Reihenfolge des ersten Auftretens wie bisher), Text nur für die Zeilennamen der Perioden
+        fmt = "%G-%V" if frequency == "week" else "%Y-%m"
+        from .dependence import _period_breaks
+        brk = _period_breaks(dates, frequency)
+        if len(dates) != R.shape[0]:
             raise ValueError("incorrect length for 'group'")
-        lev = list(dict.fromkeys(key))
-        pos = {k: i for i, k in enumerate(lev)}
-        codes = np.array([pos[k] for k in key], dtype=np.int64)
+        first = np.r_[True, brk] if len(dates) else np.zeros(0, dtype=bool)
+        lev = [str(k) for k in _fmt.format_date(dates[first], fmt)]
+        codes = (np.cumsum(first) - 1).astype(np.int64)
         S = _rowsum(_log1p(R), codes, len(lev))
         R = _libm.expm1(S)                    # seit 1.6.2 expm1 (P2)
         rn = lev
-        last = np.array([key[i] != key[i + 1] for i in range(len(key) - 1)] + [True], dtype=bool)
+        last = np.r_[brk, True].astype(bool)
         dates = dates[last]
     ok = ~np.isnan(R).any(axis=1)
     R = R[ok]
@@ -230,6 +248,10 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0):
         rn = [r for r, k in zip(rn, ok) if k]
     if dates is not None:
         dates = dates[ok]
+    if np.isinf(R).any():
+        chk_stop("e5.renditen_inf", fn)   # seit 1.6.4 (B-012)
+    if R.shape[0] < 2:
+        chk_stop("e5.perioden", fn)       # seit 1.6.4 Mindestlänge (B-016)
     if dates is not None and len(dates) > 1:
         span = float(_days(dates[-1:])[0] - _days(dates[:1])[0])
         ppy = (len(dates) - 1) / (span / 365.25)
@@ -238,6 +260,11 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0):
     R = R - risk_free / 100 / ppy
     cols = np.nonzero(keep)[0].astype(np.int64) + 1
     return R, cn, rn, dates, ppy, cols
+
+
+def _dt_types():
+    import datetime as _dt
+    return (_dt.date, np.datetime64, pd.Timestamp)
 
 
 def _of_returns(x, frequency, dates=None, risk_free=0):
@@ -259,8 +286,12 @@ class _RR:
         self.R, self.cn, self.rn, self.dates, self.ppy, self.cols = R, list(cn), rn, dates, ppy, cols
 
 
-def _rr(x, frequency, dates=None, risk_free=0):
-    return _RR(*_of_returns_np(x, frequency, dates, risk_free))
+def _rr(x, frequency, dates=None, risk_free=0, fn="overfit_reality_check"):
+    return _RR(*_of_returns_np(x, frequency, dates, risk_free, fn))
+
+
+def _e5_choice(x, choices, fn, arg):
+    return _ext("data_prep", "_e5_choice")(x, choices, fn, arg)
 
 
 def _of_metric(n, s1, s2, sdn, sl, metric, c1=None):
@@ -328,7 +359,7 @@ def _frame_data(**cols):
 # PBO
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SimLevPBO(RList):
+class SimLevPBO(RList, _PrintFormat):
     """Ergebnis von :func:`overfit_pbo` (R-Klasse ``SimLevPBO``)."""
 
     r_class = ("SimLevPBO",)
@@ -349,10 +380,6 @@ class SimLevPBO(RList):
         out.append(_sprintf("  Lesart: PBO nahe 0 = Auswahl trägt, um %.0f %% = Zufall%s, darüber = Auswahl schadet.\n",
                             100 * (N + N % 2) / (2 * N), " (ungerade Punktezahl: (N + 1) / (2N))" if N % 2 else ""))
         return "".join(out)[:-1]
-
-    def print(self):
-        print(self.format())
-        return self
 
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
@@ -383,6 +410,7 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
 
     Args:
         x: Renditequelle:
+            Seit 1.6.4 keine logischen Spalten und keine unendlichen Renditen; nach dem Entfernen der Zeilen mit fehlenden Werten mindestens zwei Perioden.
 
             - ``SimLevParamSearch`` aus ``param_search()`` mit gespeicherten Renditen (``keep_returns = "day"``);
               verwendet werden ``x["returns"]`` (tägliche Renditen je Punkt) und ``x["dates"]``;
@@ -394,7 +422,9 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
             ``metric = "sharpe"`` außerdem Spalten ohne Schwankung (Standardabweichung <= 1e-10 je Periode, mit
             Warnung), deren Sharpe Ratio nicht definiert ist. Mindestens zwei Spalten nötig. Bei
             ``print()``/``plot()``: Objekt der Klasse ``SimLevPBO``.
-        S: Anzahl Blöcke (gerade ganze Zahl >= 2, Standard 16 ergibt binom(16, 8) = 12870 Aufteilungen).
+        S: Anzahl Blöcke (gerade ganze Zahl von 2 bis 24, Standard 16 ergibt binom(16, 8) = 12870 Aufteilungen;
+            seit 1.6.4 höchstens 24: binom(24, 12) = 2704156 Aufteilungen, rund 0,5 GB Speicher, in Julia 0,8 GB).
+            Seit 1.6.4 ohne Abschneiden: eine gebrochene Zahl ist ein Fehler.
         metric: Kennzahl je Periode (nach Abzug von ``risk_free``, nicht annualisiert): ``"sharpe"`` (Standard;
             Mittelwert / Standardabweichung), ``"sortino"`` (Mittelwert / Wurzel des mittleren quadrierten
             negativen Teils), ``"geometric"`` (geometrische Periodenrendite exp(log(1 + r)) - 1, Anteil) oder
@@ -407,6 +437,7 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
             Jahr annualisiert (betrifft annualisierte Sharpe Ratios und ``risk_free``).
         dates: Datum je Zeile von ``x`` (Date oder umwandelbar), nur bei Matrix-Eingabe; ``None`` (Standard) =
             keine Aggregation. Bei ``SimLevParamSearch`` wird ``x["dates"]`` verwendet.
+            Seit 1.6.4 genau ein Datum je Zeile, aufsteigend, ohne NA und kein Faktor.
         risk_free: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als ``risk_free / 100 / ppy`` von
             jeder Periodenrendite abgezogen. ``ppy`` (Perioden je Jahr) wird aus dem Datum geschätzt: (Anzahl
             Perioden - 1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (``"day"``), 52 (``"week"``) bzw. 12
@@ -438,22 +469,27 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
         R = rng.normal(2e-4, 0.01, (2000, 30))     # 30 Zufallsstrategien
         print(simlev.overfit_pbo(R, S=10, frequency="day")["pbo"])   # etwa 0.5
     """
-    metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"), "metric")
-    frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
+    fn = "overfit_pbo"
+    metric = _e5_choice(metric, ("sharpe", "sortino", "geometric", "mean"), fn, "metric")
+    frequency = _e5_choice(frequency, ("week", "day", "month"), fn, "frequency")
+    S = chk_int1(S, fn, "S", lo=2)        # seit 1.6.4 ganze Zahl (bis 1.6.3 abgeschnitten, Entscheidung 19)
+    if S > 24:                            # seit 1.6.4 S <= 24 (Speicher; Entscheidung 138, vorher 28 nach 56)
+        chk_stop("e5.pbo_S", fn)
     S = int(S)
     if S < 2 or S % 2:
-        raise ValueError("S muss gerade und >= 2 sein.")
-    rr = _rr(x, frequency, dates, risk_free)
+        chk_stop("ut2.pbo_S", fn)
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    rr = _rr(x, frequency, dates, risk_free, fn)
     if metric == "sharpe":
         rr = _of_drop_flat(rr, "overfit_pbo")
     R = rr.R
     N = R.shape[1]
     Tn = R.shape[0]
     if N < 2:
-        raise ValueError("Mindestens zwei Punkte nötig.")
+        chk_stop("rs.zwei_punkte", fn)
     bl = Tn // S
     if bl < 4:
-        raise ValueError("Zu wenige Beobachtungen (%d) für S = %d Blöcke." % (Tn, S))
+        chk_stop("rs.pbo_beob", fn, int(Tn), int(S))
     R = R[Tn - bl * S:Tn]
     blk = np.repeat(np.arange(S), bl)
     Rc = R - _colmeans(R)[None, :]
@@ -527,6 +563,7 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     Args:
         r: Numerischer Vektor einfacher Periodenrenditen als Anteil (0.01 = 1 %); nicht endliche Werte werden
             entfernt. Ein risikoloser Zins wird nicht abgezogen.
+            Seit 1.6.4 mindestens zwei endliche Werte, die nicht alle gleich sind (sonst Fehler).
         benchmark: Vergleichs-Sharpe-Ratio SR^* p. a. (Standard 0); intern durch √(ppy) geteilt.
         ppy: Perioden je Jahr der Renditen in ``r`` (Standard 52 = Wochenrenditen; z. B. 252 für Handelstage, 12
             für Monate). Wird nicht geschätzt und dient nur der Umrechnung von ``benchmark``.
@@ -544,6 +581,20 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
         r = np.random.default_rng(1).normal(0.002, 0.02, 520)   # 10 Jahre Wochenrenditen
         print(simlev.sharpe_probabilistic(r, benchmark=0, ppy=52))
     """
+    fn = "sharpe_probabilistic"
+    chk_nofactor(r, fn, "r")
+    r = _ext("data_prep", "_e5_numvec")(r, fn, "r")
+    benchmark = chk_num1(benchmark, fn, "benchmark")
+    ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True)
+    rf = np.asarray(r, dtype=np.float64).ravel()
+    rf = rf[np.isfinite(rf)]
+    if rf.size < 2 or not (r_sd(rf) > 0):
+        chk_stop("e5.renditen_kurz", fn, "r")   # seit 1.6.4 (B-016, B-041)
+    return _of_psr(r, benchmark, ppy)
+
+
+def _of_psr(r, benchmark, ppy):
+    """PSR ohne Prüfung (für ``sharpe_deflated``)."""
     r = np.asarray(r, dtype=np.float64).ravel()
     r = r[np.isfinite(r)]
     n = r.size
@@ -551,7 +602,7 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     sd = r_sd(r)
     sr = mu / sd
     sr0 = benchmark / math.sqrt(ppy)
-    z = (r - r_mean(r)) / r_sd(r)
+    z = (r - mu) / sd
     g3 = r_mean(r_pow_vec(z, 3.0))   # Kern, je Element r_pow1 wie r_pow
     g4 = r_mean(r_pow_vec(z, 4.0))
     den = 1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)
@@ -560,7 +611,7 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     return float(_lib.pnorm(q))
 
 
-class SimLevDSR(RList):
+class SimLevDSR(RList, _PrintFormat):
     """Ergebnis von :func:`sharpe_deflated` (R-Klasse ``SimLevDSR``)."""
 
     r_class = ("SimLevDSR",)
@@ -578,13 +629,9 @@ class SimLevDSR(RList):
         out.append("  Lesart: DSR über 95 % = Ergebnis hält der Mehrfachtest-Korrektur stand.\n")
         return "".join(out)[:-1]
 
-    def print(self):
-        print(self.format())
-        return self
-
 
 def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 - R-Argumentname
-                    frequency=("week", "day", "month"), dates=None, risk_free=0):
+                    frequency=("week", "day", "month"), dates=None, risk_free=0, rho_method=("cor", "linear")):
     """Deflated Sharpe Ratio.
 
     Korrigiert die Sharpe Ratio des besten Punkts einer Suche um die Zahl der Versuche: Die Nullhypothese ist
@@ -602,8 +649,10 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
             Spalten = Punkte, einfache Renditen als Anteil). Bei ``print()``: Objekt der Klasse ``SimLevDSR``.
         id: Zu prüfender Punkt: bei ``SimLevParamSearch`` die ``id`` aus ``x["results"]``, bei einer Matrix die
             Spaltennummer der ursprünglichen Matrix. ``None`` (Standard) = Punkt mit der höchsten Sharpe Ratio.
+            Seit 1.6.4 eine ganze Zahl.
         n_trials: Versuchsanzahl N (positive Zahl, überschreibt die Schätzung), z. B. wenn vorher schon andere
             Suchen gelaufen sind. ``None`` (Standard) = aus ``x`` geschätzt (siehe ``effective``).
+            Seit 1.6.4 eine einzelne endliche Zahl > 0.
         effective: Logisch. ``True`` (Standard) = effektive Versuchsanzahl N_eff; ``False`` = Anzahl gültiger
             Spalten.
         frequency: Periodenlänge der Auswertung: ``"week"`` (Standard), ``"day"`` oder ``"month"``. Mit Datum (bei
@@ -618,6 +667,12 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
             jeder Periodenrendite abgezogen. ``ppy`` (Perioden je Jahr) wird aus dem Datum geschätzt: (Anzahl
             Perioden - 1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (``"day"``), 52 (``"week"``) bzw. 12
             (``"month"``).
+        rho_method: Rechenweg der mittleren paarweisen Korrelation barρ: ``"cor"`` (Standard) = Mittel des oberen
+            Dreiecks der vollen Korrelationsmatrix (Rechenzeit wie T N^2); ``"linear"`` = (‖Σ_j z_j‖^2 - N) / (N (N -
+            1)) mit den zentrierten und auf Länge 1 skalierten Spalten z_j (Rechenzeit wie T N). Mathematisch
+            gleich; ``rho``, ``n_eff``, ``n_trials``, ``sr0`` und ``dsr`` weichen in den letzten Stellen ab (in R,
+            Python und Julia gleich). Mit nicht endlichen Renditen rechnet auch ``"linear"`` über die
+            Korrelationsmatrix. Seit 1.6.4.
 
     Returns:
         Objekt der Klasse ``SimLevDSR``, eine Liste mit ``id`` (geprüfter Punkt), ``sharpe`` (seine Sharpe Ratio
@@ -638,8 +693,14 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
         R = rng.normal(2e-4, 0.01, (2000, 20))     # 20 Zufallsstrategien
         print(simlev.sharpe_deflated(R, frequency="day"))
     """
-    frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
-    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_deflated")
+    fn = "sharpe_deflated"
+    frequency = _e5_choice(frequency, ("week", "day", "month"), fn, "frequency")
+    rho_method = _e5_choice(rho_method, ("cor", "linear"), fn, "rho_method")   # seit 1.6.4 (B-075, Entscheidung 92)
+    id = chk_int1(id, fn, "id", lo=1, null_ok=True)   # noqa: A001 - seit 1.6.4 (B-007)
+    n_trials = chk_num1(n_trials, fn, "n_trials", lo=0, lo_open=True, null_ok=True)
+    effective = chk_bool1(effective, fn, "effective")
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free, fn), "sharpe_deflated")
     R = rr.R
     N = R.shape[1]
     sr = _of_col_metric(R, "sharpe")
@@ -648,9 +709,11 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
     else:
         hits = np.nonzero(rr.cols == float(id))[0]
         if not hits.size:
-            raise ValueError("id nicht unter den gültigen Punkten (Spalten ohne endliche Werte oder ohne Schwankung zählen nicht).")
+            chk_stop("rs.id_punkt", fn)
         j = int(hits[0])
-    if N > 1:
+    if N > 1 and rho_method == "linear" and np.isfinite(R).all():
+        rho = _of_rho_linear(R)
+    elif N > 1:
         Cm = _cor(R)
         iu = np.asarray(Cm, dtype=np.float64).T[np.tril_indices(N, -1)]   # oberes Dreieck spaltenweise wie R
         rho = r_mean(np.ascontiguousarray(iu), na_rm=True)
@@ -671,16 +734,28 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
     r = R[:, j]
     sq = math.sqrt(rr.ppy)
     return SimLevDSR(id=int(rr.cols[j]), sharpe=float(sr[j]) * sq, sr0=sr0 * sq,
-                     psr=sharpe_probabilistic(r, benchmark=0, ppy=rr.ppy), dsr=sharpe_probabilistic(r, benchmark=sr0 * sq, ppy=rr.ppy),
+                     psr=_of_psr(r, 0, rr.ppy), dsr=_of_psr(r, sr0 * sq, rr.ppy),
                      n_trials=Nt, n_points=N, n_eff=n_eff, rho=rho, var_sr=v * rr.ppy, n_obs=R.shape[0],
                      frequency=frequency)
+
+
+def _of_rho_linear(R):
+    """Mittlere paarweise Pearson-Korrelation der Spalten von R (endlich, N >= 2) in O(T N) (seit 1.6.4, B-075; R
+    ``.of_rho_linear``, dieselben Kerne in derselben Folge): (Σ_t (Σ_j z_tj)^2 - N) / (N (N - 1)), z_j zentriert
+    (colMeans) und auf Länge 1 skaliert (√colSums(C * C)); Summen in long double wie colSums/rowSums/sum."""
+    R = np.asarray(R, dtype=np.float64)
+    N = R.shape[1]
+    C = R - r_colmeans(R)[None, :]
+    Z = C / np.sqrt(r_colsums(C * C))[None, :]
+    u = r_rowsums(Z)
+    return (r_sum(u * u) - N) / (float(N) * (N - 1))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Walk-Forward
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SimLevWalkForward(RList):
+class SimLevWalkForward(RList, _PrintFormat):
     """Ergebnis von :func:`overfit_walk_forward` (R-Klasse ``SimLevWalkForward``)."""
 
     r_class = ("SimLevWalkForward",)
@@ -709,10 +784,6 @@ class SimLevWalkForward(RList):
         out.append(_sprintf("Mittlerer OOS-Rang %.0f %% (50 %% = Zufall), Effizienz OOS/IS %.2f, %d Wechsel\n",
                             100 * s["mean_oos_rank"], s["efficiency"], s["switches"]))
         return "".join(out)[:-1]
-
-    def print(self):
-        print(self.format())
-        return self
 
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
@@ -774,6 +845,7 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
             Tag dann nur einmal, für das jüngste Fenster, dessen Test schon begonnen hat (die Kennzahlen in
             ``windows`` beziehen sich auf das ganze Testfenster). Mit ``step > test`` entstehen Lücken zwischen
             den Testfenstern; sie fehlen in ``series`` und zählen nicht als Zeit.
+            Seit 1.6.4 je eine Zahl, die gerundet mindestens einen Monat ergibt (12 * Jahre >= 1), höchstens 100 Jahre.
         anchored: Logisch. ``False`` (Standard) = rollierendes Trainingsfenster der Länge ``train``; ``True`` =
             Training beginnt immer am ersten Tag (expandierendes Fenster).
         metric: Auswahl- und Bewertungskennzahl, je Fenster aus den Tagesrenditen: ``"sharpe"`` (Standard),
@@ -827,11 +899,25 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
     """
     if step is None:
         step = test
-    metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"), "metric")
-    select = _match_arg(select, ("best", "plateau"), "select")
+    fn = "overfit_walk_forward"
+    metric = _e5_choice(metric, ("sharpe", "sortino", "geometric", "mean"), fn, "metric")
+    select = _e5_choice(select, ("best", "plateau"), fn, "select")
     if not _is_param_search(x) or x.get("returns") is None:
-        raise ValueError("x muss ein SimLevParamSearch mit Renditen sein.")
-    rr = _rr(x, "day", risk_free=risk_free)
+        chk_stop("ut2.ps_renditen", "overfit_walk_forward")
+    # seit 1.6.4: Jahre, die gerundet mindestens einen Monat ergeben, höchstens 100 Jahre (B-006: step = 0 lief endlos)
+    vals = {}
+    for a, v in (("train", train), ("test", test), ("step", step)):
+        chk_nofactor(v, fn, a)
+        v = chk_scalar(v)
+        if not (isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_)) and
+                math.isfinite(float(v)) and _r_round(12 * float(v)) >= 1):
+            chk_stop("e5.jahre_monat", fn, a)
+        chk_max(v, 100, fn, a)
+        vals[a] = v
+    train, test, step = vals["train"], vals["test"], vals["step"]
+    anchored = chk_bool1(anchored, fn, "anchored")
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    rr = _rr(x, "day", risk_free=risk_free, fn=fn)
     R = rr.R
     d = rr.dates
     dn = _days(d)
@@ -874,7 +960,7 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
                     "oos_average": r_mean(np.array([_geo_ret(Ro[:, c]) for c in range(Ro.shape[1])]))})
         k += 1
     if not win:
-        raise ValueError("Historie zu kurz für ein Trainings- und Testfenster.")
+        chk_stop("rs.wf_kurz", fn)
     params = list(x["params"])
     res = x["results"]
     ids = np.array([w["id"] for w in win], dtype=np.int64)
@@ -937,7 +1023,9 @@ def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plate
         config: Konfiguration aus ``bootstrap_config()``.
         ids: Ganzzahliger Vektor von ``id``-Werten aus ``x["results"]``; ``None`` (Standard) = die ``top`` besten
             Punkte nach ``by``.
+            Seit 1.6.4 nur vorhandene id-Werte ohne Doppel.
         top: Anzahl bester Punkte (ganze Zahl, Standard 5); nur ohne ``ids``.
+            Seit 1.6.4 ganze Zahl >= 1.
         by: Rangfolge für ``top``: ``"objective"`` (Standard, Zielgröße der Suche) oder ``"plateau"``
             (``plateau_mean`` aus ``param_plateau()``); Richtung nach ``x["maximize"]``, Punkte mit ``NA``
             entfallen.
@@ -948,6 +1036,7 @@ def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plate
             B. ein Buy-and-Hold (Standard: keine).
         **kwargs: Weitere Argumente für ``bootstrap_study()``, z. B. ``method``, ``n`` (Anzahl Pfade), ``params``,
             ``seed``, ``cores``, ``progress``, ``sim_args``, ``burn_in``.
+            Seit 1.6.4 nur Argumente von bootstrap_study(); unbekannte oder doppelte Namen sind ein Fehler.
 
     Returns:
         Objekt der Klasse ``SimLevBootstrapStudy`` (siehe ``bootstrap_study()``); die Strategien heißen ``p<id>``
@@ -972,11 +1061,33 @@ def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plate
         print(bs["results"][["strategy", "path", "cagr"]])
     """
     from .param_search import _as_spec, param_plateau, _modify_list, _order, _row_params
-    by = _match_arg(by, ("objective", "plateau"), "by")
+    fn = "param_bootstrap"
+    by = _e5_choice(by, ("objective", "plateau"), fn, "by")
     if not _is_param_search(x):
-        raise ValueError("x muss ein SimLevParamSearch sein.")
+        chk_stop("klasse", "param_bootstrap", "x", "param_search()")
     include = {} if include is None else include
     res = x["results"]
+    # seit 1.6.4 (K42 E5): ids ganze Zahlen aus x$results$id ohne Doppel (B-007, B-045), top ganze Zahl >= 1,
+    # map benannter Zeichenvektor, include benannte Liste, kwargs nur Argumente von bootstrap_study() (Entscheidung 21)
+    if ids is not None:
+        chk_nofactor(ids, fn, "ids")
+        iv = list(np.atleast_1d(np.asarray(ids.to_numpy() if isinstance(ids, pd.Series) else ids, dtype=object)).ravel())
+        known = set(float(v) for v in res["id"].to_numpy())
+        if not iv or not all(isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_))
+                             and math.isfinite(float(v)) and float(v) in known for v in iv) or \
+                len(set(float(v) for v in iv)) != len(iv):
+            chk_stop("e5.ids", fn)
+    top = chk_int1(top, fn, "top", lo=1)
+    if map is not None:
+        chk_nofactor(map, fn, "map")
+        if isinstance(map, pd.Series):
+            map = dict(zip(map.index, map.to_numpy()))
+        if not (isinstance(map, Mapping) and len(map) and all(isinstance(k, str) and k != "" and isinstance(v, str)
+                                                                and v != "" for k, v in map.items())):
+            chk_stop("e5.map", fn)
+    if not (isinstance(include, Mapping) and all(isinstance(k, str) and k != "" for k in include)):
+        chk_stop("e2.benannt", fn, "include")
+    chk_dots(list(kwargs), _pb_args(), fn, taken=("data", "config", "strategies"))
     if ids is None:
         v = param_plateau(x)["plateau_mean"].to_numpy(dtype=float) if by == "plateau" else res[x["objective"]].to_numpy(dtype=float)
         o = _order(v, decreasing=x.get("maximize") is True, na_last=None)
@@ -1012,6 +1123,14 @@ def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plate
 # Haircut
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _pb_args():
+    """Argumente, die ``param_bootstrap()`` über kwargs an ``bootstrap_study()`` weitergibt (R ``.pb_args``)."""
+    import inspect
+    sig = inspect.signature(_ext("bootstrap", "bootstrap_study"))
+    return tuple(k for k, p in sig.parameters.items() if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)
+                 and k not in ("data", "config", "strategies"))
+
+
 def _sign(v):
     return np.where(v > 0, 1.0, np.where(v < 0, -1.0, np.where(np.isnan(v), v, 0.0)))
 
@@ -1032,9 +1151,11 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
             Ratios (dann ``n_obs`` und ``ppy`` angeben).
         n_obs: Anzahl Perioden T, auf denen die Sharpe Ratios beruhen (Perioden der Länge, die ``ppy``
             beschreibt); nur und zwingend bei Vektor-Eingabe. Sonst die Zeilenzahl nach Aggregation.
+            Seit 1.6.4 ganze Zahl >= 1; die Sharpe Ratios in x müssen endlich sein.
         n_tests: Gesamtzahl der Versuche M (ganze Zahl). ``None`` (Standard) = Anzahl Sharpe Ratios bzw. Punkte;
             bei früheren Suchen entsprechend höher ansetzen (fehlende Versuche gehen mit p = 1 in die Korrektur
             ein).
+            Seit 1.6.4 ganze Zahl von 1 bis 10^8, mindestens die Anzahl Sharpe Ratios bzw. Punkte (sonst ein Fehler).
         frequency, dates, risk_free: Aggregation, Datum und risikoloser Zins (Prozent p. a.) wie bei
             ``overfit_pbo()``; nur bei Suche oder Matrix.
         ppy: Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 = Wochen). Bei Suche oder Matrix wird es wie
@@ -1061,7 +1182,13 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
         import simlev
         print(simlev.sharpe_haircut([1, 0.5], n_obs=520, n_tests=50, ppy=52))
     """
-    frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
+    fn = "sharpe_haircut"
+    frequency = _e5_choice(frequency, ("week", "day", "month"), fn, "frequency")
+    # seit 1.6.4: n_tests ganze Zahl von 1 bis 10^8 (Entscheidung 16; C-017), Sharpe Ratios endlich, n_obs ganze Zahl
+    if n_tests is not None:
+        n_tests = chk_int1(n_tests, fn, "n_tests", lo=1)
+        chk_max(n_tests, 1e8, fn, "n_tests")
+    risk_free = chk_num1(risk_free, fn, "risk_free")
     names = None
     is_vec = False
     if isinstance(x, pd.Series) or (isinstance(x, (list, tuple)) and not any(isinstance(e, (list, tuple, np.ndarray)) for e in x)) \
@@ -1072,18 +1199,26 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
             if isinstance(x, pd.Series) and not isinstance(x.index, pd.RangeIndex):
                 names = [str(i) for i in x.index]
     if is_vec:
+        if not np.isfinite(np.asarray(a, dtype=np.float64)).all():
+            chk_stop("e2.zahlen_endlich", fn, "x")
         if n_obs is None:
-            raise ValueError("n_obs angeben.")
+            chk_stop("fehlt", fn, "n_obs")
+        n_obs = chk_int1(n_obs, fn, "n_obs", lo=1)
+        ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True)
         sr = np.atleast_1d(np.asarray(a, dtype=np.float64)) / math.sqrt(ppy)
         Tn = n_obs
         ids = np.arange(1, sr.size + 1, dtype=np.int64)
     else:
-        rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_haircut")
+        rr = _of_drop_flat(_rr(x, frequency, dates, risk_free, fn), "sharpe_haircut")
         sr = _of_col_metric(rr.R, "sharpe")
         names = rr.cn
         Tn = rr.R.shape[0]
         ppy = rr.ppy
         ids = rr.cols
+    # seit 1.6.4 (K43 T2-N7) mindestens so viele Tests wie Sharpe Ratios (bis dahin still durch deren Zahl ersetzt, das
+    # Attribut n_tests nannte den angegebenen Wert)
+    if n_tests is not None and n_tests < sr.size:
+        chk_stop("ut2.n_tests", fn)
     M = n_tests if n_tests is not None else sr.size
     tstat = sr * math.sqrt(Tn)
     p = 2 * np.asarray(_lib.pnorm(-np.abs(tstat)), dtype=np.float64)

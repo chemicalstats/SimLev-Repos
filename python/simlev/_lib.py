@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import sys
 import threading
 import time
 
@@ -50,18 +51,19 @@ with _LOCK:
     _entropy_state(_G)
 
 
-def check_seed(seed):
-    """Seed prüfen: ``int`` (kein ``bool``) mit ``|seed| < 2**53``."""
-    if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or not abs(int(seed)) < 2 ** 53:
-        raise ValueError("seed: ganze Zahl erwartet (erhalten: %s)" % _seed_text(seed))
+def check_seed(seed, fn="simlev_seed"):
+    """Seed prüfen: ganze Zahl mit ``|seed| < 2**53`` wie R (``int``, NumPy-Ganzzahl oder ganzzahliger ``float``,
+    kein ``bool``; Länge 1 wie Einzelwert). Seit 1.6.4 ohne Eingabewert in der Meldung (Entscheidung 8, C-096) und
+    wie R auch ``42.0`` (bis 1.6.3 nur ``int``); seit K43 T1-R5 mit dem Namen ``fn`` der Funktion (Baustein
+    ``ut1.seed``; bis dahin "seed: ganze Zahl erwartet") und T1-R4 ohne ``OverflowError`` bei ``10**400``."""
+    import math
+    from ._pruefen import _to_float, chk_scalar, chk_stop
+    seed = chk_scalar(seed)
+    ok = isinstance(seed, (int, float, np.integer, np.floating)) and not isinstance(seed, (bool, np.bool_)) and \
+        math.isfinite(_to_float(seed)) and float(seed) == math.trunc(float(seed)) and abs(float(seed)) < 2 ** 53
+    if not ok:
+        chk_stop("ut1.seed", fn)
     return int(seed)
-
-
-def _seed_text(seed):
-    if isinstance(seed, (int, np.integer)) and not isinstance(seed, bool):
-        return str(int(seed))
-    txt = repr(seed)
-    return txt if len(txt) <= 60 else txt[:57] + "..."
 
 
 def simlev_seed(seed=None):
@@ -123,7 +125,7 @@ def simlev_seed(seed=None):
         with _LOCK:
             _entropy_state(_G)
     else:
-        s = check_seed(seed)
+        s = check_seed(seed, "simlev_seed")
         with _LOCK:
             _ext.slc_seed(_G, s)
     return seed
@@ -172,14 +174,14 @@ def next_seed():
         return _ext.slc_seed31(_G)
 
 
-def resolve_seed(seed):
-    """``None`` -> :func:`next_seed`, sonst geprüft (G bleibt unberührt)."""
-    return next_seed() if seed is None else check_seed(seed)
+def resolve_seed(seed, fn="simlev_seed"):
+    """``None`` -> :func:`next_seed`, sonst geprüft (G bleibt unberührt; ``fn`` für die Meldung)."""
+    return next_seed() if seed is None else check_seed(seed, fn)
 
 
-def main_stream(seed):
-    """Hauptstrom einer zufälligen Funktion: ``Stream(resolve_seed(seed))``."""
-    return Stream(resolve_seed(seed))
+def main_stream(seed, fn="simlev_seed"):
+    """Hauptstrom einer zufälligen Funktion: ``Stream(resolve_seed(seed, fn))``."""
+    return Stream(resolve_seed(seed, fn))
 
 
 def streams(stream, n):
@@ -302,15 +304,93 @@ def pbeta(q, shape1, shape2, lower_tail=True):
     return _apply(_ext.slc_pbeta, q, float(shape1), float(shape2), bool(lower_tail))
 
 
-def nthreads():
-    """Threads der elementweisen Kerne (seit 1.6.0): ``SIMLEV_THREADS`` (ganze Zahl >= 1), sonst 0 = Zahl der
-    Prozessoren (höchstens 8); wie ``.sl_nthreads`` in R."""
-    v = os.environ.get("SIMLEV_THREADS", "")
-    try:
-        n = int(v.strip()) if v.strip() else 0
-    except ValueError:
-        return 0
+def nprocs():
+    """Höchstwert für Parallelität (seit 1.6.4, Entscheidung 41b; ``cores`` und Kern-Threads): Zahl der Prozessoren,
+    mindestens 1, aus dem Kern (``sl_nprocs``; eine Quelle für R, Python und Julia)."""
+    return int(_ext.slc_nprocs())
+
+
+_THREADS_HINT = [False]
+# Threads je parallele Einheit (seit 1.6.4, Entscheidung 41c; von _r.parallel vor dem Fork gesetzt), sonst None
+_THREAD_CAP = [None]
+
+
+def unit_threads(w):
+    """Threads je Einheit bei ``w`` gleichzeitigen Einheiten (seit 1.6.4, Entscheidung 41c): Zahl der Prozessoren
+    // ``w``, mindestens 1 (R ``.sl_unit_threads``)."""
+    return max(1, nprocs() // int(w))
+
+
+def env_threads():
+    """``SIMLEV_THREADS`` als ganze Zahl >= 1, sonst 0 (ohne Begrenzung und Hinweis; seit 1.6.4 nur ASCII-Ziffern,
+    Entscheidungen 27, 65; "2.7", "0x10", "+3", "３" wie andere Fehlwerte: 0; R ``.sl_env_threads``)."""
+    v = os.environ.get("SIMLEV_THREADS", "").strip(" \t\r\n")
+    n = int(v) if v and all(c in "0123456789" for c in v) else 0
     return n if 1 <= n < 2 ** 31 else 0
+
+
+def auto_threads():
+    """Kern-Threads außerhalb paralleler Einheiten als Zahl >= 1 (``cores = "auto"`` für die Starts des MS-GARCH-Fits,
+    seit 1.6.4): :func:`nthreads`, 0 = Zahl der Prozessoren (R ``.sl_auto_threads``)."""
+    v = nthreads()
+    return nprocs() if v == 0 else v
+
+
+def mem_avail():
+    """Freier Arbeitsspeicher in Bytes laut System (-1 unbekannt; Kern ``sl_mem_avail``, seit 1.6.4)."""
+    return float(_ext.slc_mem_avail())
+
+
+def mem_self():
+    """Arbeitsspeicher des eigenen Prozesses in Bytes (-1 unbekannt; Kern ``sl_mem_self``, seit 1.6.4)."""
+    return float(_ext.slc_mem_self())
+
+
+def par_probe(sys_=1, self_bytes=None):
+    """Messzeit vor dem Plan (Kern ``sl_par_probe``): Start eines weiteren Laufs des Systems in Sekunden."""
+    return float(_ext.slc_par_probe(int(sys_), mem_self() if self_bytes is None else float(self_bytes)))
+
+
+def load_running():
+    """Laufende Prozesse laut System einschließlich des eigenen (-1 unbekannt; Kern ``sl_load_running``, seit 1.6.4,
+    Entscheidung 112)."""
+    return float(_ext.slc_load_running())
+
+
+def par_plan(n, unit_s, unit_bytes=0.0, sys_=1, nprocs_=None, max_runs=None, env=None, mem=None, self_bytes=None,
+             running=None):
+    """Planer für ``cores = "auto"`` (seit 1.6.4, Kern ``sl_par_plan``; gleiche Regel wie R ``.sl_par_plan``):
+    ``(Läufe, Kern-Threads je Lauf)`` für ``n`` weitere Einheiten mit Rechenzeit ``unit_s`` (Sekunden) und
+    Ergebnisgröße ``unit_bytes`` je Einheit. ``sys_`` 1 = Python (Fork-Prozess). ``nprocs_``, ``mem``, ``self_bytes``,
+    ``running`` und ``env`` lassen sich für Proben der Regel vorgeben (Testschalter für andere Rechnergrößen und
+    Fremdlast, nicht öffentlich); sonst Zahl der Prozessoren, freier Speicher laut System, Speicher des eigenen
+    Prozesses, laufende Prozesse (Entscheidung 112) und ``SIMLEV_THREADS``."""
+    np_ = nprocs() if nprocs_ is None else int(nprocs_)
+    return tuple(_ext.slc_par_plan(int(sys_), np_, np_ if max_runs is None else int(max_runs),
+                                   env_threads() if env is None else int(env), int(n), float(unit_s),
+                                   float(unit_bytes), mem_avail() if mem is None else float(mem),
+                                   mem_self() if self_bytes is None else float(self_bytes),
+                                   load_running() if running is None else float(running)))
+
+
+def nthreads():
+    """Threads der elementweisen Kerne (seit 1.6.0): ``SIMLEV_THREADS`` (ganze Zahl >= 1, seit 1.6.4 nur ASCII-Ziffern),
+    sonst 0 = Höchstwert
+    (Zahl der Prozessoren; bis 1.6.3 höchstens 8). Seit 1.6.4 (Entscheidung 41b) wird mehr als der Höchstwert
+    mit einem Hinweis (einmal je Sitzung) begrenzt; wie ``.sl_nthreads`` in R. Seit 1.6.4 (Entscheidung 41c)
+    zusätzlich je parallele Einheit höchstens ``_THREAD_CAP`` Threads, auch bei gesetztem ``SIMLEV_THREADS``."""
+    n = env_threads()
+    mx = nprocs()
+    if n > mx:
+        if not _THREADS_HINT[0]:
+            _THREADS_HINT[0] = True
+            from ._meldungen import EINGABE
+            sys.stderr.write(EINGABE["hinweis.prozessoren"] % ("SIMLEV_THREADS", mx) + "\n")
+        n = mx
+    cap = _THREAD_CAP[0]
+    if cap is not None:
+        n = cap if n == 0 else min(n, cap)
+    return n
 
 
 def pt(q, df, lower_tail=True):

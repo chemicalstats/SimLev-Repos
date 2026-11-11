@@ -63,10 +63,11 @@ import datetime as _dt
 import math
 import re
 import struct
-import unicodedata
 
 import numpy as np
 import pandas as pd
+
+from . import _wctype as _wct   # glibc-Zeichenklasse print (seit 1.6.4, C-047)
 
 __all__ = [
     "NA_REAL", "set_options", "r_round", "signif", "fround", "fprec", "as_character", "paste", "format",
@@ -79,9 +80,131 @@ __all__ = [
 _OPT = {"digits": 7, "scipen": 0, "width": 80, "OutDec": ".", "digits.secs": None}
 
 
+_NA_INT_ = -2147483648
+
+
+def _isnan_num(v):
+    """Zahl NaN/NA (für Vergleiche wie in R, die dann NA ergeben)."""
+    try:
+        return isinstance(v, (float, np.floating)) and math.isnan(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _r_as_int1(v):
+    """``asInteger`` von R für ein Argument: erstes Element, Wahrheitswert 0/1, Zahl zur Null hin, Text wie
+    ``as.integer``; NA, NaN und Werte außerhalb des int-Bereichs als ``None`` (außerhalb mit der Warnung von R).
+    Seit 1.6.4 (C-012) für die Prüfung von ``digits``/``nsmall`` wie R."""
+    import warnings
+    if isinstance(v, (list, tuple, np.ndarray, pd.Series)):
+        a = list(np.asarray(v, dtype=object).ravel()) if not isinstance(v, pd.Series) else list(v)
+        if not a:
+            return None
+        v = a[0]
+    if v is None or v is pd.NA or v is pd.NaT:
+        return None
+    if isinstance(v, (bool, np.bool_)):
+        return int(bool(v))
+    if isinstance(v, str):
+        t = v.strip()
+        try:
+            f = float(t) if t and not t.lower().startswith(("nan", "inf", "+inf", "-inf")) else None
+        except ValueError:
+            f = None
+        if t == "NA":
+            return None
+        if f is None:
+            warnings.warn("NAs introduced by coercion")
+            return None
+        v = f
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f):
+        return None
+    if not abs(f) < 2147483648.0 or math.trunc(f) == -2147483648:
+        warnings.warn("NAs introduced by coercion to integer range")
+        return None
+    return int(math.trunc(f))
+
+
+def _r_as_lgl1(v):
+    """``asLogical`` von R für ein Argument: erstes Element; Zahl ungleich 0 TRUE, NaN NA; Text "TRUE"/"true"/"True"/
+    "T" bzw. "FALSE"/"false"/"False"/"F", sonst NA; leer NA. Ergebnis True, False oder None (NA). Seit 1.6.4 (C-056)."""
+    if isinstance(v, (list, tuple, np.ndarray, pd.Series)):
+        a = list(np.asarray(v, dtype=object).ravel()) if not isinstance(v, pd.Series) else list(v)
+        if not a:
+            return None
+        v = a[0]
+    if v is None or v is pd.NA:
+        return None
+    if isinstance(v, (bool, np.bool_)):
+        return bool(v)
+    if isinstance(v, str):
+        return True if v in ("TRUE", "true", "True", "T") else False if v in ("FALSE", "false", "False", "F") else None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f != 0
+
+
+def _r_lgl_arg(v, what):
+    """Wahrheitswert eines Arguments wie R ``asLogical`` mit Abbruch „invalid 'what' argument“ bei NA (seit 1.6.4,
+    C-056; bis 1.6.3 bool(), das NaN und "no" als TRUE las)."""
+    b = _r_as_lgl1(v)
+    if b is None:
+        raise ValueError("invalid '%s' argument" % what)
+    return b
+
+
+def _r_match_arg(arg, choices):
+    """``match.arg(arg, choices)`` von R (seit 1.6.4, C-056): NULL bzw. alle Wahlwerte ergeben den ersten, sonst ein
+    Text, eindeutiger Teilanfang erlaubt; Meldungen wie R."""
+    choices = tuple(choices)
+    if arg is None:
+        return choices[0]
+    a = list(arg) if isinstance(arg, (list, tuple, np.ndarray)) else [arg]
+    if not all(isinstance(t, str) for t in a):
+        raise ValueError("'arg' must be NULL or a character vector")
+    if tuple(a) == choices:
+        return choices[0]
+    if len(a) > 1:
+        raise ValueError("'arg' must be of length 1")
+    hits = [c for c in choices if a and c == a[0]] or [c for c in choices if a and a[0] and c.startswith(a[0])]
+    # mehrdeutiger Teilanfang wie R's pmatch: kein Treffer (seit 1.6.4, RP; bis dahin „there is more than one match“)
+    if len(hits) != 1:
+        raise ValueError("'arg' should be one of %s" % ", ".join("\u201c%s\u201d" % c for c in choices))
+    return hits[0]
+
+
+def _chk_digits(digits, kind="format"):
+    """``digits`` wie R prüfen (seit 1.6.4, C-012, Entscheidung 77): 1 bis 22; ``kind`` "format" (format(),
+    format.data.frame) oder "print" (print.default). ``None`` bleibt ``None``. Ergebnis: ganze Zahl."""
+    if digits is None:
+        return None
+    d = _r_as_int1(digits)
+    if d is None or d < 1 or d > 22:
+        dv = _NA_INT_ if d is None else d
+        if kind == "print":
+            raise ValueError("invalid printing digits %d" % dv)
+        raise ValueError("invalid value %d for 'digits' argument" % dv)
+    return d
+
+
+def _chk_nsmall(nsmall):
+    """``nsmall`` wie R prüfen (seit 1.6.4, C-012, Entscheidung 77): ganze Zahl 0 bis 20."""
+    n = _r_as_int1(nsmall)
+    if n is None or n < 0 or n > 20:
+        raise ValueError("invalid 'nsmall' argument")
+    return n
+
+
 def set_options(**kw):
     """Wie ``options()``: ``digits``, ``scipen``, ``width``, ``OutDec``, ``digits_secs`` (R: ``digits.secs``,
-    Ziffern für ``%OS`` ohne Ziffer in :func:`format_date`; ``None`` = nicht gesetzt wie in R).
+    Ziffern für ``%OS`` ohne Ziffer in :func:`format_date`; ``None`` = nicht gesetzt wie in R). ``digits`` wie R 1
+    bis 22 (seit 1.6.4, sonst Fehler „invalid 'digits' parameter, allowed 1...22“).
 
     Liefert die alten Werte (für ``set_options(**alt)``)."""
     old = {}
@@ -91,6 +214,11 @@ def set_options(**kw):
             raise KeyError(k)
         if k == "digits.secs" and not (v is None or isinstance(v, (bool, int, float, np.integer, np.floating))):
             raise TypeError("digits_secs: None oder eine Zahl")
+        if k == "digits":   # seit 1.6.4 (C-012, Entscheidung 77) wie R options(digits =)
+            d = _r_as_int1(v)
+            if d is None or d < 1 or d > 22:
+                raise ValueError("invalid 'digits' parameter, allowed 1...22")
+            v = d
         old[k] = _OPT[k]
         _OPT[k] = v
     return old
@@ -236,11 +364,11 @@ def _from_seq(vals, names=None, scalar=False):
         na = np.array([_is_na_scalar(x) for x in vals], bool)
         a = np.array([0 if na[i] else int(vals[i]) for i in range(n)], dtype=np.int64)
         return _V("integer", a, na, names=names, scalar=scalar)
-    if "logical" in kinds or not kinds or kinds == {"nanfloat"}:
-        na = np.array([_is_na_scalar(x) for x in vals], bool)
-        a = np.array([False if na[i] else bool(vals[i]) for i in range(n)], dtype=bool)
-        return _V("logical", a, na, names=names, scalar=scalar)
-    raise TypeError("nicht unterstützter Typ")
+    # übrig: kinds ⊆ {"logical", "nanfloat"} mit "logical" oder leer ({"nanfloat"} allein fängt der double-Zweig;
+    # seit 1.6.4 ohne die dafür unerreichbare Bedingung und den TypeError)
+    na = np.array([_is_na_scalar(x) for x in vals], bool)
+    a = np.array([False if na[i] else bool(vals[i]) for i in range(n)], dtype=bool)
+    return _V("logical", a, na, names=names, scalar=scalar)
 
 
 def _names_from_index(idx):
@@ -450,22 +578,74 @@ def fprec(x, digits):
     return _ext.slc_r_fprec(float(x), float(digits))
 
 
+def _m2_text(v):
+    return isinstance(v, (str, bytes)) or (isinstance(v, (list, tuple, np.ndarray)) and
+                                           any(isinstance(t, (str, bytes)) for t in np.asarray(v, dtype=object).ravel()))
+
+
+def _m2_digits(digits):
+    """digits von round/signif wie R's Math2 (seit 1.6.4, C-040): NULL und Länge 0 „invalid second argument of length
+    0“, Text „non-numeric argument to mathematical function“; NA (None, nan) bleibt NA."""
+    from .rlist import RList
+    if digits is None or isinstance(digits, RList):
+        if digits is None:
+            raise ValueError("invalid second argument of length 0")
+        raise ValueError("non-numeric argument to mathematical function")
+    if _m2_text(digits):
+        raise ValueError("non-numeric argument to mathematical function")
+    d = np.asarray(digits, dtype=object).ravel()
+    if d.size == 0:
+        raise ValueError("invalid second argument of length 0")
+    return np.array([NA_REAL if (t is None or t is pd.NA) else float(t) for t in d], dtype=np.float64)
+
+
+def _m2_values(a):
+    """Werte von x als double (None, pd.NA, NaT -> NA); Text ist ein Fehler wie R."""
+    if a.dtype.kind in "OUS":
+        if _m2_text(a):
+            raise ValueError("non-numeric argument to mathematical function")
+        return np.array([NA_REAL if (t is None or t is pd.NA) else float(t) for t in a.ravel()],
+                        dtype=np.float64).reshape(a.shape)
+    return np.ascontiguousarray(a, dtype=np.float64)
+
+
 def _math2(f, x, digits):
+    from .rlist import RList
     if isinstance(x, pd.DataFrame):
-        return x.apply(lambda c: pd.Series(_math2(f, c.to_numpy(dtype=np.float64), digits), index=c.index))
+        # seit 1.6.4 wie R Math.data.frame (C-040): nur Zahlen- und logische Spalten, sonst „non-numeric-alike
+        # variable(s) in data frame: …“ (bis 1.6.3 Python-Fehler aus float())
+        # Typen je Spaltenposition (x[c] wäre bei doppelten Spaltennamen ein DataFrame)
+        bad = [str(c) for c, dt in zip(x.columns, x.dtypes) if isinstance(dt, pd.CategoricalDtype)
+               or not (pd.api.types.is_numeric_dtype(dt) or pd.api.types.is_bool_dtype(dt))]
+        if bad:
+            raise ValueError("non-numeric-alike variable(s) in data frame: " + ", ".join(bad))
+        return x.apply(lambda c: pd.Series(_math2(f, c.to_numpy(dtype=np.float64, na_value=NA_REAL), digits),
+                                           index=c.index))
     if isinstance(x, pd.Series):
-        return pd.Series(_math2(f, x.to_numpy(dtype=np.float64), digits), index=x.index, name=x.name)
-    if np.isscalar(x) or x is None:
-        if x is None:
-            return math.nan
-        if isinstance(x, (int, np.integer)) and not isinstance(x, (bool, np.bool_)) and f is fround:
+        if isinstance(x.dtype, pd.CategoricalDtype) or not (pd.api.types.is_numeric_dtype(x.dtype)
+                                                             or pd.api.types.is_bool_dtype(x.dtype)):
+            raise ValueError("non-numeric argument to mathematical function")
+        return pd.Series(_math2(f, x.to_numpy(dtype=np.float64, na_value=NA_REAL), digits), index=x.index,
+                         name=x.name)
+    # seit 1.6.4 wie R (C-040): NULL, Text, Faktor und Listen sind ein Fehler, NA bleibt NA, digits wird auch bei einem
+    # Skalar recycelt; ganze Zahlen bleiben nur bei digits >= 0 unverändert (bis 1.6.3 auch bei digits < 0, z. B.
+    # round(15L, -1) = 15 statt 20)
+    if x is None or isinstance(x, (RList, pd.Categorical)) or isinstance(x, (str, bytes)):
+        raise ValueError("non-numeric argument to mathematical function")
+    d = _m2_digits(digits)
+    keep_int = f is fround and d.size == 1 and d[0] >= 0
+    if np.isscalar(x) or x is pd.NA:
+        if x is pd.NA:
+            x = NA_REAL
+        if isinstance(x, (int, np.integer)) and not isinstance(x, (bool, np.bool_)) and keep_int:
             return x  # round() auf integer bleibt integer
-        return f(float(x), float(digits))
+        if d.size == 1:
+            return f(float(x), float(d[0]))
+        x = np.array([float(x)])
     a = np.asarray(x)
-    if a.dtype.kind in "iu" and f is fround:
+    if a.dtype.kind in "iu" and keep_int:
         return a.copy()
-    a = np.ascontiguousarray(a, dtype=np.float64)
-    d = np.ascontiguousarray(np.asarray(digits, dtype=np.float64).ravel())
+    a = _m2_values(a)
     flat = a.ravel()
     n = max(flat.size, d.size) if flat.size and d.size else 0
     out = np.empty(n)
@@ -489,10 +669,10 @@ def signif(x, digits=6):
 
 # ── formatReal / scientific ────────────────────────────────────────────────
 
-def _format_real(x, na, nan, digits=None, nsmall=0, scipen=None):
+def _format_real(x, na, digits=None, nsmall=0, scipen=None):
     """``formatReal``: (w, d, e) für das float-Array ``x`` (C-Kern ``sl_r_format_real``, seit 1.6.0).
 
-    na: Maske der NA (in ``x`` nan); nan bleibt für die Aufrufer (jedes andere nan ist NaN)."""
+    na: Maske der NA (in ``x`` nan; jedes andere nan ist NaN). Seit 1.6.4 ohne den ungelesenen Parameter ``nan``."""
     if digits is None:
         digits = _OPT["digits"]
     if scipen is None:
@@ -505,20 +685,6 @@ def _encode_real(x, w, d, e, dec=".", na=False, nan=False, na_string="NA"):
     """``EncodeReal0`` für ein double (C-Kern ``sl_r_encode_real``, seit 1.6.0); nan ohne Kennung ``nan`` gilt als NA."""
     m = np.array([bool(na) or not nan], dtype=np.uint8)
     return _ext.slc_r_encode_real(np.array([x], dtype=np.float64), m, int(w), int(d), int(e), dec, na_string, False)[0]
-
-
-def _drop0(s):
-    """Nachkomma-Nullen entfernen wie ``EncodeRealDrop0``."""
-    p = s.find(".")
-    if p < 0:
-        return s
-    q = p + 1
-    replace = p
-    while q < len(s) and "0" <= s[q] <= "9":
-        if s[q] != "0":
-            replace = q + 1
-        q += 1
-    return s[:replace] + s[q:]
 
 
 def _encode_reals(v, w, d, e, dec="."):
@@ -693,8 +859,9 @@ def _wcwidth(k):
 
 
 def _printable(k):
-    cat = unicodedata.category(chr(k))
-    return cat not in ("Cc", "Cn", "Cs", "Zl", "Zp")
+    """Druckbar wie R unter Linux (glibc 2.39 iswprint in C.UTF-8; seit 1.6.4 feste Tabelle, C-047; bis 1.6.3 nach der
+    Unicode-Fassung von Python, mit Unicode 15.1 gleich)."""
+    return _wct.iswprint(k)
 
 
 def _strwid(s, quote=0):
@@ -787,18 +954,31 @@ def _format_string(strs, quote=0):
 
 
 def nchar(x, type="chars"):
-    """``nchar(x, type)``: 'chars', 'bytes' oder 'width'."""
+    """``nchar(x, type)``: 'chars', 'bytes' oder 'width' (seit 1.6.4 wie R: Teilanfang erlaubt, sonst „invalid 'type'
+    argument“; ein Faktor ist ein Fehler; C-049, C-056)."""
+    if isinstance(x, pd.Categorical) or (isinstance(x, pd.Series) and isinstance(x.dtype, pd.CategoricalDtype)):
+        raise ValueError("'nchar()' requires a character vector")
+    t = type if isinstance(type, str) else None
+    hit = [k for k in ("bytes", "chars", "width") if t and k.startswith(t)]
+    if not hit:
+        raise ValueError("invalid 'type' argument")
+    type = hit[0]
     v = _as_v(x, "character")
     res = []
     for s in v.v:
         if s is None:
-            res.append(2)
+            # seit 1.6.4 wie R (keepNA = NA, C-039): NA ergibt für "chars" und "bytes" NA (dann double mit NA_REAL wie
+            # ganze Zahlen mit NA in RExpr), für "width" 2; bis 1.6.3 immer 2
+            res.append(2 if type == "width" else None)
         elif type == "bytes":
             res.append(len(s.encode("utf-8")))
         elif type == "width":
             res.append(sum(_wcwidth(ord(c)) for c in s))
         else:
             res.append(len(s))
+    if any(r is None for r in res):
+        res = [NA_REAL if r is None else float(r) for r in res]
+        return res[0] if v.scalar else np.array(res, dtype=np.float64)
     if v.scalar:
         return res[0]
     return np.array(res, dtype=np.int64)
@@ -841,8 +1021,24 @@ def as_character(x):
     return a
 
 
+def _paste_str1(v, msg):
+    """``sep``/``collapse`` wie R's do_paste: Text (erster Wert eines Textvektors), nicht NA, sonst R's Meldung."""
+    if isinstance(v, (list, tuple, np.ndarray, pd.Series)):
+        vv = list(v)
+        if not vv or not all(isinstance(t, str) or t is None for t in vv):
+            raise ValueError(msg)
+        v = vv[0]
+    if not isinstance(v, str):
+        raise ValueError(msg)
+    return v
+
+
 def paste(*args, sep=" ", collapse=None):
-    """``paste(..., sep, collapse)`` (NA wird zu "NA")."""
+    """``paste(..., sep, collapse)`` (NA wird zu "NA"). Seit 1.6.4 wie R (RP, C-056): ``sep`` und ``collapse`` nur
+    Text (erster Wert), sonst „invalid separator“ bzw. „invalid 'collapse' argument“ (bis 1.6.3 Python-Fehler)."""
+    sep = _paste_str1(sep, "invalid separator")
+    if collapse is not None:
+        collapse = _paste_str1(collapse, "invalid 'collapse' argument")
     vecs = []
     for a in args:
         v = _as_v(a)
@@ -897,7 +1093,7 @@ def _format_internal(v, trim=False, digits=None, nsmall=0, width=None, justify="
         w = max(w, wd)
         return [_encode_integer(int(v.v[i]), bool(v.na[i]), w) for i in range(n)]
     if t == "double":
-        w, d, e = _format_real(v.v, v.na, v.nan, digits, nsmall, scipen)
+        w, d, e = _format_real(v.v, v.na, digits, nsmall, scipen)
         if trim:
             w = 0
         w = max(w, wd)
@@ -933,14 +1129,25 @@ def _format_internal(v, trim=False, digits=None, nsmall=0, width=None, justify="
     raise TypeError(t)
 
 
-def format(x, format=None, *, trim=False, digits=None, nsmall=0, justify="left", width=None,
+class _DefaultStr(str):
+    """Standardwert, der als gewöhnlicher Text erscheint, aber erkennbar bleibt, ob er übergeben wurde."""
+    __slots__ = ()
+
+
+# seit 1.6.4 (RP): format() erkennt so den Standard von justify; bei DataFrames gilt dann wie in R's
+# format.data.frame "none" (Textspalten ohne Auffüllen), sonst "left" wie format.default
+_JUSTIFY_LEFT = _DefaultStr("left")
+
+
+def format(x, format=None, *, trim=False, digits=None, nsmall=0, justify=_JUSTIFY_LEFT, width=None,
            na_encode=True, scientific=None, big_mark="", big_interval=3, small_mark="",
            small_interval=5, decimal_mark=None, zero_print=None, drop0trailing=False,
            type=None):
     """``format(x, ...)`` wie R's ``format.default``/``format.Date``/``format.factor``.
 
     Args:
-        x: Vektor (siehe Modul-Doku), Series (benannt) oder Skalar.
+        x: Vektor (siehe Modul-Doku), Series (benannt), Skalar oder DataFrame (wie
+            ``format.data.frame``: ``justify`` ist dort standardmäßig "none").
         format: nur für Datumswerte: Formatangabe wie ``strftime`` (z. B. "%d.%m.%Y").
         trim, digits, nsmall, justify, width, na_encode, scientific, big_mark,
         big_interval, small_mark, small_interval, decimal_mark, zero_print,
@@ -955,6 +1162,24 @@ def format(x, format=None, *, trim=False, digits=None, nsmall=0, justify="left",
     if isinstance(format, (bool, np.bool_)):
         trim, format = bool(format), None
     if isinstance(x, pd.DataFrame):
+        if justify is _JUSTIFY_LEFT:
+            justify = "none"           # seit 1.6.4 wie R format.data.frame (bis 1.6.3 "left": Text aufgefüllt)
+        extra = (format, trim, nsmall, width, scientific, big_mark, big_interval, small_mark, small_interval,
+                 decimal_mark, zero_print, drop0trailing, type)
+        if any(not _is_default(a, b)
+               for a, b in zip(extra, (None, False, 0, None, None, "", 3, "", 5, None, None, False, None))):
+            # seit 1.6.4 wie R format.data.frame (C-041): alle Angaben gehen an format() jeder Spalte (bis 1.6.3 nur
+            # digits, na.encode und justify; width, nsmall usw. fielen still weg)
+            def col(c):
+                r = globals()["format"](x[c].reset_index(drop=True), format, trim=trim, digits=digits, nsmall=nsmall,
+                                        justify=justify, width=width, na_encode=na_encode, scientific=scientific,
+                                        big_mark=big_mark, big_interval=big_interval, small_mark=small_mark,
+                                        small_interval=small_interval, decimal_mark=decimal_mark,
+                                        zero_print=zero_print, drop0trailing=drop0trailing, type=type)
+                return [r] if isinstance(r, str) else list(np.asarray(r, dtype=object))
+            return pd.DataFrame({c: col(c) for c in x.columns}, index=x.index)
+        if x.shape[1]:
+            digits = _chk_digits(digits)   # seit 1.6.4 wie R (format.data.frame formatiert jede Spalte; C-012)
         return pd.DataFrame({c: _fmt_column(x[c], digits=digits, na_encode=na_encode, justify=justify)
                              for c in x.columns}, index=x.index)
     if isinstance(x, np.ndarray) and x.ndim >= 2:
@@ -965,8 +1190,32 @@ def format(x, format=None, *, trim=False, digits=None, nsmall=0, justify="left",
                                    zero_print=zero_print, drop0trailing=drop0trailing, type=type))
     v = _as_v(x, type)
     if v.type == "Date":
-        res = _format_date_list(v.v, [format or "%Y-%m-%d"])
+        res = _date_nan(_format_date_list(v.v, [format or "%Y-%m-%d"]), v)
         return _out(res, v)
+    # seit 1.6.4 (C-012, C-056, Entscheidung 77) wie R format.default/do_format: justify über match.arg, dann trim,
+    # digits (1 bis 22), nsmall (0 bis 20), width, na.encode und scientific in dieser Reihenfolge mit R's Meldungen
+    # (bis 1.6.3 lasen die Tabellen des Kerns außerhalb, bool() las NaN und "no" als TRUE)
+    justify = _r_match_arg(justify, ("left", "right", "centre", "none"))
+    trim = _r_lgl_arg(trim, "trim")
+    digits = _chk_digits(digits)
+    nsmall = _chk_nsmall(nsmall)
+    if width is not None:
+        width = _r_as_int1(width)
+        if width is None:
+            raise ValueError("invalid 'width' argument")
+    na_encode = _r_lgl_arg(na_encode, "na.encode")
+    if scientific is not None:
+        sa = list(scientific) if isinstance(scientific, (list, tuple, np.ndarray)) else [scientific]
+        if len(sa) != 1 or isinstance(sa[0], str):
+            raise ValueError("invalid 'scientific' argument")
+        sv = sa[0]
+        if isinstance(sv, (bool, np.bool_)):
+            scientific = bool(sv)
+        elif isinstance(sv, (float, np.floating)) and math.isnan(sv):
+            scientific = None            # NA wie R (logisch NA: Voreinstellung)
+        else:
+            si = _r_as_int1(sv)
+            scientific = -2147483648 if si is None else si
     if v.type == "factor":
         cv = _V("character", _as_character_list(v), v.na.copy(), names=v.names, scalar=v.scalar)
         v = cv
@@ -980,7 +1229,7 @@ def format(x, format=None, *, trim=False, digits=None, nsmall=0, justify="left",
     r = _pretty_num_chr(r, big_mark=big_mark, big_interval=big_interval, small_mark=small_mark,
                         small_interval=small_interval, decimal_mark=dec, input_d_mark=dec,
                         preserve_width="individual" if trim else "common", zero_print=zero_print,
-                        drop0trailing=drop0trailing, is_cmplx=False)
+                        drop0trailing=drop0trailing)
     return _out(r, v)
 
 
@@ -1041,8 +1290,7 @@ def _rev(s):
 
 def _pretty_num_chr(x, big_mark="", big_interval=3, small_mark="", small_interval=5,
                     decimal_mark=".", input_d_mark=None, preserve_width="common",
-                    zero_print=None, replace_zero=False, drop0trailing=False, is_cmplx=None,
-                    not_char=False):
+                    zero_print=None, replace_zero=False, drop0trailing=False, not_char=False):
     """prettyNum für eine Liste von Zeichenketten (None = NA)."""
     if input_d_mark is None:
         input_d_mark = decimal_mark
@@ -1154,10 +1402,14 @@ def formatC(x, width=None, digits=None, format=None, flag="", mode=None, big_mar
     def format_char(strs, width, flag):
         if width is None:
             width = 0
+        elif _isnan_num(width):   # seit 1.6.4 wie R (width < 0L ist NA)
+            raise ValueError("missing value where TRUE/FALSE needed")
         elif width < 0:
             flag = "-"
             width = -width
         cv = _V("character", strs, np.array([s is None for s in strs], bool))
+        if width is not None and _r_as_int1(width) is None:   # seit 1.6.4 wie R do_format (asInteger(width) NA)
+            raise ValueError("invalid 'width' argument")
         return _format_internal(cv, width=width, justify="left" if flag == "-" else "right")
 
     n = len(v)
@@ -1191,9 +1443,8 @@ def formatC(x, width=None, digits=None, format=None, flag="", mode=None, big_mar
                 v = _coerce(v, "integer")
         else:
             raise ValueError('\'format\' must be one of {"f","e","E","g","G", "fg", "s"}')
-    if v.type == "logical":
-        v = _coerce(v, "integer")
-        mode = "integer"
+    if v.type == "logical":   # seit 1.6.4 wie R (C-049): formatC(<logisch>) ist ein Fehler
+        raise ValueError("unsupported type ")
     if mode == "integer":
         vals = [float(i) for i in v.v.tolist()]
         ok = (~v.na).tolist()
@@ -1220,8 +1471,17 @@ def formatC(x, width=None, digits=None, format=None, flag="", mode=None, big_mar
             digits = max_digits
     if width is None:
         width = digits + 1
+    elif _isnan_num(width):   # seit 1.6.4 wie R (width == 0L ist NA)
+        raise ValueError("missing value where TRUE/FALSE needed")
     elif width == 0:
         width = digits
+    # seit 1.6.4 (C-011, FW6-6) wie R: width außerhalb des int-Bereichs wird NA (Warnung bei as.integer in i.strlen
+    # und bei asInteger im Kern), und R kann dann bzw. ab i.strlen >= 2147483645 den Puffer nicht anlegen; bis 1.6.3
+    # Absturz bzw. leerer Text
+    if _r_as_int1(width) is None:
+        import warnings
+        warnings.warn("NAs introduced by coercion to integer range")
+        raise ValueError("cannot allocate memory block of size 16777216 Tb")
     # i.strlen
     istrlen = []
     for xv in vals:
@@ -1235,6 +1495,8 @@ def formatC(x, width=None, digits=None, format=None, flag="", mode=None, big_mar
             istrlen.append(max(abs(int(width)), base))
         else:
             istrlen.append(max(abs(int(width)), digits + 8))
+    if istrlen and max(istrlen) >= 2147483645:   # seit 1.6.4 wie R (Größe des Puffers läuft über)
+        raise ValueError("cannot allocate memory block of size 16777216 Tb")
     if digits > 0 and "#" in nf:
         digits = -digits
     r = _str_signif(vals, mode, int(width), int(digits), format, flag, istrlen)
@@ -1249,7 +1511,7 @@ def formatC(x, width=None, digits=None, format=None, flag="", mode=None, big_mar
         r = _pretty_num_chr(r, big_mark=big_mark, big_interval=big_interval, small_mark=small_mark,
                             small_interval=small_interval, decimal_mark=dec, input_d_mark=".",
                             preserve_width=preserve_width, zero_print=zero_print,
-                            replace_zero=replace_zero, drop0trailing=drop0trailing, is_cmplx=False)
+                            replace_zero=replace_zero, drop0trailing=drop0trailing)
     return _out(r, v)
 
 
@@ -1330,8 +1592,28 @@ def sprintf(fmt, *args):
 
 def _format_date_list(days, fmts):
     """format.Date für Tage seit 1970-01-01 (Länge max(n, nf) mit Wiederholung); NA/NaN/±Inf, ``None`` -> ``None``.
-    ``%OS`` ohne Ziffer nach ``digits.secs`` (:func:`set_options`); Ergebnis über 2048 Bytes: ValueError wie R."""
-    return _ext.slc_r_format_date(np.ascontiguousarray(days, dtype=np.float64), list(fmts), _digits_secs())
+    ``%OS`` ohne Ziffer nach ``digits.secs`` (:func:`set_options`); Ergebnis über 2048 Bytes: ValueError wie R.
+    Seit 1.6.4 (C-057) wie R 4.3.3: Inf und -Inf als "Inf", "-Inf" bei jeder Vorlage; NaN (nicht NA) ergänzt der
+    Aufrufer über die NA-Maske (_date_nan)."""
+    d = np.ascontiguousarray(days, dtype=np.float64)
+    out = _ext.slc_r_format_date(d, list(fmts), _digits_secs())
+    if d.size and np.isinf(d).any():
+        n = d.size
+        for i in range(len(out)):
+            t = float(d[i % n])
+            if math.isinf(t):
+                out[i] = "Inf" if t > 0 else "-Inf"
+    return out
+
+
+def _date_nan(out, v):
+    """NaN-Tage (nicht NA) wie R als "NaN" (seit 1.6.4, C-057)."""
+    n = len(v.v)
+    for i in range(len(out)):
+        k = i % n
+        if v.v[k] != v.v[k] and not v.na[k]:
+            out[i] = "NaN"
+    return out
 
 
 def format_date(x, fmt="%Y-%m-%d"):
@@ -1343,16 +1625,23 @@ def format_date(x, fmt="%Y-%m-%d"):
     if v.type in ("double", "integer"):
         v = _coerce(v, "Date")
     elif v.type == "character":
-        # ISO-Text wie as.Date()
-        days = []
-        for s in v.v:
-            try:
-                days.append(_date_days(_dt.date.fromisoformat(s[:10])) if s is not None else math.nan)
-            except ValueError:
-                days.append(math.nan)
-        v = _V("Date", np.array(days, np.float64), names=v.names, scalar=v.scalar)
+        # Text wie as.Date() (seit 1.6.4, C-021/P12-R17: Format nach dem ersten Element ungleich NA, "%Y-%m-%d" oder
+        # "%Y/%m/%d", sonst Fehler wie R; bis 1.6.3 nur ISO je Element, sonst still NA)
+        from .rexpr import CHR, _as_date
+        dd = _as_date(CHR(list(v.v)))   # Tage als double, NA = NA_REAL (seit 1.6.4, C-003)
+        days = [math.nan if d != d else float(d) for d in dd]
+        v = _V("Date", np.array(days, np.float64), np.array([d != d for d in dd], bool), names=v.names, scalar=v.scalar)
+    # seit 1.6.4 (C-057) wie R format.POSIXlt: NA in der Vorlage „missing value where TRUE/FALSE needed“, keine bzw. keine
+    # Textvorlage „invalid 'format' argument“ (bis 1.6.3 wurde z. B. TRUE als Vorlage "TRUE" gelesen)
+    if fmt is None:
+        fmt = "%Y-%m-%d"
+    fl = list(fmt) if isinstance(fmt, (list, tuple, np.ndarray)) else [fmt]
+    if any(t is None or (isinstance(t, float) and t != t) for t in fl):
+        raise ValueError("missing value where TRUE/FALSE needed")
+    if not fl or not all(isinstance(t, str) for t in fl):
+        raise ValueError("invalid 'format' argument")
     fv = _as_v(fmt, "character")
-    return _out(_format_date_list(v.v, list(fv.v)), v)
+    return _out(_date_nan(_format_date_list(v.v, list(fv.v)), v), v)
 
 
 # ── Druckausgabe: Vektoren ─────────────────────────────────────────────────
@@ -1366,12 +1655,12 @@ def _type0(v):
             "character": "character(0)"}.get(v.type, "NULL")
 
 
-def _encode_elems(v, digits=None, quote=0, na_print=None):
+def _encode_elems(v, digits=None):
     """(Breite, Liste der Elemente kodiert mit dieser Breite) – ohne Lücke."""
     t = v.type
     n = len(v)
     if t == "double":
-        w, d, e = _format_real(v.v, v.na, v.nan, digits)
+        w, d, e = _format_real(v.v, v.na, digits)
         return w, (lambda ww: _encode_reals_w(v, ww, d, e))
     if t == "integer":
         w = _format_integer(v)
@@ -1480,6 +1769,12 @@ def print_vector(x, names=None, digits=None, quote=None, right=False, type=None)
     v = _as_v(x, type)
     if names is not None:
         v.names = [None if _is_na_scalar(s) else str(s) for s in names]
+        # seit 1.6.4 wie R names<- (C-058): zu lange Namen sind ein Fehler, zu kurze werden mit NA ergänzt
+        if len(v.names) > len(v):
+            from .linalg import RError
+            raise RError("'names' attribute [%d] must be the same length as the vector [%d]" % (len(v.names), len(v)))
+        v.names = v.names + [None] * (len(v) - len(v.names))
+    digits = _chk_digits(digits, "print")   # seit 1.6.4 wie R print.default (C-012, Entscheidung 77)
     return "\n".join(_print_vec_v(v, digits, quote, right))
 
 
@@ -1561,7 +1856,7 @@ def _matrix_lines(cols, ctype, r, c, rl, cl, rn=None, cn=None, quote=0, right=Fa
         if is_str:
             wj = _format_string(col.v, quote)
         elif ctype == "double":
-            wj, dj, ej = _format_real(col.v, col.na, col.nan, digits)
+            wj, dj, ej = _format_real(col.v, col.na, digits)
             enc.append((dj, ej))
         elif ctype == "integer":
             wj = _format_integer(col)
@@ -1624,7 +1919,9 @@ def _matrix_lines(cols, ctype, r, c, rl, cl, rn=None, cn=None, quote=0, right=Fa
         if cn is not None:
             lines.append(" " * rlabw + cn)
         if rn is not None:
-            return rn.ljust(rlabw) if _strwid(rn, 0) < rlabw else rn
+            # seit 1.6.4 wie R printMatrix (C-038): Rprintf("%*s", -rlabw, rn) füllt nach Bytes auf (bis 1.6.3 nach
+            # Zeichen: bei Umlauten ein Leerzeichen mehr als R)
+            return rn + " " * max(0, rlabw - len(rn.encode("utf-8", "surrogateescape")))
         return " " * rlabw
 
     extra = gap if is_str else 0
@@ -1692,6 +1989,11 @@ def print_matrix(m, rownames=None, colnames=None, quote=True, right=False, digit
     if colnames is not None:
         cl = [None if _is_na_scalar(s) else str(s) for s in colnames]
     r, c = a.shape
+    for k, (lab, ext) in enumerate(((rl, r), (cl, c)), start=1):   # seit 1.6.4 wie R dimnames<- (C-058)
+        if lab is not None and len(lab) != ext:
+            from .linalg import RError
+            raise RError("length of 'dimnames' [%d] not equal to array extent" % k)
+    digits = _chk_digits(digits, "print")   # seit 1.6.4 wie R print.default (C-012, Entscheidung 77)
     whole = _as_v(a.ravel(order="F") if a.size else np.zeros(0), type)
     if a.size == 0 and type is None:
         whole = _V("logical", np.zeros(0, bool))
@@ -1717,6 +2019,12 @@ def _df_rownames(df):
     return [None if _is_na_scalar(s) else str(s) for s in idx]
 
 
+def _is_default(a, b):
+    """a ist der Standardwert b (gleicher Typ und Wert; für C-041)."""
+    import builtins
+    return a is b or (b is not None and builtins.type(a) is builtins.type(b) and a == b)
+
+
 def _fmt_column(col, digits=None, na_encode=False, justify="none", type=None):
     """format() einer data.frame-Spalte (wie in format.data.frame) -> Liste str/None."""
     if isinstance(col, pd.Series):
@@ -1736,6 +2044,8 @@ def _fmt_column(col, digits=None, na_encode=False, justify="none", type=None):
 def format_data_frame(df, digits=None, types=None):
     """``format.data.frame``: Liste formatierter Spalten (str/None); wie R mit ``na.encode = FALSE``,
     ``justify = "none"`` (seit 1.6.3 ohne die nie übergebenen Argumente dafür)."""
+    if df.shape[1]:
+        digits = _chk_digits(digits)   # seit 1.6.4 wie R format() je Spalte (C-012, Entscheidung 77)
     types = types or {}
     return [_fmt_column(df.iloc[:, j], digits, False, "none", types.get(df.columns[j]))
             for j in range(df.shape[1])]

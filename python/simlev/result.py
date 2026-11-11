@@ -1,24 +1,19 @@
 """Ergebnisobjekt der Simulation (R-Klasse ``SimLevResult``) mit ``print`` und ``summary``."""
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
 
-from ._r.rlist import RList
+from ._r.rlist import RList, _PrintFormat
 from ._r.rformat import r_round, r_sprintf
 from ._r.rnum import NA_REAL, r_sum
-from ._util import _n_tage
+from ._util import _n_tage, _na
 
 __all__ = ["SimLevResult", "SimLevSummary"]
 
 _LINE = "═" * 62
 _RULE = "  " + "─" * 21
-
-
-def _na(x: Any) -> bool:
-    return x is None or (isinstance(x, (float, np.floating)) and math.isnan(x))
 
 
 def _undef_text(um: Any, metric: str) -> str:
@@ -32,7 +27,7 @@ def _undef_text(um: Any, metric: str) -> str:
     return "nicht definiert" if d is None else "nicht definiert (%s)" % d
 
 
-class SimLevResult(RList):
+class SimLevResult(RList, _PrintFormat):
     """Ergebnis von :func:`simlev.simulation` (R-Klasse ``SimLevResult``).
 
     Geordnetes ``dict`` mit Attributzugriff (``res["worth"]`` und ``res.worth``). Elemente in
@@ -126,10 +121,6 @@ class SimLevResult(RList):
         out.append(_LINE)
         return "\n".join(out)
 
-    def print(self) -> "SimLevResult":
-        print(self.format())
-        return self
-
     # ── summary.SimLevResult ─────────────────────────────────────────────
     def summary(self, verbose: bool = False) -> "SimLevSummary":
         """Zusammenfassung (R: ``summary()``); druckt nicht selbst (``verbose=True``: zusätzlich drucken)."""
@@ -141,7 +132,7 @@ class SimLevResult(RList):
     # ── Grafik ───────────────────────────────────────────────────────────
     # ``plot`` (Dashboard als SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
-class SimLevSummary(RList):
+class SimLevSummary(RList, _PrintFormat):
     """Ergebnis von ``summary(<SimLevResult>)`` (R-Klasse ``summary.SimLevResult``)."""
 
     r_class = ("summary.SimLevResult",)
@@ -193,10 +184,6 @@ class SimLevSummary(RList):
         out.append(_LINE)
         return "\n".join(out)
 
-    def print(self) -> "SimLevSummary":
-        print(self.format())
-        return self
-
 
 def summary(object: SimLevResult) -> SimLevSummary:
     """``summary.SimLevResult``: Kennzahlen als :class:`SimLevSummary` (druckt nicht selbst)."""
@@ -238,4 +225,4 @@ def summary(object: SimLevResult) -> SimLevSummary:
 from .dashboard import plot_dashboard as _plot_dashboard  # noqa: E402
 from .svg import _plot_method  # noqa: E402
 
-SimLevResult.plot = _plot_method(_plot_dashboard, "SimLevResult")
+SimLevResult.plot = _plot_method(_plot_dashboard, "SimLevResult", strict=True)   # unbekannte Argumente: Fehler

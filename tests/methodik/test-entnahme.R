@@ -89,8 +89,8 @@ test_that("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf ders
   w <- lapply(1:3, wk)
   tabelle("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf derselben Stueckzahl",
     ident(w[[1]]$adopted,
-          list(partial_exemption = 30, loss_carryforward = 0, sale_cost = 0, lots = 4L),
-          quelle = "Spread 0 -> sale_cost 0; Pauschbetrag 0 -> im ersten Planjahr nichts verbraucht; 3 Lots A plus Cash-Position"))
+          list(partial_exemption = 30, loss_carryforward = 0, sale_cost = 0, lots = 3L),
+          quelle = "Spread 0 -> sale_cost 0; Pauschbetrag 0 -> im ersten Planjahr nichts verbraucht; 3 Lots A (der negative Rundungsrest im Geldbestand mindert seit 1.6.4 den aeltesten Lot, kein Cash-Lot)"))
   cpi <- c(1, net[2:3] / net[1])
   tax_w <- diff(c(0, vapply(w, function(x) x$paths$taxes, 0))) * cpi                # nominal je Verkauf
   tabelle("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf derselben Stueckzahl",
@@ -110,12 +110,19 @@ test_that("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf ders
   tabelle("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf derselben Stueckzahl",
     pruef(expect_lt(wa$paths$taxes, 0.8 * tax_e[1]),
           quelle = "Handrechnung (Herleitung im Test)"))
-  # ganzer Bestand: weiterhin wie mit Durchschnittskosten
+  # ganzer Bestand: weiterhin wie mit Durchschnittskosten. Seit 1.6.4 (Entscheidungen 87, 104) mindert ein negativer
+  # Geldbestand (hier Rundungsrest) den aeltesten Lot von A um seinen Wert, Basis und Vorabpauschale anteilig;
+  # die Basis der Durchschnittskosten ist daher die der geminderten Lots
+  rest <- -sum(vapply(r0$open_lots, `[[`, 0, "cash"))
+  PA <- r0$report$A$worth[length(r0$worth)] / sum(L$units)                        # Kurs von A (ohne Geldbestand)
+  B2 <- sum(L$units * L$price) + sum(L$vp) - rest / (L$units[1] * PA) * (L$units[1] * L$price[1] + L$vp[1])
   full <- function(...) suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 100), start_value = r0,
                                                                tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2, ...))
   tabelle("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf derselben Stueckzahl",
+    pruef(expect_gt(rest, 0),
+          quelle = "negativer Rundungsrest der Ansparphase (Voraussetzung der Minderung)"),
     wert(full()$paths$taxes,
-         full(cost_basis = 100 * B / sv)$paths$taxes,
+         full(cost_basis = 100 * B2 / sv)$paths$taxes,
          quelle = "Handrechnung (Herleitung im Test)", tol = 1e-10))
 })
 
@@ -191,7 +198,11 @@ test_that("FIFO mit zwei Assets: Verkauf anteilig je Asset nach der Steuerformel
   wA <- r0$report$A$worth[nE] / sv; wB <- r0$report$B$worth[nE] / sv; wC <- 1 - wA - wB
   cash <- sv - r0$report$A$worth[nE] - r0$report$B$worth[nE]
   net <- 0.45 * sv
-  tax_of <- function(f) (fifo_gain(LA, f * sum(LA$units), P[["A"]]) + fifo_gain(LB, f * sum(LB$units), P[["B"]])) * 0.7 * 0.26375
+  # seit 1.6.4 (Entscheidungen 87, 104): der negative Geldbestand (Rundungsrest) mindert den aeltesten Lot des
+  # wertgroessten Assets (A) um seinen Wert, Vorabpauschale anteilig; kein Cash-Lot
+  LA2 <- LA; fa <- 1 + cash / (LA$units[1] * P[["A"]])
+  LA2$units[1] <- LA$units[1] * fa; LA2$vp[1] <- LA$vp[1] * fa
+  tax_of <- function(f) (fifo_gain(LA2, f * sum(LA2$units), P[["A"]]) + fifo_gain(LB, f * sum(LB$units), P[["B"]])) * 0.7 * 0.26375
   f <- uniroot(function(f) f * sv - tax_of(f) - net, c(0.3, 0.9), tol = 1e-14)$root
   w <- suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 45), start_value = r0,
                                               tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2))
@@ -199,8 +210,8 @@ test_that("FIFO mit zwei Assets: Verkauf anteilig je Asset nach der Steuerformel
     wert(w$paths$taxes,
          tax_of(f),
          quelle = "Handrechnung (Herleitung im Test)", tol = 1e-9),
-    pruef(expect_gt(abs(wC), 0),
-          quelle = "Cash-Position (Gewinn 0 bei Rendite 1)"))
+    pruef(expect_lt(wC, 0),
+          quelle = "negativer Geldbestand (Rundungsrest), mindert den aeltesten Lot von A"))
 })
 
 test_that("FIFO: neue Vorabpauschale je Anteil f\u00fcr alle Lots gleich (Handrechnung \u00fcber zwei Jahre)", {
@@ -374,7 +385,7 @@ test_that("Stueckrest ohne Wert (kuenstlicher Staub-Lot) wird \u00fcbersprungen 
   w <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax = tax_profile()))
   tabelle("Stueckrest ohne Wert (kuenstlicher Staub-Lot) wird übersprungen statt C++-Abbruch",
     wert(w$adopted$lots,
-         nrow(r$open_lots$A$lots) + (abs(tail(r$worth, 1) - tail(r$report$A$worth, 1)) > 1e-12 * tail(r$worth, 1)),
+         nrow(r$open_lots$A$lots) + (tail(r$worth, 1) - tail(r$report$A$worth, 1) > 1e-12 * tail(r$worth, 1)),   # Cash-Lot nur bei positivem Geldbestand (seit 1.6.4, Entscheidung 87)
          quelle = "Handrechnung (Herleitung im Test)"),
     wert(w$adopted$sale_cost,
          0.2,
@@ -647,13 +658,13 @@ test_that("+ k Monate auf das Monatsende begrenzt (series_align_macro, overfit_w
 test_that("withdrawal_max_rate prueft success, lower/upper, tol und rechnet jede Rate einmal", {
   set.seed(1); R <- matrix(exp(rnorm(30 * 100, 0.05, 0.15)), 30)
   tabelle("withdrawal_max_rate prueft success, lower/upper, tol und rechnet jede Rate einmal",
-    pruef(expect_error(withdrawal_max_rate(R, success = 95, inflation = 2), "success muss ein Anteil .*gemeint vermutlich 0.95"),
+    pruef(expect_error(withdrawal_max_rate(R, success = 95, inflation = 2), "success muss ein Anteil .*Prozentangaben durch 100 teilen"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(withdrawal_max_rate(R, success = 0, inflation = 2), "0 < success <= 1"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(withdrawal_max_rate(R, lower = 10, upper = 2, inflation = 2), "0 <= lower < upper <= 100"),
           quelle = "Handrechnung (Herleitung im Test)"),
-    pruef(expect_error(withdrawal_max_rate(R, upper = 150, inflation = 2), "lower = 0.5, upper = 150"),
+    pruef(expect_error(withdrawal_max_rate(R, upper = 150, inflation = 2), "0 <= lower < upper <= 100 sein\\."),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(withdrawal_max_rate(R, success = 0.9, inflation = 2, tol = 0), "tol muss eine Zahl > 0"),
           quelle = "Handrechnung (Herleitung im Test)"))
@@ -671,17 +682,17 @@ test_that("withdrawal_max_rate prueft success, lower/upper, tol und rechnet jede
 
 test_that("withdrawal_rule prueft alle Parameter (Skalar, NA, Bereich) und warnt bei Anteilen", {
   tabelle("withdrawal_rule prueft alle Parameter (Skalar, NA, Bereich) und warnt bei Anteilen",
-    pruef(expect_error(withdrawal_rule("constant", rate = c(4, 5)), "rate muss zwischen 0 und 100 Prozent liegen .*erhalten: 4, 5"),
+    pruef(expect_error(withdrawal_rule("constant", rate = c(4, 5)), "withdrawal_rule: rate muss zwischen 0 und 100 Prozent liegen"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(withdrawal_rule("constant", rate = NA), "rate muss zwischen"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(withdrawal_rule("endowment", smoothing = NA), "smoothing muss NULL oder eine Zahl von 0 bis 100"),
           quelle = "Handrechnung (Herleitung im Test)"),
-    pruef(expect_error(withdrawal_rule("vpw", age = 70, max_age = 65), "age \\(70\\) muss kleiner als max_age \\(65\\)"),
+    pruef(expect_error(withdrawal_rule("vpw", age = 70, max_age = 65), "age muss kleiner als max_age sein"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_silent(withdrawal_rule("constant", age = 70, max_age = 65)),
           quelle = "ungenutzt bei anderen Regeln"),
-    pruef(expect_error(withdrawal_rule("constant", min_real = 5e4, max_real = 1e4), "min_real \\(50000\\) darf nicht gr\u00f6\u00dfer als max_real"),
+    pruef(expect_error(withdrawal_rule("constant", min_real = 5e4, max_real = 1e4), "min_real darf nicht gr\u00f6\u00dfer als max_real"),
           quelle = "Handrechnung (Herleitung im Test)"),
     pruef(expect_error(withdrawal_rule("clyatt", floor95 = 150), "floor95 muss eine Zahl von 0 bis 100"),
           quelle = "Handrechnung (Herleitung im Test)"),

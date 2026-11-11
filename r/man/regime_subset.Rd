@@ -13,7 +13,10 @@ Eine Spalte \code{date} ist optional.}
 
 \item{condition}{Logischer Vektor der Laenge \code{nrow(data)} (NA =
 FALSE) oder Ausdruck als Zeichenkette, der in \code{data} ausgewertet
-wird, z. B. \code{"inflation >= 4"}.}
+wird, z. B. \code{"inflation >= 4"}. Seit 1.6.4 in allen Sprachen wie R as.logical gelesen (NA = FALSE); nicht lesbarer Text, Faktor, Datum, Liste oder Matrix sind ein Fehler; auch das Ergebnis des Ausdrucks.
+Seit 1.6.4 gelten Texte in R, Python und Julia gleich im gemeinsamen Umfang der Regeltexte
+von \code{\link[=tactical_rules]{tactical_rules()}} (bis 1.6.3 in R jeder R-Ausdruck); \code{condition} kann auch eine
+Funktion von \code{data} sein (Ergebnis wie oben).}
 
 \item{min_run}{Mindestlaenge einer Episode in Zeilen (ganze Zahl,
 Standard 1); kuerzere zusammenhaengende Abschnitte werden verworfen.}

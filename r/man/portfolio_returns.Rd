@@ -8,13 +8,15 @@ portfolio_returns(data, candidates, frequency = c("year", "quarter", "month"))
 }
 \arguments{
 \item{data}{data.frame mit Spalte \code{date} und allen in
-\code{candidates} genannten Kursspalten (Niveaus).}
+\code{candidates} genannten Kursspalten (Niveaus).
+Die Spalte \code{date} muss aufsteigend sortiert sein und darf kein NA enthalten.}
 
 \item{candidates}{Liste von benannten Gewichtsvektoren (Namen =
 Kursspalten; je Kandidat auf Summe 1 normiert), z. B. aus
 \code{lapply(seq(0, 1, 0.1), function(a) c(aktien = a, anleihen = 1 - a))}.
 Die Listennamen werden Spaltennamen des Ergebnisses; ohne Namen
-\code{"P1"}, \code{"P2"}, ...}
+\code{"P1"}, \code{"P2"}, ...
+Gewichte endlich mit Summe > 0 (einzelne negative Gewichte erlaubt).}
 
 \item{frequency}{Periodenlaenge und Rebalancing-Rhythmus: \code{"year"}
 (Standard), \code{"quarter"} oder \code{"month"}.}

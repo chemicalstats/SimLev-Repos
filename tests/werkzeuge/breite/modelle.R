@@ -71,18 +71,29 @@ ref_done()
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # Modul regimes
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-# Referenzfälle für regimes.R (+ Kern .hmm_forward_backward aus research_core.cpp).
+# Referenzfälle für regimes.R (+ Kern .hmm_em_core aus research_core.cpp).
 ref_init("regimes")
 P <- "from simlev import _dependence_core as C\nfrom simlev import regimes as RG\n"
 J <- 'C = SL.DependenceCore\nRG = SL.Regimes\n'
 
 # ── Kerne und Hilfen ─────────────────────────────────────────────────────
+# Vorwärts-Rückwärts-Schritt über den EM-Kern (seit 1.6.4; bis dahin fb_core über den Einstieg .hmm_forward_backward,
+# ohne Aufrufer im Paket gestrichen): max_iter = 0 rechnet nur den E-Schritt zum Startwert, 5 dazu M-Schritte
 set.seed(6); Tn <- 200; K <- 3
-B <- matrix(runif(Tn * K, 0.1, 1), Tn); A <- matrix(runif(K * K), K); A <- A / rowSums(A); p0 <- rep(1 / K, K)
-ref_case("fb_core", "list(SimLev:::.hmm_forward_backward(B, A, p0), SimLev:::.hmm_forward_backward(B[1:5, 1:2], diag(2), c(0.3, 0.7)), SimLev:::.hmm_forward_backward(B[1, , drop = FALSE], A, p0))",
-         paste0(P, "result = [C.hmm_forward_backward(B, A, p0), C.hmm_forward_backward(B[:5, :2], np.eye(2), [0.3, 0.7]), C.hmm_forward_backward(B[:1], A, p0)]"),
-         inputs = list(B = B, A = A, p0 = p0),
-         jl = paste0(J, "result = [C.hmm_forward_backward(B, A, p0), C.hmm_forward_backward(B[1:5, 1:2], [1.0 0; 0 1], [0.3, 0.7]), C.hmm_forward_backward(B[1:1, :], A, p0)]"))
+X <- cbind(rnorm(Tn, rep(c(-1, 0, 1), length.out = Tn)), rnorm(Tn, 0, 2))
+mu <- matrix(c(-1, 0, 1, 0, 0.5, -0.5), K); S1 <- diag(2); S2 <- diag(c(1, 4)); S3 <- matrix(c(2, 0.3, 0.3, 1), 2)
+A <- matrix(runif(K * K), K); A <- A / rowSums(A); A2 <- matrix(c(0.9, 0.2, 0.1, 0.8), 2); rid <- diag(1e-6, 2)
+ref_case("fb_em", paste("I3 <- list(mu = mu, S = list(S1, S2, S3), A = A); I2 <- list(mu = mu[1:2, ], S = list(S1, S2), A = A2)",
+                        "list(SimLev:::.hmm_em(X, 3L, I3, 0, 1e-8, rid), SimLev:::.hmm_em(X, 3L, I3, 5, 1e-8, rid),",
+                        "  SimLev:::.hmm_em(X[1:5, ], 2L, I2, 0, 1e-8, rid), SimLev:::.hmm_em(X[1, , drop = FALSE], 3L, I3, 0, 1e-8, rid))", sep = "\n"),
+         paste0(P, "I3 = {'mu': mu, 'S': [S1, S2, S3], 'A': A}; I2 = {'mu': mu[:2], 'S': [S1, S2], 'A': A2}\n",
+                "result = [RG._hmm_em(X, 3, I3, 0, 1e-8, rid), RG._hmm_em(X, 3, I3, 5, 1e-8, rid),\n",
+                "  RG._hmm_em(X[:5], 2, I2, 0, 1e-8, rid), RG._hmm_em(X[:1], 3, I3, 0, 1e-8, rid)]"),
+         inputs = list(X = X, mu = mu, S1 = S1, S2 = S2, S3 = S3, A = A, A2 = A2, rid = rid),
+         jl = paste0(J, "I3 = (mu = mu, S = [S1, S2, S3], A = A); I2 = (mu = mu[1:2, :], S = [S1, S2], A = A2)\n",
+                     "rl(r) = SL.RList((String(k) => v for (k, v) in pairs(r))...)\n",
+                     "result = [rl(RG._hmm_em(X, 3, I3, 0, 1e-8, rid)), rl(RG._hmm_em(X, 3, I3, 5, 1e-8, rid)),\n",
+                     "  rl(RG._hmm_em(X[1:5, :], 2, I2, 0, 1e-8, rid)), rl(RG._hmm_em(X[1:1, :], 3, I3, 0, 1e-8, rid))]"))
 # .ldmvn: seit 1.5.2 entfallen (ohne Aufrufer; regime_hmm rechnet die Dichte seit 1.5.0 im Kern hmm_em)
 set.seed(3); VI <- list()
 for (k in 2:4) {

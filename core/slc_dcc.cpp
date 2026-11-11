@@ -4,7 +4,8 @@
  *               Q_t = (1 - a - b) Qbar + a z_{t-1} z_{t-1}' + b Q_{t-1},  Q_1 = Qbar,
  *               R_t = diag(Q_t)^{-1/2} Q_t diag(Q_t)^{-1/2},
  *               -l = 1/2 sum_t (log|R_t| + z_t' R_t^{-1} z_t - z_t' z_t).
- *             Der Filter ist der eigene Kern dcc_filter (r/src/dependence_core_impl.h), Zeile für
+ *             Der Filter ist der frühere eigene Kern dcc_filter (r/src/dependence_core_impl.h, nicht mehr
+ *             vorhanden), Zeile für
  *             Zeile als C-ABI überführt: dieselbe Rechenfolge, dieselbe Cholesky-Zerlegung der
  *             kleinen Matrix (Pivot <= 1e-14: nicht positiv definit -> nll = 1e10, ok = 0,
  *             Korrelationen ab dieser Zeile NA).
@@ -12,7 +13,7 @@
  *             dependence_dcc (r/R/dependence.R): s = 0.999 plogis(th1), a = s plogis(th2), b = s - a
  *             (damit a, b > 0, a + b < 0.999); Start (qlogis(0.98/0.999), qlogis(0.03/0.98)).
  *             Bis 1.1.0 Nelder-Mead (höchstens 2000 Auswertungen, reltol 1e-10). BFGS mit
- *             analytischem Gradienten (dcc_fg: Vorwärtsrekursion von dQ_t/da, dQ_t/db, Kettenregel
+ *             analytischem Gradienten (dcc_fg_impl: Vorwärtsrekursion von dQ_t/da, dQ_t/db, Kettenregel
  *             über die logistische Abbildung), maxit 500, reltol 1e-12, gtol 1e-8, vom bisherigen
  *             Start. Die Likelihood hat oft mehrere lokale Minima (Grat kleines a / b nahe 1 gegen
  *             den Rand a -> 0); BFGS findet häufig ein besseres Becken als der bisherige Nelder-Mead,
@@ -29,7 +30,7 @@
  *               Derivatives, 2. Aufl., SIAM (Vorwärtsmodus). Magnus, J. R., Neudecker, H. (2019).
  *               Matrix Differential Calculus, 3. Aufl., Wiley (d log|R| = tr(R^-1 dR),
  *               d R^-1 = -R^-1 dR R^-1).
- *             Eigener SimLev-Code: dcc_filter (r/src/dependence_core_impl.h), dependence_dcc
+ *             Eigener SimLev-Code: dcc_filter (früher r/src/dependence_core_impl.h), dependence_dcc
  *               (r/R/dependence.R).
  * Konstanten: keine; Verfahrensparameter wie dependence_dcc.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
@@ -141,14 +142,15 @@ int sl_dcc_filter(sl_ctx *cx, int n, int k, const double *Z, double a, double b,
  * Unterlauf (< 1e-280; L_ii > 1e-7) und am Ende logarithmiert wird (ein Logarithmus für viele
  * Zeitpunkte statt k je Zeitpunkt). Der Wert weicht daher von dcc_run in den letzten Stellen ab.
  * Nicht positiv definit: +Inf (statt 1e10, damit die Liniensuche zurückgeht), Gradient NaN.
- * want_g = 0: nur der Wert (derzeit ungenutzt). work: 6 k^2 + 3 k double. g: (dl/da, dl/db). */
+ * work: 6 k^2 + 3 k double. g: (dl/da, dl/db) (seit 1.6.4 stets mit Gradient; bis 1.6.3 dazu ein ungenutzter
+ * Schalter want_g und die Hülle dcc_fg). */
 #if defined(__GNUC__) || defined(__clang__)
 #define DCC_FG_INLINE static inline __attribute__((always_inline))
 #else
 #define DCC_FG_INLINE static inline
 #endif
 DCC_FG_INLINE double dcc_fg_impl(int n, int k, const double *Z, double a, double b, const double *Qbar,
-                                 double *g, double *work, const int want_g)
+                                 double *g, double *work)
 {
     double *Q = work, *R = Q + k * k, *L = R + k * k, *y = L + k * k, *Da = y + k, *Db = Da + k * k,
            *Li = Db + k * k, *w = Li + k * k, *r = w + k;
@@ -157,7 +159,7 @@ DCC_FG_INLINE double dcc_fg_impl(int n, int k, const double *Z, double a, double
     int t, i, j, m;
     for (i = 0; i < k; ++i) for (j = 0; j < k; ++j) {
         Q[i * k + j] = Qbar[i + (size_t) k * j];
-        if (want_g) { Da[i * k + j] = 0.0; Db[i * k + j] = 0.0; }
+        Da[i * k + j] = 0.0; Db[i * k + j] = 0.0;
     }
     for (t = 0; t < n; ++t) {
         const double *zt = Z + t;
@@ -165,10 +167,8 @@ DCC_FG_INLINE double dcc_fg_impl(int n, int k, const double *Z, double a, double
             const double *zp = Z + (t - 1);
             for (i = 0; i < k; ++i) for (j = 0; j < k; ++j) {
                 const double qb = Qbar[i + (size_t) k * j], zz = zp[(size_t) n * i] * zp[(size_t) n * j];
-                if (want_g) {
-                    Da[i * k + j] = (zz - qb) + b * Da[i * k + j];
-                    Db[i * k + j] = (Q[i * k + j] - qb) + b * Db[i * k + j];
-                }
+                Da[i * k + j] = (zz - qb) + b * Da[i * k + j];
+                Db[i * k + j] = (Q[i * k + j] - qb) + b * Db[i * k + j];
                 Q[i * k + j] = c0 * qb + a * zz + b * Q[i * k + j];
             }
         }
@@ -189,7 +189,7 @@ DCC_FG_INLINE double dcc_fg_impl(int n, int k, const double *Z, double a, double
             }
             qz += quad - zz;
         }
-        if (!want_g || t == 0) continue;           /* dQ_1 = 0 */
+        if (t == 0) continue;                      /* dQ_1 = 0 */
         for (i = k - 1; i >= 0; --i) {             /* L' w = y */
             double s = y[i];
             for (m = i + 1; m < k; ++m) s -= L[m * k + i] * w[m];
@@ -217,16 +217,11 @@ DCC_FG_INLINE double dcc_fg_impl(int n, int k, const double *Z, double a, double
     }
     nll = (lsum + log(lp)) + 0.5 * qz;
     if (!isfinite(nll)) goto bad;
-    if (want_g) { g[0] = 0.5 * ga; g[1] = 0.5 * gb; }
+    g[0] = 0.5 * ga; g[1] = 0.5 * gb;
     return nll;
 bad:
-    if (want_g) g[0] = g[1] = NAN;
+    g[0] = g[1] = NAN;
     return INFINITY;
-}
-
-static double dcc_fg(int n, int k, const double *Z, double a, double b, const double *Qbar, double *g, double *work)
-{
-    return dcc_fg_impl(n, k, Z, a, b, Qbar, g, work, 1);
 }
 
 typedef struct { int n, k; const double *Z, *Qbar; double *work; sl_ctx *cx; double xc[2], gc[2]; int have; } dcc_data;
@@ -260,7 +255,7 @@ static double dcc_fg_th(dcc_data *d, const double *th, double *g)
     s = 0.999 * p[0];
     a = s * p[1];
     b = s - a;
-    f = dcc_fg(d->n, d->k, d->Z, a, b, d->Qbar, gab, d->work);
+    f = dcc_fg_impl(d->n, d->k, d->Z, a, b, d->Qbar, gab, d->work);
     g[0] = 0.999 * p[0] * p[2] * (gab[0] * p[1] + gab[1] * p[3]);
     g[1] = s * p[1] * p[3] * (gab[0] - gab[1]);
     return f;

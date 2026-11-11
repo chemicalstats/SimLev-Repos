@@ -44,6 +44,20 @@
   list(R = R[stats::complete.cases(R), , drop = FALSE], ppy = switch(frequency, day = 252, week = 52, month = 12), dates = NULL)
 }
 
+# Eingabe x und assets der Optimierungsfunktionen (seit 1.6.4, K42 E4): assets NULL oder Namen ohne NA, doppelte und
+# 'date' (B-052, B-055); bei Kursdaten (Tabelle mit 'date') Datumsspalte kein Faktor und die Anlagen als Zahlenspalten
+# (B-040: keine Wahrheitswerte). Renditematrizen prueft .opt_returns.
+.opt_check_x <- function(x, assets, fn) {
+  .e4_names(assets, fn, "assets", null_ok = TRUE)
+  if (is.data.frame(x) && "date" %in% names(x)) {
+    chk_col_nofactor(x, "date", fn)
+    if (!is.null(assets)) { chk_cols(x, assets, fn); for (a in assets) .e4_numcol(x, a, fn) }
+  } else if (is.data.frame(x)) {                                  # Renditetabelle: nur Zahlenspalten (B-040)
+    for (a in intersect(assets %||% names(x), names(x))) .e4_numcol(x, a, fn)
+  }
+  invisible(x)
+}
+
 #' Unendliche Renditen (Inf, -Inf) einer Renditematrix mit Spalte und Zeile melden
 #' (Kursdaten prueft bereits .dep_returns())
 #' @keywords internal
@@ -61,12 +75,13 @@
 #' @noRd
 .opt_check_alpha <- function(alpha, fn) {
   if (is.numeric(alpha) && length(alpha) == 1 && is.finite(alpha) && alpha > 0 && alpha <= 0.5) return(invisible())
-  hint <- if (is.numeric(alpha) && length(alpha) == 1 && is.finite(alpha)) {
-    if (alpha >= 1) sprintf(" - als Anteil angeben (z. B. %g statt %g)", alpha / 100, alpha)
-    else if (alpha > 0.5) sprintf(" - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (%g -> alpha = %g)", alpha, 1 - alpha)
+  # seit 1.6.4 ohne den Wert, Hinweise wertfrei (Entscheidung 8, wie 12)
+  hint <- if (!is.factor(alpha) && is.numeric(alpha) && length(alpha) == 1 && is.finite(alpha)) {
+    if (alpha >= 1) " - als Anteil angeben (Prozentangaben durch 100 teilen)"
+    else if (alpha > 0.5) " - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (alpha = 1 - Konfidenzniveau)"
     else "" } else ""
-  stop(sprintf("%s: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste 5 %% (erhalten: %s)%s.",
-               fn, paste(format(alpha), collapse = ", "), hint))
+  stop(sprintf("%s: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste 5 %%%s.",
+               fn, hint))
 }
 
 # Je Zeile t von X: sum((x_t x_t' - S1)^2) / N wie nrm(.sl_tcrossprod(X[t, ]) - S1) (seit 1.6.3 blockweise ohne Schleife je
@@ -109,7 +124,7 @@
     if (quiet) m$val <- val
     return(val)
   }
-  S <- stats::cov(R); N <- ncol(R); Tn <- nrow(R)
+  S <- .sl_cov(R); N <- ncol(R); Tn <- nrow(R)
   if (type == "sample" || N < 2) return(S)
   psd <- function(M) { e <- .sl_eigen_sym(M); M2 <- e$vectors %m% diag(pmax(e$values, 1e-12), N) %m% t(e$vectors)
                        dimnames(M2) <- dimnames(S); (M2 + t(M2)) / 2 }
@@ -121,6 +136,7 @@
     d2 <- nrm(S1 - diag(m, N))
     b2 <- min(d2, sum(.opt_lw_rows(X, S1)) / Tn^2)
     a2 <- d2 - b2
+    if (!isTRUE(d2 > 0)) chk_stop("e4.lw")                        # Entscheidung 73 (B-039): keine neue Rechnung
     Sh <- (b2 / d2) * diag(m, N) + (a2 / d2) * S1
     dimnames(Sh) <- dimnames(S)
     return(Sh * Tn / (Tn - 1))
@@ -182,7 +198,10 @@
     H <- S + diag(b / y^2, N)
     dx <- .sl_solve_spd(H, g)                         # H symmetrisch positiv definit (Cholesky, slc)
     step <- 1
-    while (any(y - step * dx <= 0) || f(y - step * dx) > f(y) - 1e-4 * step * sum(g * dx)) { step <- step / 2; if (step < 1e-12) break }
+    # seit 1.6.4 f(y) einmal je Schritt (B-107), wenn y > 0 (dann ohne Meldung); sonst wie bisher je Pruefung
+    fy <- if (isTRUE(all(y > 0))) f(y)
+    while (any(y - step * dx <= 0) || f(y - step * dx) > (if (is.null(fy)) f(y) else fy) - 1e-4 * step * sum(g * dx)) {
+      step <- step / 2; if (step < 1e-12) break }
     y <- y - step * dx
     if (max(abs(dx * step)) < 1e-14) break
   }
@@ -197,7 +216,7 @@
   C <- stats::cov2cor(S)
   Dm <- (1 - C) / 2; Dm[Dm < 0] <- 0
   D <- stats::as.dist(sqrt(Dm))
-  ord <- stats::hclust(D, method = "single")$order
+  ord <- .sl_hclust(D, method = "single")$order
   w <- rep(1, N)
   clusters <- list(ord)
   while (length(clusters)) {
@@ -219,7 +238,7 @@
 #' @keywords internal
 #' @noRd
 .min_cvar <- function(R, alpha, lo, hi) {
-  N <- ncol(R); R <- as.matrix(R); storage.mode(R) <- "double"; sc <- stats::sd(as.vector(R))
+  N <- ncol(R); R <- as.matrix(R); storage.mode(R) <- "double"; sc <- .sl_sd(as.vector(R))
   w <- .proj_capped_simplex(rep(1 / N, N), lo, hi)
   zeta <- stats::quantile(-drop(R %m% w), 1 - alpha, names = FALSE)
   .min_cvar_core(R, alpha, as.numeric(lo), as.numeric(hi), w, zeta, sc * c(0.05, 0.005), 2000L)
@@ -253,8 +272,8 @@
 #' @keywords internal
 #' @noRd
 .opt_bounds <- function(b, nm, default, what = "upper") {
-  if (!is.numeric(b) || !length(b) || anyNA(b))
-    stop(sprintf("%s: numerischer Wert bzw. Vektor ohne NA erwartet (erhalten: %s).", what, paste(format(b), collapse = ", ")))
+  if (is.factor(b) || !is.numeric(b) || !is.null(dim(b)) || !length(b) || anyNA(b))   # seit 1.6.4 ohne Wert
+    stop(sprintf("%s: numerischer Wert bzw. Vektor ohne NA erwartet.", what))
   if (is.null(names(b))) {
     if (length(b) == 1) return(rep(as.numeric(b), length(nm)))
     if (length(b) == length(nm)) return(as.numeric(b))
@@ -279,7 +298,7 @@
                                paste(sprintf("%s = %s", nm[big], format(hi[big])), collapse = ", ")))
     class(w) <- c("SimLevBoundsPercent", class(w)); warning(w)
   }
-  if (any(lo < 0)) stop(sprintf("lower: Untergrenzen m\u00fcssen >= 0 sein (Long-only; erhalten %s).", paste(format(lo[lo < 0]), collapse = ", ")))
+  if (any(lo < 0)) stop("lower: Untergrenzen m\u00fcssen >= 0 sein (Long-only).")   # seit 1.6.4 ohne Wert
   if (sum(lo) > 1 + 1e-12 || sum(hi) < 1 - 1e-12 || any(lo > hi))
     stop(sprintf("Grenzen nicht erf\u00fcllbar (sum(lower) <= 1 <= sum(upper) und lower <= upper; hier sum(lower) = %g, sum(upper) = %g).", sum(lo), sum(hi)))
   list(lo = lo, hi = hi)
@@ -442,6 +461,7 @@
 #' @param resample Anzahl Block-Bootstrap-Stichproben fuer das
 #'   Michaud-Resampling (ganze Zahl, Standard 0 = aus); die Gewichte sind
 #'   dann das Mittel der Einzeloptimierungen.
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps fuer das
 #'   Resampling in Perioden. \code{NULL} (Standard) = \eqn{T^{1/3}} gerundet,
 #'   mindestens 2 (T = Anzahl Perioden).
@@ -490,31 +510,40 @@ portfolio_optimize <- function(x, assets = NULL,
                                risk_aversion = 4, budget = NULL, alpha = 0.05, frequency = c("week", "day", "month"),
                                resample = 0L, block = NULL, seed = NULL) {
   method <- match.arg(method); cov <- match.arg(cov); frequency <- match.arg(frequency)
+  fn <- "portfolio_optimize"                                      # seit 1.6.4 vor der Rechnung (K42 E4)
+  .opt_check_x(x, assets, fn)
+  chk_num1(risk_free, fn, "risk_free")                            # B-018
+  chk_num1(risk_aversion, fn, "risk_aversion", lo = 0)            # B-018
+  .e4_count(resample, fn, "resample", lo = 0)                     # B-018
+  if (!is.null(block)) chk_num1(block, fn, "block", lo = 1)
   rr <- .opt_returns(x, assets, frequency); R <- rr$R; nm <- colnames(R); N <- ncol(R)
   if (nrow(R) < N + 5) stop(sprintf("Zu wenige Beobachtungen f\u00fcr die Optimierung (%d Perioden f\u00fcr %d Anlagen, mindestens %d).", nrow(R), N, N + 5))
   b <- .opt_check_bounds(lower, upper, nm); lo <- b$lo; hi <- b$hi
   .opt_check_alpha(alpha, "portfolio_optimize")
   if (!is.null(mu)) {                               # wie lower/upper: Skalar, benannt (Namen pruefen) oder ein Wert je Spalte
     mu <- stats::setNames(.opt_bounds(mu, nm, NA_real_, "mu"), nm)
-    if (any(is.infinite(mu))) stop(sprintf("mu: endliche Werte in Prozent p. a. erwartet (erhalten: %s).", paste(format(mu), collapse = ", ")))
+    if (any(is.infinite(mu))) stop("mu: endliche Werte in Prozent p. a. erwartet.")   # seit 1.6.4 ohne Wert
   }
   core <- function(Rx) .opt_core(Rx, method, lo, hi, cov, mu, risk_free, risk_aversion, budget, alpha, rr$ppy)
   # Kovarianz von R seit 1.6.3 einmal fuer Optimierung (.opt_core) und Kennzahlen (.opt_summary): .opt_cov merkt
   # sich das Ergebnis fuer genau dieses R, wenn seine Rechnung ohne Warnung blieb (sonst wie bisher zweimal)
-  memo_alt <- mget(c("on", "R", "type", "val"), envir = .opt_cov_memo, ifnotfound = list(NULL))
+  memo_alt <- mget(c("on", "R", "type", "val", "wo"), envir = .opt_cov_memo, ifnotfound = list(NULL))
   on.exit(list2env(memo_alt, .opt_cov_memo), add = TRUE)
   .opt_cov_memo$on <- TRUE; .opt_cov_memo$R <- R; .opt_cov_memo$type <- cov; .opt_cov_memo$val <- NULL
+  # nur die Gewichte (portfolio_rolling, seit 1.6.4, T3-R7): .opt_summary prueft nur die Volatilitaet mit ihrer Warnung
+  wo <- inherits(x, "SimLevOptReturns") && isTRUE(x$weights_only); .opt_cov_memo$wo <- wo
   w <- core(R)
   wb <- NULL
   if (resample > 0) {
     block <- block %||% max(2, round(nrow(R)^(1 / 3)))
-    S <- .sl_main_stream(seed)                                  # Hauptstrom
+    S <- .sl_main_stream(seed, "portfolio_optimize")                                  # Hauptstrom
     wb <- matrix(vapply(seq_len(resample), function(b) core(R[.sl_boot_idx_stationary(nrow(R), nrow(R), block, stream = S), , drop = FALSE]), numeric(N)),
                  ncol = N, byrow = TRUE)
     colnames(wb) <- nm
     w <- colMeans(wb); w <- w / sum(w)
   }
   out <- .opt_summary(w, R, rr$ppy, cov, risk_free, alpha)
+  if (wo) return(out)
   structure(c(out, list(method = method, bounds = rbind(lower = lo, upper = hi), resampled = wb, cov_type = cov,
                         frequency = frequency, n_obs = nrow(R))), class = "SimLevOptimization")
 }
@@ -523,13 +552,14 @@ portfolio_optimize <- function(x, assets = NULL,
 #' @keywords internal
 #' @noRd
 .opt_summary <- function(w, R, ppy, cov_type, risk_free, alpha) {
-  S <- .opt_cov(R, cov_type) * ppy; m <- colMeans(R) * ppy
-  vol <- sqrt(max(drop(t(w) %m% S %m% w), 0)); ret <- sum(w * m)
-  rp <- drop(R %m% w)
+  wo <- isTRUE(.opt_cov_memo$wo)                    # nur Gewichte (portfolio_rolling, seit 1.6.4): wie Python _opt_vol
+  S <- .opt_cov(R, cov_type) * ppy; if (!wo) m <- colMeans(R) * ppy
+  vol <- sqrt(max(drop(t(w) %m% S %m% w), 0)); if (!wo) { ret <- sum(w * m); rp <- drop(R %m% w) }
   if (vol <= 1e-10) {                               # Portfolio ohne Schwankung: Quotienten nicht definiert
     warning("Portfolio ohne Schwankung (Volatilit\u00e4t 0, nur Anlagen mit konstanter Rendite): Sharpe Ratio, Diversifikationsverh\u00e4ltnis und Risikoanteile sind nicht definiert (NA).")
     vol <- 0; vq <- NA_real_
   } else vq <- vol
+  if (wo) return(list(weights = w))
   rc <- w * drop(S %m% w) / vq
   list(weights = w,
        stats = c(expected_return = ret, volatility = vol, sharpe = (ret - risk_free / 100) / vq,
@@ -585,6 +615,7 @@ plot.SimLevOptimization <- function(x, ...) {
 #' @param n Anzahl der Risikoaversionen (ganze Zahl, Standard 40). Punkte mit
 #'   (auf 6 Stellen) gleicher Rendite und Volatilitaet werden nur einmal
 #'   behalten; das Ergebnis kann daher weniger Zeilen haben.
+#'   Seit 1.6.4 hoechstens 10^6.
 #' @return Objekt der Klasse \code{SimLevFrontier} mit \code{frontier}
 #'   (data.frame je Punkt: \code{expected_return}, \code{volatility} als
 #'   Anteil p. a., \code{sharpe} mit \code{risk_free} (\code{NA} bei
@@ -604,6 +635,10 @@ plot.SimLevOptimization <- function(x, ...) {
 portfolio_frontier <- function(x, assets = NULL, n = 40L, lower = 0, upper = 1, cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber"),
                                risk_free = 0, frequency = c("week", "day", "month")) {
   cov <- match.arg(cov); frequency <- match.arg(frequency)
+  fn <- "portfolio_frontier"                                      # seit 1.6.4 vor der Rechnung (K42 E4)
+  .opt_check_x(x, assets, fn)
+  .e4_count(n, fn, "n", hi = SL_MAX_GITTER)       # B-011, B-038 (Obergrenze wie n_grid)
+  chk_num1(risk_free, fn, "risk_free")
   rr <- .opt_returns(x, assets, frequency); R <- rr$R; nm <- colnames(R)
   b <- .opt_check_bounds(lower, upper, nm); lo <- b$lo; hi <- b$hi
   S <- .opt_cov(R, cov) * rr$ppy; m <- colMeans(R) * rr$ppy
@@ -671,6 +706,7 @@ plot.SimLevFrontier <- function(x, ...) {
 #' @param method Verfahren wie in [portfolio_optimize()] (Zeichenkette,
 #'   Standard \code{"min_variance"}).
 #' @param window Fensterlaenge in Jahren (Standard 3).
+#'   Seit 1.6.4 eine ganze Zahl von 1 bis 100 (Jahre).
 #' @param every Entscheidungsrhythmus: \code{"month"} (Standard),
 #'   \code{"quarter"} oder \code{"year"}.
 #' @param frequency Renditefrequenz innerhalb des Fensters: \code{"week"}
@@ -699,17 +735,22 @@ plot.SimLevFrontier <- function(x, ...) {
 portfolio_rolling <- function(data, assets, method = "min_variance", window = 3, every = c("month", "quarter", "year"),
                                  frequency = c("week", "day", "month"), ...) {
   every <- match.arg(every); frequency <- match.arg(frequency)
+  fn <- "portfolio_rolling"
   # Argumentfehler sofort melden (sonst schluege jeder Termin fehl)
   allowed <- eval(formals(portfolio_optimize)$method)
-  if (!is.character(method) || length(method) != 1 || !method %in% allowed)
-    stop(sprintf("portfolio_rolling: unbekanntes Verfahren %s; erlaubt: %s.", paste0("'", method, "'", collapse = ", "), paste(allowed, collapse = ", ")))
+  if (!is.character(method) || length(method) != 1 || !method %in% allowed)   # seit 1.6.4 ohne Wert
+    stop(sprintf("portfolio_rolling: unbekanntes Verfahren; erlaubt: %s.", paste(allowed, collapse = ", ")))
   dots <- list(...)
-  bad <- setdiff(names(dots), setdiff(names(formals(portfolio_optimize)), c("x", "assets", "method", "frequency")))
-  if (length(bad) || (length(dots) && is.null(names(dots))) || any(names(dots) == ""))
-    stop(sprintf("portfolio_rolling: unbekannte bzw. unbenannte Argumente f\u00fcr portfolio_optimize() in ...: %s.",
-                 if (length(bad)) paste0("'", bad, "'", collapse = ", ") else "ohne Namen"))
+  if ((length(dots) && is.null(names(dots))) || any(names(dots) == ""))
+    stop("portfolio_rolling: unbekannte bzw. unbenannte Argumente f\u00fcr portfolio_optimize() in ...: ohne Namen.")
+  # seit 1.6.4 einheitlich (Entscheidung 21); x und assets setzt portfolio_rolling selbst
+  chk_dots(names(dots), setdiff(names(formals(portfolio_optimize)), c("x", "assets", "method", "frequency")), fn,
+           taken = c("x", "assets", "method", "frequency"))
+  chk_jahre(window, fn, "window")                                 # B-098, Entscheidung 70 (ganze Jahre 1 bis 100)
+  .e4_names(assets, fn, "assets")
   if (!is.data.frame(data) || !"date" %in% names(data)) stop("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
   miss <- setdiff(assets, names(data)); if (length(miss)) stop(sprintf("Spalten fehlen: %s", paste(miss, collapse = ", ")))
+  chk_col_nofactor(data, "date", fn); for (a in assets) .e4_numcol(data, a, fn)
   .opt_check_bounds(dots$lower %||% 0, dots$upper %||% 1, assets)
   .opt_check_alpha(dots$alpha %||% 0.05, "portfolio_rolling")
   if (!is.null(dots$mu)) .opt_bounds(dots$mu, assets, NA_real_, "mu")
@@ -720,10 +761,15 @@ portfolio_rolling <- function(data, assets, method = "min_variance", window = 3,
   rows <- rows[d[rows] >= first_ok]
   if (!length(rows)) stop("Historie k\u00fcrzer als das Fenster.")
   msg <- character(length(rows))
+  # seit 1.6.4 (T3-R7) wie Python: Kurse, Logarithmen und Periodenwechsel einmal vorab, je Termin nur die Renditen des
+  # Fensters und die Gewichte (ohne die verworfenen Kennzahlen); gleiche Bits und Meldungen wie je Fenster
+  pre <- .roll_prep(data, d, assets, frequency)
+  lo_all <- findInterval(as.numeric(d[rows] - round(window * 365.25)), as.numeric(d)) + 1L   # erste Zeile mit d > d[i] - Fenster
   M <- matrix(vapply(seq_along(rows), function(k) {
     i <- rows[k]
-    sub <- data[d > d[i] - round(window * 365.25) & d <= d[i], c("date", assets), drop = FALSE]
-    w <- tryCatch(withCallingHandlers(portfolio_optimize(sub, assets, method = method, frequency = frequency, ...)$weights,
+    w <- tryCatch(withCallingHandlers({
+                                        sub <- .roll_returns(pre, lo_all[k], i, assets, frequency)
+                                        portfolio_optimize(sub, assets, method = method, frequency = frequency, ...)$weights },
                                       SimLevBoundsPercent = function(w) invokeRestart("muffleWarning")),   # schon vorab gewarnt
                   error = function(e) { msg[k] <<- conditionMessage(e); rep(NA_real_, N) })
     if (anyNA(w)) { if (!nzchar(msg[k])) msg[k] <<- "Gewichte NA"; rep(1 / N, N) } else w
@@ -737,6 +783,45 @@ portfolio_rolling <- function(data, assets, method = "min_variance", window = 3,
   attr(out, "decision_rows") <- rows
   attr(out, "failed_dates") <- d[rows[failed]]
   out
+}
+
+# Vorabrechnung fuer portfolio_rolling (seit 1.6.4, T3-R7; Gegenstueck Python _roll_prep, seit 1.5.1): Kurse je
+# Spalte, unzulaessige Kurse (kumuliert), letzte vorhandene Zeile je Tag (Fortschreiben), Logarithmen (unzulaessige
+# Kurse als NA, sie gehen nur in Fenster ein, die .dep_check_prices ablehnt) und Periodenwechsel (ISO-Woche bzw. Monat)
+.roll_prep <- function(data, d, assets, frequency) {
+  n <- length(d); N <- length(assets)
+  V <- matrix(vapply(assets, function(a) as.numeric(data[[a]]), numeric(n)), nrow = n, dimnames = list(NULL, assets))
+  okv <- !is.na(V)
+  bad <- okv & (!is.finite(V) | V <= 0)
+  nbad <- rbind(0L, matrix(apply(bad, 2L, cumsum), nrow = n))
+  idx <- matrix(apply(okv * row(V), 2L, cummax), nrow = n)       # letzte Zeile mit Kurs bis i, 0 = keine
+  Lf <- V; Lf[bad] <- NA_real_
+  lv <- matrix(Lf[cbind(c(pmax(idx, 1L)), rep(seq_len(N), each = n))], nrow = n, dimnames = list(NULL, assets))
+  lv[idx == 0L] <- NA_real_
+  lv <- log(lv)
+  brk <- NULL
+  if (frequency != "day" && n > 1L) {
+    key <- .date_key(d, frequency)
+    if (is.null(key)) key <- if (frequency == "week") format(d, "%G-%V") else format(d, "%Y-%m")
+    brk <- key[-1] != key[-n]
+  }
+  list(V = V, nbad = nbad, idx = idx, lv = lv, brk = brk, d = d)
+}
+
+# Renditen des Fensters lo..hi wie .opt_returns(.dep_returns(Fenster)): Pruefung der Kurse, Fortschreiben nur im
+# Fenster (fuehrende Luecken bleiben), letzte Zeile je Periode, Log-Differenzen, Zeilen mit NA entfallen (bei "day"
+# auch Tage ohne Bewegung), einfache Renditen und ppy; Ergebnis fuer portfolio_optimize mit weights_only
+.roll_returns <- function(pre, lo, hi, assets, frequency) {
+  for (j in seq_along(assets)) if (pre$nbad[hi + 1L, j] > pre$nbad[lo, j])
+    .dep_check_prices(pre$V[lo:hi, j], assets[j], pre$d[lo:hi])  # meldet wie je Fenster
+  e <- if (frequency == "day" || hi == lo) lo:hi else c(lo - 1L + which(pre$brk[lo:(hi - 1L)]), hi)
+  L <- pre$lv[e, , drop = FALSE]; L[pre$idx[e, , drop = FALSE] < lo] <- NA_real_
+  R <- if (length(e) > 1L) diff(L) else L[0L, , drop = FALSE]
+  ok <- stats::complete.cases(R)
+  if (frequency == "day") ok <- ok & rowSums(abs(R) > 0) > 0
+  R <- R[ok, , drop = FALSE]; dd <- pre$d[e][-1L][ok]; nr <- nrow(R)
+  structure(list(R = expm1(R), ppy = (nr - 1) / (as.numeric(dd[nr] - dd[1]) / 365.25), weights_only = TRUE),
+            class = "SimLevOptReturns")
 }
 
 #' Risikobeitraege (Euler-Zerlegung)
@@ -785,27 +870,39 @@ portfolio_rolling <- function(data, assets, method = "min_variance", window = 3,
 portfolio_risk_contributions <- function(x, weights, measure = c("volatility", "cvar"), alpha = 0.05,
                                frequency = c("week", "day", "month"), cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber")) {
   measure <- match.arg(measure); frequency <- match.arg(frequency); cov <- match.arg(cov)
+  fn <- "portfolio_risk_contributions"
   .opt_check_alpha(alpha, "portfolio_risk_contributions")
   if (inherits(weights, "SimLevOptimization")) weights <- weights$weights
-  if (!is.numeric(weights) || is.null(names(weights)) || any(names(weights) == "") || anyNA(weights))
+  # seit 1.6.4 auch ohne Inf, Faktor und Matrix
+  if (is.factor(weights) || !is.numeric(weights) || !is.null(dim(weights)) || is.null(names(weights)) || any(names(weights) == "") ||
+      any(!is.finite(weights)))
     stop("weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).")
-  avail <- if (is.data.frame(x) && "date" %in% names(x)) names(x) else colnames(as.matrix(x)) %||% paste0("A", seq_len(NCOL(x)))
+  if (anyDuplicated(names(weights))) chk_stop("e2.doppelt", fn, "weights")   # B-052
+  if ("date" %in% names(weights)) chk_stop("e4.date", fn, "weights")
+  avail <- if (is.data.frame(x) && "date" %in% names(x)) setdiff(names(x), "date") else colnames(as.matrix(x)) %||% paste0("A", seq_len(NCOL(x)))
   unk <- setdiff(names(weights), avail)
   if (length(unk)) stop(sprintf("weights: unbekannte Anlage(n) %s; vorhanden: %s.", paste0("'", unk, "'", collapse = ", "),
                                 paste(setdiff(avail, "date"), collapse = ", ")))
+  .opt_check_x(x, names(weights), fn)
   rr <- .opt_returns(x, names(weights), frequency); R <- rr$R; w <- weights[colnames(R)]
   if (measure == "volatility") {
-    S <- .opt_cov(R, cov) * rr$ppy; tot <- sqrt(drop(t(w) %m% S %m% w))
+    # seit 1.6.4 (B-072) S auch fuer das Diversifikationsverhaeltnis, wenn .opt_cov ohne Warnung blieb
+    quiet <- TRUE
+    S <- withCallingHandlers(.opt_cov(R, cov), warning = function(w) quiet <<- FALSE) * rr$ppy
+    tot <- sqrt(drop(t(w) %m% S %m% w))
+    if (!isTRUE(abs(tot) > 0)) chk_stop("e4.risiko0", fn)          # Entscheidung 73 (B-039)
     mc <- drop(S %m% w) / tot; rc <- w * mc
   } else {
     rp <- drop(R %m% w); L <- -rp; v <- stats::quantile(L, 1 - alpha, names = FALSE); tail <- L >= v
     mc <- colMeans(-R[tail, , drop = FALSE]); rc <- mc * w; tot <- sum(rc)   # Grenzbeitrag auch fuer Gewicht 0
+    if (!isTRUE(abs(tot) > 0)) chk_stop("e4.risiko0", fn)          # Entscheidung 73 (B-039)
   }
   out <- data.frame(asset = names(w), weight = unname(w), contribution = unname(rc), share = unname(rc / tot),
                     marginal = unname(mc), stringsAsFactors = FALSE)
   attr(out, "total") <- tot; attr(out, "measure") <- measure
   attr(out, "effective_n") <- 1 / sum((rc / tot)^2)
-  if (measure == "volatility") attr(out, "diversification_ratio") <- sum(w * sqrt(diag(.opt_cov(R, cov) * rr$ppy))) / tot
+  if (measure == "volatility")
+    attr(out, "diversification_ratio") <- sum(w * sqrt(diag(if (quiet) S else .opt_cov(R, cov) * rr$ppy))) / tot
   out
 }
 
@@ -845,11 +942,13 @@ portfolio_risk_contributions <- function(x, weights, measure = c("volatility", "
 #'   fuer [portfolio_optimize()] (z. B.
 #'   \code{list(mv = list(method = "min_variance", cov = "ledoit_wolf"))}).
 #' @param n_groups Anzahl Gruppen insgesamt (ganze Zahl >= 2, Standard 6).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param test_groups Anzahl Testgruppen je Aufteilung (ganze Zahl, Standard
 #'   2, kleiner als \code{n_groups}); es gibt choose(n_groups, test_groups)
 #'   Aufteilungen.
 #' @param purge,embargo Sperrzone und Embargo in Perioden der gewaehlten
 #'   Frequenz (Zeilen der Renditen, ganze Zahlen >= 0, je Standard 2).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param frequency Siehe [portfolio_optimize()].
 #' @return Objekt der Klasse \code{SimLevCPCV} mit
 #'   \describe{
@@ -884,12 +983,14 @@ portfolio_cpcv <- function(x, assets = NULL, methods = c("equal", "inverse_vol",
                            n_groups = 6L, test_groups = 2L, purge = 2L, embargo = 2L,
                            frequency = c("week", "day", "month")) {
   frequency <- match.arg(frequency)
+  fn <- "portfolio_cpcv"                                          # seit 1.6.4 vor der Rechnung (K42 E4)
+  .opt_check_x(x, assets, fn)
+  # seit 1.6.4 Bausteine der Tabelle eingabe (ohne Wert); Obergrenze wie Entscheidung 16
+  .e4_count(n_groups, fn, "n_groups", lo = 2); .e4_count(test_groups, fn, "test_groups")
+  .e4_count(purge, fn, "purge", lo = 0); .e4_count(embargo, fn, "embargo", lo = 0)
+  if (test_groups >= n_groups) stop("portfolio_cpcv: test_groups muss kleiner als n_groups sein, sonst bleibt keine Trainingsgruppe.")
+  if (is.character(methods)) .e4_names(methods, fn, "methods", no_date = FALSE)   # B-052
   rr <- .opt_returns(x, assets, frequency); R <- rr$R; Tn <- nrow(R)
-  int1 <- function(v, nm, lo) if (!is.numeric(v) || length(v) != 1 || !is.finite(v) || v != round(v) || v < lo)
-    stop(sprintf("portfolio_cpcv: %s muss eine ganze Zahl >= %d sein (erhalten: %s).", nm, lo, paste(format(v), collapse = ", ")))
-  int1(n_groups, "n_groups", 2); int1(test_groups, "test_groups", 1); int1(purge, "purge", 0); int1(embargo, "embargo", 0)
-  if (test_groups >= n_groups) stop(sprintf("portfolio_cpcv: test_groups (%d) muss kleiner als n_groups (%d) sein, sonst bleibt keine Trainingsgruppe.",
-                                            test_groups, n_groups))
   specs <- if (is.character(methods)) stats::setNames(lapply(methods, function(m) list(method = m)), methods) else methods
   if (!is.list(specs) || !length(specs) || is.null(names(specs)) || any(names(specs) == ""))
     stop("portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
@@ -898,6 +999,8 @@ portfolio_cpcv <- function(x, assets = NULL, methods = c("equal", "inverse_vol",
     sp <- specs[[nm]]
     if (!is.list(sp) || (length(sp) && (is.null(names(sp)) || any(names(sp) == ""))))
       stop(sprintf("portfolio_cpcv: Eintrag '%s' von methods muss eine benannte Argumentliste sein.", nm))
+    if (!is.null(sp$method) && !(is.character(sp$method) && length(sp$method) == 1L && !is.na(sp$method)))
+      chk_stop("text", fn, sprintf("methods$%s$method", nm))     # seit 1.6.4
     if (!is.null(sp$method) && !sp$method %in% allowed)
       stop(sprintf("portfolio_cpcv: unbekanntes Verfahren '%s'; erlaubt: %s.", sp$method, paste(allowed, collapse = ", ")))
     bad <- setdiff(names(sp), setdiff(names(formals(portfolio_optimize)), c("x", "assets", "frequency")))
@@ -922,8 +1025,8 @@ portfolio_cpcv <- function(x, assets = NULL, methods = c("equal", "inverse_vol",
       if (is.null(w)) next
       r <- drop(Rte %m% w[colnames(R)])
       rows[[length(rows) + 1L]] <- data.frame(method = nm, split = cidx, return = mean(r) * rr$ppy,
-                                              volatility = stats::sd(r) * sqrt(rr$ppy),
-                                              sharpe = mean(r) / stats::sd(r) * sqrt(rr$ppy),
+                                              volatility = .sl_sd(r) * sqrt(rr$ppy),
+                                              sharpe = mean(r) / .sl_sd(r) * sqrt(rr$ppy),
                                               cdar = .cdar_hist(r, 0.05), stringsAsFactors = FALSE)
     }
   }
@@ -933,7 +1036,7 @@ portfolio_cpcv <- function(x, assets = NULL, methods = c("equal", "inverse_vol",
   if (!is.null(fl)) warning(sprintf("portfolio_cpcv: %d von %d Optimierungen fehlgeschlagen (z. B. '%s' in Aufteilung %d: %s); sie fehlen in der Auswertung, Einzelheiten in $failed.",
                                     nrow(fl), ncol(combos) * length(specs), fl$method[1], fl$split[1], fl$message[1]))
   sp <- do.call(rbind, rows)
-  agg <- function(v) c(mean = mean(v), sd = stats::sd(v), q10 = stats::quantile(v, 0.1, names = FALSE),
+  agg <- function(v) c(mean = mean(v), sd = .sl_sd(v), q10 = stats::quantile(v, 0.1, names = FALSE),
                        q50 = stats::median(v), q90 = stats::quantile(v, 0.9, names = FALSE))
   summ <- do.call(rbind, lapply(split(sp, sp$method), function(z)
     data.frame(method = z$method[1], t(agg(z$sharpe)), volatility = mean(z$volatility), cdar = mean(z$cdar),

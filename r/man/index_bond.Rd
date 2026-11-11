@@ -20,22 +20,30 @@ Zeile je Tag des gewuenschten Index).}
 \item{yield}{Rendite in Prozent p. a. (2.5 = 2,5 Prozent): Spaltenname, Vektor
 der Laenge \code{nrow(data)}, Skalar, \code{data.frame(date, value)}
 (z. B. Monatswerte, Stufenfunktion ab Datum) oder benannter Vektor mit
-Datumsnamen.}
+Datumsnamen. Je Kuponperiode muss die Rendite groesser als -100 Prozent sein
+(\code{yield / coupon_frequency > -100}; seit 1.6.4 geprueft, bis dahin ergaben solche
+Werte still Inf, NaN oder Indexwerte mit wechselndem Vorzeichen).}
 
-\item{maturity}{Konstante Restlaufzeit in Jahren (Standard 10).}
+\item{maturity}{Konstante Restlaufzeit in Jahren (Standard 10; eine endliche Zahl > 0).}
 
-\item{coupon_frequency}{Kupons je Jahr (Standard 1 = jaehrlich wie
+\item{coupon_frequency}{Kupons je Jahr (eine endliche Zahl > 0; Standard 1 = jaehrlich wie
 Bundesanleihen; 2 = halbjaehrlich wie US-Treasuries).}
 
 \item{method}{\code{"exact"} (Standard, Neubewertung) oder
 \code{"duration"} (Duration-/Konvexitaetsnaeherung).}
 
-\item{start}{Startwert des Index in der ersten Zeile (Standard 100).}
+\item{start}{Startwert des Index in der ersten Zeile (Standard 100; > 0). Seit
+  1.6.4 geprueft: \code{data} nur als data.frame mit Spalte \code{date} (mindestens eine
+  Datenzeile; seit 1.6.4 ist 0 Zeilen ein Fehler), eine Spalte als Zinsangabe numerisch, eine Zahl endlich,
+  \code{NULL} fehlt.}
 }
 \value{
 Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}) mit
 Attribut \code{duration} (modifizierte Duration der Par-Anleihe zur
-Rendite des jeweiligen Tages, in Jahren).
+Rendite des jeweiligen Tages, in Jahren). Seit 1.6.4 geschlossen gerechnet,
+\eqn{D = -\mathrm{expm1}(-n \log(1 + i)) / (i m)} mit \eqn{i = y/m}, \eqn{n = M m}
+(bei \eqn{i = 0} die Laufzeit), auf alle Stellen genau; bis 1.6.3 ueber zentrale
+Differenzen (relativer Fehler bis etwa 2e-6 bei 30 Jahren).
 }
 \description{
 Bildet einen Total-Return-Index einer Staatsanleihe mit konstanter
@@ -46,7 +54,10 @@ Rendite bewertet:
 mit \eqn{\Delta t} = Kalendertage seit der Vorzeile / 365.25.
 Mit \code{method = "duration"} wird die Kursaenderung ueber modifizierte
 Duration und Konvexitaet angenaehert,
-\eqn{-D\,\Delta y + \tfrac12 C\,\Delta y^2} (wie bei Swinkels 2019).
+\eqn{-D\,\Delta y + \tfrac12 C\,\Delta y^2} (wie bei Swinkels 2019); \eqn{D} und
+\eqn{C = 2 (a - n v^{n+1}) / (i m^2)} der Par-Anleihe (\eqn{v = 1/(1+i)},
+\eqn{a = (1 - v^n)/i}) seit 1.6.4 geschlossen (nahe \eqn{i = 0} ueber die Reihe), bis
+1.6.3 ueber zentrale Differenzen.
 Roll-down-Effekte entlang der Zinskurve und Kosten sind nicht enthalten.
 Das Ergebnis kann als Kursspalte (Niveau) in \code{\link[=simulation]{simulation()}} oder
 \code{\link[=bootstrap_config]{bootstrap_config()}} verwendet werden.

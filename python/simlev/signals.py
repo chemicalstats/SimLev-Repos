@@ -19,10 +19,52 @@ import numpy as np
 from . import _ext
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
+from ._r import stats as _st
 from ._r.rnum import r_mean
 from ._signals_core import roll_cov_core, roll_mean_core
 from ._r.base import quiet_fp
 from .data_prep import _as_numeric, _match_arg
+from ._pruefen import chk_int1, chk_num1, chk_scalar, chk_stop
+
+_IMAX = 2147483647
+
+
+def _isna1(v) -> bool:
+    import pandas as pd
+    return v is None or v is pd.NA or (isinstance(v, (float, np.floating)) and math.isnan(v))
+
+
+def _sig_x(x, fn):
+    """Kursreihe prüfen (seit 1.6.4, B-009 bis B-012, B-016; R: .sig_x): numerischer Vektor (keine Matrix, keine
+    Tabelle, kein Text, keine Kategorie, keine Wahrheitswerte; leer erlaubt; nur NA zählt als Zahlenvektor)."""
+    import pandas as pd
+    bad = isinstance(x, (pd.DataFrame, Mapping, str, bytes)) or (isinstance(x, np.ndarray) and x.ndim > 1)
+    if not bad:
+        if isinstance(x, pd.Series):
+            if isinstance(x.dtype, pd.CategoricalDtype):   # Entscheidung 15
+                chk_stop("faktor", fn, "x")
+            elif x.dtype.kind in "fiu":
+                return
+            vals = [] if bad else list(x.to_numpy(dtype=object))
+        elif isinstance(x, np.ndarray):
+            if x.dtype.kind in "fiu":
+                return
+            vals = list(x.ravel())
+        elif isinstance(x, (list, tuple)):
+            vals = list(x)
+        else:
+            vals = [x]
+        bad = bad or not all(_isna1(v) or (isinstance(v, (int, float, np.integer, np.floating))
+                                           and not isinstance(v, (bool, np.bool_))) for v in vals)
+    if bad:
+        chk_stop("zahlen", fn, "x")
+
+
+def _sig_win(x, fn, arg, lo=1, null_ok=False):
+    """Fenster bzw. Verzögerung: einzelne endliche Zahl >= lo bis zur R-Ganzzahlgrenze; seit 1.6.4 ganze Zahl
+    (Entscheidungen 19, 32; bis dahin abgeschnitten)."""
+    x = chk_num1(x, fn, arg, lo=lo, hi=_IMAX, null_ok=null_ok)
+    return chk_int1(x, fn, arg, lo=lo, null_ok=null_ok)
 
 __all__ = ["signal_sma", "signal_ema", "signal_crossover", "signal_momentum", "signal_drawdown",
            "signal_volatility", "signal_combine"]
@@ -50,7 +92,6 @@ def _roll_cov(x, y, n):
 
 def _rfilter_recursive1(x, f, init):
     """``stats::filter(x, f, method = "recursive", init = init)`` mit einem Koeffizienten."""
-    from ._r import stats as _st
     return np.asarray(_st.filter(x, f, method="recursive", init=init), dtype=np.float64).ravel()
 
 
@@ -98,6 +139,7 @@ def _sig_out(buy, sell, lag=0):
     sell = _sig_clean(sell)
     if lag > 0:
         m = len(buy)
+        lag = min(lag, m)   # seit 1.6.4 (B-024): lag >= Länge ergibt nur False (bis 1.6.3 falsche Länge)
         buy = np.concatenate([np.zeros(lag, dtype=bool), buy[: m - lag]])
         sell = np.concatenate([np.zeros(lag, dtype=bool), sell[: m - lag]])
     return {"buy": buy, "sell": sell}
@@ -133,6 +175,13 @@ def signal_sma(x, *, n=200, band=0, lag=0):
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -167,6 +216,11 @@ def signal_sma(x, *, n=200, band=0, lag=0):
                                                                                  signal_buy="buy", signal_sell="sell")))
         print(res["buys"], res["sells"])
     """
+    fn = "signal_sma"
+    _sig_x(x, fn)
+    n = _sig_win(n, fn, "n")
+    band = chk_num1(band, fn, "band", lo=0)
+    lag = _sig_win(lag, fn, "lag", lo=0)
     xv = _as_numeric(x)
     s = _roll_mean(xv, n)
     return _sig_out(_cmp(np.greater_equal, xv, s * (1 + band / 100)), _cmp(np.less, xv, s * (1 - band / 100)), lag)
@@ -202,6 +256,13 @@ def signal_ema(x, *, n=200, band=0, lag=0):
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -229,6 +290,11 @@ def signal_ema(x, *, n=200, band=0, lag=0):
         x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
         print(simlev.signal_ema(x, n=200, band=1)["buy"].sum())
     """
+    fn = "signal_ema"
+    _sig_x(x, fn)
+    n = _sig_win(n, fn, "n")
+    band = chk_num1(band, fn, "band", lo=0)
+    lag = _sig_win(lag, fn, "lag", lo=0)
     xv = _as_numeric(x)
     s = _ema(xv, n)
     return _sig_out(_cmp(np.greater_equal, xv, s * (1 + band / 100)), _cmp(np.less, xv, s * (1 - band / 100)), lag)
@@ -265,6 +331,13 @@ def signal_crossover(x, *, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -292,9 +365,15 @@ def signal_crossover(x, *, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0
         x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
         print(simlev.signal_crossover(x, fast=50, slow=200)["buy"].sum())
     """
-    type_ = _match_arg(type, ("sma", "ema"))
+    fn = "signal_crossover"
+    _sig_x(x, fn)
+    fast = _sig_win(fast, fn, "fast")
+    slow = _sig_win(slow, fn, "slow")
+    type_ = _match_arg(chk_scalar(type), ("sma", "ema"))
     if fast >= slow:
         raise ValueError("fast muss kleiner als slow sein.")
+    band = chk_num1(band, fn, "band", lo=0)
+    lag = _sig_win(lag, fn, "lag", lo=0)
     xv = _as_numeric(x)
     f = _roll_mean(xv, fast) if type_ == "sma" else _ema(xv, fast)
     s = _roll_mean(xv, slow) if type_ == "sma" else _ema(xv, slow)
@@ -333,6 +412,13 @@ def signal_momentum(x, *, n=250, threshold=0, band=0, lag=0):
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -360,6 +446,12 @@ def signal_momentum(x, *, n=250, threshold=0, band=0, lag=0):
         x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
         print(simlev.signal_momentum(x, n=250)["buy"].sum())
     """
+    fn = "signal_momentum"
+    _sig_x(x, fn)
+    n = _sig_win(n, fn, "n")
+    threshold = chk_num1(threshold, fn, "threshold")
+    band = chk_num1(band, fn, "band", lo=0)
+    lag = _sig_win(lag, fn, "lag", lo=0)
     x = _as_numeric(x)
     m = len(x)
     n = int(n)
@@ -399,6 +491,13 @@ def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -426,6 +525,12 @@ def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
         x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
         print(simlev.signal_drawdown(x, sell_dd=20, buy_dd=10)["sell"].sum())
     """
+    fn = "signal_drawdown"
+    _sig_x(x, fn)
+    sell_dd = chk_num1(sell_dd, fn, "sell_dd", lo=0, lo_open=True, hi=100)
+    buy_dd = chk_num1(buy_dd, fn, "buy_dd", lo=0, lo_open=True, hi=100)
+    window = _sig_win(window, fn, "window", null_ok=True)
+    lag = _sig_win(lag, fn, "lag", lo=0)
     x = _as_numeric(x)
     if buy_dd > sell_dd:
         raise ValueError("buy_dd darf nicht größer als sell_dd sein.")
@@ -479,6 +584,13 @@ def signal_volatility(x, *, n=20, threshold=25, band=0, ppy=365.25, lag=0):
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -506,6 +618,13 @@ def signal_volatility(x, *, n=20, threshold=25, band=0, ppy=365.25, lag=0):
         x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
         print(simlev.signal_volatility(x, n=20, threshold=25)["buy"].sum())
     """
+    fn = "signal_volatility"
+    _sig_x(x, fn)
+    n = _sig_win(n, fn, "n")
+    threshold = chk_num1(threshold, fn, "threshold", lo=0)
+    band = chk_num1(band, fn, "band", lo=0)
+    ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True)
+    lag = _sig_win(lag, fn, "lag", lo=0)
     x = _as_numeric(x)
     r = np.concatenate([[_NAN], np.diff(_libm.log(x))]) if len(x) else np.empty(0)
     r0 = r.copy()
@@ -550,6 +669,13 @@ def signal_combine(*signals, op=("and", "or")):
         enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
         alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
 
+        Eingaben (seit 1.6.4 geprüft): ``x`` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+        Kategorie, keine Wahrheitswerte; leer erlaubt); ``n``, ``fast``, ``slow``, ``window`` je eine endliche Zahl
+        ``>= 1``, ``lag >= 0`` (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; ``lag`` ab der Länge von ``x`` ergibt nur
+        ``False``); ``band >= 0``; ``sell_dd``, ``buy_dd`` größer 0 und höchstens 100; bei ``signal_volatility``
+        ``threshold >= 0`` und ``ppy > 0``; bei ``signal_combine`` ``buy`` und ``sell`` je True/False oder 0/1
+        (NA bleibt NA: Ergebnis dann als object-Feld mit ``None``).
+
         ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
         Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
         (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
@@ -578,20 +704,71 @@ def signal_combine(*signals, op=("and", "or")):
         both = simlev.signal_combine(simlev.signal_sma(x, n=200), simlev.signal_volatility(x, n=20, threshold=25))
         print(both["buy"].sum())
     """
-    op = _match_arg(op, ("and", "or"))
+    op = _match_arg(chk_scalar(op), ("and", "or"))
     s = list(signals)
     if not s:
         raise ValueError("Keine Signale übergeben.")
-    lens = [len(np.atleast_1d(_get(z, "buy"))) if _get(z, "buy") is not None else 0 for z in s]
-    slen = [len(np.atleast_1d(_get(z, "sell"))) if _get(z, "sell") is not None else 0 for z in s]
+    # seit 1.6.4 (B-008, Entscheidung 1): je Signal buy und sell, jeweils True/False oder 0/1 (NA erlaubt, bleibt NA
+    # wie in R; bis 1.6.3 las Python NaN und Text als True)
+    vb, vs = [], []
+    for i, z in enumerate(s, start=1):
+        b = _sig_vals(_get(z, "buy")) if isinstance(z, Mapping) or hasattr(z, "buy") else None
+        c = _sig_vals(_get(z, "sell")) if isinstance(z, Mapping) or hasattr(z, "sell") else None
+        if b is None or c is None:
+            chk_stop("e1.signal", "signal_combine", i)
+        vb.append(b)
+        vs.append(c)
+    lens = [len(b) for b in vb]
+    slen = [len(c) for c in vs]
     if any(L != lens[0] for L in lens) or any(a != b for a, b in zip(slen, lens)):
         raise ValueError("signal_combine: Signale haben unterschiedliche Längen (%s); alle aus derselben "
                          "Kursreihe erzeugen." % ", ".join(str(L) for L in lens))
-    B = np.column_stack([np.asarray(_get(z, "buy"), dtype=bool) for z in s])
-    S = np.column_stack([np.asarray(_get(z, "sell"), dtype=bool) for z in s])
+    if any(e is None for v in vb + vs for e in v):   # mit NA: dreiwertig wie R (&, |, all, any)
+        return {"buy": _sig_comb(vb, op == "and"), "sell": _sig_comb(vs, op != "and")}
+    B = np.column_stack([np.asarray(v, dtype=bool) for v in vb])
+    S = np.column_stack([np.asarray(v, dtype=bool) for v in vs])
     if op == "and":
         return {"buy": B.all(axis=1), "sell": S.any(axis=1)}
     return {"buy": B.any(axis=1), "sell": S.all(axis=1)}
+
+
+def _sig_vals(v):
+    """Signalvektor als Liste aus True/False/None (NA); None, wenn kein Signal (Text, andere Zahlen, Matrix)."""
+    import pandas as pd
+    if v is None or isinstance(v, (str, bytes, Mapping, pd.DataFrame)) or (isinstance(v, np.ndarray) and v.ndim > 1):
+        return None
+    if isinstance(v, pd.Series):
+        if isinstance(v.dtype, pd.CategoricalDtype):
+            return None
+        arr = list(v.to_numpy(dtype=object))
+    elif isinstance(v, (np.ndarray, list, tuple)):
+        arr = list(np.asarray(v, dtype=object).ravel()) if isinstance(v, np.ndarray) else list(v)
+    else:
+        arr = [v]
+    out = []
+    for e in arr:
+        if _isna1(e):
+            out.append(None)
+        elif isinstance(e, (bool, np.bool_)):
+            out.append(bool(e))
+        elif isinstance(e, (int, float, np.integer, np.floating)) and e in (0, 1):
+            out.append(bool(e))
+        else:
+            return None
+    return out
+
+
+def _sig_comb(vs, conj):
+    """Elementweise all (conj) bzw. any mit NA wie R; Ergebnis als object-Feld aus True/False/None."""
+    n = len(vs[0]) if vs else 0
+    out = np.empty(n, dtype=object)
+    for i in range(n):
+        col = [v[i] for v in vs]
+        if conj:
+            out[i] = False if any(e is False for e in col) else (None if any(e is None for e in col) else True)
+        else:
+            out[i] = True if any(e is True for e in col) else (None if any(e is None for e in col) else False)
+    return out
 
 
 quiet_fp(globals(), __all__ + ["_roll_mean", "_roll_var", "_roll_cov", "_ema", "_sig_out"])

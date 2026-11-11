@@ -26,6 +26,7 @@ module RStats
 import ..SimLev
 import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict
 using Dates
+using Printf: @sprintf   # seit 1.6.4 (C-017, Meldung wie R bei fehlendem Speicher)
 
 export quantile, median, var, sd, cov, cor, cov2cor, scale, approx, approxfun,
        r_filter, optimize, hclust, dist,

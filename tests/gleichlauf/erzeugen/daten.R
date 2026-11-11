@@ -399,11 +399,7 @@ VOR <- list(r = r"()",
             jl = r"(const DP = SL.DataPrep; const BO = SL.Bonds)")
 
 ref_init("data_prep", gruppe = "gleichlauf")
-SZ("datum_umwandeln", ".to_date aus Faktor und POSIXct (Zeitzone)", vor = VOR, teile = list(
-  todate_factor = teil(
-    r"(SimLev:::.to_date(factor(c('2020-01-02', '2020-01-01', '2020-01-02'))))",
-    r"(result = DP._to_date(pd.Categorical(['2020-01-02', '2020-01-01', '2020-01-02'])))",
-    r"(result = DP._to_date(["2020-01-02", "2020-01-01", "2020-01-02"]))", inp = ein("data_prep/todate_factor", c())),
+SZ("datum_umwandeln", ".to_date aus POSIXct (Zeitzone); Faktor seit 1.6.4 Fehlerfall (Tabelle .to_date)", vor = VOR, teile = list(
   todate_posix = teil(
     r"(SimLev:::.to_date(as.POSIXct(c('2020-01-01 00:30', '2020-06-30 23:59'), tz = 'Europe/Berlin')))",
     r"(result = DP._to_date(pd.Series(pd.to_datetime(['2020-01-01 00:30', '2020-06-30 23:59'])).dt.tz_localize('Europe/Berlin')))",
@@ -465,9 +461,9 @@ SZ("reihen_pruefen", "series_check: Beispiel mit negativen Werten und einer Spal
     r"(result = DP.series_check(d))",
     r"(result = DP.series_check(d))", druck = TRUE, inp = ein("data_prep/cs_dates", c("d"))),
   cs_onlyna = teil(
-    r"(series_check(d, columns = c('C', 'C')))",
-    r"(result = DP.series_check(d, columns=['C', 'C']))",
-    r"(result = DP.series_check(d; columns = ["C", "C"]))", druck = TRUE, inp = ein("data_prep/cs_onlyna", c("d"))),
+    r"(series_check(d, columns = 'C'))",
+    r"(result = DP.series_check(d, columns=['C']))",
+    r"(result = DP.series_check(d; columns = ["C"]))", druck = TRUE, inp = ein("data_prep/cs_onlyna", c("d"))),
   cs_nocols = teil(
     r"(series_check(d, columns = character(0)))",
     r"(result = DP.series_check(d, columns=[]))",
@@ -587,7 +583,11 @@ TB(".to_date", "Meldungen und Warnungen von .to_date je Zeile (Eingabe -> Meldun
   zeile("todate_int",
     r"(SimLev:::.to_date(5L))",
     r"(result = DP._to_date(5))",
-    r"(result = DP._to_date(5))", inp = ein("data_prep/todate_int", c()))))
+    r"(result = DP._to_date(5))", inp = ein("data_prep/todate_int", c())),
+  zeile("todate_factor",   # seit 1.6.4 Fehler (Entscheidungen 15, 61; bis 1.6.3 Teil von datum_umwandeln, still als Text)
+    r"(SimLev:::.to_date(factor(c('2020-01-02', '2020-01-01', '2020-01-02'))))",
+    r"(result = DP._to_date(pd.Categorical(['2020-01-02', '2020-01-01', '2020-01-02'])))",
+    r"(result = DP._to_date(SL.RFmt.RFactor([2, 1, 2], ["2020-01-01", "2020-01-02"])))", inp = ein("data_prep/todate_factor", c()))))
 TB("series_align", "Meldungen und Warnungen von series_align je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("al_err_none",
     r"(series_align())",
@@ -604,7 +604,7 @@ TB("series_align", "Meldungen und Warnungen von series_align je Zeile (Eingabe -
   zeile("al_factor",
     r"(series_align(a = data.frame(date = dft$date, Kurs = factor(dft$kurs))))",
     r"(result = DP.series_align(a=pd.DataFrame(dict(date=dft['date'], Kurs=pd.Categorical(dft['kurs'])))))",
-    r"(result = DP.series_align(a = RFrame("date" => dft.date, "Kurs" => dft.kurs)))", inp = ein("data_prep/al_factor", c("dft"))),
+    r"(k = string.(dft.kurs); lv = sort(unique(k)); result = DP.series_align(a = RFrame("date" => dft.date, "Kurs" => SL.RFmt.RFactor([findfirst(==(x), lv) for x in k], lv))))", inp = ein("data_prep/al_factor", c("dft"))),
   zeile("al_nonum",
     r"(series_align(a = data.frame(date = dft$date, n = dft$name)))",
     r"(result = DP.series_align(a=pd.DataFrame(dict(date=dft['date'], n=dft['name']))))",
@@ -623,7 +623,11 @@ TB("series_check", "Meldungen und Warnungen von series_check je Zeile (Eingabe -
   zeile("cs_err",
     r"(series_check(data.frame(x = 1)))",
     r"(result = DP.series_check(pd.DataFrame(dict(x=[1.]))))",
-    r"(result = DP.series_check(RFrame("x" => [1.0])))", inp = ein("data_prep/cs_err", c()))))
+    r"(result = DP.series_check(RFrame("x" => [1.0])))", inp = ein("data_prep/cs_err", c())),
+  zeile("cs_err_dupcols",   # seit 1.6.4 Fehler (Entscheidung 53; bis 1.6.3 Teil cs_onlyna von reihen_pruefen)
+    r"(series_check(d, columns = c('C', 'C')))",
+    r"(result = DP.series_check(d, columns=['C', 'C']))",
+    r"(result = DP.series_check(d; columns = ["C", "C"]))", inp = ein("data_prep/cs_onlyna", c("d")))))
 TB("series_convert_currency", "Meldungen und Warnungen von series_convert_currency je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("cc_errcol",
     r"(series_convert_currency(d, c('USD', 'A', 'x'), fx = 'fx'))",
@@ -892,7 +896,7 @@ JL <- list(
   bc_linear = 'f = BC.backcast_fit(s, "etf", "idx"; ter = 0.2, model = "linear")\nresult = BC.backcast(f; rebase = 100)',
   bc_spline = 'f = BC.backcast_fit(s, "etf", "idx"; model = "spline", fx = "fx", validate = false)\nresult = BC.backcast(f)',
   bc_nofit = sprintf('result = BC.backcast(nothing; data = s, product = "etf", index = "idx", ter = %s, leverage = 2, rate = "rate", params = RList("drag" => 0.4), fill = "model")', TERJ),
-  bc_nofit_attr = paste0('bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric", unknown = 5)\n', ATTRJ),
+  bc_nofit_attr = paste0('bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric")\n', ATTRJ),
   bc_noprod = 's.etf = fill(NA, nrow(s))\nresult = BC.backcast(; data = s, product = "etf", index = "idx", fx = "fx", index_fill = "linear")',
   bc_lead = 's.idx[1:5] .= NA\nresult = BC.backcast(; data = s, product = "etf", index = "idx", rebase = 1)',
   bc_err_splice = 'result = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2030-01-01")',
@@ -1073,10 +1077,10 @@ SZ("rueckrechnung", "Kette backcast_fit (einmal gerechnet) -> backcast auf den e
     r"(s2 = rows(s, 1:1000); s2.etf[990:1000] .= NA
 result = BC.backcast(f; data = s2, fill = "model"))", druck = TRUE, inp = ein("backcast/bc_otherdata", c("s"))),
   bc_nofit_attr = teil(
-    r"(bc <- backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric', unknown = 5); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date')))",
-    r"(bc = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2006-01-01', lag=1, accrual='geometric', unknown=5)
+    r"(bc <- backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric'); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date')))",
+    r"(bc = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2006-01-01', lag=1, accrual='geometric')
 result = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date']))",
-    r"(bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric", unknown = 5)
+    r"(bc = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric")
 result = RList("bc" => bc, "params" => attrs(bc)["params"], "splice" => attrs(bc)["splice_date"]))", inp = ein("backcast/bc_nofit_attr", c("s"))),
   bc_noprod = teil(
     r"(s$etf <- NA; backcast(data = s, product = 'etf', index = 'idx', fx = 'fx', index_fill = 'linear'))",
@@ -1153,6 +1157,10 @@ result = BC.backcast_fit(s, 'etf', 'idx'))",
     r"(s.idx[10] = -1
 result = BC.backcast_fit(s, "etf", "idx"))", inp = ein("backcast/bf_err_idx", c("s")))))
 TB("backcast", "Meldungen und Warnungen von backcast je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("bc_err_unknown",   # seit 1.6.4 (Entscheidung 21; bis 1.6.3 im Teil bc_nofit_attr still übergangen)
+    r"(backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric', unknown = 5))",
+    r"(result = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2006-01-01', lag=1, accrual='geometric', unknown=5))",
+    r"(result = BC.backcast(; data = s, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, splice = "2006-01-01", lag = 1, accrual = "geometric", unknown = 5))", inp = ein("backcast/bc_nofit_attr", c("s"))),
   zeile("bc_err_splice",
     r"(backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2030-01-01'))",
     r"(result = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2030-01-01'))",

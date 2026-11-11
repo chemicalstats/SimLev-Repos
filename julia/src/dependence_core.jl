@@ -1,6 +1,6 @@
-# DependenceCore – .kendall_tau_core, .quantile_reg_core und .hmm_forward_backward aus
-# core/research_core_impl.h: geteilte C++-Kerne wie in R und Python über die C-ABI-Hülle
-# core/simlev_cabi.cpp (CAbi). Der frühere Julia-Port (samt der Nachbildung von libstdc++
+# DependenceCore – .kendall_tau_core, .quantile_reg_core, .hmm_em_core, .goal_dp und .pbo_cscv aus
+# core/research_core_impl.h (.hmm_forward_backward ohne Aufrufer im Paket entfällt seit 1.6.4): geteilte C++-Kerne
+# wie in R und Python über die C-ABI-Hülle core/simlev_cabi.cpp (CAbi). Der frühere Julia-Port (samt der Nachbildung von libstdc++
 # `std::sort` und dem NaN-genauen HMM-Weg) ist seit 1.2.0 entfallen, der Port des DCC-Filters seit
 # 1.0.0 (den DCC-Filter rechnet die C-Bibliothek slc, SimLev.SLib.dcc_filter). Gegenstück zu
 # python/simlev/_dependence_core.py.
@@ -9,7 +9,7 @@ module DependenceCore
 import ..SimLev
 using ..SimLev: CAbi, LIBSLC
 
-export kendall_tau_core, quantile_reg_core, hmm_forward_backward, hmm_em, goal_dp, pbo_cscv, QuantileRegError
+export kendall_tau_core, quantile_reg_core, hmm_em, goal_dp, pbo_cscv, QuantileRegError
 
 "Fehler aus dem Quantilsregressions-Kern (Rcpp `stop`)."
 struct QuantileRegError <: Exception
@@ -59,21 +59,6 @@ function quantile_reg_core(y, X, tau::Real, beta0, sc::Real, tol::Real, maxit::I
                      y, length(y), X, n, p, Float64(tau), beta, length(beta), Float64(sc), Float64(tol), Int(maxit),
                      out, opt), QuantileRegError)
     return out, opt[] == 1
-end
-
-"`.hmm_forward_backward(B, A, p0)` → RList `filtered`, `smoothed`, `xi`, `scale`."
-function hmm_forward_backward(B, A, p0)
-    Bm = _fmat(B); Am = _fmat(A); p0 = _fvec(p0)
-    T, K = size(Bm)
-    (T >= 1 && size(Am, 1) >= K && size(Am, 2) >= K && length(p0) >= K) ||
-        error("hmm_forward_backward: ungültige Abmessungen.")
-    al = Matrix{Float64}(undef, T, K); ga = Matrix{Float64}(undef, T, K); xi = Matrix{Float64}(undef, K, K)
-    cs = Vector{Float64}(undef, T)
-    CAbi.check(ccall((:simlev_c_hmm_forward_backward, LIBSLC), Cint,
-                     (Ptr{Float64}, Int64, Int64, Ptr{Float64}, Int64, Int64, Ptr{Float64}, Int64,
-                      Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}),
-                     Bm, T, K, Am, size(Am, 1), size(Am, 2), p0, length(p0), al, ga, xi, cs))
-    SimLev.RList("filtered" => al, "smoothed" => ga, "xi" => xi, "scale" => cs)
 end
 
 """

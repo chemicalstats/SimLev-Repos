@@ -27,20 +27,6 @@ from ._r import fmt as _fmt
 __all__: list[str] = []
 
 
-def _show(x):
-    """``paste(format(x), collapse = ", ")``; ``None`` steht für ``NA``."""
-    if x is None:
-        return "NA"
-    if isinstance(x, (list, tuple)):
-        x = np.asarray(x, dtype=object if any(isinstance(v, str) or v is None for v in x) else None)
-    if isinstance(x, np.ndarray) and x.dtype == object:
-        return ", ".join("NA" if v is None else str(v) for v in x.ravel())
-    r = _fmt.format(x)
-    if isinstance(r, str):
-        return r
-    return ", ".join(str(s) for s in np.asarray(r, dtype=object).ravel())
-
-
 def _ms_garch_check(K, model):
     """Varianzmodell und Regimezahl der MS-GARCH-Schätzung prüfen (``.ms_garch_check``)."""
     m = model
@@ -51,17 +37,17 @@ def _ms_garch_check(K, model):
     ok_m = (len(mv) == 1 and isinstance(mv[0], str) and mv[0] in ("sGARCH", "gjrGARCH"))
     if not ok_m:
         raise ValueError("MS-GARCH: Varianzmodell je Regime (params ms_garch_model, ms_ar_garch_model bzw. "
-                         "tvtp_garch_model) muss \"sGARCH\" oder \"gjrGARCH\" sein (erhalten: %s)." % _show(model))
+                         "tvtp_garch_model) muss \"sGARCH\" oder \"gjrGARCH\" sein.")   # seit 1.6.4 ohne Wert
     kv = K if isinstance(K, (list, tuple, np.ndarray)) else [K]
     kv = list(np.asarray(kv, dtype=object).ravel())
     ok_k = (len(kv) == 1 and isinstance(kv[0], (int, float, np.integer, np.floating))
             and not isinstance(kv[0], (bool, np.bool_)))
     if ok_k:
         k0 = float(kv[0])
-        ok_k = math.isfinite(k0) and k0 == float(_fmt.r_round(k0)) and k0 >= 2
+        ok_k = math.isfinite(k0) and k0 == float(_fmt.r_round(k0)) and 2 <= k0 <= 64   # seit 1.6.4 bis 64 (B-097)
     if not ok_k:
         raise ValueError("MS-GARCH: Anzahl Regime (params ms_n_regimes, ms_ar_n_regimes bzw. tvtp_n_regimes) "
-                         "muss eine ganze Zahl >= 2 sein (erhalten: %s)." % _show(K))
+                         "muss eine ganze Zahl >= 2 und <= 64 sein.")   # seit 1.6.4 ohne Wert
     return True
 
 

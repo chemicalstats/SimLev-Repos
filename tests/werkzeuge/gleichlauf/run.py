@@ -59,7 +59,8 @@
 #                              mom, eigen, clust, vec, cor, padj, fmt (1.6.0), prec (1.6.2: expm1/log1p, CAGR,
 #                              Periodenaggregation, Copula-Dichte, Fehler in ulp gegen Rmpfr); eigen seit 1.6.2 zusätzlich
 #                              gegen eine hochgenaue Rechnung (Rmpfr). Seit 1.6.2 alle gegen eine Fassung (R 1.6.2, seit 1.6.3 R
-#                              1.6.3; bis 1.6.1 gegen R 1.3.0 bis 1.5.2, je Familie die Fassung vor ihrem Umbau)
+#                              1.6.3, seit 1.6.4 R 1.6.4; bis 1.6.1 gegen R 1.3.0 bis 1.5.2, je Familie die Fassung vor ihrem
+#                              Umbau)
 # 6 Abdeckung der Exporte durch die Katalogfälle (exporte.py). Ende 1, wenn eine Sprache abweicht, ein Schritt
 # scheitert, R vom Katalog abweicht oder core/sync.py --check abweicht. Läufe nie parallel im selben Arbeitsordner.
 # Python 3.10 oder neuer, nur Standardbibliothek.
@@ -92,7 +93,7 @@ MODUS = {
 # Referenz der Vorversion (seit 1.6.2 nur eine): Kennung -> (Fassung, Umgebungsvariable der Bibliothek, Standard).
 # Die Bibliothek wird nur von --ref-erzeugen gelesen; der übliche Lauf liest die abgelegten Ausgaben unter REFDIR/K.
 REFLIBS = {
-    "163": ("1.6.3", "SIMLEV_FUZZ_REFLIB163", "/home/claude/rlib163"),
+    "164": ("1.6.4", "SIMLEV_FUZZ_REFLIB164", "/home/claude/rlib164"),
 }
 # Julia: Bau ohne Grenze; die Vergleiche mit --heap-size-hint=2G (JULIA_VGL). Der Vergleich liest seit 1.6.3 Fall für
 # Fall, ein Prozess prüft aber alle FUZZ_REF-Familien; ohne Grenze wuchs er bei --full bis 4 GB und wurde neben R
@@ -103,35 +104,35 @@ REFDIR_VAR, REFDIR_STANDARD = "SIMLEV_GLEICHLAUF_REF", "/home/claude/gleichlauf_
 # Zufallsprüfungen mit abgelegter Referenz, in dieser Reihenfolge:
 # (Name: tests/werkzeuge/gleichlauf/<name>_fuzz.R, Fälle quick, Fälle full, Startwert, Referenz aus REFLIBS)
 FUZZ_REF = [
-    ("sim", 300, 2000, 20261101, "163"),      # simulation() (seit 1.4.0)
-    ("sched", 300, 2000, 20261102, "163"),    # Termine, Kalender, Flags der Vorbereitung im Kern (seit 1.4.0)
-    ("metric", 300, 2000, 20261103, "163"),   # Kennzahlen, Auswertung im Kern (seit 1.4.0)
+    ("sim", 300, 2000, 20261101, "164"),      # simulation() (seit 1.4.0)
+    ("sched", 300, 2000, 20261102, "164"),    # Termine, Kalender, Flags der Vorbereitung im Kern (seit 1.4.0)
+    ("metric", 300, 2000, 20261103, "164"),   # Kennzahlen, Auswertung im Kern (seit 1.4.0)
     # in 1.5.0 in den Kern verlagerte Teile (approx, Entnahme-Auswertung, HMM-EM, Zielplanung, CSCV)
-    ("approx", 300, 2000, 20261104, "163"),
-    ("wd", 300, 2000, 20261105, "163"),
-    ("hmm", 300, 2000, 20261106, "163"),
-    ("goal", 300, 2000, 20261107, "163"),
-    ("pbo", 300, 2000, 20261108, "163"),
-    ("nav", 300, 2000, 20261109, "163"),
-    ("rolling", 300, 2000, 20261110, "163"),
-    ("study", 300, 2000, 20261111, "163"),
-    ("libm", 300, 2000, 20261112, "163"),     # in 1.5.2 schneller in Python (libm in C, Ränge, Dubletten, Trigger)
+    ("approx", 300, 2000, 20261104, "164"),
+    ("wd", 300, 2000, 20261105, "164"),
+    ("hmm", 300, 2000, 20261106, "164"),
+    ("goal", 300, 2000, 20261107, "164"),
+    ("pbo", 300, 2000, 20261108, "164"),
+    ("nav", 300, 2000, 20261109, "164"),
+    ("rolling", 300, 2000, 20261110, "164"),
+    ("study", 300, 2000, 20261111, "164"),
+    ("libm", 300, 2000, 20261112, "164"),     # in 1.5.2 schneller in Python (libm in C, Ränge, Dubletten, Trigger)
     # in 1.6.0 (K38a) in den Kern verlagert bzw. beschleunigt: Kalenderauffüllung (cal), Pfadaufbau im Bootstrap (boot),
     # t-Copula, optimize und qt/pt auf Threads (copula), Momentum-Scores (mom), Eigenzerlegung (eigen; seit 1.6.2
     # Householder + QL, dazu Genauigkeit gegen Rmpfr)
-    ("cal", 300, 2000, 20261113, "163"),
-    ("boot", 300, 2000, 20261114, "163"),
-    ("copula", 300, 2000, 20261115, "163"),
-    ("mom", 300, 2000, 20261116, "163"),
-    ("eigen", 300, 2000, 20261117, "163"),
+    ("cal", 300, 2000, 20261113, "164"),
+    ("boot", 300, 2000, 20261114, "164"),
+    ("copula", 300, 2000, 20261115, "164"),
+    ("mom", 300, 2000, 20261116, "164"),
+    ("eigen", 300, 2000, 20261117, "164"),
     # in 1.6.0 in den Kern verlagerte R-Nachbildungen (K38b; approx_fuzz.R erweitert um filter und regularize.values)
-    ("clust", 300, 2000, 20261118, "163"),    # dist, hclust (core/slc_rbase_clust.cpp)
-    ("vec", 300, 2000, 20261119, "163"),      # cut/.bincode, seq.int, median, sort (core/slc_rbase_vec.cpp)
-    ("cor", 300, 2000, 20261120, "163"),      # cor/cov mit Rängen, cov2cor, scale (core/slc_rbase_cor.cpp)
-    ("padj", 300, 2000, 20261121, "163"),     # p.adjust, ecdf (core/slc_rbase_models.cpp)
-    ("fmt", 300, 2000, 20261122, "163"),      # sprintf, formatC, format, round/signif (core/slc_rbase_fmt.cpp)
+    ("clust", 300, 2000, 20261118, "164"),    # dist, hclust (core/slc_rbase_clust.cpp)
+    ("vec", 300, 2000, 20261119, "164"),      # cut/.bincode, seq.int, median, sort (core/slc_rbase_vec.cpp)
+    ("cor", 300, 2000, 20261120, "164"),      # cor/cov mit Rängen, cov2cor, scale (core/slc_rbase_cor.cpp)
+    ("padj", 300, 2000, 20261121, "164"),     # p.adjust, ecdf (core/slc_rbase_models.cpp)
+    ("fmt", 300, 2000, 20261122, "164"),      # sprintf, formatC, format, round/signif (core/slc_rbase_fmt.cpp)
     # seit 1.6.2: genauere Formeln (expm1/log1p, CAGR, Periodenaggregation, Copula-Dichte), Fehler in ulp gegen Rmpfr
-    ("prec", 300, 2000, 20261123, "163"),
+    ("prec", 300, 2000, 20261123, "164"),
 ]
 # Protokolle der Zusammenfassung (Schritt 7) mit Zeilen nach MUSTER; danach je FUZZ_REF fz_<name>_{r,py,jl}
 ZUSAMMENFASSUNG = ["faelle_diff", "fz_date_py", "fz_date_jl", "fz_rbase_py", "fz_rbase_jl", "fz_tariff"]

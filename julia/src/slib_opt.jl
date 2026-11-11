@@ -36,11 +36,13 @@ function _opt_method(method)
 end
 
 # Steuerwerte wie in R (.sl_opt_control): Nelder-Mead maxit = Funktionsauswertungen,
-# L-BFGS-B factr (reltol = factr * eps, Standard 1e7) und pgtol (= gtol)
+# L-BFGS-B factr (reltol = factr * eps, Standard 1e7) und pgtol (= gtol). Abweichung von optim: maxit = 0 bzw.
+# maxfev = 0 heißt hier „ohne Grenze“ (kein Aufruf im Paket nutzt 0).
 function _opt_control(control, m::Int, n::Int)
     ctl = Dict{String,Any}(String(k) => v for (k, v) in pairs(control === nothing ? Dict{String,Any}() : control))
-    bad = [k for k in keys(ctl) if !(k in _OPT_KNOWN)]
-    isempty(bad) || error("optim: unbekannte Steuerwerte " * join(["'$k'" for k in sort(bad)], ", "))
+    # seit 1.6.4 (B-028) in der Reihenfolge der Angabe wie R und Python (bis 1.6.3 sortiert)
+    bad = String[String(k) for (k, _) in pairs(control === nothing ? Dict{String,Any}() : control) if !(String(k) in _OPT_KNOWN)]
+    isempty(bad) || error("optim: unbekannte Steuerwerte " * join(["'$k'" for k in bad], ", "))
     function num1(k, def)
         v = get(ctl, k, nothing)
         v === nothing && return Float64(def)
@@ -58,6 +60,10 @@ function _opt_control(control, m::Int, n::Int)
                  num1("reltol", m == 2 ? 1e7 * _EPS : sqrt(_EPS))
     end
     gtol = num1("gtol", num1("pgtol", 1e-8))
+    # seit 1.6.4 (B-028, Entscheidung 76): maxit/maxfev im Bereich von int (bis 1.6.3 InexactError)
+    for (k, v) in (("maxit", maxit), ("maxfev", maxfev))
+        -2147483648.0 <= v <= 2147483647.0 || parentmodule(@__MODULE__).chk_stop("sp.optim_ganz", "optim", k)
+    end
     ps = get(ctl, "parscale", nothing)
     if ps !== nothing
         p = Float64.(vec(collect(ps)))
@@ -72,7 +78,9 @@ _opt_ctrl(c, ps) = OptCtrl(c[1], c[2], c[3], c[4], c[5], c[6], ps === nothing ? 
 _bounds(b, n) = (v = Float64.(vec(collect(b))); length(v) == n ? v : [v[mod1(i, length(v))] for i in 1:n])
 
 function _fscalar(v)
-    (v === missing || v === nothing) && return NaN
+    v === nothing &&   # seit 1.6.4 wie R NULL (Länge 0) ein Fehler (B-028, Entscheidung 76; bis 1.6.3 NaN)
+        error("optim: die Zielfunktion muss eine Zahl liefern (erhalten: Länge 0)")
+    v === missing && return NaN
     v isa AbstractArray && (length(v) == 1 || error("optim: die Zielfunktion muss eine Zahl liefern (erhalten: Länge $(length(v)))"); v = first(v))
     v isa Real || error("optim: die Zielfunktion muss eine Zahl liefern (erhalten: Länge 1)")
     Float64(v)

@@ -31,10 +31,10 @@ Median-Regression).}
 
 \item{tol}{Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich
 kein Koeffizient um mehr als \code{tol * (1 + max|beta|)} aendert (in
-den ersten drei Stufen wird hoechstens 1e-7 verlangt). Standard 1e-10.}
+den ersten drei Stufen wird hoechstens 1e-7 verlangt). Standard 1e-10. Seit 1.6.4 eine Zahl > 0.}
 
 \item{maxit}{Hoechstzahl der Iterationen je MM-Stufe (ganze Zahl,
-Standard 2000).}
+Standard 2000). Seit 1.6.4 hoechstens 10^8.}
 }
 \value{
 Benannter numerischer Koeffizientenvektor in der Einheit von

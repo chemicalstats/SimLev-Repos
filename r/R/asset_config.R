@@ -115,32 +115,35 @@ asset_config <- function(
   # Zahlen muessen Zahlen sein (kein Text wie "0.5"), Prozentangaben plausibel
   .num1 <- function(x, arg) {
     if (!is.numeric(x) || length(x) != 1L || is.na(x))
-      stop(sprintf("asset_config: %s muss eine einzelne Zahl sein, nicht %s.", arg, paste(deparse(x), collapse = "")))
+      stop(sprintf("asset_config: %s muss eine einzelne Zahl sein.", arg))   # seit 1.6.4 ohne Eingabewert
   }
   .num1(share, "share"); .num1(spread, "spread"); .num1(partial_exemption, "partial_exemption")
 
-  if (share <= 0 || share > 1) {   # C7-04: Wert und Hinweis auf die Anteil-Konvention nennen
-    stop(sprintf("asset_config: share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein (z. B. 0.6 f\u00fcr 60 %%), nicht %s%s.",
-                 format(share), if (share > 1 && share <= 100)
-                   sprintf("; f\u00fcr %s %% share = %s angeben", format(share), format(share / 100)) else ""))
+  if (share <= 0 || share > 1) {   # C7-04: Hinweis auf die Anteil-Konvention (seit 1.6.4 ohne Eingabewert)
+    # bei 1 < share <= 100 wertfreier Hinweis (Entscheidung 12; seit 1.6.4, K43 KE)
+    stop(paste0("asset_config: share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein (z. B. 0.6 f\u00fcr 60 %)",
+                if (share > 1 && share <= 100) chk_msg("ke.prozent_teilen") else "", "."))
   }
   
   if (spread < 0) {
-    stop(sprintf("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 f\u00fcr 0,1 %%), nicht %s.", format(spread)))
+    stop("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 f\u00fcr 0,1 %).")
   }
+  if (spread == Inf) chk_stop("zahl", "asset_config", "spread")   # seit 1.6.4: Spread endlich (bis 1.6.3 still angenommen)
   
   if (partial_exemption < 0 || partial_exemption > 100) {
-    stop(sprintf("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 f\u00fcr 30 %%), nicht %s.", format(partial_exemption)))
+    stop("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 f\u00fcr 30 %).")
   }
   if (partial_exemption > 0 && partial_exemption < 1)
     warning(sprintf("asset_config: partial_exemption = %s wird als %s %% Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
                     format(partial_exemption), format(partial_exemption), format(partial_exemption * 100)), call. = FALSE)
 
   if (!is.null(start)) {
-    st <- if (length(start) == 1L) tryCatch(as.Date(start), error = function(e) NA) else NA
-    if (length(st) != 1L || is.na(st))
-      stop(sprintf("asset_config: start = %s ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").",
-                   paste(deparse(start), collapse = "")))
+    # seit 1.6.4 nur Date, Datum-Uhrzeit oder Text (bis 1.6.3 auch Zahlen als Tage seit 1970, Faktoren und +-Inf;
+    # Entscheidung 7); Meldung ohne Eingabewert
+    st <- if (length(start) == 1L && (inherits(start, c("Date", "POSIXt")) || is.character(start)))
+            tryCatch(as.Date(start), error = function(e) NA) else NA
+    if (length(st) != 1L || !is.finite(unclass(st)))
+      stop("asset_config: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
     start <- st
   }
   
@@ -151,10 +154,15 @@ asset_config <- function(
   # Fonds-Wrapper: keine Signale auf den Anteilswert
   if (!is.null(wrapper)) {
     if (!inherits(wrapper, "SimLevWrapperConfig"))
-      stop(sprintf("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht %s.",
-                   paste(class(wrapper), collapse = "/")))
+      stop("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein.")
     if (trading == "signal") stop(.ac_msg_wrapper_signal)
   }
+
+  # seit 1.6.4: Signalspalten als einzelner Name, deliverable nur TRUE/FALSE (bis 1.6.3 ungeprueft: Zahlen,
+  # Vektoren und Text liefen durch, deliverable = 1 galt in R als TRUE, Text "FALSE" in Python als wahr)
+  chk_name1(signal_buy, "asset_config", "signal_buy", null_ok = TRUE)
+  chk_name1(signal_sell, "asset_config", "signal_sell", null_ok = TRUE)
+  chk_bool1(deliverable, "asset_config", "deliverable")
 
   # Steuerregime ableiten
   if (is.null(tax_regime)) {
@@ -166,9 +174,9 @@ asset_config <- function(
     )
   } else {
     valid_regimes <- c("investment_fund", "capital_gains", "private_sale")
-    if (!tax_regime %in% valid_regimes) {
-      stop(sprintf("asset_config: tax_regime = %s ist ung\u00fcltig; erlaubt sind %s (oder NULL: aus asset_class abgeleitet).",
-                   paste(deparse(tax_regime), collapse = ""), paste(valid_regimes, collapse = ", ")))
+    if (!(is.character(tax_regime) && length(tax_regime) == 1L && tax_regime %in% valid_regimes)) {   # seit 1.6.4 Laenge 1
+      stop(sprintf("asset_config: tax_regime ist ung\u00fcltig; erlaubt sind %s (oder NULL: aus asset_class abgeleitet).",
+                   paste(valid_regimes, collapse = ", ")))
     }
   }
   

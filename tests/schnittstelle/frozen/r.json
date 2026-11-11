@@ -1,6 +1,6 @@
 {
  "language": "R",
- "stand": "2026-11-04 – 1.6.3: WithdrawalPathsPB entfällt",
+ "stand": "2026-11-08 – 1.6.4: Standard cores auto (Planer)",
  "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -64,7 +64,7 @@
    {"name": "path_length", "kind": "arg", "default": "NULL"},
    {"name": "max_tries", "kind": "arg", "default": "10L"},
    {"name": "seed", "kind": "arg", "default": "NULL"},
-   {"name": "cores", "kind": "arg", "default": "1L"},
+   {"name": "cores", "kind": "arg", "default": "\"auto\""},
    {"name": "progress", "kind": "arg", "default": "TRUE"}
   ],
   "bootstrap_block_length": [
@@ -127,7 +127,7 @@
    {"name": "max_tries", "kind": "arg", "default": "10L"},
    {"name": "chunk_size", "kind": "arg", "default": "25L"},
    {"name": "seed", "kind": "arg", "default": "NULL"},
-   {"name": "cores", "kind": "arg", "default": "1L"},
+   {"name": "cores", "kind": "arg", "default": "\"auto\""},
    {"name": "progress", "kind": "arg", "default": "TRUE"}
   ],
   "bootstrap_study_metrics": [
@@ -311,7 +311,7 @@
    {"name": "maximize", "kind": "arg", "default": "TRUE"},
    {"name": "keep_returns", "kind": "arg", "default": "c(\"day\", \"none\")", "match_arg": true},
    {"name": "seed", "kind": "arg", "default": "NULL"},
-   {"name": "cores", "kind": "arg", "default": "1L"}
+   {"name": "cores", "kind": "arg", "default": "\"auto\""}
   ],
   "param_space": [
    {"name": "...", "kind": "dots", "default": null}
@@ -334,7 +334,7 @@
    {"name": "horizon", "kind": "arg", "default": "10"},
    {"name": "step", "kind": "arg", "default": "1"},
    {"name": "sim_args", "kind": "arg", "default": "list()"},
-   {"name": "cores", "kind": "arg", "default": "1L"}
+   {"name": "cores", "kind": "arg", "default": "\"auto\""}
   ],
   "portfolio_cpcv": [
    {"name": "x", "kind": "arg", "default": null},
@@ -506,7 +506,7 @@
    {"name": "sim_args", "kind": "arg", "default": "list()"},
    {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
    {"name": "keep_results", "kind": "arg", "default": "FALSE"},
-   {"name": "cores", "kind": "arg", "default": "1L"}
+   {"name": "cores", "kind": "arg", "default": "\"auto\""}
   ],
   "sensitivity_leverage": [
    {"name": "data", "kind": "arg", "default": null},
@@ -518,7 +518,7 @@
    {"name": "strategy", "kind": "arg", "default": "NULL"},
    {"name": "sim_args", "kind": "arg", "default": "list()"},
    {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
-   {"name": "cores", "kind": "arg", "default": "1L"}
+   {"name": "cores", "kind": "arg", "default": "\"auto\""}
   ],
   "sensitivity_rebalancing": [
    {"name": "data", "kind": "arg", "default": null},
@@ -530,7 +530,7 @@
    {"name": "include_none", "kind": "arg", "default": "TRUE"},
    {"name": "sim_args", "kind": "arg", "default": "list()"},
    {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
-   {"name": "cores", "kind": "arg", "default": "1L"}
+   {"name": "cores", "kind": "arg", "default": "\"auto\""}
   ],
   "series_align": [
    {"name": "...", "kind": "dots", "default": null},
@@ -598,7 +598,8 @@
    {"name": "effective", "kind": "arg", "default": "TRUE"},
    {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
    {"name": "dates", "kind": "arg", "default": "NULL"},
-   {"name": "risk_free", "kind": "arg", "default": "0"}
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "rho_method", "kind": "arg", "default": "c(\"cor\", \"linear\")", "match_arg": true}
   ],
   "sharpe_haircut": [
    {"name": "x", "kind": "arg", "default": null},

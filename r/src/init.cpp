@@ -25,7 +25,6 @@ extern SEXP C_qp_box_simplex(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_min_cvar_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_min_cdar_core(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_quantile_reg_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
-extern SEXP C_hmm_forward_backward(SEXP, SEXP, SEXP);
 extern SEXP C_hmm_em_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_goal_dp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_wrapper_nav_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
@@ -95,6 +94,14 @@ extern SEXP C_sl_opt_result(SEXP);
 extern SEXP C_sl_opt_testfn(SEXP, SEXP, SEXP);
 extern SEXP C_sl_opt_minimize_test(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_numgrad_test(SEXP, SEXP, SEXP, SEXP);
+/* slc_r_stats.cpp (Statistikwege cov/cor/var, approx, filter, dist, hclust, optimize; seit 1.6.4) */
+extern SEXP C_sl_r_corcov(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_r_approx(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_r_cfilter(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_r_rfilter(SEXP, SEXP, SEXP);
+extern SEXP C_sl_r_dist(SEXP, SEXP, SEXP);
+extern SEXP C_sl_r_hclust(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_fmin(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 /* slc_r_models.cpp (Modelle der C-Bibliothek slc: GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne) */
 extern SEXP C_sl_garch11_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_nll(SEXP, SEXP, SEXP, SEXP);
@@ -137,6 +144,13 @@ extern SEXP C_sl_mom_score(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_boot_path(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_pt_mt(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_qt_mt(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_nprocs(void);
+extern SEXP C_sl_mem_avail(void);
+extern SEXP C_sl_mem_self(void);
+extern SEXP C_sl_par_probe(SEXP, SEXP);
+extern SEXP C_sl_load_running(void);
+extern SEXP C_sl_child_guard(SEXP);
+extern SEXP C_sl_par_plan(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_tcop_fit(SEXP, SEXP, SEXP);
 extern SEXP C_sl_tcop_nu(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 
@@ -147,7 +161,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"min_cvar_core", (DL_FUNC) &C_min_cvar_core, 8},
     {"min_cdar_core", (DL_FUNC) &C_min_cdar_core, 5},
     {"quantile_reg_core", (DL_FUNC) &C_quantile_reg_core, 7},
-    {"hmm_forward_backward", (DL_FUNC) &C_hmm_forward_backward, 3},
     {"hmm_em_core", (DL_FUNC) &C_hmm_em_core, 8},
     {"goal_dp", (DL_FUNC) &C_goal_dp, 8},
     {"pbo_cscv", (DL_FUNC) &C_pbo_cscv, 7},
@@ -206,6 +219,14 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_opt_testfn", (DL_FUNC) &C_sl_opt_testfn, 3},
     {"sl_opt_minimize_test", (DL_FUNC) &C_sl_opt_minimize_test, 8},
     {"sl_numgrad_test", (DL_FUNC) &C_sl_numgrad_test, 4},
+    /* slc_r_stats.cpp */
+    {"sl_r_corcov", (DL_FUNC) &C_sl_r_corcov, 5},
+    {"sl_r_approx", (DL_FUNC) &C_sl_r_approx, 8},
+    {"sl_r_cfilter", (DL_FUNC) &C_sl_r_cfilter, 4},
+    {"sl_r_rfilter", (DL_FUNC) &C_sl_r_rfilter, 3},
+    {"sl_r_dist", (DL_FUNC) &C_sl_r_dist, 3},
+    {"sl_r_hclust", (DL_FUNC) &C_sl_r_hclust, 4},
+    {"sl_fmin", (DL_FUNC) &C_sl_fmin, 7},
     /* slc_r_models.cpp */
     {"sl_garch11_filter", (DL_FUNC) &C_sl_garch11_filter, 6},
     {"sl_garch11_nll", (DL_FUNC) &C_sl_garch11_nll, 4},
@@ -259,6 +280,13 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_boot_path", (DL_FUNC) &C_sl_boot_path, 8},
     {"sl_pt_mt", (DL_FUNC) &C_sl_pt_mt, 4},
     {"sl_qt_mt", (DL_FUNC) &C_sl_qt_mt, 4},
+    {"sl_nprocs", (DL_FUNC) &C_sl_nprocs, 0},
+    {"sl_mem_avail", (DL_FUNC) &C_sl_mem_avail, 0},
+    {"sl_mem_self", (DL_FUNC) &C_sl_mem_self, 0},
+    {"sl_par_probe", (DL_FUNC) &C_sl_par_probe, 2},
+    {"sl_load_running", (DL_FUNC) &C_sl_load_running, 0},
+    {"sl_child_guard", (DL_FUNC) &C_sl_child_guard, 1},
+    {"sl_par_plan", (DL_FUNC) &C_sl_par_plan, 10},
     {"sl_tcop_fit", (DL_FUNC) &C_sl_tcop_fit, 3},
     {"sl_tcop_nu", (DL_FUNC) &C_sl_tcop_nu, 7},
     {NULL, NULL, 0}

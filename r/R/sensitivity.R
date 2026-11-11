@@ -8,6 +8,46 @@
 #  sensitivity_leverage()     Kennzahlen ueber den Hebel, optimaler Hebel
 # =============================================================================
 
+
+# Einheitliche Eingabepruefung (seit 1.6.4): data und strategy, die an simulation() gehen, frueh mit den Meldungen
+# von simulation() (sim_validate.R) pruefen; sim_args als Liste, metrics als Funktion, cores als ganze Zahl >= 1.
+.sens_check_sim <- function(data, strategy) {
+  if (!is.data.frame(data))
+    stop(sprintf("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).",
+                 chk_msg("tabelle.formen")))
+  .e2_check_strategy(strategy)
+  invisible(NULL)
+}
+# strategy wie simulation() (sim_validate.R): nicht leer, alle Assets benannt; gleiche Meldungen
+.e2_check_strategy <- function(strategy) {
+  if (length(strategy) == 0)
+    stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()).")
+  if (is.null(names(strategy)) || any(is.na(names(strategy)) | names(strategy) == ""))
+    stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
+  invisible(NULL)
+}
+.sens_check_common <- function(fn, sim_args, cores, metrics = mean, check_metrics = TRUE) {
+  if (!is.null(sim_args) && !is.list(sim_args)) chk_stop("liste", fn, "sim_args")
+  if (check_metrics && !is.function(metrics)) chk_stop("e2.funktion", fn, "metrics")
+  chk_cores(cores, fn)   # seit 1.6.4 hoechstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b); Ergebnis: cores
+}
+# Hebelreihe: data mit date und Indexspalte, Hebel, Zins, Kosten (series_leverage, sensitivity_leverage)
+.lev_check <- function(fn, data, index, rate, expense, spread) {
+  chk_df(data, fn, "data")
+  chk_name1(index, fn, "index")
+  chk_cols(data, c("date", index), fn)
+  chk_col_nofactor(data, "date", fn)   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
+  chk_col_nofactor(data, index, fn)   # Entscheidung 15
+  chk_col_type(data, index, fn, "numerisch")
+  if (is.numeric(rate) && length(rate) == 1L) chk_num1(rate, fn, "rate")
+  else if (is.character(rate) && length(rate) == 1L && !is.na(rate) && rate %in% names(data)) {
+    chk_col_nofactor(data, rate, fn); chk_col_type(data, rate, fn, "numerisch") }
+  else chk_nofactor(rate, fn, "rate")
+  chk_num1(expense, fn, "expense")
+  chk_num1(spread, fn, "spread")
+  invisible(NULL)
+}
+
 #' simulation() ueber ein Parameterraster
 #'
 #' Ruft [simulation()] fuer jede Kombination von \code{grid} auf denselben
@@ -43,7 +83,21 @@
 #'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.
 #' @param metrics Funktion \code{SimLevResult -> benannter numerischer Vektor}
 #'   (Standard [bootstrap_study_metrics()]).
-#' @param cores Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+#'   Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen keiner festen Spalte des
+#'   Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
+#' @param cores Anzahl Prozesse (Fork auf Unix, PSOCK auf Windows):
+#'   \code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+#'   Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+#'   dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+#'   Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+#'   viele, wie der freie Speicher traegt, und
+#'   nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+#'   einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+#'   erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+#'   Eine feste Zahl rechnet wie bis 1.6.3; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
+#'   begrenzt.
+#'   Das Ergebnis haengt nicht von cores ab.
+#'   Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
 #' @param keep_results Logisch (Standard \code{FALSE}): Ergebnisse der Laeufe
 #'   zusaetzlich als Attribut \code{results} zurueckgeben.
 #' @return data.frame: Rasterspalten (Listen-Spalten als Text "a/b"), die
@@ -66,10 +120,20 @@
 #'   [bootstrap_study_metrics()], [simulation()]
 #' @export
 sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = bootstrap_study_metrics,
-                             keep_results = FALSE, cores = 1L) {
+                             keep_results = FALSE, cores = "auto") {
   own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
+  .sens_check_sim(data, strategy)
+  # grid: data.frame oder benannte Liste (vorher nannte R bei unbenannten Elementen "Var1")
+  if (!is.data.frame(grid) && (!is.list(grid) || !length(grid) || is.null(names(grid)) || anyNA(names(grid)) ||
+                               any(names(grid) == "")))
+    chk_stop("e2.benannt", "sensitivity_grid", "grid")
+  if (anyDuplicated(names(grid))) chk_stop("e2.doppelt", "sensitivity_grid", "grid")
+  if (is.data.frame(grid)) for (k in names(grid)) chk_col_nofactor(grid, k, "sensitivity_grid")   # Entscheidung 15
+  else for (k in names(grid)) if (is.factor(grid[[k]])) chk_stop("faktor", "sensitivity_grid", sprintf("grid$%s", k))
+  cores <- .sens_check_common("sensitivity_grid", sim_args, cores, metrics)
+  chk_bool1(keep_results, "sensitivity_grid", "keep_results")
   design <- if (is.data.frame(grid)) grid else expand.grid(grid, stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
-  if (!nrow(design)) stop("Leeres Raster.")
+  if (!nrow(design)) chk_stop("rs.raster_leer", "sensitivity_grid")
   .sim_check_names(names(design), "sensitivity_grid")   # Argumente von simulation() bzw. Pfade wie "dca.value"
   sim_args <- .sim_args_set(list(), sim_args, "sensitivity_grid")
   run <- function(i) {
@@ -87,6 +151,9 @@ sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = 
     stop(sprintf("sensitivity_grid: Alle %d L\u00e4ufe fehlgeschlagen: %s", length(out),
                  paste(sprintf("%s (%d x)", names(err), as.integer(err)), collapse = "; ")), call. = FALSE)
   }
+  # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
+  # Spalte des Rasters bzw. error; geprueft nach dem Rechnen, bei jedem cores gleich
+  for (m in okm) chk_kennzahlen(names(m), length(m), c(names(design), "error"), "sensitivity_grid")
   mnames <- names(okm[[1]])
   M <- t(vapply(out, function(o) if (is.null(o$m)) rep(NA_real_, length(mnames)) else o$m[mnames], numeric(length(mnames))))
   if (length(mnames) == 1) M <- t(M)
@@ -162,9 +229,24 @@ sensitivity_rebalancing <- function(data, strategy,
                                                        quarterly = c("quarter", 1), four_monthly = c("month", 4),
                                                        semiannual = c("month", 6), yearly = c("year", 1)),
                                     offsets = NULL, bands = NA, band_type = c("absolute", "relative"),
-                                    include_none = TRUE, sim_args = list(), metrics = bootstrap_study_metrics, cores = 1L) {
+                                    include_none = TRUE, sim_args = list(), metrics = bootstrap_study_metrics, cores = "auto") {
   own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
+  .e5_choice(band_type, c("absolute", "relative"), "sensitivity_rebalancing", "band_type")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   band_type <- match.arg(band_type)
+  fn <- "sensitivity_rebalancing"
+  .sens_check_sim(data, strategy)
+  if (!is.list(frequencies) || !length(frequencies) || is.null(names(frequencies)) || anyNA(names(frequencies)) ||
+      any(names(frequencies) == ""))
+    chk_stop("e2.benannt", fn, "frequencies")
+  for (k in names(frequencies)) if (length(frequencies[[k]]) != 2L) chk_stop("e2.frequenz", fn, k)
+  if (!is.null(offsets) && !(is.numeric(offsets) && length(offsets) >= 1L && all(is.finite(offsets)) &&
+                             all(offsets == trunc(offsets)) && all(offsets >= 0)))
+    chk_stop("ganz_vektor", fn, "offsets", chk_range_text(lo = 0))
+  if (!((is.numeric(bands) || (is.logical(bands) && all(is.na(bands)))) && length(bands) >= 1L &&
+        all(is.na(bands) | (is.finite(bands) & bands >= 0))))
+    chk_stop("e2.zahlen_na", fn, "bands", chk_range_text(lo = 0))
+  chk_bool1(include_none, fn, "include_none")
+  cores <- .sens_check_common(fn, sim_args, cores, metrics)
   sim_args <- .sim_args_set(list(), sim_args, "sensitivity_rebalancing")
   rows <- list()
   for (fn in names(frequencies)) {
@@ -191,6 +273,9 @@ sensitivity_rebalancing <- function(data, strategy,
   if (!any(ok)) { err <- table(unlist(out))
     stop(sprintf("sensitivity_rebalancing: Alle %d L\u00e4ufe fehlgeschlagen: %s", length(out),
                  paste(sprintf("%s (%d x)", names(err), as.integer(err)), collapse = "; ")), call. = FALSE) }
+  # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte
+  for (m in out[ok]) chk_kennzahlen(names(m), length(m), c("frequency", "offset", "band", "band_type"),
+                                    "sensitivity_rebalancing")
   M <- do.call(rbind, out[ok])
   tab <- data.frame(do.call(rbind, lapply(rows[ok], `[[`, "label")), M, check.names = FALSE, stringsAsFactors = FALSE)
   rownames(tab) <- NULL
@@ -235,7 +320,9 @@ sensitivity_rebalancing <- function(data, strategy,
 #' @param amount Anlagebetrag in Waehrungseinheiten (Standard 10000); bei DCA
 #'   in \code{months} Raten von \code{amount / months} aufgeteilt.
 #' @param months Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
+#'   Seit 1.6.4 hoechstens 1200.
 #' @param horizon Vergleichshorizont in Jahren ab Start (Standard 10).
+#'   Seit 1.6.4 hoechstens 100.
 #' @param step Jeder wievielte moegliche Starttermin verwendet wird (Standard
 #'   1 = jeder Monat; 12 = jaehrlich).
 #' @param sim_args Benannte Liste weiterer Argumente fuer \code{\link[=simulation]{simulation()}}
@@ -267,13 +354,23 @@ sensitivity_rebalancing <- function(data, strategy,
 #' @seealso [simulation()], [sensitivity_grid()]
 #' @export
 planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12, horizon = 10, step = 1,
-                           sim_args = list(), cores = 1L) {
+                           sim_args = list(), cores = "auto") {
   own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
+  fn <- "planning_lumpsum_vs_dca"
+  .sens_check_sim(data, strategy)
+  chk_num1(amount, fn, "amount", lo = 0, lo_open = TRUE)
+  chk_int1(months, fn, "months")
+  chk_int1(horizon, fn, "horizon")
+  # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46): Laufzeiten bis 100 Jahre (months in Monaten)
+  chk_max(months, SL_MAX_MONATE, fn, "months")
+  chk_max(horizon, SL_MAX_JAHRE, fn, "horizon")
+  chk_int1(step, fn, "step")
+  cores <- .sens_check_common(fn, sim_args, cores, check_metrics = FALSE)
   nm <- names(sim_args) %||% character(0)
   own <- nm[nm %in% c("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip") | startsWith(nm, "dca.")]
-  if (length(own)) stop(sprintf("planning_lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag \u00fcber amount, Raten \u00fcber months).",
-                                paste(own, collapse = ", ")))
+  if (length(own)) chk_stop("rs.sim_args_eigen", fn, paste(own, collapse = ", "))
   sim_args <- .sim_args_set(list(), sim_args, "planning_lumpsum_vs_dca")
+  chk_col_nofactor(data, "date", "planning_lumpsum_vs_dca")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still Text)
   data$date <- .to_date(data$date, "planning_lumpsum_vs_dca: data$date")
   data <- data[order(data$date), , drop = FALSE]
   d <- data$date
@@ -282,8 +379,8 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
   firsts <- d[format(d, "%d") == "01"]
   last_ok <- seq.Date(max(d), by = paste0("-", horizon, " years"), length.out = 2)[2]
   starts <- firsts[firsts <= last_ok]
+  if (!length(starts)) chk_stop("rs.horizont_kurz", fn)   # seit 1.6.4 vor seq() (vorher "wrong sign in 'by' argument")
   starts <- starts[seq(1, length(starts), by = step)]
-  if (!length(starts)) stop("Historie zu kurz f\u00fcr den Horizont.")
   wraps <- .strategy_wrappers(strategy)   # Fonds-Wrapper: Asset-Name ist keine Kursspalte (.strategy_columns)
   run <- function(s) {
     e <- seq.Date(s, by = paste(horizon, "years"), length.out = 2)[2] - 1
@@ -358,6 +455,7 @@ print.SimLevLumpSum <- function(x, ...) {
 #' Anpassung an ein echtes Produkt siehe [backcast_fit()].
 #'
 #' @param data data.frame mit Spalte \code{date} und der Indexspalte.
+#'   Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).
 #' @param index Spaltenname des Index (Niveau, nicht Rendite; Luecken werden
 #'   mit dem letzten Wert gefuellt).
 #' @param leverage Hebel L als Zahl (Standard 2; negativ fuer Short).
@@ -381,6 +479,10 @@ print.SimLevLumpSum <- function(x, ...) {
 #' @seealso [sensitivity_leverage()], [backcast_fit()], [bootstrap_config()]
 #' @export
 series_leverage <- function(data, index, leverage = 2, rate = 0, expense = 0, spread = 0, start = 100) {
+  .lev_check("series_leverage", data, index, rate, expense, spread)   # seit 1.6.4
+  if (!nrow(data)) chk_stop("zeilen_keine", "series_leverage", "data")   # seit 1.6.4 (Entscheidung 38; bis 1.6.3 R 100)
+  chk_num1(leverage, "series_leverage", "leverage")
+  chk_num1(start, "series_leverage", "start", lo = 0, lo_open = TRUE)
   idx <- .fill_na(as.numeric(data[[index]]), "locf")
   dd <- c(1, as.numeric(diff(.to_date(data$date, "data$date"))))
   x <- c(0, idx[-1] / idx[-length(idx)] - 1)
@@ -419,7 +521,7 @@ series_leverage <- function(data, index, leverage = 2, rate = 0, expense = 0, sp
 #' @return data.frame der Klasse \code{SimLevSensitivity} mit \code{leverage}
 #'   und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen);
 #'   Attribut \code{optimal} (benannter Vektor \code{cagr}, \code{sharpe}:
-#'   Hebel mit maximaler CAGR bzw. Sharpe Ratio) und \code{kind = "leverage"}.
+#'   Hebel mit maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert) und \code{kind = "leverage"}.
 #'   Mit Sparplan (\code{sim_args}) ist \code{cagr} geldgewichtet (XIRR).
 #'   Ausgabe und Grafik ueber \code{print()} und \code{plot()}.
 #' @examples
@@ -432,8 +534,14 @@ series_leverage <- function(data, index, leverage = 2, rate = 0, expense = 0, sp
 #' @seealso [series_leverage()], [sensitivity_grid()], [simulation()]
 #' @export
 sensitivity_leverage <- function(data, index, leverages = seq(0.5, 4, by = 0.25), rate = 0, expense = 0,
-                                 spread = 0, strategy = NULL, sim_args = list(), metrics = bootstrap_study_metrics, cores = 1L) {
+                                 spread = 0, strategy = NULL, sim_args = list(), metrics = bootstrap_study_metrics, cores = "auto") {
   own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
+  fn <- "sensitivity_leverage"
+  .lev_check(fn, data, index, rate, expense, spread)   # seit 1.6.4
+  if (!(is.numeric(leverages) && length(leverages) >= 1L && all(is.finite(leverages))))
+    chk_stop("e2.zahlen_endlich", fn, "leverages")
+  if (!is.null(strategy)) .sens_check_sim(data, strategy)
+  cores <- .sens_check_common(fn, sim_args, cores, metrics)
   strategy <- strategy %||% create_strategy(LEV = asset_config("etf", "bnh", partial_exemption = 30))
   sim_args <- .sim_args_set(list(), sim_args, "sensitivity_leverage")
   run <- function(L) {
@@ -445,11 +553,15 @@ sensitivity_leverage <- function(data, index, leverages = seq(0.5, 4, by = 0.25)
   }
   out <- .par_lapply(as.list(leverages), run, cores)
   ok <- !vapply(out, is.null, TRUE)
+  # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und nicht leverage
+  for (m in out[ok]) chk_kennzahlen(names(m), length(m), "leverage", fn)
   tab <- data.frame(leverage = leverages[ok], do.call(rbind, out[ok]), check.names = FALSE)
   class(tab) <- c("SimLevSensitivity", "data.frame")
   attr(tab, "kind") <- "leverage"
-  attr(tab, "optimal") <- c(cagr = tab$leverage[which.max(tab$cagr)],
-                            sharpe = if ("sharpe" %in% names(tab)) tab$leverage[which.max(tab$sharpe)] else NA)
+  # seit 1.6.4 (K43 T2-N3) immer cagr und sharpe, NA ohne Spalte bzw. ohne Wert (bis dahin fehlte cagr ohne Spalte
+  # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR)
+  best <- function(v) { j <- which.max(v); if (length(j)) tab$leverage[j] else NA }
+  attr(tab, "optimal") <- c(cagr = best(tab$cagr), sharpe = best(tab$sharpe))
   tab
 }
 

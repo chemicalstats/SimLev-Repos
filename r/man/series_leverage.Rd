@@ -15,10 +15,12 @@ series_leverage(
 )
 }
 \arguments{
-\item{data}{data.frame mit Spalte \code{date} und der Indexspalte.}
+\item{data}{data.frame mit Spalte \code{date} und der Indexspalte.
+Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).}
 
 \item{index}{Spaltenname des Index (Niveau, nicht Rendite; Luecken werden
-mit dem letzten Wert gefuellt).}
+mit dem letzten Wert gefuellt).
+Seit 1.6.4 geprueft: Zahlenspalte in data (kein Faktor).}
 
 \item{leverage}{Hebel L als Zahl (Standard 2; negativ fuer Short).}
 
@@ -31,7 +33,8 @@ Spaltenname, Vektor der Laenge \code{nrow(data)},
 \item{spread}{Spread auf den finanzierten bzw. leerverkauften Anteil
 \eqn{m(L)} in Prozent p. a. (Standard 0).}
 
-\item{start}{Startwert der Reihe in der ersten Zeile (Standard 100).}
+\item{start}{Startwert der Reihe in der ersten Zeile (Standard 100).
+Seit 1.6.4 eine Zahl > 0.}
 }
 \value{
 Numerischer Vektor (Niveau, Laenge \code{nrow(data)}); faellt eine

@@ -84,7 +84,16 @@ def _approx_setup(x, y, method, yleft, yright, rule, f, ties, na_rm, ties_missin
     if len(m) != 1:
         raise RError("invalid interpolation method")
     method = m[0]
-    rule = list(np.atleast_1d(rule))
+    # seit 1.6.4 wie R stopifnot(is.numeric(rule), (lenR <- length(rule)) >= 1L, lenR <= 2L) (C-061)
+    ra = np.atleast_1d(np.asarray(rule, dtype=object)).ravel()
+    if not all(isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_))
+               for v in ra) or (len(ra) and all(v is None for v in ra)):
+        raise RError("is.numeric(rule) is not TRUE")
+    if len(ra) < 1:
+        raise RError("(lenR <- length(rule)) >= 1L is not TRUE")
+    if len(ra) > 2:
+        raise RError("lenR <= 2L is not TRUE")
+    rule = [float(v) for v in ra]
     if len(rule) == 1:
         rule = rule * 2
     xv, yv, kept_na, notna = _regularize(x, y, ties, ties_missing, na_rm)
@@ -96,9 +105,39 @@ def _approx_setup(x, y, method, yleft, yright, rule, f, ties, na_rm, ties_missin
         if nx == 0:
             raise RError("zero non-NA points")
     if yleft is None:
+        if rule[0] != rule[0]:
+            raise RError("missing value where TRUE/FALSE needed")
         yleft = NA_REAL if rule[0] == 1 else float(yv[0])
     if yright is None:
+        if rule[1] != rule[1]:
+            raise RError("missing value where TRUE/FALSE needed")
         yright = NA_REAL if rule[1] == 1 else float(yv[-1])
+    # seit 1.6.4 wie R stopifnot(length(yleft) == 1L, length(yright) == 1L, length(f) == 1L) (T4-R3; bis dahin roher
+    # TypeError); die f- und NA-Prüfung (C_ApproxTest) folgt in approx erst nach n und xout
+    for nm, v in (("yleft", yleft), ("yright", yright), ("f", f)):
+        if _rlen(v) != 1:
+            raise RError("length(%s) == 1L is not TRUE" % nm)
+    return xv, yv, method, _one(yleft), _one(yright), nona, notna, nx, _one(f)
+
+
+def _rlen(v):
+    """``length(v)`` für ein Argument (None = NULL, Skalar 1, sonst Zahl der Elemente)."""
+    if v is None:
+        return 0
+    if isinstance(v, (str, bytes)) or np.isscalar(v):
+        return 1
+    return int(np.size(np.asarray(v, dtype=object)))
+
+
+def _one(v):
+    """Wert eines Arguments der Länge 1 als float (Skalar wie bisher float(v))."""
+    if isinstance(v, (str, bytes)) or np.isscalar(v):
+        return float(v)
+    return float(np.asarray(v, dtype=object).ravel()[0])
+
+
+def _approx_test(xv, yv, method, f, na_rm):
+    """R's C_ApproxTest: f bei method "constant", dann NA in x (und y bei na.rm)."""
     if method == 2:
         if not math.isfinite(f) or f < 0 or f > 1:
             raise RError("approx(): invalid f value")
@@ -108,7 +147,6 @@ def _approx_setup(x, y, method, yleft, yright, rule, f, ties, na_rm, ties_missin
     else:
         if np.isnan(xv).any():
             raise RError("approx(x,y, .., na.rm=FALSE): NA values in x are not allowed")
-    return xv, yv, method, float(yleft), float(yright), nona, notna, nx
 
 
 def _seq_int(frm, to, n):
@@ -121,7 +159,7 @@ def _seq_int(frm, to, n):
     if not math.isfinite(to):
         raise RError("'to' must be a finite number")
     out = seq_len_out(frm, to, n)
-    n = int(n)
+    n = int(math.ceil(float(n)))   # seit 1.6.4 wie R aufgerundet (C-061)
     rby = 0.0
     if n > 2:
         nint = float(n - 1)
@@ -147,9 +185,15 @@ def approx(x, y=None, xout=None, method="linear", n=50, yleft=None, yright=None,
     Ergebnis: ``RList`` mit ``x`` und ``y``.
     """
     ties_missing = ties is None
-    xv, yv, meth, yl, yr, nona, notna, nx = _approx_setup(
-        x, y, method, yleft, yright, rule, float(f), _rmean if ties is None else ties, na_rm, ties_missing)
+    # Reihenfolge der Prüfungen seit 1.6.4 wie stats::approx 4.3.3 (T4-R3): method, rule, Werte, yleft/yright/f-Längen,
+    # n und xout, dann f und NA (C_ApproxTest)
+    xv, yv, meth, yl, yr, nona, notna, nx, f = _approx_setup(
+        x, y, method, yleft, yright, rule, f, _rmean if ties is None else ties, na_rm, ties_missing)
     if xout is None:
+        if n is None:
+            raise RError("argument is of length zero")
+        if n != n:
+            raise RError("missing value where TRUE/FALSE needed")
         if n <= 0:
             raise RError("'approx' requires n >= 1")
         if nona:
@@ -157,13 +201,49 @@ def approx(x, y=None, xout=None, method="linear", n=50, yleft=None, yright=None,
         else:
             xs = xv[notna]
             xo = _seq_int(xs[0], xs[-1], n)
-    else:
+    _approx_test(xv, yv, meth, f, na_rm)
+    if xout is not None:
         xo, _ = _vec(xout)
     res = _XY()
     res["x"] = xo if xout is None else (xout if not np.isscalar(xout) else float(xout))
-    yo = _approx_core(xv, yv, xo, meth, yl, yr, float(f))
+    yo = _approx_core(xv, yv, xo, meth, yl, yr, f)
     res["y"] = float(yo[0]) if np.isscalar(xout) else yo
     return res
+
+
+def _as_int1(v):
+    """``as.integer(v)[1]`` für einen Wert (abgeschnitten; NA, Text ohne Zahl, ±Inf → ``None``)."""
+    v = v[0] if isinstance(v, (list, tuple, np.ndarray)) and len(v) else v
+    if v is None or isinstance(v, (list, tuple, np.ndarray)):
+        return None
+    if isinstance(v, str):
+        try:
+            v = float(v.strip())
+        except ValueError:
+            return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f or not -2147483648.0 < f < 2147483648.0:
+        return None
+    return int(math.trunc(f))
+
+
+def _as_lgl1(v):
+    """``as.logical(v)[1]`` für einen Wert (Text "TRUE"/"true"/"T"/"True" bzw. "FALSE"/…; Zahl != 0; sonst ``None``)."""
+    v = v[0] if isinstance(v, (list, tuple, np.ndarray)) and len(v) else v
+    if v is None or isinstance(v, (list, tuple, np.ndarray)):
+        return None
+    if isinstance(v, (bool, np.bool_)):
+        return bool(v)
+    if isinstance(v, str):
+        return True if v in ("TRUE", "true", "T", "True") else False if v in ("FALSE", "false", "F", "False") else None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f != 0
 
 
 def filter(x, filter, method="convolution", sides=2, circular=False, init=None):
@@ -177,6 +257,8 @@ def filter(x, filter, method="convolution", sides=2, circular=False, init=None):
     if not is_mat:
         X = X.reshape(-1, 1)
     n, nser = X.shape
+    if n == 0:   # seit 1.6.4 wie R as.ts(x) (C-052)
+        raise RError("'ts' object must have one or more observations")
     fv = np.atleast_1d(np.asarray(filter, dtype=np.float64)).ravel()
     nf = fv.size
     if np.isnan(fv).any():
@@ -185,9 +267,14 @@ def filter(x, filter, method="convolution", sides=2, circular=False, init=None):
     if method == "convolution":
         if nf > n:
             raise RError("'filter' is longer than time series")
-        sides = int(sides)
-        if sides not in (1, 2):
+        sv = _as_int1(sides)   # seit 1.6.4 wie R as.integer(sides), NA mit Meldung (C-052)
+        if sv is None or sv not in (1, 2):
             raise RError("argument 'sides' must be 1 or 2")
+        sides = sv
+        cv = _as_lgl1(circular)
+        if cv is None:
+            raise RError("'circular' must be logical and not NA")
+        circular = cv
         ini = np.zeros((0, nser))
     else:
         if init is None:
@@ -212,8 +299,8 @@ def filter(x, filter, method="convolution", sides=2, circular=False, init=None):
             ini = ia.reshape(nf, -1) if ia.ndim == 2 else ia.reshape(nf, 1)
     out = np.empty(n)
     for s in range(nser):   # C-Kerne sl_r_filter_conv, sl_r_filter_rec (seit 1.6.0)
-        _ext.slc_r_filter(np.ascontiguousarray(X[:, s]), np.ascontiguousarray(fv), method == "recursive", sides,
-                          bool(circular), np.ascontiguousarray(ini[:, s]), out)
+        _ext.slc_r_filter(np.ascontiguousarray(X[:, s]), np.ascontiguousarray(fv), method == "recursive",
+                          sides if method == "convolution" else 2, circular is True, np.ascontiguousarray(ini[:, s]), out)
         Y[:, s] = out
     if is_mat:
         return Y

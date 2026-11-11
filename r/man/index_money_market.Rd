@@ -13,12 +13,15 @@ index_money_market(data, rate, spread = 0, basis = 360, start = 100)
 \code{nrow(data)}, Skalar, \code{data.frame(date, value)} (Stufenfunktion
 ab Datum) oder benannter Vektor mit Datumsnamen.}
 
-\item{spread}{Abschlag in Prozent p. a. (Standard 0), auf derselben
+\item{spread}{Abschlag in Prozent p. a. (Standard 0; endlich), auf derselben
 Tagesbasis wie der Zins.}
 
-\item{basis}{Tagesbasis (Standard 360; ueblich 360 oder 365).}
+\item{basis}{Tagesbasis (Standard 360; ueblich 360 oder 365; > 0).}
 
-\item{start}{Startwert des Index in der ersten Zeile (Standard 100).}
+\item{start}{Startwert des Index in der ersten Zeile (Standard 100; > 0). Seit
+1.6.4 geprueft: \code{data} nur als data.frame mit Spalte \code{date} (mindestens eine
+Datenzeile; seit 1.6.4 ist 0 Zeilen ein Fehler), eine Spalte als Zinsangabe numerisch, eine Zahl endlich,
+\code{NULL} fehlt.}
 }
 \value{
 Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}).

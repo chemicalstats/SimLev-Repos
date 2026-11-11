@@ -7,7 +7,8 @@
  * Bitgleich:  Die Kerne rechnen dieselben Operationen in derselben Reihenfolge wie R 1.5.2 (Summen,
  *             Mittel und Kumulationen über slc_rbase.cpp in long double wie R); bei zwei NaN-Operanden
  *             gewinnt wie in R der linke (Hilfen in slc_prep.cpp und slc_bootpath.cpp).
- * Threads:    nthreads <= 0: Zahl der Prozessoren (höchstens 8); 1: nacheinander. Nur mit SLC_THREADS
+ * Threads:    nthreads <= 0: Höchstwert sl_nprocs() = Zahl der Prozessoren, mindestens 1 (seit 1.6.4, Entscheidung 41b;
+ *             bis 1.6.3 Zahl der Prozessoren, höchstens 8); mehr wird auf den Höchstwert begrenzt; 1: nacheinander. Nur mit SLC_THREADS
  *             übersetzt (alle Builds außer Windows), sonst nacheinander. Das Ergebnis hängt nicht von der
  *             Zahl der Threads ab (jedes Element unabhängig, Warnungen als Vereinigung der Merker).
  */
@@ -23,8 +24,39 @@ extern "C" {
 #endif
 
 /* ── Threads (slc_prep.cpp) ─────────────────────────────────────────────────
- * Zahl der Threads für n Elemente: nthreads <= 0 automatisch, höchstens n / min_per Threads (mindestens 1). */
+ * Zahl der logischen Prozessoren (mindestens 1) = Höchstwert für Parallelität (seit 1.6.4, eine Quelle für cores und
+ * Threads in R, Python und Julia). */
+int  sl_nprocs(void) SL_NOTHROW;
+/* Zahl der Threads für n Elemente: nthreads <= 0 oder größer als sl_nprocs(): sl_nprocs(); höchstens n / min_per
+ * Threads (mindestens 1). */
 int  sl_par_threads(int nthreads, int64_t n, int64_t min_per) SL_NOTHROW;
+/* Freier Arbeitsspeicher in Bytes laut System (Linux MemAvailable), unbekannt -1 (seit 1.6.4). */
+double sl_mem_avail(void) SL_NOTHROW;
+/* Arbeitsspeicher des eigenen Prozesses in Bytes (resident, Linux /proc/self/statm), unbekannt -1 (seit 1.6.4). */
+double sl_mem_self(void) SL_NOTHROW;
+/* Laufende Prozesse laut System einschliesslich des eigenen (Linux /proc/loadavg ohne laufende Threads anderer Prozesse
+ * mit groesserem nice, Entscheidung 139; macOS getloadavg), unbekannt -1, und
+ * freie Prozessoren max(1, nprocs - (running - 1)) (running < 0: nprocs) (seit 1.6.4, Entscheidung 112). */
+double sl_load_running(void) SL_NOTHROW;
+int  sl_par_free(int nprocs, double running) SL_NOTHROW;
+/* Kindprozess nach dem Fork schuetzen (seit 1.6.4, K43 T2-B4): Linux PR_SET_PDEATHSIG = SIGTERM, beim Ende des
+ * Elternprozesses parent_pid endet das Kind; 1 mit Schutz, 0 ohne (macOS, Windows). */
+int  sl_child_guard(long parent_pid) SL_NOTHROW;
+/* Messzeit vor dem Plan: die Huellen rechnen Einheiten nacheinander, bis so viel Zeit vergangen ist (Start eines weiteren
+ * Laufs des Systems sys in Sekunden bei self_bytes Bytes im eigenen Prozess), und planen dann den Rest (seit 1.6.4). */
+double sl_par_probe(int sys, double self_bytes) SL_NOTHROW;
+/* Planer fuer cores = "auto" (seit 1.6.4, Entscheidungen 41b/41c): Zahl der Laeufe c (Rueckgabe, 1 ... min(nprocs,
+ * max_runs, n)) und Kern-Threads je Lauf (*threads) fuer n weitere Einheiten mit gemessener Rechenzeit unit_s (Sekunden)
+ * und Ergebnisgroesse unit_bytes je Einheit; sys: 0 R (Fork), 1 Python (Fork-Prozess), 2 Julia (Task); self_bytes:
+ * Arbeitsspeicher des eigenen Prozesses (sl_mem_self; Start und Speicher eines Forks wachsen damit); running: laufende
+ * Prozesse einschliesslich des eigenen (sl_load_running; < 0 unbekannt), c hoechstens sl_par_free(nprocs, running). Waehlt das
+ * kleinste c mit der kuerzesten geschaetzten Laufzeit c * Start + ceil(n / c) * (unit_s + Zusatz je Einheit), c = 1,
+ * wenn kein c > 1 schneller ist; alle Laeufe zusammen hoechstens mem_avail Bytes (mem_avail < 0: ohne Grenze).
+ * Threads: c = 1: env_threads (>= 1, hoechstens nprocs), sonst nprocs; c > 1: freie Prozessoren / c, mindestens 1, hoechstens
+ * env_threads. nprocs und running sind Argumente (Probe der Regel fuer andere Rechnergroessen und Fremdlast); die
+ * Huellen geben sl_nprocs() und sl_load_running(). */
+int  sl_par_plan(int sys, int nprocs, int max_runs, int env_threads, int64_t n, double unit_s, double unit_bytes,
+                 double mem_avail, double self_bytes, double running, int *threads) SL_NOTHROW;
 /* fn(arg, lo, hi, part) für nt zusammenhängende Teile part = 0 ... nt-1 von [0, n) (Teil 0 im aufrufenden Thread) */
 typedef void (*sl_range_fn)(void *arg, int64_t lo, int64_t hi, int part);
 void sl_par_run(int nt, int64_t n, sl_range_fn fn, void *arg) SL_NOTHROW;

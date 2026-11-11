@@ -8,9 +8,12 @@ bootstrap_data(result, i = 1L, dates = NULL, start = "2000-01-01")
 }
 \arguments{
 \item{result}{\code{bootstrap_result} aus \code{\link[=bootstrap]{bootstrap()}} oder eine einzelne
-Pfadmatrix (z. B. \code{result$paths[[i]]}).}
+Pfadmatrix (z. B. \code{result$paths[[i]]}).
+Seit 1.6.4 auch wie beschrieben ein einzelner Pfad: Zahlenmatrix (Spalten ohne Namen heissen V1, V2,
+...) oder Tabelle aus Zahlenspalten.}
 
-\item{i}{Pfadnummer (Standard 1); nur bei \code{bootstrap_result} verwendet.}
+\item{i}{Pfadnummer (Standard 1); nur bei \code{bootstrap_result} verwendet.
+Seit 1.6.4 eine ganze Zahl von 1 bis zur Pfadzahl.}
 
 \item{dates}{Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen
 hat (\code{path_length + 1}), z. B. ein Handelstagskalender;
@@ -18,7 +21,8 @@ hat (\code{path_length + 1}), z. B. ein Handelstagskalender;
 \code{start}.}
 
 \item{start}{Startdatum fuer \code{dates = NULL} (Zeichenkette oder
-Date, Standard "2000-01-01").}
+Date, Standard "2000-01-01").
+Seit 1.6.4 ein einzelnes Datum (Date oder "JJJJ-MM-TT"), keine Zahl.}
 }
 \value{
 data.frame mit Spalte \code{date} (Klasse Date) und allen

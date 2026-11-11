@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simlev"
-version = "1.6.3"
+version = "1.6.4"
 description = "Backtesting für ETF-, Hebel- und Multi-Asset-Strategien mit deutscher Investmentbesteuerung: Python-Fassung von SimLev mit gemeinsamem C/C++-Kern, bitgleich zu den Fassungen in R und Julia (Engine, Bootstrap, Entnahmephase, Analyse, Optimierung u. a.)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,9 @@ dependencies = ["numpy>=1.22", "pandas>=1.4"]
 
 
 [tool.setuptools]
-packages = ["simlev", "simlev._r"]
+# simlev.data (Tarifdatei, Anlageklassen, R-Farben; ohne __init__.py) als eigenes Paket aufgeführt (seit 1.6.4, C-100):
+# bis 1.6.3 nur als package-data von simlev, wofür setuptools beim Bau warnte, dass das Paket in packages fehlt
+packages = ["simlev", "simlev._r", "simlev.data"]
 
 [tool.setuptools.package-data]
-simlev = ["data/*"]
+"simlev.data" = ["*"]

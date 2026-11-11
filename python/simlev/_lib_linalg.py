@@ -294,6 +294,11 @@ def kde(x, bw=None, n=512, from_=None, to=None, cut=3, weights=None):
     n = int(n)
     if n < 2:
         raise ValueError("density: mindestens 2 Gitterpunkte")
+    wv = None if weights is None else _vec(weights)
+    if wv is not None and wv.size != xv.size:
+        # seit 1.6.4 eine Meldung für alle drei Sprachen (T4-R7; bis dahin TypeError „interner Fehler“ aus C)
+        from ._pruefen import chk_stop
+        chk_stop("ut4.kde_weights", "density")
     gx, gy = np.empty(n), np.empty(n)
-    _ext.slc_kde(xv, None if weights is None else _vec(weights), float(bw), float(from_), float(to), gx, gy)
+    _ext.slc_kde(xv, wv, float(bw), float(from_), float(to), gx, gy)
     return {"x": gx, "y": gy, "bw": float(bw), "n": xv.size}

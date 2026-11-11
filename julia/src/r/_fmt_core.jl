@@ -18,6 +18,93 @@
 
 const _OPT = Dict{Symbol,Any}(:digits => 7, :scipen => 0, :width => 80, :OutDec => ".", :digits_secs => nothing)
 
+"""`asInteger` von R für ein Argument: erstes Element, Wahrheitswert 0/1, Zahl zur Null hin, Text wie `as.integer`;
+NA, NaN und Werte außerhalb des int-Bereichs als `nothing` (außerhalb mit der Warnung von R). Seit 1.6.4 (C-012) für
+die Prüfung von `digits`/`nsmall` wie R."""
+function _r_as_int1(v)
+    if v isa AbstractVector || v isa Tuple
+        isempty(v) && return nothing
+        v = first(v)
+    end
+    (v === nothing || v === missing) && return nothing
+    v isa Bool && return Int(v)
+    if v isa AbstractString
+        t = strip(v)
+        t == "NA" && return nothing
+        f = tryparse(Float64, t)
+        (f === nothing || occursin(r"^[+-]?(inf|nan)"i, t)) && (@warn "NAs introduced by coercion"; return nothing)
+        v = f
+    end
+    v isa Real || return nothing
+    f = Float64(v)
+    isnan(f) && return nothing
+    if !(abs(f) < 2147483648.0) || trunc(f) == -2147483648.0
+        @warn "NAs introduced by coercion to integer range"
+        return nothing
+    end
+    return Int(trunc(f))
+end
+
+"""`asLogical` von R für ein Argument: erstes Element; Zahl ungleich 0 true, NaN NA; Text "TRUE"/"true"/"True"/"T"
+bzw. "FALSE"/"false"/"False"/"F", sonst NA; leer NA. Ergebnis true, false oder `nothing` (NA). Seit 1.6.4 (C-056)."""
+function _r_as_lgl1(v)
+    if v isa AbstractVector || v isa Tuple
+        isempty(v) && return nothing
+        v = first(v)
+    end
+    (v === nothing || v === missing) && return nothing
+    v isa Bool && return v
+    v isa AbstractString && return v in ("TRUE", "true", "True", "T") ? true : v in ("FALSE", "false", "False", "F") ? false : nothing
+    v isa Real || return nothing
+    f = Float64(v)
+    return isnan(f) ? nothing : f != 0
+end
+
+"Wahrheitswert eines Arguments wie R `asLogical` mit Abbruch „invalid 'what' argument“ bei NA (seit 1.6.4, C-056)."
+function _r_lgl_arg(v, what::AbstractString)
+    b = _r_as_lgl1(v)
+    b === nothing && error("invalid '$what' argument")
+    return b
+end
+
+"`match.arg(arg, choices)` von R (seit 1.6.4, C-056)."
+function _r_match_arg(arg, choices)
+    arg === nothing && return choices[1]
+    a = arg isa AbstractVector || arg isa Tuple ? collect(arg) : [arg]
+    all(t -> t isa AbstractString || t isa Symbol, a) || error("'arg' must be NULL or a character vector")
+    a = String[string(t) for t in a]
+    Tuple(a) == Tuple(choices) && return choices[1]
+    length(a) > 1 && error("'arg' must be of length 1")
+    hits = isempty(a) ? String[] : [c for c in choices if c == a[1]]
+    isempty(hits) && !isempty(a) && !isempty(a[1]) && (hits = [c for c in choices if startswith(c, a[1])])
+    # mehrdeutiger Teilanfang wie R's pmatch: kein Treffer (seit 1.6.4, RP; bis dahin „there is more than one match“)
+    length(hits) > 1 && (hits = String[])
+    length(hits) == 1 || error("'arg' should be one of " * join(["\u201c$(c)\u201d" for c in choices], ", "))
+    return hits[1]
+end
+
+"`digits` wie R prüfen (seit 1.6.4, C-012, Entscheidung 77): 1 bis 22; `kind` :format oder :print."
+function _chk_digits(digits, kind::Symbol = :format)
+    digits === nothing && return nothing
+    d = _r_as_int1(digits)
+    if d === nothing || d < 1 || d > 22
+        dv = d === nothing ? -2147483648 : d
+        kind === :print && error("invalid printing digits $dv")
+        error("invalid value $dv for 'digits' argument")
+    end
+    return d
+end
+
+"`nsmall` wie R prüfen (seit 1.6.4, C-012, Entscheidung 77): ganze Zahl 0 bis 20."
+function _chk_nsmall(nsmall)
+    n = _r_as_int1(nsmall)
+    (n === nothing || n < 0 || n > 20) && error("invalid 'nsmall' argument")
+    return n
+end
+
+"Zahl NaN/NA (Vergleiche wie in R ergäben NA)."
+_isnan_num(v) = v isa AbstractFloat && isnan(v)
+
 """
     set_options(; digits, scipen, width, OutDec, digits_secs)
 
@@ -30,6 +117,11 @@ function set_options(; kw...)
     for (k, v) in kw
         haskey(_OPT, k) || throw(KeyError(k))
         k === :digits_secs && !(v === nothing || v isa Real) && throw(ArgumentError("digits_secs: nothing oder eine Zahl"))
+        if k === :digits   # seit 1.6.4 (C-012, Entscheidung 77) wie R options(digits =)
+            d = _r_as_int1(v)
+            (d === nothing || d < 1 || d > 22) && error("invalid 'digits' parameter, allowed 1...22")
+            v = d
+        end
         old[k] = _OPT[k]
         _OPT[k] = v
     end
@@ -254,12 +346,10 @@ function _as_v0(x, type)
         return _from_seq(Any[p.second for p in x]; names = _Str[string(p.first) for p in x])
     elseif x isa AbstractDict
         return _from_seq(Any[v for v in values(x)]; names = _Str[string(k) for k in keys(x)])
-    elseif x isa AbstractVector
+    elseif x isa AbstractVector                       # auch AbstractRange (seit 1.6.4 ohne den dafür unerreichbaren Zweig)
         return _from_vec(x)
     elseif x isa Tuple
         return _from_seq(Any[z for z in x])
-    elseif x isa AbstractRange
-        return _from_vec(collect(x))
     end
     return _from_seq(Any[x]; scalar = true)
 end
@@ -386,26 +476,36 @@ function _math2(f, x, digits)
         return SimLev.RVector(_math2(f, x.values, digits); names = x.names, attrs = copy(x.attrs))
     elseif x isa SimLev.NamedMat
         return SimLev.NamedMat(_math2(f, x.data, digits); rownames = x.rownames, colnames = x.colnames, attrs = copy(x.attrs))
-    elseif x === nothing || x === missing
-        return SimLev.NA
-    elseif x isa Number
-        isint(x) && f === fround && return x
-        return f(Float64(x), Float64(digits isa AbstractVector ? digits[1] : digits))
-    elseif x isa AbstractArray
+    end
+    # seit 1.6.4 wie R (C-040): NULL, Text, Faktor und Listen sind ein Fehler, digits NULL bzw. der Länge 0 „invalid
+    # second argument of length 0“, NA bleibt NA, digits wird auch bei einem Skalar recycelt; ganze Zahlen bleiben nur
+    # bei digits >= 0 unverändert (bis 1.6.3 auch bei digits < 0, z. B. round(15L, -1) = 15 statt 20)
+    _m2_bad(z) = z === nothing || z isa AbstractString || z isa AbstractChar || z isa RFactor || z isa SimLev.RList ||
+                 (z isa AbstractArray && any(t -> t isa AbstractString || t isa AbstractChar, z))
+    _m2_bad(x) && error("non-numeric argument to mathematical function")
+    digits === nothing && error("invalid second argument of length 0")
+    _m2_bad(digits) && error("non-numeric argument to mathematical function")
+    d = Float64[t === missing ? SimLev.NA : Float64(t) for t in (digits isa AbstractArray ? vec(digits) : [digits])]
+    isempty(d) && error("invalid second argument of length 0")
+    keep_int = f === fround && length(d) == 1 && d[1] >= 0
+    if x === missing || x isa Number
+        isint(x) && keep_int && return x
+        (x === missing && length(d) == 1) && return SimLev.NA
+        length(d) == 1 && return f(Float64(x), d[1])
+        x = [x]
+    end
+    if x isa AbstractArray
         T = nonmissingtype(eltype(x))
-        if T <: Integer && !(T <: Bool) && f === fround && T !== Union{}
+        if T <: Integer && !(T <: Bool) && keep_int && T !== Union{}
             return copy(x)
         end
         # C-Kern sl_r_round_vec (seit 1.6.0)
         kind = f === fprec ? 1 : 0
         xs = Float64[_tofloat(z) for z in vec(x)]
-        if digits isa AbstractVector && length(digits) > 1
-            return SimLev._rb_round_vec(kind, xs, Float64[Float64(t) for t in digits])
-        end
-        dd = Float64(digits isa AbstractVector ? digits[1] : digits)
-        return reshape(SimLev._rb_round_vec(kind, xs, [dd]), size(x))
+        length(d) > 1 && return SimLev._rb_round_vec(kind, xs, d)
+        return reshape(SimLev._rb_round_vec(kind, xs, d), size(x))
     end
-    error("round/signif: nicht unterstützter Typ $(typeof(x))")
+    error("non-numeric argument to mathematical function")
 end
 
 """
@@ -434,20 +534,6 @@ function _encode_real(x::Float64, w::Int, d::Int, e::Int, dec::AbstractString = 
                       na_string = "NA")
     m = UInt8[na || SimLev.isna_strict(x)]
     return SimLev._rb_encode_real([x], m, w, d, e, dec, na_string, false)[1]
-end
-
-"Nachkomma-Nullen entfernen wie `EncodeRealDrop0`."
-function _drop0(s::String)
-    p = findfirst('.', s)
-    p === nothing && return s
-    b = codeunits(s)
-    q = p + 1
-    repl = p
-    while q <= length(b) && UInt8('0') <= b[q] <= UInt8('9')
-        b[q] != UInt8('0') && (repl = q + 1)
-        q += 1
-    end
-    return s[1:repl-1] * s[q:end]
 end
 
 function _encode_reals(v::_V, w, d, e, dec = ".")
@@ -494,8 +580,6 @@ end
 _encode_logical(x::Bool, na::Bool, w::Int, na_string = "NA") = na ? lpad(na_string, w) : lpad(x ? "TRUE" : "FALSE", w)
 
 # ── Zeichenketten: Breite und Kodierung ────────────────────────────────────
-
-const _UC = Base.Unicode
 
 # Anzeigebreite eines Zeichens wie R 4.3.3 (Ri18n_wcwidth mit den Tabellen aus src/main/rlocale_widths.h) unter
 # C.UTF-8 (seit 1.6.3; bis 1.6.2 aus utf8proc, also aus dem Unicode-Stand von Julia, mit Abweichungen von R und von
@@ -596,11 +680,9 @@ function _wcwidth(c::Char)
     return i >= 1 && k <= _WC_HI[i] ? Int(_WC_W[i]) : 1
 end
 
-function _printable(c::Char)
-    cat = _UC.category_code(c)
-    return !(cat == _UC.UTF8PROC_CATEGORY_CC || cat == _UC.UTF8PROC_CATEGORY_CN || cat == _UC.UTF8PROC_CATEGORY_CS ||
-             cat == _UC.UTF8PROC_CATEGORY_ZL || cat == _UC.UTF8PROC_CATEGORY_ZP)
-end
+# Druckbar wie R unter Linux (glibc 2.39 iswprint in C.UTF-8, julia/src/r/wctype.jl; seit 1.6.4 feste Tabelle, C-047;
+# bis 1.6.3 nach utf8proc, das an rund 10 000 neueren Codepunkten abwich)
+_printable(c::Char) = SimLev._wct_print(c)
 
 const _NOQ = '\0'
 
@@ -693,11 +775,18 @@ end
 `nchar(x, type)`: "chars", "bytes" oder "width" (NA → 2 wie in R).
 """
 function nchar(x, t = "chars"; type = t)
+    # seit 1.6.4 wie R (C-049, C-056): Teilanfang von type erlaubt, sonst „invalid 'type' argument“; Faktor ist ein Fehler
+    x isa RFactor && error("'nchar()' requires a character vector")
+    hit = type isa AbstractString && !isempty(type) ? [k for k in ("bytes", "chars", "width") if startswith(k, type)] : String[]
+    isempty(hit) && error("invalid 'type' argument")
+    type = hit[1]
     v = _as_v(x, "character")
-    res = Int[]
+    res = Union{Missing,Int}[]
     for s in v.s
         if s === nothing
-            push!(res, 2)
+            # seit 1.6.4 wie R (keepNA = NA, C-039): NA ergibt für "chars" und "bytes" `missing`, für "width" 2; bis
+            # 1.6.3 immer 2
+            push!(res, type == "width" ? 2 : missing)
         elseif type == "bytes"
             push!(res, ncodeunits(s))
         elseif type == "width"
@@ -707,7 +796,8 @@ function nchar(x, t = "chars"; type = t)
         end
     end
     v.scalar && return res[1]
-    return res
+    any(ismissing, res) && return res
+    return Vector{Int}(res)
 end
 
 # ── as.character / paste ───────────────────────────────────────────────────
@@ -745,7 +835,20 @@ end
 
 `paste(..., sep, collapse)` (NA wird zu "NA").
 """
+# sep/collapse wie R's do_paste (seit 1.6.4, RP, C-056): Text (erster Wert eines Textvektors), nicht NA
+function _paste_str1(v, msg)
+    if v isa AbstractVector || v isa Tuple
+        vv = collect(v)
+        (isempty(vv) || !all(t -> t isa AbstractString || t === missing || t === nothing, vv)) && error(msg)
+        v = vv[1]
+    end
+    v isa AbstractString || error(msg)
+    return String(v)
+end
+
 function paste(args...; sep = " ", collapse = nothing)
+    sep = _paste_str1(sep, "invalid separator")
+    collapse === nothing || (collapse = _paste_str1(collapse, "invalid 'collapse' argument"))
     vecs = Vector{Vector{String}}()
     allscalar = true
     for a in args

@@ -33,6 +33,19 @@
   structure(out, class = c("SimLevWeights", "data.frame"), source = source)
 }
 
+# Signal list(buy, sell): Liste mit buy und sell, je logisch oder 0/1 (NA erlaubt), gleich lang (seit 1.6.4,
+# Entscheidung 1; bis 1.6.3 recycelte R ungleiche Laengen, initial als Vektor verdoppelte das Ergebnis)
+.e5_signal <- function(signal, fn, i = NULL) {
+  ok1 <- function(v) (is.logical(v) || (is.numeric(v) && !is.factor(v) && all(is.na(v) | v == 0 | v == 1))) &&
+    is.null(dim(v))
+  ok <- is.list(signal) && !is.data.frame(signal) && all(c("buy", "sell") %in% names(signal)) &&
+    ok1(signal$buy) && ok1(signal$sell) && length(signal$buy) == length(signal$sell)
+  if (!ok) {
+    if (is.null(i)) chk_stop("e5.signal", fn) else chk_stop("e5.when", fn, i)
+  }
+  invisible(signal)
+}
+
 #' Zeilen am Ende jeder Periode (letzte vorhandene Zeile)
 #' @keywords internal
 #' @noRd
@@ -69,6 +82,7 @@
 #' @param signal \code{list(buy, sell)} mit logischen Vektoren gleicher
 #'   Laenge (z. B. aus [signal_sma()]); NA vorher durch \code{FALSE}
 #'   ersetzen (die Signal-Bausteine liefern keine NA).
+#'   Seit 1.6.4 nur TRUE/FALSE oder 0/1 (NA erlaubt) und gleiche Laenge, sonst Fehler.
 #' @param initial Logischer Zustand vor dem ersten Signal (Standard
 #'   \code{FALSE} = nicht investiert).
 #' @return Logischer Vektor gleicher Laenge (\code{TRUE} = investiert).
@@ -81,6 +95,8 @@
 #' table(signal_state(signal_sma(p, 200, band = 2)))
 #' @export
 signal_state <- function(signal, initial = FALSE) {
+  .e5_signal(signal, "signal_state")                     # seit 1.6.4 (Entscheidung 1; B-024)
+  chk_bool1(initial, "signal_state", "initial")
   b <- signal$buy; s <- signal$sell; n <- length(b)
   ev <- ifelse(b & !s, 1L, ifelse(s & !b, -1L, 0L))
   idx <- which(ev != 0L)
@@ -110,9 +126,11 @@ signal_state <- function(signal, initial = FALSE) {
 #'
 #' @param data data.frame mit Spalte \code{date} (Klasse Date) und
 #'   Kursspalten (Niveaus).
+#'   Seit 1.6.4 Datum aufsteigend ohne NA, Kursspalten numerisch (kein Faktor).
 #' @param assets Zeichenvektor der Kursspalten.
 #' @param lookbacks Rueckblicke in Kalendermonaten (Standard
 #'   \code{c(1, 3, 6, 12)}); bei \code{type = "13612w"} ignoriert.
+#'   Seit 1.6.4 ganze Zahlen von 1 bis 1200 (kein Blick in die Zukunft).
 #' @param type \code{"average"} (Standard; ungewichtetes Mittel der
 #'   Renditen) oder \code{"13612w"} (gewichtet, Rueckblicke fest 1, 3, 6, 12).
 #' @return Numerische Matrix Zeilen von \code{data} x \code{assets} mit dem
@@ -129,9 +147,14 @@ signal_state <- function(signal, initial = FALSE) {
 #' tail(momentum_score(d, c("aktien", "anleihen"), type = "13612w"), 3)
 #' @export
 momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("average", "13612w")) {
+  fn <- "momentum_score"
+  .e5_choice(type, c("average", "13612w"), fn, "type")   # Pruefung (Meldung auswahl)
   type <- match.arg(type)
-  d <- .to_date(data$date, "momentum_score: data$date"); n <- length(d)
+  d <- .e5_data_dates(data, fn, "momentum_score: data$date"); n <- length(d)   # seit 1.6.4 (K42 E5)
+  .e5_names(assets, fn, "assets")
+  .e5_lookbacks(lookbacks, fn)                            # seit 1.6.4 ganze Zahlen 1 bis 1200 (B-025)
   miss <- setdiff(assets, names(data)); if (length(miss)) stop(sprintf("momentum_score: Kursspalte(n) fehlen: %s", paste(miss, collapse = ", ")))
+  .e5_numcols(data, assets, fn)                           # Entscheidung 15, B-009
   if (type == "13612w") lookbacks <- c(1, 3, 6, 12)
   # seit 1.6.0 im Kern (sl_mom_score: Rueckblickzeilen ganzzahlig, LOCF, Renditen, Scores), wenn die Daten den
   # ueblichen Fall bilden (sortiert, endlich, Jahre 1000-9000, Rueckblicke bis 1000 Jahre); sonst wie bisher
@@ -163,6 +186,134 @@ momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("a
   S
 }
 
+# Regeltexte im gemeinsamen RExpr-Umfang (seit 1.6.4, Entscheidung 59): Auswertung in einer Umgebung, die nur
+# die Operatoren und Funktionen von RExpr (python/simlev/_r/rexpr.py, julia/src/r/rexpr.jl: _FUNS) sowie Variablen
+# und Funktionen der aufrufenden Umgebung bis zur globalen kennt (nicht die Paketfunktionen des Suchpfads, wie
+# Python/Julia die Funktionen der Sprache nicht kennen); nicht unterstuetzte Sprachmittel
+# melden wie RExpr. Ergebnisse im Umfang unveraendert (dieselben R-Funktionen).
+.e5_rexpr_ops <- c("(", "{", "if", "<-", "=", "!", "-", "+", "&&", "||", "&", "|", "==", "!=", "<", ">", "<=",
+                   ">=", "*", "/", "^", "%%", "%/%", "%in%", ":", "[", "[[")
+.e5_rexpr_funs <- c("logical", "integer", "numeric", "double", "character", "rep", "abs", "sqrt", "exp", "expm1",
+                    "log1p", "log2", "log10", "sin", "cos", "tan", "tanh", "atan", "floor", "ceiling", "trunc",
+                    "sign", "log", "round", "signif", "is.na", "is.nan", "is.finite", "is.infinite", "ifelse",
+                    "pmin", "pmax", "min", "max", "sum", "mean", "median", "var", "sd", "quantile", "any", "all",
+                    "length", "c", "nchar", "xor", "isTRUE", "isFALSE", "as.numeric", "as.double", "as.integer",
+                    "as.logical", "as.character", "as.Date", "cumsum", "identity")
+.e5_rexpr_unsup <- c("function", "for", "while", "repeat", "next", "break", "~", "?", "::", ":::", "<<-")
+# Aufruf mit einem Ausdruck statt eines Namens als Funktion (z. B. (function(x) x)(1), stats::sd(x)): wie RExpr
+# "attempt to apply non-function" beim Auswerten
+.e5_rexpr_cplx <- function(e) is.complex(e) || (is.call(e) && any(vapply(as.list(e), function(z) {
+  if (missing(z)) FALSE else .e5_rexpr_cplx(z) }, TRUE)))
+.e5_rexpr_rw <- function(e) {
+  if (!is.call(e)) return(e)
+  if (!is.symbol(e[[1L]])) return(quote(.e5_callx()))
+  for (i in seq_along(e)[-1L]) if (is.call(e[[i]])) e[[i]] <- .e5_rexpr_rw(e[[i]])
+  e
+}
+# Tiefe des Aufrufbaums (seit 1.6.4, Entscheidung 75): Aufruf 1 + Tiefe des tiefsten Elements (auch der Funktion),
+# Namen und Konstanten 0, Paarlisten (Formale) ohne eigene Ebene; bricht ueber 200 ab (gleiche Zaehlung wie RExpr)
+.sp_rexpr_depth <- function(e, d = 0L) {
+  if (is.call(e)) d <- d + 1L
+  else if (!(is.pairlist(e) && !is.null(e))) return(d)
+  if (d > 200L) return(d)
+  max(d, vapply(as.list(e), function(z) if (missing(z)) 0L else .sp_rexpr_depth(z, d), 0L))
+}
+.e5_rexpr_parse <- function(w) {
+  # seit 1.6.4 (C-006, Entscheidung 75): hoechstens 200 Ebenen wie RExpr; der Parser von R meldet sehr tiefe Ketten
+  # (ab einigen tausend Ebenen) als "out of memory while parsing", RExpr schon ab 201 die Tiefe
+  ex <- tryCatch(parse(text = w, keep.source = FALSE), error = function(e) {
+    if (grepl("out of memory while parsing", conditionMessage(e), fixed = TRUE)) chk_stop("sp.rexpr_tiefe", 200L)
+    stop(e)
+  })
+  if (any(vapply(as.list(ex), function(z) .sp_rexpr_depth(z) > 200L, TRUE))) chk_stop("sp.rexpr_tiefe", 200L)
+  # komplexe Zahlen (1i, NA_complex_) wie RExpr schon beim Zerlegen abgelehnt (seit 1.6.4, Entscheidung 64)
+  if (any(vapply(as.list(ex), .e5_rexpr_cplx, TRUE)))
+    stop("RExpr: komplexe Zahlen werden nicht unterst\u00fctzt", call. = FALSE)
+  for (i in seq_along(ex)) ex[[i]] <- .e5_rexpr_rw(ex[[i]])
+  ex
+}
+# Spalten von data fuer Regeltexte (seit 1.6.4, C-007): bei gleichem Namen die erste (wie eval mit einem data.frame);
+# Listen- und komplexe Spalten kann RExpr nicht darstellen, ihr Zugriff ist in allen drei Sprachen ein Fehler
+.sp_rexpr_data <- function(data, rx) {
+  data <- data[!duplicated(names(data))]
+  bad <- vapply(data, function(v) is.list(v) || is.complex(v), TRUE)
+  if (!any(bad)) return(data)
+  e <- list2env(as.list(data)[!bad], parent = rx)
+  for (nm in names(data)[bad])
+    makeActiveBinding(nm, local({ k <- nm; function() chk_stop("sp.rexpr_spalte", k) }), e)
+  e
+}
+# Vektorlängen in Regeltexten höchstens 1e8 wie RExpr (seit 1.6.4, C-006, Entscheidung 79): ":", rep() und
+# logical()/integer()/numeric()/double()/character() prüfen die Ergebnislänge vor dem Aufruf der Basisfunktion; Fälle,
+# die R selbst ablehnt (NA, Inf, negative Werte, falsche Längen), gehen unverändert an R
+.sp_rexpr_maxlen <- 1e8
+.sp_rexpr_len_stop <- function() chk_stop("sp.rexpr_laenge", "100000000")
+.sp_rexpr_num1 <- function(v) if ((is.numeric(v) || is.logical(v) || is.character(v)) && length(v) >= 1L && !is.object(v))
+  suppressWarnings(as.numeric(v[[1L]])) else NA_real_
+.sp_rexpr_colon <- function(e1, e2) {
+  a <- .sp_rexpr_num1(e1); b <- .sp_rexpr_num1(e2)
+  if (is.finite(a) && is.finite(b) && abs(b - a) < 4.503599627370496e15 &&
+      floor(abs(b - a) + 1 + 1.1920928955078125e-07) > .sp_rexpr_maxlen) .sp_rexpr_len_stop()
+  .Primitive(":")(e1, e2)
+}
+.sp_rexpr_rep_len <- function(lx, times = 1, length.out = NA, each = 1) {
+  num <- function(v) if ((is.numeric(v) || is.logical(v) || is.character(v)) && length(v) && !is.object(v))
+                       suppressWarnings(as.numeric(v)) else NA_real_
+  lo <- num(length.out)[1L]
+  if (is.finite(lo)) return(max(trunc(lo), 0))
+  e <- num(each)[1L]
+  e <- if (is.finite(e)) trunc(e) else 1
+  if (e < 0) return(0)
+  t <- num(times)
+  if (!length(t) || anyNA(t) || !all(t > -1 & t < 4503599627370497)) return(0)
+  if (length(t) == 1L) lx * e * trunc(t) else if (length(t) == lx * e) sum(trunc(t)) else 0
+}
+.sp_rexpr_rep <- function(x, ...) {
+  n <- tryCatch(.sp_rexpr_rep_len(length(x), ...), error = function(e) 0)
+  if (n > .sp_rexpr_maxlen) .sp_rexpr_len_stop()
+  .Primitive("rep")(x, ...)
+}
+.sp_rexpr_vec <- function(f) {
+  force(f)
+  function(length = 0L) {
+    n <- .sp_rexpr_num1(length)
+    if (base::length(length) == 1L && is.finite(n) && n >= 0 && trunc(n) > .sp_rexpr_maxlen) .sp_rexpr_len_stop()
+    f(length)
+  }
+}
+.e5_rexpr_env <- function(env) {
+  ev <- new.env(parent = emptyenv())
+  e <- env
+  repeat {                                   # aufrufende Umgebung bis einschliesslich der globalen
+    if (identical(e, emptyenv()) || isNamespace(e) || identical(e, baseenv())) break
+    for (nm in ls(e, all.names = TRUE)) if (!exists(nm, envir = ev, inherits = FALSE)) {
+      v <- tryCatch(get(nm, envir = e), error = function(err) NULL)   # auch selbst zugewiesene Funktionen
+      if (!is.null(v)) assign(nm, v, envir = ev)
+    }
+    if (identical(e, globalenv())) break
+    e <- parent.env(e)
+  }
+  for (nm in c("T", "F", "pi", "letters", "LETTERS", "month.name", "month.abb"))
+    if (!exists(nm, envir = ev, inherits = FALSE)) assign(nm, get(nm, envir = baseenv()), envir = ev)
+  for (nm in c(.e5_rexpr_ops, .e5_rexpr_funs))
+    assign(nm, if (nm %in% c("median", "var", "sd", "quantile")) getExportedValue("stats", nm) else get(nm, envir = baseenv()),
+           envir = ev)
+  assign(":", .sp_rexpr_colon, envir = ev)   # seit 1.6.4 mit Längengrenze (Entscheidung 79)
+  assign("rep", .sp_rexpr_rep, envir = ev)
+  for (nm in c("logical", "integer", "numeric", "double", "character"))
+    assign(nm, .sp_rexpr_vec(get(nm, envir = baseenv())), envir = ev)
+  for (nm in .e5_rexpr_unsup)
+    assign(nm, local({ f <- nm; function(...) stop(sprintf("RExpr: '%s' wird in Ausdr\u00fccken nicht unterst\u00fctzt", f), call. = FALSE) }),
+           envir = ev)
+  assign(".e5_callx", function() stop("attempt to apply non-function", call. = FALSE), envir = ev)
+  assign("$", function(x, name) {   # seit 1.6.4 wie R und RExpr: NULL$x ist NULL (C-025)
+    if (is.null(x)) return(NULL)
+    stop("$ operator is invalid for atomic vectors", call. = FALSE) }, envir = ev)
+  assign("@", function(object, name) stop(sprintf("no applicable method for `@` applied to an object of class \"%s\"",
+                                                  class(object)[1]), call. = FALSE), envir = ev)
+  ev
+}
+
 #' Regelbasierte taktische Allokation
 #'
 #' Geordnete Bedingungen waehlen je Tag ein Zielportfolio; die erste
@@ -187,6 +338,17 @@ momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("a
 #'   \code{list(buy, sell)} (wird mit [signal_state()] in einen Zustand
 #'   uebersetzt); NA gilt als \code{FALSE}. \code{weights}: benannter
 #'   Vektor Kursspalte -> Gewicht als Anteil.
+#'   Seit 1.6.4 je Regel nur die Felder when und weights; Gewichte endlich und >= 0.
+#'   Seit 1.6.4 ist \code{when} auch eine Funktion von \code{data} (Ergebnis logischer Vektor
+#'   der Laenge \code{nrow(data)}), und Regeltexte gelten in R, Python und Julia gleich im
+#'   gemeinsamen Umfang: Spalten von \code{data}, Variablen und eigene Funktionen der aufrufenden
+#'   Umgebung (bis zur globalen, nicht die Funktionen geladener Pakete), Operatoren, \code{if} und
+#'   die Funktionen abs, all, any, as.character, as.Date, as.double, as.integer, as.logical,
+#'   as.numeric, atan, c, ceiling, character, cos, cumsum, double, exp, expm1, floor, identity,
+#'   ifelse, integer, is.finite, is.infinite, is.na, is.nan, isFALSE, isTRUE, length, log, log10,
+#'   log1p, log2, logical, max, mean, median, min, nchar, numeric, pmax, pmin, quantile, rep, round,
+#'   sd, sign, signif, sin, sqrt, sum, tan, tanh, trunc, var, xor; anderes (z. B. \code{function},
+#'   \code{::}, Paketfunktionen) ist ein Fehler.
 #' @param default Benannter Gewichtsvektor (Anteile) fuer Zeilen, in denen
 #'   keine Regel zutrifft.
 #' @return \code{SimLevWeights}: data.frame mit \code{date} und je Anlage
@@ -206,18 +368,38 @@ momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("a
 #' table(attr(w, "regime"))
 #' @export
 tactical_rules <- function(data, rules, default) {
+  fn <- "tactical_rules"
+  .e5_data_dates(data, fn, "date")                        # seit 1.6.4 (K42 E5)
   n <- nrow(data); env <- parent.frame()
+  if (!is.list(rules) || is.data.frame(rules)) chk_stop("liste", fn, "rules")   # leere Liste: nur default
+  for (i in seq_along(rules)) {
+    r <- rules[[i]]
+    if (!is.list(r) || is.data.frame(r) || is.null(names(r)) || !all(c("when", "weights") %in% names(r))) chk_stop("e5.regel", fn, i)
+    bad <- setdiff(names(r), c("when", "weights"))       # Entscheidung 11 sinngemaess
+    if (length(bad)) chk_stop("e5.regel_feld", fn, bad[1], i)
+    .e5_weights(r$weights, fn, sprintf("rules[[%d]]$weights", i))
+    w <- r$when
+    if (is.list(w)) .e5_signal(w, fn, i)
+    else if (!(is.function(w) ||                          # Funktion von data (seit 1.6.4, Entscheidung 59)
+               (is.character(w) && length(w) >= 1L) ||   # Text: je Element ein Ausdruck (seit 1.6.3)
+               ((is.logical(w) || (is.numeric(w) && !is.factor(w) && all(is.na(w) | w == 0 | w == 1))) && is.null(dim(w)))))
+      chk_stop("e5.when", fn, i)
+  }
+  .e5_weights(default, fn, "default")
   assets <- unique(c(unlist(lapply(rules, function(r) names(r$weights))), names(default)))
+  rx <- if (any(vapply(rules, function(r) is.character(r$when), TRUE))) .e5_rexpr_env(env)
   cond <- vapply(rules, function(r) {
     w <- r$when
-    v <- if (is.character(w)) eval(parse(text = w), data, env)
+    v <- if (is.character(w)) eval(.e5_rexpr_parse(w), .sp_rexpr_data(data, rx), rx)   # RExpr-Umfang (seit 1.6.4)
+         else if (is.function(w)) w(data)
          else if (is.list(w) && !is.null(w$buy)) signal_state(w) else w
     v <- as.logical(v); v[is.na(v)] <- FALSE
     if (length(v) != n) stop("Bedingung hat nicht die L\u00e4nge nrow(data).")
     v
   }, logical(n))
   if (!is.matrix(cond)) cond <- matrix(cond, nrow = n)
-  regime <- apply(cond, 1, function(z) { k <- which(z); if (length(k)) k[1] else 0L })
+  # erste Regel mit TRUE je Zeile, sonst 0; seit 1.6.4 spaltenweise von hinten (B-080, bis 1.6.3 apply je Zeile)
+  regime <- integer(n); for (j in rev(seq_len(ncol(cond)))) regime[cond[, j]] <- j
   vec <- function(w) { v <- stats::setNames(rep(0, length(assets)), assets); v[names(w)] <- w; v }
   P <- rbind(vec(default), do.call(rbind, lapply(rules, function(r) vec(r$weights))))
   W <- P[regime + 1L, , drop = FALSE]
@@ -253,6 +435,7 @@ tactical_rules <- function(data, rules, default) {
 #' @param assets Zeichenvektor der Risikoanlagen fuer die Rotation.
 #' @param top Anzahl gehaltener Anlagen (Standard 1; 1 bis Anzahl
 #'   \code{assets}).
+#'   Seit 1.6.4 ganze Zahl ohne Abschneiden.
 #' @param safe Zeichenvektor der sicheren Anlage(n); bei mehreren wird die
 #'   mit dem besten Score gewaehlt. Pflicht, wenn \code{absolute = TRUE}
 #'   (Standard) oder \code{canary} gesetzt ist (sonst Fehler).
@@ -262,6 +445,7 @@ tactical_rules <- function(data, rules, default) {
 #'   \code{NULL} = kein Canary-Schutz).
 #' @param breadth Schutzschwelle \eqn{B} als Anzahl Anlagen (mindestens 1;
 #'   Standard \code{NULL} = Anzahl Canary-Anlagen).
+#'   Seit 1.6.4 ganze Zahl.
 #' @param lookbacks,type Siehe [momentum_score()] (Rueckblicke in Monaten;
 #'   \code{"average"} oder \code{"13612w"}).
 #' @param every Entscheidungsrhythmus: \code{"month"} (Standard),
@@ -269,6 +453,9 @@ tactical_rules <- function(data, rules, default) {
 #' @param weighting Gewichtung der gewaehlten Anlagen: \code{"equal"}
 #'   (Standard) oder \code{"inverse_vol"} (umgekehrt proportional zur
 #'   Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
+#'   Seit 1.6.4 liegen die Termine dann erst ab Zeile 63 (volles Fenster; bis
+#'   1.6.3 brach jeder fruehere Termin ab, mit Wochen- und Monatskursen auch mit den
+#'   Standardrueckblicken).
 #' @return \code{SimLevWeights} (data.frame mit \code{date} und
 #'   Zielgewichten je Anlage aus \code{assets} und \code{safe}, Anteile) mit
 #'   Attributen \code{scores} (Matrix der Momentum-Scores aller Anlagen je
@@ -291,18 +478,36 @@ tactical_rules <- function(data, rules, default) {
 tactical_rotation <- function(data, assets, top = 1L, safe = NULL, absolute = TRUE, canary = NULL, breadth = NULL,
                               lookbacks = c(1, 3, 6, 12), type = c("average", "13612w"),
                               every = c("month", "week", "quarter"), weighting = c("equal", "inverse_vol")) {
-  type <- match.arg(type); every <- match.arg(every); weighting <- match.arg(weighting)
+  fn <- "tactical_rotation"
+  .e5_choice(type, c("average", "13612w"), fn, "type")   # Pruefung (Meldung auswahl)
+  type <- match.arg(type)
+  .e5_choice(every, c("month", "week", "quarter"), fn, "every")   # Pruefung (Meldung auswahl)
+  every <- match.arg(every)
+  .e5_choice(weighting, c("equal", "inverse_vol"), fn, "weighting")   # Pruefung (Meldung auswahl)
+  weighting <- match.arg(weighting)
+  # seit 1.6.4 (K42 E5): Datum, Namen, Wahrheitswert, ganze Zahlen; Meldungen ohne Eingabewert (Entscheidung 8)
+  .e5_data_dates(data, fn, "momentum_score: data$date")
+  .e5_names(assets, fn, "assets")
+  .e5_names(safe, fn, "safe", null_ok = TRUE)
+  .e5_names(canary, fn, "canary", null_ok = TRUE)
+  chk_bool1(absolute, fn, "absolute")
+  .e5_lookbacks(lookbacks, fn)
   if ((absolute || length(canary)) && !length(safe)) stop("absolute bzw. canary brauchen eine sichere Anlage 'safe'.")
+  chk_int1(top, fn, "top", lo = 1)
   top <- as.integer(top)
   if (length(top) != 1L || is.na(top) || top < 1L || top > length(assets))
-    stop(sprintf("top muss zwischen 1 und der Anzahl der Anlagen in assets (%d) liegen (ist: %s).", length(assets), format(top)))
+    stop(sprintf("top muss zwischen 1 und der Anzahl der Anlagen in assets (%d) liegen.", length(assets)))
+  if (!is.null(breadth)) chk_int1(breadth, fn, "breadth", lo = 1)
   if (length(canary) && !is.null(breadth) && (length(breadth) != 1L || is.na(breadth) || breadth < 1))
-    stop(sprintf("breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score f\u00fcr vollen Schutz; ist: %s).", format(breadth)))
+    stop("breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score f\u00fcr vollen Schutz).")
   allc <- unique(c(assets, safe, canary))
   S <- momentum_score(data, allc, lookbacks, type)
   d <- .to_date(data$date, "data$date"); n <- length(d)
   rows <- .period_last(d, every)
   rows <- rows[apply(S[rows, assets, drop = FALSE], 1, function(z) sum(is.finite(z)) >= top)]
+  # inverse_vol: Termine erst ab Zeile 63, wenn das Fenster der Schwankung voll ist (seit 1.6.4, Entscheidung 144;
+  # bis 1.6.3 Abbruch "Zeilen ohne positive Gewichte" bei jedem frueheren Termin)
+  if (weighting == "inverse_vol") rows <- rows[rows >= 63L]
   if (!length(rows)) stop("Zu kurze Historie f\u00fcr den R\u00fcckblick.")
   out_assets <- unique(c(assets, safe))
   vol <- if (weighting == "inverse_vol") vapply(assets, function(a) {
@@ -367,6 +572,7 @@ tactical_rotation <- function(data, assets, top = 1L, safe = NULL, absolute = TR
 #'   Werte unter 1 ergeben eine Warnung (vermutlich als Anteil angegeben).
 #' @param window Fensterlaenge der Volatilitaetsschaetzung in Zeilen mit
 #'   Kursbewegung (Standard 63).
+#'   Seit 1.6.4 ganze Zahl >= 2.
 #' @param max_exposure Hoechster Risikoanteil als Anteil (Standard 1 = ohne
 #'   Hebel; Werte > 1 sind nicht erlaubt, da die Engine keinen Kredit
 #'   kennt).
@@ -398,7 +604,12 @@ tactical_rotation <- function(data, assets, top = 1L, safe = NULL, absolute = TR
 #' @export
 tactical_target_volatility <- function(data, weights, safe, target = 10, window = 63L, max_exposure = 1,
                               every = c("month", "week", "day", "quarter"), ppy = NULL) {
+  fn <- "tactical_target_volatility"
+  .e5_choice(every, c("month", "week", "day", "quarter"), fn, "every")   # Pruefung (Meldung auswahl)
   every <- match.arg(every)
+  .e5_risk_check(fn, data, weights, safe, window, ppy)    # seit 1.6.4 (K42 E5)
+  chk_num1(target, fn, "target", lo = 0, lo_open = TRUE)
+  chk_num1(max_exposure, fn, "max_exposure", lo = 0)
   if (max_exposure > 1) stop("max_exposure > 1 w\u00e4re Kredit; die Engine kennt keine Kreditaufnahme (Hebel \u00fcber Hebelprodukte abbilden).")
   if (target < 1) warning(sprintf("target = %g ist sehr klein; target ist in Prozent p. a. (10 = 10 %%), nicht als Anteil.", target))
   rv <- .risk_vol(data, weights, safe, window, ppy)
@@ -410,6 +621,21 @@ tactical_target_volatility <- function(data, weights, safe, target = 10, window 
   out <- .risk_weights(rv, expo, safe, "target_volatility")
   attr(out, "exposure") <- expo; attr(out, "volatility") <- vol
   out
+}
+
+# Gemeinsame Pruefung der Volatilitaetssteuerung (seit 1.6.4, K42 E5): data mit Datum, weights (SimLevWeights oder
+# benannte Gewichte), safe (eine Kursspalte), window ganze Zahl >= 2, ppy NULL oder Zahl > 0, Kursspalten numerisch
+.e5_risk_check <- function(fn, data, weights, safe, window, ppy) {
+  .e5_data_dates(data, fn, "data$date")
+  if (!inherits(weights, "SimLevWeights")) {
+    if (!is.numeric(weights) || is.null(names(weights))) stop("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+    .e5_weights(weights, fn, "weights")
+  }
+  chk_name1(safe, fn, "safe")
+  chk_int1(window, fn, "window", lo = 2)
+  chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE, null_ok = TRUE)
+  .e5_numcols(data, intersect(c(setdiff(names(weights), "date"), safe), names(data)), fn)
+  invisible(NULL)
 }
 
 #' Volatilitaet des Risikoportfolios (gemeinsam fuer Zielvolatilitaet und
@@ -502,6 +728,7 @@ tactical_target_volatility <- function(data, weights, safe, target = 10, window 
 #' @param min_history Mindesthistorie der Volatilitaetsschaetzung in Jahren
 #'   (Standard 3), bevor gesteuert wird. Ist sie laenger als die vorhandene
 #'   Historie, wird nie gesteuert (mit Warnung).
+#'   Seit 1.6.4 hoechstens 100 Jahre.
 #' @param scaling \code{"inverse"} (Standard): Anteil
 #'   \code{base * target / vol}; \code{"fixed"}: feste Anteile
 #'   \code{high_exposure} und \code{low_exposure}.
@@ -534,7 +761,18 @@ tactical_conditional_volatility <- function(data, weights, safe, base = 1, upper
                                    window = 63L, min_exposure = 0, max_exposure = 1, min_history = 3,
                                    scaling = c("inverse", "fixed"), high_exposure = NULL, low_exposure = NULL,
                                    every = c("month", "week", "day", "quarter"), ppy = NULL) {
-  every <- match.arg(every); scaling <- match.arg(scaling)
+  fn <- "tactical_conditional_volatility"
+  .e5_choice(every, c("month", "week", "day", "quarter"), fn, "every")   # Pruefung (Meldung auswahl)
+  every <- match.arg(every)
+  .e5_choice(scaling, c("inverse", "fixed"), fn, "scaling")   # Pruefung (Meldung auswahl)
+  scaling <- match.arg(scaling)
+  # seit 1.6.4 (K42 E5): einzelne endliche Zahlen vor den Bereichspruefungen (B-012: NA lief in Python/Julia still)
+  .e5_risk_check(fn, data, weights, safe, window, ppy)
+  for (a in c("base", "upper", "min_exposure", "max_exposure")) chk_num1(get(a), fn, a)
+  for (a in c("lower", "target", "high_exposure", "low_exposure")) chk_num1(get(a), fn, a, null_ok = TRUE)
+  if (!is.null(target)) chk_num1(target, fn, "target", lo = 0, lo_open = TRUE)
+  chk_num1(min_history, fn, "min_history", lo = 0)
+  chk_max(min_history, 100, fn, "min_history")             # Entscheidung 46
   if (max_exposure > 1) stop("max_exposure > 1 w\u00e4re Kredit; die Engine kennt keine Kreditaufnahme (Hebel \u00fcber Hebelprodukte abbilden).")
   if (base < 0 || base > max_exposure) stop("base muss zwischen 0 und max_exposure liegen.")
   if (min_exposure < 0 || min_exposure > base) stop("min_exposure muss zwischen 0 und base liegen.")
@@ -618,6 +856,7 @@ tactical_conditional_volatility <- function(data, weights, safe, base = 1, upper
 #'   Summe 1 normiert.
 #' @param start,end Beginn und Ende des Uebergangs (Date oder
 #'   \code{"JJJJ-MM-TT"}; Standard \code{NULL} = erstes bzw. letztes Datum).
+#'   Seit 1.6.4 keine Zahl.
 #' @param every Rhythmus der Stufen: \code{"year"} (Standard),
 #'   \code{"quarter"} oder \code{"month"}.
 #' @return \code{SimLevWeights} (data.frame mit \code{date} und
@@ -629,13 +868,24 @@ tactical_conditional_volatility <- function(data, weights, safe, base = 1, upper
 #' gp[c(1, 3653, 7670), ]
 #' @export
 tactical_glidepath <- function(data, from, to, start = NULL, end = NULL, every = c("year", "quarter", "month")) {
+  fn <- "tactical_glidepath"
+  .e5_choice(every, c("year", "quarter", "month"), fn, "every")   # Pruefung (Meldung auswahl)
   every <- match.arg(every)
-  d <- .to_date(if (is.data.frame(data)) data$date else data, "tactical_glidepath: Datum")
+  # seit 1.6.4 (K42 E5): Datum ohne NA und aufsteigend, Gewichte benannt endlich >= 0, start/end Datum
+  if (is.data.frame(data)) d <- .e5_data_dates(data, fn, "tactical_glidepath: Datum")
+  else {
+    chk_nofactor(data, fn, "data")
+    if (!length(data)) chk_stop("zeilen_keine", fn, "data")
+    d <- .to_date(data, "tactical_glidepath: Datum")
+    if (anyNA(d) || is.unsorted(d)) chk_stop("e5.datum_vektor", fn, "data")
+  }
+  .e5_weights(from, fn, "from"); .e5_weights(to, fn, "to")
+  start <- chk_date1(start, fn, "start", null_ok = TRUE); end <- chk_date1(end, fn, "end", null_ok = TRUE)
   a <- unique(c(names(from), names(to)))
   f <- stats::setNames(rep(0, length(a)), a); f[names(from)] <- from
   t <- stats::setNames(rep(0, length(a)), a); t[names(to)] <- to
   s <- .to_date(start %||% d[1], "start"); e <- .to_date(end %||% d[length(d)], "end")
-  if (e < s) stop(sprintf("tactical_glidepath: end (%s) liegt vor start (%s); f\u00fcr den umgekehrten Weg from und to tauschen.", format(e), format(s)))
+  if (e < s) stop("tactical_glidepath: end liegt vor start; f\u00fcr den umgekehrten Weg from und to tauschen.")
   rows <- unique(c(1L, .period_last(d, every)))
   frac <- if (e > s) pmin(1, pmax(0, as.numeric(d[rows] - s) / as.numeric(e - s)))
           else as.numeric(d[rows] >= s)                       # start = end: Sprung von from auf to
@@ -676,9 +926,10 @@ tactical_blend <- function(..., shares = NULL) {
   ws <- list(...)
   if (!length(ws) || !all(vapply(ws, inherits, TRUE, "SimLevWeights"))) stop("tactical_blend: ... muss aus SimLevWeights bestehen.")
   shares <- shares %||% rep(1 / length(ws), length(ws))
-  if (length(shares) != length(ws) || anyNA(shares) || any(shares < 0) || sum(shares) <= 0)
-    stop(sprintf("tactical_blend: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)); erhalten: %s.",
-                 length(ws), paste(format(shares), collapse = ", ")))
+  if (!is.numeric(shares) || is.factor(shares) || length(shares) != length(ws) || !all(is.finite(shares)) ||
+      any(shares < 0) || sum(shares) <= 0)                 # seit 1.6.4 ohne Eingabewert, endlich (Entscheidung 8)
+    stop(sprintf("tactical_blend: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)).",
+                 length(ws)))
   d <- ws[[1]]$date
   if (!all(vapply(ws, function(w) identical(as.numeric(w$date), as.numeric(d)), TRUE))) stop("tactical_blend: unterschiedliche Daten.")
   a <- unique(unlist(lapply(ws, function(w) names(w)[-1])))
@@ -778,6 +1029,7 @@ plot.SimLevWeights <- function(x, main = "Zielgewichte", ...) {
 #'   liegt) oder \code{"relative"} (Prozent des Zielgewichts).
 #' @param lag Verzoegerung in Zeilen von \code{data} (ganze Zahl >= 0,
 #'   Standard 1); mit Attribut \code{filled} in Zeilen mit echten Kursen.
+#'   Seit 1.6.4 ohne Abschneiden (1.5 und Text sind ein Fehler).
 #' @param asset_args Liste von Argumenten fuer [asset_config()] (ueber
 #'   [strategy_from_weights()]), z. B.
 #'   \code{list(spread = 0.1, partial_exemption = c(aktien = 30, geld = 0))}.
@@ -817,8 +1069,15 @@ plot.SimLevWeights <- function(x, main = "Zielgewichte", ...) {
 tactical_simulation <- function(data, weights, rebalance = c("switch", "month", "quarter", "year"),
                                 tolerance = NULL, tolerance_type = c("absolute", "relative"), lag = 1L,
                                 asset_args = list(), ...) {
-  rebalance <- match.arg(rebalance); tolerance_type <- match.arg(tolerance_type)
+  fn <- "tactical_simulation"
+  .e5_choice(rebalance, c("switch", "month", "quarter", "year"), fn, "rebalance")   # Pruefung (Meldung auswahl)
+  rebalance <- match.arg(rebalance)
+  .e5_choice(tolerance_type, c("absolute", "relative"), fn, "tolerance_type")   # Pruefung (Meldung auswahl)
+  tolerance_type <- match.arg(tolerance_type)
+  .e5_data_dates(data, fn, "data$date")                   # seit 1.6.4 (K42 E5)
   if (!inherits(weights, "SimLevWeights")) stop("weights muss ein SimLevWeights sein.")
+  chk_int1(lag, fn, "lag", lo = 0)                       # seit 1.6.4 ohne Abschneiden (Entscheidung 19)
+  if (!is.list(asset_args) || is.data.frame(asset_args)) chk_stop("liste", fn, "asset_args")
   sim_args <- list(...)
   nm <- names(sim_args) %||% character(0)
   bad <- nm[nm %in% c("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh") | startsWith(nm, "rebalance.")]
@@ -831,8 +1090,7 @@ tactical_simulation <- function(data, weights, rebalance = c("switch", "month", 
   W <- as.matrix(weights[, assets, drop = FALSE])[k, , drop = FALSE]
   W <- apply(W, 2, function(v) .fill_na(v, "locf", keep_leading = FALSE))
   if (!is.matrix(W)) W <- matrix(W, nrow = length(d), dimnames = list(NULL, assets))
-  lag <- suppressWarnings(as.integer(lag))
-  if (length(lag) != 1L || is.na(lag) || lag < 0L) stop("lag muss eine ganze Zahl >= 0 sein.")
+  lag <- as.integer(lag)
   n <- nrow(W)
   if (lag > 0) {
     # Verzoegerung in Zeilen mit echten Kursen: Mit Attribut 'filled' (series_align) zaehlen per LOCF

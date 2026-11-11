@@ -101,6 +101,16 @@ Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei
 \code{signal_drawdown} nur die Zeile mit NA (das Hoch wird ohne sie
 fortgefuehrt).
 
+Eingaben (seit 1.6.4 geprueft): \code{x} ein numerischer Vektor (keine Matrix,
+Tabelle, kein Text, Faktor oder Wahrheitswert; leer erlaubt); \code{n},
+\code{fast}, \code{slow}, \code{window} je eine endliche Zahl \code{>= 1},
+\code{lag >= 0} (seit 1.6.4 ganze Zahlen, gebrochene Werte sind ein Fehler; \code{lag} ab der
+Laenge von \code{x} ergibt nur \code{FALSE}); \code{band >= 0};
+\code{sell_dd}, \code{buy_dd} groesser 0 und hoechstens 100; bei
+\code{signal_volatility} \code{threshold >= 0} und \code{ppy > 0}; bei
+\code{signal_combine} \code{buy} und \code{sell} je TRUE/FALSE oder 0/1
+(\code{NA} bleibt \code{NA}).
+
 \code{band} wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind
 beide Signale \code{FALSE}, der Zustand in \code{\link[=simulation]{simulation()}} bzw.
 \code{\link[=signal_state]{signal_state()}} bleibt dann unveraendert. Bei Durchschnitten

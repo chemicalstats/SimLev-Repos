@@ -39,7 +39,8 @@ Ziel 40 \% wird gehandelt, wenn eine Anlage unter 35 \% oder ueber 45 \%
 liegt) oder \code{"relative"} (Prozent des Zielgewichts).}
 
 \item{lag}{Verzoegerung in Zeilen von \code{data} (ganze Zahl >= 0,
-Standard 1); mit Attribut \code{filled} in Zeilen mit echten Kursen.}
+Standard 1); mit Attribut \code{filled} in Zeilen mit echten Kursen.
+Seit 1.6.4 ohne Abschneiden (1.5 und Text sind ein Fehler).}
 
 \item{asset_args}{Liste von Argumenten fuer \code{\link[=asset_config]{asset_config()}} (ueber
 \code{\link[=strategy_from_weights]{strategy_from_weights()}}), z. B.

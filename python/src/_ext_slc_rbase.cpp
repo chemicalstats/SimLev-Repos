@@ -169,9 +169,11 @@ static PyObject *slc_r_pow_rec(PyObject *self, PyObject *args)
     nx = NITEMS(vx); ny = NITEMS(vy);
     if (nx < 1 || ny < 1) { rel(&vx); rel(&vy); PyErr_SetString(PyExc_ValueError, "interner Fehler: Laenge 0"); return NULL; }
     if (DBUF(o, &vo, 1, nx > ny ? nx : ny, "Ausgabe") < 0) { rel(&vx); rel(&vy); return NULL; }
-    sl_r_pow_rec(nx, (const double *) vx.buf, ny, (const double *) vy.buf, (double *) vo.buf);
-    rel(&vx); rel(&vy); rel(&vo);
-    Py_RETURN_NONE;
+    {
+        int64_t nw = sl_r_pow_rec(nx, (const double *) vx.buf, ny, (const double *) vy.buf, (double *) vo.buf);
+        rel(&vx); rel(&vy); rel(&vo);
+        return PyLong_FromLongLong((long long) nw);   /* seit 1.6.4 (T4-R2): Zahl der Warnungen (-Inf)^y, y > 2^64 */
+    }
 }
 
 /* libm elementweise wie R's math1: (kind, x, out) */
@@ -237,6 +239,10 @@ static PyObject *slc_r_psort(PyObject *self, PyObject *args)
     if (LBUF(k, &vk, 0, -1, "partial") < 0) { rel(&vx); return NULL; }
     st = sl_r_psort(NITEMS(vx), (double *) vx.buf, NITEMS(vk), (const int64_t *) vk.buf);
     rel(&vx); rel(&vk);
+    if (st == SL_EARG) {   /* seit 1.6.4 (C-015) */
+        PyErr_SetString(PyExc_ValueError, "interner Fehler: partial ausserhalb 1 ... length(x)");
+        return NULL;
+    }
     if (st) return nomem();
     Py_RETURN_NONE;
 }
@@ -434,7 +440,7 @@ PyMethodDef simlev_ext_slc_rbase_methods[] = {
      "slc_r_colsums_idx(x, nr, nc, rs, cs, idx, base, narm, mean, out): colSums/colMeans(x[idx, ]) ohne Kopie"},
     {"slc_r_pow", slc_r_pow, METH_VARARGS, "slc_r_pow(x, y, out): x ^ y wie R"},
     {"slc_r_pow1", slc_r_pow1, METH_VARARGS, "slc_r_pow1(x, y) -> x ^ y wie R"},
-    {"slc_r_pow_rec", slc_r_pow_rec, METH_VARARGS, "slc_r_pow_rec(x, y, out): x ^ y wie R mit Recycling"},
+    {"slc_r_pow_rec", slc_r_pow_rec, METH_VARARGS, "slc_r_pow_rec(x, y, out) -> Zahl der Warnungen: x ^ y wie R mit Recycling"},
     {"slc_r_math1", slc_r_math1, METH_VARARGS, "slc_r_math1(kind, x, out): exp, log, log1p, expm1, log2, log10 wie R"},
     {"slc_r_order", slc_r_order, METH_VARARGS, "slc_r_order(keys, n, nkey, dec, nalast, out) -> nout"},
     {"slc_r_rank", slc_r_rank, METH_VARARGS, "slc_r_rank(x, ties, out)"},

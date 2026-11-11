@@ -276,8 +276,12 @@ static int cmp_i64(const void *a, const void *b)
 
 int sl_r_psort(int64_t n, double *x, int64_t nk, const int64_t *k)
 {
-    int64_t *s;
+    int64_t *s, i;
     if (nk > 10) { qsort_singleton(x, n); return SL_OK; }
+    /* seit 1.6.4 (C-015): Stellen 1 ... n wie R's do_psort (bis 1.6.3 lief psort2 ueber das Feld oder hing);
+     * die Huellen melden vorher wie R "index %d outside bounds" */
+    for (i = 0; i < nk; i++)
+        if (k[i] < 1 || k[i] > n) return SL_EARG;
     if (nk < 1 || n < 2) return SL_OK;
     s = (int64_t *) malloc((size_t) nk * sizeof(int64_t));
     if (s == NULL) return SL_ENOMEM;
@@ -292,6 +296,9 @@ int sl_r_psort(int64_t n, double *x, int64_t nk, const int64_t *k)
 
 /* Wert an 1-basierter Stelle i oder NA außerhalb */
 static double at1(const double *x, int64_t n, int64_t i) { return (i >= 1 && i <= n) ? x[i - 1] : SLR_NA; }
+
+/* Grenze von sl_r_psort: mehr Indizes als diese sortieren das ganze Feld */
+#define QPART_FULL 10
 
 static int64_t add_unique(int64_t *part, int64_t np, double v)
 {
@@ -323,26 +330,30 @@ int sl_r_quantile(int64_t n, const double *x, int64_t np, const double *p, int t
     xx = (double *) malloc((size_t) (n + 4) * sizeof(double));
     if (xs == NULL || part == NULL || xx == NULL) { st = SL_ENOMEM; goto done; }
     if (n > 0) memcpy(xs, x, (size_t) n * sizeof(double));
-    /* Indizes der partiellen Sortierung (Reihenfolge des ersten Auftretens, ohne Wiederholung) */
+    /* Indizes der partiellen Sortierung (Reihenfolge des ersten Auftretens, ohne Wiederholung). Seit 1.6.4 (C-072)
+     * endet die Sammlung beim 11. verschiedenen Index: ab 11 Indizes sortiert sl_r_psort ohnehin das ganze Feld (ohne
+     * Blick auf die Indizes), das Ergebnis ist also dasselbe; bis 1.6.3 lineare Suche über alle gesammelten Indizes. */
     if (n > 0) {
         if (type == 7) {
             double nm1 = (double) (n - 1 > 0 ? n - 1 : 0);
-            for (k = 0; k < np; k++) if (p[k] == p[k]) npart = add_unique(part, npart, floor(1 + nm1 * p[k]));
-            for (k = 0; k < np; k++) if (p[k] == p[k]) npart = add_unique(part, npart, ceil(1 + nm1 * p[k]));
+            for (k = 0; k < np && npart <= QPART_FULL; k++)
+                if (p[k] == p[k]) npart = add_unique(part, npart, floor(1 + nm1 * p[k]));
+            for (k = 0; k < np && npart <= QPART_FULL; k++)
+                if (p[k] == p[k]) npart = add_unique(part, npart, ceil(1 + nm1 * p[k]));
         } else {
             double j;
             npart = add_unique(part, npart, 1.0);
-            for (k = 0; k < np; k++) {
+            for (k = 0; k < np && npart <= QPART_FULL; k++) {
                 if (type <= 3) j = floor(type == 3 ? (double) n * p[k] - 0.5 : (double) n * p[k]);
                 else j = floor(a + p[k] * ((double) n + 1 - a - b) + fuzz);
                 if (p[k] == p[k] && j > 0 && j <= (double) n) npart = add_unique(part, npart, j);
             }
-            for (k = 0; k < np; k++) {
+            for (k = 0; k < np && npart <= QPART_FULL; k++) {
                 if (type <= 3) j = floor(type == 3 ? (double) n * p[k] - 0.5 : (double) n * p[k]);
                 else j = floor(a + p[k] * ((double) n + 1 - a - b) + fuzz);
                 if (p[k] == p[k] && j > 0 && j < (double) n) npart = add_unique(part, npart, j + 1);
             }
-            npart = add_unique(part, npart, (double) n);
+            if (npart <= QPART_FULL) npart = add_unique(part, npart, (double) n);
         }
         st = sl_r_psort(n, xs, npart, part);
         if (st != SL_OK) goto done;

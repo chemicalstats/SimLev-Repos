@@ -75,16 +75,20 @@ end
 function _rb_psort(x::Vector{Float64}, k::Vector{Int64})
     v = copy(x)
     st = ccall((:sl_r_psort, LIBSLC), Cint, (Int64, Ptr{Float64}, Int64, Ptr{Int64}), length(v), v, length(k), k)
+    st == 1 && error("interner Fehler: partial ausserhalb 1 ... length(x)")   # seit 1.6.4 (C-015, SL_EARG)
     st == 0 || throw(OutOfMemoryError())
     v
 end
+
+"Statuscode des Kerns für fehlenden Speicher (`SL_ENOMEM` in core/slc.h; seit 1.6.4 benannt statt der Zahl 7, C-092)."
+const _SL_ENOMEM = Cint(7)
 
 "quantile(x, p, type) für x ohne NA und begrenzte p (NaN erlaubt)."
 function _rb_quantile(x::Vector{Float64}, p::Vector{Float64}, type::Int)
     out = Vector{Float64}(undef, length(p))
     st = ccall((:sl_r_quantile, LIBSLC), Cint, (Int64, Ptr{Float64}, Int64, Ptr{Float64}, Cint, Ptr{Float64}),
                length(x), x, length(p), p, type, out)
-    st == 7 && throw(OutOfMemoryError())
+    st == _SL_ENOMEM && throw(OutOfMemoryError())
     st == 0 || error("'type' must be 1:9")
     out
 end

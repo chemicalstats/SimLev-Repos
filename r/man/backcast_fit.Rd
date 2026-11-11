@@ -97,7 +97,7 @@ ohne Wirkung (immer RMS).}
 
 \item{horizon}{Renditehorizont in Produktbeobachtungen fuer "return"/"hybrid"
 (ganze Zahl >= 1, Standard 1). Werte > 1 (z. B. 5) daempfen asynchrone
-Schlusskurse (Xetra vs. US-Index).}
+Schlusskurse (Xetra vs. US-Index). Seit 1.6.4 kleiner als die Zahl der Produktbeobachtungen im Fit-Fenster.}
 
 \item{hybrid_weight}{Gewicht des Renditeterms bei "hybrid" als Anteil
 (0..1, Standard 0.5); der Niveauterm erhaelt 1 - \code{hybrid_weight}.}
@@ -105,7 +105,8 @@ Schlusskurse (Xetra vs. US-Index).}
 \item{lag}{Verzoegerung des Index gegenueber dem Produkt in Zeilen
 (ganzzahlig, Standard 0; bei k > 0 wird die Produktrendite in Zeile t mit
 der Indexrendite aus Zeile t - k modelliert) oder \code{"auto"} (Lag aus
--2..2 mit der hoechsten Korrelation, bei negativem Hebel der niedrigsten).}
+-2..2 mit der hoechsten Korrelation, bei negativem Hebel der niedrigsten). Seit 1.6.4 mit Betrag kleiner als die Zeilenzahl von data.
+Ist bei "auto" keine der fuenf Korrelationen bestimmbar (jede braucht mindestens 30 gemeinsame Renditen, keine konstante Reihe), meldet die Funktion das seit 1.6.4 (lag dann angeben).}
 
 \item{rate_lag}{Verzoegerung des Zinssatzes in Zeilen (Standard 0 = Satz
 des Tages t; k > 0 = Satz aus Zeile t - k).}
@@ -131,7 +132,7 @@ Nicht genannte Parameter behalten ihr Standardintervall (je Eintrag
 \code{c(unten, oben)} mit unten < oben).}
 
 \item{ter_basis, rate_basis}{Tagesbasis fuer TER (Standard 365) und fuer
-Zins und Spread (Standard 360, Act/360).}
+Zins und Spread (Standard 360, Act/360). Seit 1.6.4 Zahlen > 0.}
 
 \item{accrual}{Abgrenzung der TER: \code{"linear"} (Standard,
 TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}

@@ -24,9 +24,12 @@
         as.double(gamma), as.double(s2_init))
 
 # NLL an par = c(mu, omega, alpha, beta, gamma); s2_init = NULL: Stichprobenvarianz
-.sl_garch11_nll <- function(e, par, gjr = FALSE, s2_init = NULL)
+# seit 1.6.4 nur 4 oder 5 Werte (B-095: bis 1.6.3 wiederholte R kuerzere Angaben, Python/Julia fuellten mit 0 auf)
+.sl_garch11_nll <- function(e, par, gjr = FALSE, s2_init = NULL) {
+  if (!length(par) %in% c(4L, 5L)) stop("garch11_nll: par muss 4 oder 5 Werte haben (mu, omega, alpha, beta[, gamma]).")
   .Call(C_sl_garch11_nll, as.double(e), as.double(rep_len(c(par, 0), 5)), as.logical(gjr),
         if (is.null(s2_init)) NaN else as.double(s2_init))
+}
 
 # GJR-NLL und analytischer Gradient an theta = c(mu, log omega, a, g, b) (Vorwaertsrekursion der
 # Ableitungen von s2, wie im Fit); list(value, gradient), nicht endlich: value = Inf, gradient = NaN.
@@ -74,7 +77,8 @@
   .Call(C_sl_dcc_filter, .sl_mmat(Z), as.double(a), as.double(b), .sl_mmat(Qbar), as.logical(keep))
 
 # Schaetzung von (a, b) ganz in C; list(a, b, nll, convergence, par). BFGS mit analytischem
-# Gradienten nach grobem Nelder-Mead-Vorlauf (bis 1.1.0 Nelder-Mead wie dependence_dcc)
+# Gradienten ohne Nelder-Mead-Vorlauf; Nelder-Mead nur als Rueckfall bei nicht endlichem Start (core/slc_dcc.cpp;
+# bis 1.1.0 Nelder-Mead wie dependence_dcc)
 .sl_dcc_fit <- function(Z, Qbar) .Call(C_sl_dcc_fit, .sl_mmat(Z), .sl_mmat(Qbar))
 
 # ── Backcast ────────────────────────────────────────────────────────────
@@ -135,8 +139,10 @@
   .Call(C_sl_ms_garch_estimate, as.double(y), as.integer(K), model == "gjrGARCH", .sl_threads(cores))
 }
 
-# Zahl der Threads aus cores (wie bootstrap(): ganze Zahl; NA, ungueltig oder < 1 -> 1)
+# Zahl der Threads aus cores (wie bootstrap(): ganze Zahl; NA, ungueltig oder < 1 -> 1; seit 1.6.4 "auto": Kern-Threads
+# wie ausserhalb paralleler Einheiten, .sl_auto_threads)
 .sl_threads <- function(cores) {
+  if (identical(cores, "auto")) return(.sl_auto_threads())
   nt <- suppressWarnings(as.integer(cores[1L]))
   if (length(nt) != 1L || is.na(nt) || nt < 1L) 1L else nt
 }

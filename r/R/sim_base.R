@@ -63,11 +63,6 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
        start = as.numeric(start_date), days = if (!is.null(days)) as.numeric(days), dcode = dcode)
 }
 
-#' Argument fuer Fehlermeldungen darstellen (NULL, Text in Anfuehrungszeichen, Zahlen)
-#' @keywords internal
-#' @noRd
-.show_arg_s <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
-
 #--------> Tarifweg (income_tariff()): Hilfsfunktionen zur Jahresrechnung
 # rechnet die Tagesengine den Jahresabschluss im Kern (tariff_core_impl.h); .tariff_close mit
 # .tariff_base/.tariff_full/.tariff_diff bleibt als R-Referenz des Tarifkerns (Gleichlauf: tariff_fuzz.R und
@@ -92,15 +87,16 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
                                       paste(names(x), collapse = ", ")), call. = FALSE)
       yc <- 1L; vc <- 2L
     }
+    for (j in c(yc, vc)) if (is.factor(x[[j]])) chk_stop("spalte_faktor", who, names(x)[j])   # Entscheidung 15 (bis 1.6.3 Jahr still als Text)
     if (!is.numeric(x[[vc]])) stop(sprintf("%s: taxable_income: Spalte '%s' (Betrag) muss numerisch sein.", who, names(x)[vc]), call. = FALSE)
     x <- stats::setNames(as.numeric(x[[vc]]), as.character(x[[yc]]))
   }
   if (!is.numeric(x) || !length(x) || is.matrix(x))
-    stop(sprintf("%s: taxable_income muss %s sein, nicht %s.", who, form, paste(utils::head(format(x), 3), collapse = ", ")), call. = FALSE)
+    stop(sprintf("%s: taxable_income muss %s sein.", who, form), call. = FALSE)   # seit 1.6.4 ohne Eingabewert
   if (any(!is.finite(x))) {
     i <- which(!is.finite(x))[1]
-    stop(sprintf("%s: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche Betr\u00e4ge in EUR.", who,
-                 format(x[i]), if (!is.null(names(x))) sprintf(" f\u00fcr %s", names(x)[i]) else ""), call. = FALSE)
+    stop(sprintf("%s: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert%s; erwartet werden endliche Betr\u00e4ge in EUR.", who,
+                 if (!is.null(names(x))) sprintf(" (f\u00fcr %s)", names(x)[i]) else ""), call. = FALSE)   # seit 1.6.4 ohne den Wert
   }
   if (length(x) == 1L && is.null(names(x))) return(list(all = unname(as.numeric(x)), by_year = NULL))
   if (plan_ok && is.null(names(x))) return(list(all = NULL, by_year = NULL))
@@ -277,13 +273,15 @@ calculate_skewness <- function(x, na.rm = TRUE){
   }
 
   mean_x <- mean(x)
-  sd_x <- sd(x)
+  sd_x <- .sl_sd(x)
 
   if(sd_x == 0){
     return(NA)
   }
 
-  skew <- (n / ((n - 1) * (n - 2))) * sum((x - mean_x)^3) / (sd_x^3)
+  # seit 1.6.4 (K43 T1-R11) Summanden (d * d) * d statt (x - mean_x)^3, wie der Kern (simlev_eval::moments)
+  d <- x - mean_x
+  skew <- (n / ((n - 1) * (n - 2))) * sum(d * d * d) / (sd_x^3)
 
   return(skew)
 }
@@ -300,14 +298,17 @@ calculate_kurtosis <- function(x, na.rm = TRUE, excess = TRUE){
   }
 
   mean_x <- mean(x)
-  sd_x <- sd(x)
+  sd_x <- .sl_sd(x)
 
   if(sd_x == 0){
     return(NA)
   }
 
+  # seit 1.6.4 (K43 T1-R11) Summanden (d * d) * (d * d) statt (x - mean_x)^4, wie der Kern (simlev_eval::moments)
+  d <- x - mean_x
+  q <- d * d
   kurt <- (n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3)) * 
-          sum((x - mean_x)^4) / (sd_x^4)
+          sum(q * q) / (sd_x^4)
 
   if(excess){
     kurt <- kurt - (3 * (n - 1)^2) / ((n - 2) * (n - 3))
@@ -320,18 +321,30 @@ calculate_kurtosis <- function(x, na.rm = TRUE, excess = TRUE){
 .fee_env <- new.env(parent = emptyenv())
 
 #' Gebuehrenangabe normalisieren
+#' @param fn,arg Funktion und Argument fuer Meldungen (seit 1.6.4, K43 T1-R5; bis dahin "order_fee/dca_fee" bzw.
+#'   ganz ohne Funktionsnamen)
 #' @keywords internal
 #' @noRd
-.fee_spec <- function(x) {
+.fee_spec <- function(x, fn, arg) {
   if (is.null(x)) return(NULL)
   if (is.numeric(x) && length(x) == 1L) x <- list(fixed = x)
-  if (!is.list(x)) stop("order_fee/dca_fee: Zahl (EUR je Order) oder list(fixed, percent, min, max).")
-  unk <- setdiff(names(x), c("fixed", "percent", "min", "max"))
-  if (length(x) && (is.null(names(x)) || any(names(x) == "") || length(unk)))   # Tippfehler nicht still ignorieren
-    stop(sprintf("order_fee/dca_fee: unbekannte oder unbenannte Felder (%s); erlaubt sind fixed, percent, min, max.",
-                 paste(if (length(unk)) unk else "ohne Namen", collapse = ", ")))
+  if (!is.list(x)) chk_stop("ut1.gebuehr", fn, arg)
+  nm <- names(x)
+  # Tippfehler nicht still ignorieren; seit K43 T1-R5 je Fall eine Meldung aus der Tabelle (bis dahin eine Sammelmeldung)
+  if (length(x) && (is.null(nm) || any(nm == ""))) chk_stop("e2.benannt", fn, arg)
+  unk <- setdiff(nm, c("fixed", "percent", "min", "max"))
+  if (length(unk)) chk_stop("ut1.gebuehr_feld", fn, unk[1L], arg)
+  if (anyDuplicated(nm)) chk_stop("e2.doppelt", fn, arg)   # seit K43 T1-R7 (bis dahin galt still das erste Feld)
+  # seit 1.6.4 (A-046): je Feld eine einzelne Zahl, nicht NA, endlich (max auch Inf); bis 1.6.3 liefen NA, Text
+  # und TRUE je Sprache verschieden durch. Negative Werte und min > max meldet die Pruefung danach.
+  for (k in nm) {
+    v <- x[[k]]
+    if (is.null(v)) next
+    if (!(is.numeric(v) && length(v) == 1L && !is.na(v) && (is.finite(v) || (k == "max" && v == Inf))))
+      chk_stop(if (k == "max") "e1.zahl_inf" else "zahl", fn, paste0(arg, "$", k))
+  }
   s <- list(fixed = x$fixed %||% 0, percent = (x$percent %||% 0) / 100, min = x$min %||% 0, max = x$max %||% Inf)
-  if (s$fixed < 0 || s$percent < 0 || s$min < 0 || s$max < s$min) stop("Geb\u00fchren m\u00fcssen nicht negativ sein (min <= max).")
+  if (s$fixed < 0 || s$percent < 0 || s$min < 0 || s$max < s$min) chk_stop("ut1.gebuehr_negativ", fn, arg)
   if (s$fixed == 0 && s$percent == 0 && s$min == 0) return(NULL)
   s
 }

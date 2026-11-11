@@ -30,22 +30,23 @@ _D() = SimLev.Dependence
 _fmat(X) = SimLev.Dependence._fmat(X)
 _fvec(x) = SimLev.Dependence._fvec(x)
 
-_is_num_scalar(v) = v isa Real && !(v isa Bool)
+using ..SimLev: _isnum, _cummax   # util.jl (seit 1.6.4 eine Fassung)
+const _is_num_scalar = _isnum
 
 "Zielwert einer Annahme prüfen (eine endliche Zahl, ggf. mit Bereich)."
 function _view_value(value, what, lo = -Inf, hi = Inf)
     a = value === nothing ? Any[] : value isa AbstractVector || value isa Tuple ? collect(value) : Any[value]
-    ok = length(a) == 1 && _is_num_scalar(a[1]) && isfinite(Float64(a[1])) && lo <= a[1] <= hi
+    ok = length(a) == 1 && _is_num_scalar(a[1]) && isfinite(Float64(a[1])) && lo <= a[1] <= hi &&
+         !(value isa SimLev.RFmt.RFactor)
     if !ok
         rng = (isfinite(lo) && isfinite(hi)) ? _D()._sprintf(" zwischen %g und %g", lo, hi) :
               isfinite(lo) ? _D()._sprintf(" >= %g", lo) : ""
-        got = isempty(a) ? "" : _D()._fmt1(value)
-        error("$what: value muss eine endliche Zahl$rng sein (erhalten: $got).")
+        error("$what: value muss eine endliche Zahl$rng sein.")   # seit 1.6.4 ohne Wert
     end
     value isa AbstractVector ? value[1] : value
 end
 
-_ops = ("=", "<=", ">=")
+const _ops = ("=", "<=", ">=")
 
 """
     view_mean(var, value; op = "=")
@@ -85,7 +86,7 @@ println(ep["summary"])
 ```
 """
 view_mean(var, value, op_pos = _ops; op = op_pos) =
-    (v = _view_value(value, "view_mean"); RList("type" => "mean", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
+    (var = SimLev.chk_name1(var, "view_mean", "var"); v = _view_value(value, "view_mean"); RList("type" => "mean", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
 
 """
     view_prob(expr, value; op = "=")
@@ -108,6 +109,8 @@ stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Rend
 # Argumente
 - `expr`: Ereignis als Zeichenkette, ein R-Ausdruck über die Spaltennamen der Szenario-Tabelle, der einen
   logischen Wert je Szenario liefert (z. B. `"aktien < -5 & inflation > 3"`).
+  Seit 1.6.4 in R, Python und Julia gleich im gemeinsamen Ausdrucksumfang wie die Regeltexte von
+  `tactical_rules()`; auch eine Funktion der Szenario-Tabelle (Ergebnis ein Wert je Szenario).
 - `value`: Zielwert: bei `view_mean` und `view_vol` in der Einheit der Spalte (bei Kursdaten Prozent je
   Periode), bei `view_prob` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
   `view_vol` >= 0, bei `view_prob` zwischen 0 und 1 (sonst Fehler).
@@ -126,7 +129,7 @@ println(ep["summary"])
 ```
 """
 view_prob(expr, value, op_pos = _ops; op = op_pos) =
-    (v = _view_value(value, "view_prob", 0, 1); RList("type" => "prob", "expr" => expr, "value" => v, "op" => _D()._match_arg(op, _ops)))
+    (expr = expr isa Function ? expr : SimLev.chk_name1(expr, "view_prob", "expr"); v = _view_value(value, "view_prob", 0, 1); RList("type" => "prob", "expr" => expr, "value" => v, "op" => _D()._match_arg(op, _ops)))
 
 """
     view_vol(var, value; op = "=")
@@ -166,17 +169,37 @@ println(ep["summary"])
 ```
 """
 view_vol(var, value, op_pos = _ops; op = op_pos) =
-    (v = _view_value(value, "view_vol", 0); RList("type" => "vol", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
+    (var = SimLev.chk_name1(var, "view_vol", "var"); v = _view_value(value, "view_vol", 0); RList("type" => "vol", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
 
 "Szenario-Tabelle aus Daten (Renditen in Prozent je Periode, Zustände verzögert) oder `as.data.frame(x)`."
-function _scen_frame(x, assets, states, frequency)
+function _scen_frame(x, assets, states, frequency, fn)
     D = _D()
+    # seit 1.6.4 vor der Rechnung (K42 E4, R `.scen_frame`): Namen ohne NA, doppelte und "date", keine gemeinsame
+    # Spalte; Kursdaten wie `_e4_data`, eine fertige Tabelle bzw. Matrix nur mit Zahlenspalten (Entscheidung 6)
+    assets = D._e4_names(assets, fn, "assets")
+    states = D._e4_names(states, fn, "states"; null_ok = true)
+    D._e4_disjoint(assets, states, fn, "assets", "states")
+    cols = states === nothing ? assets : vcat(assets, states)
+    if x isa RFrame && haskey(x, "date")
+        D._e4_data(x, cols, fn)
+    elseif x isa RFrame
+        SimLev.chk_cols(x, cols, fn)
+        for k in cols
+            D._e4_numcol(x, k, fn)
+        end
+    elseif x isa NamedMat && x.colnames !== nothing
+        SimLev.chk_cols([c => nothing for c in x.colnames], cols, fn)   # seit 1.6.4 wie R (T3-N6; bis 1.6.3 KeyError)
+    elseif !(x isa NamedMat || (x isa AbstractMatrix && all(D._e4_numscalar, x)))
+        SimLev.chk_stop("e4.szenarien", fn)
+    end
     if D._is_frame(x) && haskey(D._as_frame(x), "date")
+        SimLev.nrow(D._as_frame(x)) < 2 && SimLev.chk_stop("e4.wenige", fn)   # seit 1.6.4 (0 oder 1 Zeile)
         rd = D._dep_returns(x, assets, states, frequency)
         for a in D._as_names(assets)
             rd[a] = 100 .* SimLev.RLibm.expm1.(_fvec(rd[a]))
         end
         ok = D._complete_rows((rd[c] for c in names(rd))...)
+        count(ok) < 2 && SimLev.chk_stop("e4.wenige", fn)
         return SimLev.rows(rd, findall(ok))
     end
     D._is_frame(x) && return D._as_frame(x)
@@ -250,26 +273,24 @@ println(ep["summary"])
 ```
 """
 function scenario_entropy_pooling(x, assets, views; states = nothing, frequency = ("week", "day", "month"), prior = nothing, env = Main)
-    x = SimLev.as_rframe(x)
     D = _D()
     frequency = D._match_arg(frequency, ("week", "day", "month"))
+    fn = "scenario_entropy_pooling"
+    (views isa Union{AbstractVector,Tuple} && all(v -> (t = _vget(v, "type"); t isa AbstractString && t in ("mean", "prob", "vol")), views)) ||
+        SimLev.chk_stop("e4.views", fn)                        # seit 1.6.4 (K42 E4)
+    S = _scen_frame(x, assets, states, frequency, fn)
     assets = D._as_names(assets)
     states_l = D._as_names(states)
-    S = _scen_frame(x, assets, states, frequency)
     Tn = SimLev.nrow(S)
     if prior !== nothing
         pa = prior isa RVector ? prior.values : prior isa AbstractVector ? prior : [prior]
-        isnum = all(v -> v isa Real && !(v isa Bool), pa)
+        isnum = all(v -> v isa Real && !(v isa Bool), pa) && !(prior isa SimLev.RFmt.RFactor)
         bad = !isnum || length(pa) != Tn
         if !bad
             pf = _fvec(pa)
             bad = !all(isfinite, pf) || any(<(0), pf) || SimLev.r_sum(pf) <= 0
         end
-        if bad
-            neg = isnum && any(v -> !isnan(Float64(v)) && v < 0, pa) ? ", negative Werte" : ""
-            error("scenario_entropy_pooling: prior muss $Tn endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; " *
-                  "erhalten: Länge $(length(pa))$neg).")
-        end
+        bad && error("scenario_entropy_pooling: prior muss $Tn endliche Werte >= 0 mit positiver Summe haben (einer je Szenario).")   # seit 1.6.4 ohne Wert
         p = _fvec(pa)
     else
         p = fill(1 / Tn, Tn)
@@ -306,6 +327,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
         end
         if f === nothing || length(f) != Tn
             nm = _vget(v, "var") !== nothing ? _vget(v, "var") : _vget(v, "expr")
+            nm isa Function && (nm = "<Funktion>")
             error("View '$nm' passt nicht zu den Szenarien.")
         end
         val0 = _vget(v, "value")
@@ -413,6 +435,7 @@ t-Copula).
   Periodenrenditen ohne `date`.
 - `assets`: Zeichenvektor der Kurs- bzw. Renditespalten.
 - `n`: Anzahl Szenarien (ganze Zahl, Standard 10000).
+  Seit 1.6.4 höchstens 10^8.
 - `family`: Copula: `"t"` (Standard) oder `"gaussian"`.
 - `stress`: Optional benannte Liste von Quantilbändern je Anlage als Anteile `[von, bis]` mit 0 <= von < bis
   <= 1, z. B. `(aktien = [0, 0.05],)` (schlechteste 5 % der Perioden). Unbenannte Einträge, unbekannte Anlagen
@@ -455,12 +478,13 @@ println(scenario_risk(cs, (aktien = 0.6, anleihen = 0.4)))
 """
 function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stress = nothing,
                           frequency = ("week", "day", "month"), seed = nothing)
-    x = SimLev.as_rframe(x)
     D = _D()
     family = D._match_arg(family, ("t", "gaussian"))
     frequency = D._match_arg(frequency, ("week", "day", "month"))
+    fn = "scenario_copula"
+    n = D._e4_count(n, fn, "n")                                # B-026, Entscheidung 16
+    S = _scen_frame(x, assets, nothing, frequency, fn)
     assets = D._as_names(assets)
-    S = _scen_frame(x, assets, nothing, frequency)
     X = reshape(reduce(hcat, [_fvec(S[a]) for a in assets]), SimLev.nrow(S), length(assets))
     Tn, k = size(X)
     U = reduce(hcat, [D._pobs(X[:, j]) for j in 1:k])
@@ -474,7 +498,7 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
         V = _fmat(D._el(ev, "vectors"))
         Dg = zeros(k, k)
         for i in 1:k
-            Dg[i, i] = (1e-6 > vals[i] || isnan(1e-6)) ? 1e-6 : vals[i]
+            Dg[i, i] = 1e-6 > vals[i] ? 1e-6 : vals[i]   # pmax(values, 1e-6): ein NaN-Eigenwert bleibt NaN (wie R)
         end
         R = D._matprod(D._matprod(V, Dg), permutedims(V))
         R = _cov2cor(R)
@@ -509,13 +533,12 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
             ba = b isa AbstractVector || b isa Tuple ? collect(b) : Any[b]
             good = length(ba) == 2 && all(_is_num_scalar, ba) && all(v -> isfinite(Float64(v)), ba) &&
                    ba[1] >= 0 && ba[2] <= 1 && ba[1] < ba[2]
-            good || error("stress: Band für '$a' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent; " *
-                          "erhalten: $(D._fmt1(b))).")
+            good || error("stress: Band für '$a' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent).")   # seit 1.6.4 ohne Wert
         end
     end
     n = Int(n)
     fin = isfinite(nu)
-    sim = let rs = SimLev.SLib.main_stream(seed)          # Hauptstrom
+    sim = let rs = SimLev.SLib.main_stream(seed, "scenario_copula")          # Hauptstrom
         st = st_list === nothing ? Int[] : [findfirst(==(p.first), assets) for p in st_list]
         Z = zeros(n, k)
         if length(st) == 1
@@ -676,12 +699,14 @@ function scenario_risk(x, weights; alpha = 0.05)
     D = _D()
     SimLev.inherits(x, "SimLevScenarios") || error("x muss ein SimLevScenarios sein.")
     av = alpha isa AbstractVector ? alpha : [alpha]
-    (length(av) == 1 && _is_num_scalar(av[1]) && isfinite(Float64(av[1])) && 0 < av[1] < 1) ||
-        error("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein (erhalten: $(D._fmt1(alpha))).")
+    (length(av) == 1 && _is_num_scalar(av[1]) && isfinite(Float64(av[1])) && 0 < av[1] < 1 && !(alpha isa SimLev.RFmt.RFactor)) ||
+        error("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.")   # seit 1.6.4 ohne Wert
     alpha = Float64(av[1])
     nms, vals = _named_weights(weights)
-    (!_isnum_arr(vals) || nms === nothing || any(==(""), nms)) &&
+    (!_isnum_arr(vals) || nms === nothing || isempty(nms) || any(==(""), nms) || weights isa SimLev.RFmt.RFactor) &&
         error("scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).")
+    all(v -> isfinite(Float64(v)), vals) || SimLev.chk_stop("e3.werte", "scenario_risk", "weights")   # seit 1.6.4 (B-026)
+    length(unique(nms)) < length(nms) && SimLev.chk_stop("e2.doppelt", "scenario_risk", "weights")
     unk = unique([k for k in nms if !haskey(x["scenarios"], k)])
     isempty(unk) || error("scenario_risk: unbekannte Anlage(n) $(join(["'$u'" for u in unk], ", ")).")
     w = _fvec(vals)
@@ -710,9 +735,6 @@ const _DEFAULT_CRISES = RFrame(
 
 "`cumprod` (long double)."
 _cumprod(x) = SimLev._rb_cumprod(Float64[Float64(v) for v in x])   # C-Kern
-"R's `cummax()` über den Kern `sl_r_cummax` (wie R und Python: NA ab dem ersten NA, sonst NaN ab dem ersten NaN; seit
-1.6.3, bis 1.6.2 eine eigene Schleife mit anderen NA/NaN-Regeln)."
-_cummax(x) = SimLev.r_cummax(collect(Float64, x))
 
 """
     scenario_crisis(data, weights; crises = nothing, rebalance = false)
@@ -762,23 +784,32 @@ kr = RFrame("crisis" => ["Test"], "start" => [Date(2019, 5, 1)], "end" => [Date(
 println(scenario_crisis(d, (aktien = 0.6, anleihen = 0.4); crises = kr))
 ```
 """
-function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_pos, rebalance::Bool = false)
-    data = SimLev.as_rframe(data)
-    crises = SimLev.as_rframe(crises)
+function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_pos, rebalance = false)
     D = _D()
+    fn = "scenario_crisis"
     crises === nothing && (crises = _DEFAULT_CRISES)
-    (D._is_frame(data) && haskey(D._as_frame(data), "date")) || error("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
-    (D._is_frame(crises) && all(c -> haskey(D._as_frame(crises), c), ("crisis", "start", "end"))) ||
+    # seit 1.6.4 nur Tabellen (Entscheidung 6; bis 1.6.3 auch NamedTuple, Dict)
+    (data isa RFrame && haskey(data, "date")) || error("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
+    (crises isa RFrame && all(c -> haskey(crises, c), ("crisis", "start", "end"))) ||
         error("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
-    data = D._as_frame(data); crises = D._as_frame(crises)
     nms, vals = _named_weights(weights)
-    (!_isnum_arr(vals) || nms === nothing || any(==(""), nms) || !all(v -> isfinite(Float64(v)), vals)) &&
+    (!_isnum_arr(vals) || nms === nothing || isempty(nms) || any(==(""), nms) || !all(v -> isfinite(Float64(v)), vals) ||
+     weights isa SimLev.RFmt.RFactor) &&
         error("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+    length(unique(nms)) < length(nms) && SimLev.chk_stop("e2.doppelt", fn, "weights")   # seit 1.6.4 (B-052)
     unk = unique([k for k in nms if !(k in setdiff(names(data), ["date"]))])
     isempty(unk) || error("scenario_crisis: Kursspalte(n) $(join(["'$u'" for u in unk], ", ")) fehlen in data.")
+    SimLev.chk_col_nofactor(data, "date", fn)                  # seit 1.6.4 (Entscheidung 15, B-009)
+    for k in nms
+        D._e4_numcol(data, k, fn)
+    end
+    for k in ("start", "end")
+        crises[k] isa SimLev.RFmt.RFactor && SimLev.chk_stop("spalte_faktor", fn, k)
+    end
+    rebalance = SimLev.chk_bool1(rebalance, fn, "rebalance")::Bool
     wv = _fvec(vals)
     sw = SimLev.r_sum(wv)
-    sw <= 0 && error("scenario_crisis: Summe der Gewichte muss positiv sein (erhalten $(D._sprintf("%g", sw))); sie wird auf 1 normiert.")
+    sw <= 0 && SimLev.chk_stop("ut3.krise_summe", fn)          # seit 1.6.4 ohne Wert und Zusatz (Entscheidung 8, T3-B2)
     data = D._dep_sort_dates(data)
     d = collect(data["date"])
     dd = D._days(d)

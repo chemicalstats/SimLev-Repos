@@ -21,18 +21,27 @@
 #' Renditematrix und Datum aus Suche oder Matrix holen, ggf. aggregieren
 #' @keywords internal
 #' @noRd
-.of_returns <- function(x, frequency, dates = NULL, risk_free = 0) {
+# fn: Funktionsname fuer die Meldungen (seit 1.6.4); Standard fuer den Aufrufer overfit_reality_check() (analysis_tests.R)
+.of_returns <- function(x, frequency, dates = NULL, risk_free = 0, fn = "overfit_reality_check") {
   if (inherits(x, "SimLevParamSearch")) {
-    if (is.null(x$returns)) stop("Suche ohne gespeicherte Renditen (keep_returns = \"none\").")
+    if (is.null(x$returns)) chk_stop("rs.ps_ohne_renditen", fn)
     R <- x$returns; dates <- x$dates
   } else {
+    .of_check_x(x, fn)
     R <- as.matrix(x)
-    if (!is.numeric(R)) stop("x muss ein SimLevParamSearch oder eine numerische Renditematrix sein.")
+    if (!is.numeric(R)) chk_stop("ut2.of_x", fn)
     if (is.null(colnames(R))) colnames(R) <- paste0("p", seq_len(ncol(R)))
+    if (!is.null(dates)) {                                 # seit 1.6.4: Laenge, kein Faktor, aufsteigend ohne NA (B-020)
+      chk_nofactor(dates, fn, "dates")
+      chk_len(dates, nrow(R), fn, "dates")
+    }
   }
   keep <- colSums(is.finite(R)) > 0
   R <- R[, keep, drop = FALSE]
-  if (!is.null(dates)) dates <- .to_date(dates, "dates")
+  if (!is.null(dates)) {
+    dates <- .to_date(dates, "dates")
+    if (anyNA(dates) || is.unsorted(dates)) chk_stop("e5.datum_vektor", fn, "dates")
+  }
   if (!is.null(dates) && frequency != "day") {
     key <- if (frequency == "week") format(dates, "%G-%V") else format(dates, "%Y-%m")
     grp <- factor(key, levels = unique(key))
@@ -41,10 +50,31 @@
   }
   ok <- stats::complete.cases(R)
   R <- R[ok, , drop = FALSE]; if (!is.null(dates)) dates <- dates[ok]
+  if (any(is.infinite(R))) chk_stop("e5.renditen_inf", fn)  # seit 1.6.4 (B-012; bis 1.6.3 still Sharpe NaN bzw. sr0 = 0)
+  if (nrow(R) < 2L) chk_stop("e5.perioden", fn)            # seit 1.6.4 Mindestlaenge (B-016)
   ppy <- if (!is.null(dates) && length(dates) > 1) (length(dates) - 1) / (as.numeric(dates[length(dates)] - dates[1]) / 365.25)
          else switch(frequency, day = 252, week = 52, month = 12)
   R <- R - risk_free / 100 / ppy
   list(R = R, dates = dates, ppy = ppy, cols = which(keep))
+}
+
+#' Renditematrix als Eingabe: Matrix oder data.frame nur aus Zahlen (seit 1.6.4 keine logischen Spalten, B-043;
+#' Faktoren, Text und Datum ergaben schon bisher die Meldung)
+#' @keywords internal
+#' @noRd
+.of_check_x <- function(x, fn = "overfit_reality_check") {
+  ok <- if (is.data.frame(x)) all(vapply(x, function(v) is.numeric(v) && !is.factor(v), TRUE))
+        else is.numeric(x) && !is.factor(x)
+  if (!ok) chk_stop("ut2.of_x", fn)                         # seit 1.6.4 mit Funktionsnamen (K43 T2-B6)
+  invisible(x)
+}
+
+#' Gemeinsame Pruefung von frequency, risk_free (seit 1.6.4, K42 E5)
+#' @keywords internal
+#' @noRd
+.of_check_common <- function(fn, risk_free) {
+  chk_num1(risk_free, fn, "risk_free")
+  invisible(NULL)
 }
 
 #' Kennzahl aus Summen-Statistiken (spaltenweise, auch Matrizen). s2 und c1
@@ -75,7 +105,7 @@
 #' @keywords internal
 #' @noRd
 .of_drop_flat <- function(rr, what) {
-  sdv <- apply(rr$R, 2, stats::sd)
+  sdv <- apply(rr$R, 2, .sl_sd)
   flat <- which(!(sdv > 1e-10))
   if (!length(flat)) return(rr)
   if (length(flat) == ncol(rr$R)) stop(sprintf("%s: alle Spalten ohne Schwankung (Standardabweichung <= 1e-10); Sharpe Ratio nicht definiert.", what))
@@ -124,8 +154,11 @@
 #'   Schwankung (Standardabweichung <= 1e-10 je Periode, mit Warnung), deren
 #'   Sharpe Ratio nicht definiert ist. Mindestens zwei Spalten noetig. Bei
 #'   \code{print()}/\code{plot()}: Objekt der Klasse \code{SimLevPBO}.
+#'   Seit 1.6.4 keine logischen Spalten und keine unendlichen Renditen; nach dem Entfernen der Zeilen mit fehlenden Werten mindestens zwei Perioden.
 #' @param S Anzahl Bloecke (gerade ganze Zahl >= 2, Standard 16 ergibt
 #'   \eqn{\binom{16}{8}} = 12870 Aufteilungen).
+#'   Seit 1.6.4 ohne Abschneiden: eine gebrochene Zahl ist ein Fehler; hoechstens 24
+#'   (\eqn{\binom{24}{12}} = 2704156 Aufteilungen, rund 0,5 GB Speicher, in Julia 0,8 GB).
 #' @param metric Kennzahl je Periode (nach Abzug von \code{risk_free}, nicht
 #'   annualisiert): \code{"sharpe"} (Standard; Mittelwert /
 #'   Standardabweichung), \code{"sortino"} (Mittelwert / Wurzel des mittleren
@@ -145,6 +178,7 @@
 #' @param dates Datum je Zeile von \code{x} (Date oder umwandelbar), nur bei
 #'   Matrix-Eingabe; \code{NULL} (Standard) = keine Aggregation. Bei
 #'   \code{SimLevParamSearch} wird \code{x$dates} verwendet.
+#'   Seit 1.6.4 genau ein Datum je Zeile, aufsteigend, ohne NA und kein Faktor.
 #' @param risk_free Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0);
 #'   wird als \code{risk_free / 100 / ppy} von jeder Periodenrendite
 #'   abgezogen. \code{ppy} (Perioden je Jahr) wird aus dem Datum geschaetzt:
@@ -177,15 +211,22 @@
 #' @export
 overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric", "mean"),
                 frequency = c("week", "day", "month"), dates = NULL, risk_free = 0) {
-  metric <- match.arg(metric); frequency <- match.arg(frequency)
+  fn <- "overfit_pbo"
+  .e5_choice(metric, c("sharpe", "sortino", "geometric", "mean"), fn, "metric")   # Pruefung (Meldung auswahl)
+  metric <- match.arg(metric)
+  .e5_choice(frequency, c("week", "day", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
+  frequency <- match.arg(frequency)
+  chk_int1(S, fn, "S", lo = 2)                          # seit 1.6.4 ganze Zahl (bis 1.6.3 abgeschnitten, Entscheidung 19)
+  if (S > 24) chk_stop("e5.pbo_S", fn)                  # seit 1.6.4 S <= 24 (Speicher; Entscheidung 138, vorher 28 nach 56)
   S <- as.integer(S)
-  if (S < 2L || S %% 2L) stop("S muss gerade und >= 2 sein.")
-  rr <- .of_returns(x, frequency, dates, risk_free)
+  if (S < 2L || S %% 2L) chk_stop("ut2.pbo_S", fn)
+  .of_check_common(fn, risk_free)
+  rr <- .of_returns(x, frequency, dates, risk_free, fn)
   if (metric == "sharpe") rr <- .of_drop_flat(rr, "overfit_pbo")
   R <- rr$R; N <- ncol(R); Tn <- nrow(R)
-  if (N < 2L) stop("Mindestens zwei Punkte n\u00f6tig.")
+  if (N < 2L) chk_stop("rs.zwei_punkte", fn)
   bl <- Tn %/% S
-  if (bl < 4L) stop(sprintf("Zu wenige Beobachtungen (%d) f\u00fcr S = %d Bl\u00f6cke.", Tn, S))
+  if (bl < 4L) chk_stop("rs.pbo_beob", fn, Tn, as.integer(S))
   R <- R[(Tn - bl * S + 1L):Tn, , drop = FALSE]
   blk <- rep(seq_len(S), each = bl)
   Rc <- sweep(R, 2, colMeans(R))                                 # zentriert fuer die Varianz (keine Ausloeschung)
@@ -254,6 +295,7 @@ plot.SimLevPBO <- function(x, ...) {
 #' @param r Numerischer Vektor einfacher Periodenrenditen als Anteil
 #'   (0.01 = 1 %); nicht endliche Werte werden entfernt. Ein risikoloser
 #'   Zins wird nicht abgezogen.
+#'   Seit 1.6.4 mindestens zwei endliche Werte, die nicht alle gleich sind (sonst Fehler).
 #' @param benchmark Vergleichs-Sharpe-Ratio \eqn{SR^*} p. a. (Standard 0);
 #'   intern durch \eqn{\sqrt{ppy}} geteilt.
 #' @param ppy Perioden je Jahr der Renditen in \code{r} (Standard 52 =
@@ -270,9 +312,24 @@ plot.SimLevPBO <- function(x, ...) {
 #'   efficient frontier. Journal of Risk 15(2), 3-44.
 #' @export
 sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
+  fn <- "sharpe_probabilistic"
+  chk_nofactor(r, fn, "r")
+  .e5_numvec(r, fn, "r")
+  chk_num1(benchmark, fn, "benchmark")
+  chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE)
+  rf <- r[is.finite(r)]
+  if (length(rf) < 2L || !(.sl_sd(rf) > 0)) chk_stop("e5.renditen_kurz", fn, "r")   # seit 1.6.4 (B-016, B-041)
+  .of_psr(r, benchmark, ppy)
+}
+
+#' PSR ohne Pruefung (fuer sharpe_deflated)
+#' @keywords internal
+#' @noRd
+.of_psr <- function(r, benchmark, ppy) {
   r <- r[is.finite(r)]; n <- length(r)
-  sr <- mean(r) / stats::sd(r); sr0 <- benchmark / sqrt(ppy)
-  z <- (r - mean(r)) / stats::sd(r)
+  mu <- mean(r); s <- .sl_sd(r)
+  sr <- mu / s; sr0 <- benchmark / sqrt(ppy)
+  z <- (r - mu) / s
   g3 <- mean(z^3); g4 <- mean(z^4)
   .sl_pnorm((sr - sr0) * sqrt(n - 1) / sqrt(max(1 - g3 * sr + (g4 - 1) / 4 * sr^2, 1e-12)))
 }
@@ -304,12 +361,24 @@ sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
 #'   \code{id} aus \code{x$results}, bei einer Matrix die Spaltennummer der
 #'   urspruenglichen Matrix. \code{NULL} (Standard) = Punkt mit der hoechsten
 #'   Sharpe Ratio.
+#'   Seit 1.6.4 eine ganze Zahl.
 #' @param n_trials Versuchsanzahl \eqn{N} (positive Zahl, ueberschreibt die
 #'   Schaetzung), z. B. wenn vorher schon andere Suchen gelaufen sind.
 #'   \code{NULL} (Standard) = aus \code{x} geschaetzt (siehe
 #'   \code{effective}).
+#'   Seit 1.6.4 eine einzelne endliche Zahl > 0.
 #' @param effective Logisch. \code{TRUE} (Standard) = effektive
 #'   Versuchsanzahl \eqn{N_{eff}}; \code{FALSE} = Anzahl gueltiger Spalten.
+#' @param rho_method Rechenweg der mittleren paarweisen Korrelation
+#'   \eqn{\bar\rho}: \code{"cor"} (Standard) = Mittel des oberen Dreiecks der
+#'   vollen Korrelationsmatrix (Rechenzeit wie \eqn{T N^2});
+#'   \code{"linear"} = \eqn{(\lVert\sum_j z_j\rVert^2 - N) / (N (N - 1))} mit den
+#'   zentrierten und auf Laenge 1 skalierten Spalten \eqn{z_j} (Rechenzeit wie
+#'   \eqn{T N}). Mathematisch
+#'   gleich; \code{rho}, \code{n_eff}, \code{n_trials}, \code{sr0} und
+#'   \code{dsr} weichen in den letzten Stellen ab (in R, Python und Julia
+#'   gleich). Mit nicht endlichen Renditen rechnet auch \code{"linear"} ueber
+#'   die Korrelationsmatrix. Seit 1.6.4.
 #' @inheritParams overfit_pbo
 #' @return Objekt der Klasse \code{SimLevDSR}, eine Liste mit \code{id}
 #'   (gepruefter Punkt), \code{sharpe} (seine Sharpe Ratio p. a.),
@@ -343,27 +412,50 @@ sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
 #'   ratio. Journal of Portfolio Management 40(5), 94-107.
 #' @export
 sharpe_deflated <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
-                            frequency = c("week", "day", "month"), dates = NULL, risk_free = 0) {
+                            frequency = c("week", "day", "month"), dates = NULL, risk_free = 0,
+                            rho_method = c("cor", "linear")) {
+  fn <- "sharpe_deflated"
+  .e5_choice(frequency, c("week", "day", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
-  rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free), "sharpe_deflated"); R <- rr$R
+  .e5_choice(rho_method, c("cor", "linear"), fn, "rho_method")   # seit 1.6.4 (B-075, Entscheidung 92)
+  rho_method <- match.arg(rho_method)
+  chk_int1(id, fn, "id", lo = 1, null_ok = TRUE)        # seit 1.6.4 (B-007)
+  chk_num1(n_trials, fn, "n_trials", lo = 0, lo_open = TRUE, null_ok = TRUE)
+  chk_bool1(effective, fn, "effective")
+  .of_check_common(fn, risk_free)
+  rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free, fn), "sharpe_deflated"); R <- rr$R
   N <- ncol(R)
   sr <- .of_col_metric(R, "sharpe")
   j <- if (is.null(id)) which.max(sr) else {
     jj <- match(id, rr$cols)
-    if (is.na(jj)) stop("id nicht unter den g\u00fcltigen Punkten (Spalten ohne endliche Werte oder ohne Schwankung z\u00e4hlen nicht).")
+    if (is.na(jj)) chk_stop("rs.id_punkt", fn)
     jj }
-  rho <- if (N > 1) { Cm <- stats::cor(R); mean(Cm[upper.tri(Cm)], na.rm = TRUE) } else 1
+  rho <- if (N <= 1) 1
+         else if (rho_method == "linear" && all(is.finite(R))) .of_rho_linear(R)
+         else { Cm <- .sl_cor(R); mean(Cm[upper.tri(Cm)], na.rm = TRUE) }
   n_eff <- max(1, rho + (1 - max(rho, 0)) * N)
   if (rho < 0) n_eff <- N
   Nt <- n_trials %||% (if (effective) n_eff else N)
-  v <- if (N > 1) stats::var(sr) else 0
+  v <- if (N > 1) .sl_var(sr) else 0
   g <- 0.5772156649
   sr0 <- if (Nt > 1 && v > 0) sqrt(v) * ((1 - g) * .sl_qnorm(1 - 1 / Nt) + g * .sl_qnorm(1 - 1 / (Nt * exp(1)))) else 0
   r <- R[, j]
   structure(list(id = rr$cols[j], sharpe = sr[j] * sqrt(rr$ppy), sr0 = sr0 * sqrt(rr$ppy),
-                 psr = sharpe_probabilistic(r, 0, rr$ppy), dsr = sharpe_probabilistic(r, sr0 * sqrt(rr$ppy), rr$ppy),
+                 psr = .of_psr(r, 0, rr$ppy), dsr = .of_psr(r, sr0 * sqrt(rr$ppy), rr$ppy),
                  n_trials = Nt, n_points = N, n_eff = n_eff, rho = rho, var_sr = v * rr$ppy, n_obs = nrow(R),
                  frequency = frequency), class = "SimLevDSR")
+}
+
+# Mittlere paarweise Pearson-Korrelation der Spalten von R (endlich, N >= 2) in O(T N) (seit 1.6.4, B-075,
+# rho_method = "linear"): Spalten zentriert (colMeans) und auf Laenge 1 skaliert (sqrt(colSums(C * C))), dann
+# (sum(rowSums(Z)^2) - N) / (N (N - 1)); Summen in long double wie colSums/rowSums/sum, in Python und Julia ueber
+# dieselben Kerne in derselben Folge (gleiche Bits in allen drei Sprachen)
+.of_rho_linear <- function(R) {
+  nT <- nrow(R); N <- ncol(R)
+  C <- R - rep(unname(colMeans(R)), each = nT)
+  Z <- C / rep(unname(sqrt(colSums(C * C))), each = nT)
+  u <- unname(rowSums(Z))
+  (sum(u * u) - N) / (as.numeric(N) * (N - 1))
 }
 
 #' @rdname sharpe_deflated
@@ -413,6 +505,7 @@ print.SimLevDSR <- function(x, ...) {
 #'   (die Kennzahlen in \code{windows} beziehen sich auf das ganze
 #'   Testfenster). Mit \code{step > test} entstehen Luecken zwischen den
 #'   Testfenstern; sie fehlen in \code{series} und zaehlen nicht als Zeit.
+#'   Seit 1.6.4 je eine Zahl, die gerundet mindestens einen Monat ergibt (12 * Jahre >= 1), hoechstens 100 Jahre.
 #' @param anchored Logisch. \code{FALSE} (Standard) = rollierendes
 #'   Trainingsfenster der Laenge \code{train}; \code{TRUE} = Training beginnt
 #'   immer am ersten Tag (expandierendes Fenster).
@@ -475,9 +568,22 @@ print.SimLevDSR <- function(x, ...) {
 overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored = FALSE,
                          metric = c("sharpe", "sortino", "geometric", "mean"),
                          select = c("best", "plateau"), risk_free = 0) {
-  metric <- match.arg(metric); select <- match.arg(select)
-  if (!inherits(x, "SimLevParamSearch") || is.null(x$returns)) stop("x muss ein SimLevParamSearch mit Renditen sein.")
-  rr <- .of_returns(x, "day", risk_free = risk_free); R <- rr$R; d <- rr$dates
+  fn <- "overfit_walk_forward"
+  .e5_choice(metric, c("sharpe", "sortino", "geometric", "mean"), fn, "metric")   # Pruefung (Meldung auswahl)
+  metric <- match.arg(metric)
+  .e5_choice(select, c("best", "plateau"), fn, "select")   # Pruefung (Meldung auswahl)
+  select <- match.arg(select)
+  if (!inherits(x, "SimLevParamSearch") || is.null(x$returns)) chk_stop("ut2.ps_renditen", "overfit_walk_forward")
+  # seit 1.6.4: Jahre, die gerundet mindestens einen Monat ergeben, hoechstens 100 Jahre (B-006: step = 0 lief endlos)
+  for (a in c("train", "test", "step")) {
+    v <- get(a)
+    chk_nofactor(v, fn, a)
+    if (!(is.numeric(v) && length(v) == 1L && is.finite(v) && round(12 * v) >= 1)) chk_stop("e5.jahre_monat", fn, a)
+    chk_max(v, 100, fn, a)
+  }
+  chk_bool1(anchored, fn, "anchored")
+  .of_check_common(fn, risk_free)
+  rr <- .of_returns(x, "day", risk_free = risk_free, fn = fn); R <- rr$R; d <- rr$dates
   if (select == "plateau") nb <- .ps_neighbours(x)
   add_m <- function(date, months) .add_months(date, round(months))      # auf das Monatsende begrenzt
   t0 <- d[1]; last <- d[length(d)]
@@ -504,7 +610,7 @@ overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored =
                                           oos_average = mean(apply(R[oos_rows, , drop = FALSE], 2, .geo_ret)))
     k <- k + 1L
   }
-  if (!length(win)) stop("Historie zu kurz f\u00fcr ein Trainings- und Testfenster.")
+  if (!length(win)) chk_stop("rs.wf_kurz", fn)
   W <- do.call(rbind, win)
   W <- cbind(W[, 1:4], x$results[W$id, x$params, drop = FALSE], W[, -(1:4)])
   # Testtage ohne Ueberlappung: jeder Tag gehoert zum juengsten Fenster, dessen Test begonnen hat
@@ -590,8 +696,10 @@ plot.SimLevWalkForward <- function(x, ...) {
 #' @param config Konfiguration aus [bootstrap_config()].
 #' @param ids Ganzzahliger Vektor von \code{id}-Werten aus \code{x$results};
 #'   \code{NULL} (Standard) = die \code{top} besten Punkte nach \code{by}.
+#'   Seit 1.6.4 nur vorhandene id-Werte ohne Doppel.
 #' @param top Anzahl bester Punkte (ganze Zahl, Standard 5); nur ohne
 #'   \code{ids}.
+#'   Seit 1.6.4 ganze Zahl >= 1.
 #' @param by Rangfolge fuer \code{top}: \code{"objective"} (Standard,
 #'   Zielgroesse der Suche) oder \code{"plateau"} (\code{plateau_mean} aus
 #'   [param_plateau()]); Richtung nach \code{x$maximize}, Punkte mit \code{NA}
@@ -607,6 +715,7 @@ plot.SimLevWalkForward <- function(x, ...) {
 #' @param ... Weitere Argumente fuer [bootstrap_study()], z. B.
 #'   \code{method}, \code{n} (Anzahl Pfade), \code{params}, \code{seed},
 #'   \code{cores}, \code{progress}, \code{sim_args}, \code{burn_in}.
+#'   Seit 1.6.4 nur Argumente von bootstrap_study(); unbekannte oder doppelte Namen sind ein Fehler.
 #' @return Objekt der Klasse \code{SimLevBootstrapStudy} (siehe
 #'   [bootstrap_study()]); die Strategien heissen \code{p<id>} (plus die
 #'   Namen aus \code{include}). Attribut \code{param_ids}: benannter Vektor
@@ -629,8 +738,28 @@ plot.SimLevWalkForward <- function(x, ...) {
 #' @export
 param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objective", "plateau"),
                             map = NULL, include = list(), ...) {
+  fn <- "param_bootstrap"
+  .e5_choice(by, c("objective", "plateau"), fn, "by")   # Pruefung (Meldung auswahl)
   by <- match.arg(by)
-  if (!inherits(x, "SimLevParamSearch")) stop("x muss ein SimLevParamSearch sein.")
+  if (!inherits(x, "SimLevParamSearch")) chk_stop("klasse", "param_bootstrap", "x", "param_search()")
+  # seit 1.6.4 (K42 E5): ids ganze Zahlen aus x$results$id ohne Doppel (B-007, B-045), top ganze Zahl >= 1,
+  # map benannter Zeichenvektor, include benannte Liste, ... nur Argumente von bootstrap_study() (Entscheidung 21)
+  if (!is.null(ids)) {
+    chk_nofactor(ids, fn, "ids")
+    if (!(is.numeric(ids) && length(ids) >= 1L && all(is.finite(ids)) && all(ids %in% x$results$id)) || anyDuplicated(ids))
+      chk_stop("e5.ids", fn)
+  }
+  chk_int1(top, fn, "top", lo = 1)
+  if (!is.null(map)) {
+    chk_nofactor(map, fn, "map")
+    nm <- names(map)
+    if (!(is.character(map) && length(map) >= 1L && !anyNA(map) && all(nzchar(map)) && !is.null(nm) && !anyNA(nm) &&
+          all(nzchar(nm)))) chk_stop("e5.map", fn)
+  }
+  if (!(is.list(include) && !is.data.frame(include) && (!length(include) || (!is.null(names(include)) &&
+        !anyNA(names(include)) && all(nzchar(names(include)))))))
+    chk_stop("e2.benannt", fn, "include")
+  chk_dots(names(list(...)) %||% character(0), .pb_args, fn, taken = c("data", "config", "strategies"))
   if (is.null(ids)) {
     v <- if (by == "plateau") param_plateau(x)$plateau_mean else x$results[[x$objective]]
     ids <- x$results$id[utils::head(order(v, decreasing = isTRUE(x$maximize), na.last = NA), top)]
@@ -651,6 +780,9 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
   attr(st, "param_ids") <- stats::setNames(ids, names(specs))
   st
 }
+
+# Argumente, die param_bootstrap() ueber ... an bootstrap_study() weitergibt (beim Bau festgelegt, seit 1.6.4)
+.pb_args <- setdiff(names(formals(bootstrap_study)), c("data", "config", "strategies", "..."))
 
 #' Sharpe-Ratio-Abschlag fuer Mehrfachtests (Harvey & Liu 2015)
 #'
@@ -678,10 +810,12 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #' @param n_obs Anzahl Perioden \eqn{T}, auf denen die Sharpe Ratios
 #'   beruhen (Perioden der Laenge, die \code{ppy} beschreibt); nur und
 #'   zwingend bei Vektor-Eingabe. Sonst die Zeilenzahl nach Aggregation.
+#'   Seit 1.6.4 ganze Zahl >= 1; die Sharpe Ratios in x muessen endlich sein.
 #' @param n_tests Gesamtzahl der Versuche \eqn{M} (ganze Zahl).
 #'   \code{NULL} (Standard) = Anzahl Sharpe Ratios bzw. Punkte; bei
 #'   frueheren Suchen entsprechend hoeher ansetzen (fehlende Versuche gehen
 #'   mit p = 1 in die Korrektur ein).
+#'   Seit 1.6.4 ganze Zahl von 1 bis 10^8, mindestens die Anzahl Sharpe Ratios bzw. Punkte (sonst ein Fehler).
 #' @param frequency,dates,risk_free Aggregation, Datum und risikoloser Zins
 #'   (Prozent p. a.) wie bei [overfit_pbo()]; nur bei Suche oder Matrix.
 #' @param ppy Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 =
@@ -710,15 +844,26 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #' @export
 sharpe_haircut <- function(x, n_obs = NULL, n_tests = NULL, frequency = c("week", "day", "month"), dates = NULL,
                            risk_free = 0, ppy = 52) {
+  fn <- "sharpe_haircut"
+  .e5_choice(frequency, c("week", "day", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
-  if (is.numeric(x) && is.null(dim(x))) {
-    if (is.null(n_obs)) stop("n_obs angeben.")
+  # seit 1.6.4: n_tests ganze Zahl von 1 bis 10^8 (Entscheidung 16; C-017), Sharpe Ratios endlich, n_obs ganze Zahl
+  if (!is.null(n_tests)) { chk_int1(n_tests, fn, "n_tests", lo = 1); chk_max(n_tests, 1e8, fn, "n_tests") }
+  .of_check_common(fn, risk_free)
+  if (is.numeric(x) && is.null(dim(x)) && !is.factor(x)) {
+    if (!all(is.finite(x))) chk_stop("e2.zahlen_endlich", fn, "x")
+    if (is.null(n_obs)) chk_stop("fehlt", fn, "n_obs")
+    chk_int1(n_obs, fn, "n_obs", lo = 1)
+    chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE)
     sr <- x / sqrt(ppy); Tn <- n_obs; ids <- seq_along(x)
   } else {
-    rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free), "sharpe_haircut")
+    rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free, fn), "sharpe_haircut")
     sr <- .of_col_metric(rr$R, "sharpe"); Tn <- nrow(rr$R)
     ppy <- rr$ppy; ids <- rr$cols
   }
+  # seit 1.6.4 (K43 T2-N7) mindestens so viele Tests wie Sharpe Ratios (bis dahin still durch deren Zahl ersetzt, das
+  # Attribut n_tests nannte den angegebenen Wert)
+  if (!is.null(n_tests) && n_tests < length(sr)) chk_stop("ut2.n_tests", fn)
   M <- n_tests %||% length(sr)
   tstat <- sr * sqrt(Tn); p <- 2 * .sl_pnorm(-abs(tstat))
   padj <- function(method) {
@@ -727,9 +872,9 @@ sharpe_haircut <- function(x, n_obs = NULL, n_tests = NULL, frequency = c("week"
   }
   back <- function(pa) sign(sr) * .sl_qnorm(pmin(pa, 1) / 2, lower.tail = FALSE) / sqrt(Tn) * sqrt(ppy)   # oberes Ende
   out <- data.frame(id = ids, sharpe = sr * sqrt(ppy), t = tstat, p = p)
-  for (m in c(bonferroni = "bonferroni", holm = "holm", bhy = "BY")) {
-    nm <- names(which(c(bonferroni = "bonferroni", holm = "holm", bhy = "BY") == m))
-    pa <- padj(m); sa <- back(pa)
+  meth <- c(bonferroni = "bonferroni", holm = "holm", bhy = "BY")
+  for (nm in names(meth)) {
+    pa <- padj(meth[[nm]]); sa <- back(pa)
     out[[paste0("p_", nm)]] <- pa; out[[paste0("sharpe_", nm)]] <- sa
     out[[paste0("haircut_", nm)]] <- ifelse(out$sharpe != 0, 1 - sa / out$sharpe, NA)
   }

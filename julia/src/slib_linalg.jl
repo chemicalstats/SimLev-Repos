@@ -267,6 +267,9 @@ function kde(x; bw = nothing, n = 512, from = nothing, to = nothing, cut = 3, we
     ng = Int(n)
     ng >= 2 || error("density: mindestens 2 Gitterpunkte")
     wv = weights === nothing ? nothing : _la_vec(weights)
+    # seit 1.6.4 (C-018): weights so lang wie x wie die R- und Python-Hülle (bis 1.6.3 las der Kern dahinter); Meldung
+    # aus core/meldungen.tsv, in allen drei Sprachen gleich (T4-R7)
+    wv === nothing || length(wv) == length(xv) || parentmodule(@__MODULE__).chk_stop("ut4.kde_weights", "density")
     gx = Vector{Float64}(undef, ng); gy = Vector{Float64}(undef, ng)
     cx = _ctx()
     s = ccall((:sl_kde, LIBSLC), Cint,

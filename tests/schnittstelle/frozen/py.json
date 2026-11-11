@@ -1,6 +1,6 @@
 {
  "language": "Python",
- "stand": "2026-11-04 – 1.6.3: WithdrawalPathsPB entfällt",
+ "stand": "2026-11-08 – 1.6.4: Standard cores auto (Planer)",
  "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -64,7 +64,7 @@
    {"name": "path_length", "kind": "keyword_only", "default": "None"},
    {"name": "max_tries", "kind": "keyword_only", "default": "10"},
    {"name": "seed", "kind": "keyword_only", "default": "None"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"},
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"},
    {"name": "progress", "kind": "keyword_only", "default": "True"}
   ],
   "bootstrap_block_length": [
@@ -129,7 +129,7 @@
    {"name": "max_tries", "kind": "keyword_only", "default": "10"},
    {"name": "chunk_size", "kind": "keyword_only", "default": "25"},
    {"name": "seed", "kind": "keyword_only", "default": "None"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"},
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"},
    {"name": "progress", "kind": "keyword_only", "default": "True"}
   ],
   "bootstrap_study_metrics": [
@@ -319,7 +319,7 @@
    {"name": "maximize", "kind": "keyword_only", "default": "True"},
    {"name": "keep_returns", "kind": "keyword_only", "default": "('day', 'none')"},
    {"name": "seed", "kind": "keyword_only", "default": "None"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"}
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"}
   ],
   "param_space": [
    {"name": "args", "kind": "var_positional", "default": null},
@@ -343,7 +343,7 @@
    {"name": "horizon", "kind": "keyword_only", "default": "10"},
    {"name": "step", "kind": "keyword_only", "default": "1"},
    {"name": "sim_args", "kind": "keyword_only", "default": "None"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"}
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"}
   ],
   "plot": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
@@ -522,7 +522,7 @@
    {"name": "sim_args", "kind": "keyword_only", "default": "None"},
    {"name": "metrics", "kind": "keyword_only", "default": "None"},
    {"name": "keep_results", "kind": "keyword_only", "default": "False"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"}
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"}
   ],
   "sensitivity_leverage": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -534,7 +534,7 @@
    {"name": "strategy", "kind": "keyword_only", "default": "None"},
    {"name": "sim_args", "kind": "keyword_only", "default": "None"},
    {"name": "metrics", "kind": "keyword_only", "default": "None"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"}
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"}
   ],
   "sensitivity_rebalancing": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -546,7 +546,7 @@
    {"name": "include_none", "kind": "keyword_only", "default": "True"},
    {"name": "sim_args", "kind": "keyword_only", "default": "None"},
    {"name": "metrics", "kind": "keyword_only", "default": "None"},
-   {"name": "cores", "kind": "keyword_only", "default": "1"}
+   {"name": "cores", "kind": "keyword_only", "default": "'auto'"}
   ],
   "series_align": [
    {"name": "args", "kind": "var_positional", "default": null},
@@ -616,7 +616,8 @@
    {"name": "effective", "kind": "keyword_only", "default": "True"},
    {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
    {"name": "dates", "kind": "keyword_only", "default": "None"},
-   {"name": "risk_free", "kind": "keyword_only", "default": "0"}
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "rho_method", "kind": "keyword_only", "default": "('cor', 'linear')"}
   ],
   "sharpe_haircut": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},

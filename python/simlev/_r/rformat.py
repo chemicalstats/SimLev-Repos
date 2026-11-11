@@ -27,6 +27,8 @@ Nachbildung mit Python-Formaten).
 from __future__ import annotations
 
 import datetime as _dt
+import decimal as _decimal
+import fractions as _fractions
 import math
 import re
 from typing import Any, Sequence
@@ -35,7 +37,7 @@ import numpy as np
 
 from . import fmt as _fmt
 from .. import _ext   # C-Kern sl_r_sprintf (core/slc_rbase_fmt.cpp, seit 1.6.0)
-from .rnum import NA_REAL, r_isna
+from .rnum import NA_REAL, r_isna, r_isna_arr
 
 __all__ = ["r_round", "r_signif", "r_format", "r_format1", "r_as_character", "r_deparse", "r_sprintf"]
 
@@ -59,13 +61,12 @@ def _format_real(xs: Sequence[float], digits: int = 7, nsmall: int = 0, scipen: 
     """``formatReal()``: gemeinsame Breite w, Nachkommastellen d, Exponentformat e."""
     x = np.asarray(xs, dtype=np.float64)
     nan = _fmt._nan_mask(x)
-    return _fmt._format_real(x, np.isnan(x) & ~nan, nan, digits, nsmall, scipen)
+    return _fmt._format_real(x, np.isnan(x) & ~nan, digits, nsmall, scipen)
 
 
-def _encode_real(x: float, w: int, d: int, e: int, drop0: bool = False) -> str:
+def _encode_real(x: float, w: int, d: int, e: int) -> str:
     na = r_isna(x)
-    s = _fmt._encode_real(x, w, d, e, ".", na, x != x and not na)
-    return _fmt._drop0(s) if drop0 and math.isfinite(x) else s
+    return _fmt._encode_real(x, w, d, e, ".", na, x != x and not na)
 
 
 def _insert_big_mark(s: str, mark: str) -> str:
@@ -82,6 +83,33 @@ def _is_num(x) -> bool:
     return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, (bool, np.bool_))
 
 
+def _flt(v) -> float:
+    """``float(v)`` wie R's double: ganze Zahlen über dem Zahlbereich ergeben ±Inf (seit 1.6.4, RP, C-049; bis 1.6.3
+    OverflowError)."""
+    try:
+        return float(v)
+    except OverflowError:
+        return math.inf if v > 0 else -math.inf
+
+
+def _rp_vals(vals, who):
+    """Werte für r_format/r_deparse (seit 1.6.4, RP, C-049): Decimal und Fraction gelten wie R als double (bis 1.6.3
+    als Text ``Decimal('1.5')``/``1/3``); Werte ohne Gegenstück in R (Bytes, komplexe Zahlen) ergeben einen Fehler.
+    Gemischte Zahlen und Wahrheitswerte wie R's ``c()``: Wahrheitswerte als 1/0."""
+    out = []
+    for v in vals:
+        if isinstance(v, (_decimal.Decimal, _fractions.Fraction)):
+            v = _flt(v)
+        elif isinstance(v, (bytes, bytearray, memoryview, complex, np.complexfloating)):
+            from .._meldungen import EINGABE
+            raise ValueError(EINGABE["rp.wert_typ"] % who)
+        out.append(v)
+    if any(isinstance(v, (bool, np.bool_)) for v in out) and any(_is_num(v) for v in out) \
+            and all(v is None or _is_num(v) or isinstance(v, (bool, np.bool_)) for v in out):
+        out = [int(v) if isinstance(v, (bool, np.bool_)) else v for v in out]
+    return out
+
+
 def r_format(x: Any, digits: int | None = None, nsmall: int = 0, big_mark: str = "",
              scientific: bool | None = None, width: int | None = None) -> list[str]:
     """``format(x, ...)`` für einen Vektor wie R (gemeinsame Breite).
@@ -94,12 +122,32 @@ def r_format(x: Any, digits: int | None = None, nsmall: int = 0, big_mark: str =
     vals = list(x) if isinstance(x, (list, tuple, np.ndarray)) else [x]
     if not vals:
         return []
-    dg = 7 if digits is None else int(digits)
-    scipen = 0 if scientific is None else (-99 if scientific else 310)
+    vals = _rp_vals(vals, "r_format")
+    # seit 1.6.4 (C-012, Entscheidung 77) digits 1 bis 22 und nsmall 0 bis 20 wie R format()
+    dg = 7 if digits is None else _fmt._chk_digits(digits)
+    nsmall = _fmt._chk_nsmall(nsmall)
+    # scientific: Wahrheitswert oder (seit 1.6.4 wie R und Julia, C-048) Zahl als Strafpunkte wie options(scipen)
+    if scientific is None:
+        scipen = 0
+    elif isinstance(scientific, (bool, np.bool_)):
+        scipen = -99 if scientific else 310
+    else:
+        scipen = int(scientific)
     if all(_is_num(v) or v is None for v in vals) and any(_is_num(v) for v in vals):
-        fv = [NA_REAL if v is None else float(v) for v in vals]
-        w, d, e = _format_real(fv, dg, nsmall, scipen)
-        out = [_encode_real(v, w, d, e) for v in fv]
+        fv = [NA_REAL if v is None else _flt(v) for v in vals]
+        if all(v is None or (isinstance(v, (int, np.integer)) and not isinstance(v, (bool, np.bool_))
+                             and abs(int(v)) < 2 ** 31) for v in vals):
+            # seit 1.6.4 ganze Zahlen (|x| < 2^31) wie R-integer (Entscheidung 63, C-090; bis 1.6.3 wie double)
+            out = ["NA" if v is None else str(int(v)) for v in vals]
+            ww = max(len(s) for s in out)
+            out = [s.rjust(ww) for s in out]
+        else:
+            w, d, e = _format_real(fv, dg, nsmall, scipen)
+            # in einem Aufruf (seit 1.6.4, C-070, wie Julia seit 1.6.3; bis dahin je Wert): gleicher Kern
+            # sl_r_encode_real, gleiche Maske wie _encode_real (NA oder keine NaN)
+            a = np.array(fv, dtype=np.float64)
+            m = np.ascontiguousarray(r_isna_arr(a) | ~np.isnan(a), dtype=np.uint8)
+            out = list(_ext.slc_r_encode_real(a, m, int(w), int(d), int(e), ".", "NA", False))
         if big_mark:
             out = [_insert_big_mark(s, big_mark) for s in out]
             ww = max(len(s) for s in out)
@@ -112,6 +160,9 @@ def r_format(x: Any, digits: int | None = None, nsmall: int = 0, big_mark: str =
         w = max(len(s) for s in out)
         return [s.rjust(w) for s in out]
     out = [_as_str(v) for v in vals]
+    if all(v is None or (isinstance(v, _dt.date) and not isinstance(v, _dt.datetime))
+           or (isinstance(v, np.datetime64) and np.datetime_data(v.dtype)[0] == "D") for v in vals):
+        return out   # Datumswerte ohne gemeinsame Breite wie R format.Date (seit 1.6.4 mit Jahren ohne Auffüllen, C-005)
     w = max(width or 0, max(len(s) for s in out))
     return [s.ljust(w) for s in out]
 
@@ -120,6 +171,30 @@ def r_format1(x: Any, **kw) -> str:
     """``format(x)`` für einen einzelnen Wert."""
     r = r_format(x, **kw)
     return r[0] if r else "character(0)"
+
+
+def _r_date_text(z: int) -> str:
+    """Datumstext wie R as.character/format für Tage seit 1970-01-01: ``"%d-%02d-%02d"`` mit dem Jahr ohne Auffüllen
+    (``"53-06-19"``, ``"-1-01-01"``, ``"12345-01-01"``). Seit 1.6.4 (C-005, Entscheidung 97); bis 1.6.3 ISO-Text mit
+    vierstelligem Jahr bzw. Fehler außerhalb 1–9999."""
+    z += 719468
+    era = z // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    d = doy - (153 * mp + 2) // 5 + 1
+    m = mp + 3 if mp < 10 else mp - 9
+    return "%d-%02d-%02d" % (yoe + era * 400 + (m <= 2), m, d)
+
+
+def _date_days(v: Any) -> int:
+    """Tage seit 1970-01-01 eines date/datetime/datetime64 (Uhrzeit abgeschnitten)."""
+    if isinstance(v, np.datetime64):
+        return int(v.astype("datetime64[D]").astype(np.int64))
+    if isinstance(v, _dt.datetime):
+        v = v.date()
+    return v.toordinal() - _dt.date(1970, 1, 1).toordinal()
 
 
 def _as_str(v: Any) -> str:
@@ -131,10 +206,17 @@ def _as_str(v: Any) -> str:
         return "TRUE" if v else "FALSE"
     if isinstance(v, (_dt.date, np.datetime64)):
         if isinstance(v, np.datetime64):
-            return str(v.astype("datetime64[D]"))
-        if isinstance(v, _dt.datetime):
-            return v.date().isoformat()
-        return v.isoformat()
+            if np.isnat(v):
+                return "NA"
+            d = v.astype("datetime64[D]")
+            if v == d:
+                return _r_date_text(_date_days(d))
+            v = _dt.datetime(1970, 1, 1) + _dt.timedelta(microseconds=int(v.astype("datetime64[us]").astype(np.int64)))
+        if isinstance(v, _dt.datetime):   # seit 1.6.4 wie R as.character(<POSIXct>) (C-050)
+            if (v.hour, v.minute, v.second, v.microsecond) == (0, 0, 0, 0):
+                return _r_date_text(_date_days(v))
+            return _r_date_text(_date_days(v)) + v.strftime(" %H:%M:%S")
+        return _r_date_text(_date_days(v))
     if _is_num(v):
         return r_as_character(v)
     return str(v)
@@ -149,8 +231,37 @@ def r_as_character(x: Any) -> str:
     xf = float(x)
     if math.isnan(xf):
         return "NA" if r_isna(xf) else "NaN"
-    w, d, e = _format_real([xf], 15, 0, 0)
-    return _encode_real(xf, w, d, e, drop0=True)
+    # C-Kern sl_r_as_character_real mit scipen fest 0 und "." (seit 1.6.4; bis 1.6.3 formatReal + encodeReal + Drop0
+    # hier nachgebaut, gleiche Texte)
+    return _ext.slc_r_as_character_real(np.array([xf], dtype=np.float64), 0, ".")[0]
+
+
+_DEP_ESC = {"\a": "\\a", "\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t", "\v": "\\v",
+            "\\": "\\\\", '"': '\\"'}
+
+
+def r_deparse_str(s: str) -> str:
+    """Text in Anführungszeichen wie R ``deparse`` (EncodeString in UTF-8; seit 1.6.4, C-089): ``\\``, ``\"`` und
+    ``\\a \\b \\f \\n \\r \\t \\v``, andere ASCII-Steuerzeichen oktal (``\\001``), nicht druckbare Zeichen als
+    ``\\uxxxx``/``\\Uxxxxxxxx``, ungültige Bytes (als Ersatzzeichen U+DC80 … U+DCFF) als ``\\xNN``; ``$`` bleibt."""
+    from ._wctype import iswprint
+    out = ['"']
+    for ch in s:
+        e = _DEP_ESC.get(ch)
+        if e is not None:
+            out.append(e)
+            continue
+        k = ord(ch)
+        if 0xDC80 <= k <= 0xDCFF:       # Byte aus surrogateescape (ungültiges UTF-8)
+            out.append("\\x%02x" % (k - 0xDC00))
+        elif k < 0x80:
+            out.append(ch if 0x20 <= k < 0x7F else "\\%03o" % k)
+        elif iswprint(k):
+            out.append(ch)
+        else:
+            out.append("\\U%08x" % k if k > 0xFFFF else "\\u%04x" % k)
+    out.append('"')
+    return "".join(out)
 
 
 def r_deparse(x: Any) -> str:
@@ -158,14 +269,16 @@ def r_deparse(x: Any) -> str:
     def one(v, all_na=False):
         if v is None:
             return "NA"
-        if isinstance(v, str):
-            return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        if isinstance(v, str):   # seit 1.6.4 wie R mit Steuerzeichen (C-089)
+            return r_deparse_str(v)
         if isinstance(v, (bool, np.bool_)):
             return "TRUE" if v else "FALSE"
         if isinstance(v, (_dt.date, np.datetime64)):
             return '"%s"' % _as_str(v)
+        if isinstance(v, (int, np.integer)) and abs(int(v)) < 2 ** 31:   # wie R-integer (Entscheidung 63, C-090)
+            return str(int(v))
         if _is_num(v):
-            f = float(v)
+            f = _flt(v)
             if math.isnan(f):
                 if not r_isna(f):
                     return "NaN"
@@ -178,6 +291,10 @@ def r_deparse(x: Any) -> str:
         return repr(v)
     if x is None:
         return "NULL"
+    if not isinstance(x, (dict, list, tuple, np.ndarray)):
+        x = _rp_vals([x], "r_deparse")[0]
+        if _is_day(x):                    # seit 1.6.4 wie R (RP, C-049): structure(<Tage>, class = "Date")
+            return 'structure(%s, class = "Date")' % one(NA_REAL if _day_na(x) else float(_date_days(x)), True)
     if isinstance(x, dict):
         if not x:
             return "list()"
@@ -188,11 +305,32 @@ def r_deparse(x: Any) -> str:
             return "NULL" if isinstance(x, (list, tuple)) else "numeric(0)"
         if any(isinstance(v, (list, tuple, dict)) for v in vals):
             return "list(" + ", ".join(r_deparse(v) for v in vals) + ")"
+        vals = _rp_vals(vals, "r_deparse")
+        # seit 1.6.4 wie R (RP, C-049): Datumsvektor als structure(c(<Tage>), class = "Date"); mit Text wie c() alles
+        # als Text (bis 1.6.3 Datum als Text in Anführungszeichen, Zahlen neben Text ohne Anführungszeichen)
+        if all(v is None or _is_day(v) for v in vals) and any(v is not None for v in vals):
+            d = [NA_REAL if v is None or _day_na(v) else float(_date_days(v)) for v in vals]
+            dna = all(r_isna(t) for t in d)
+            inner = one(d[0], dna) if len(d) == 1 else "c(" + ", ".join(one(t, dna) for t in d) + ")"
+            return 'structure(%s, class = "Date")' % inner
+        if any(isinstance(v, str) for v in vals) and not any(isinstance(v, (_dt.date, np.datetime64)) for v in vals):
+            vals = [v if v is None or isinstance(v, str) else _as_str(v) for v in vals]
         all_na = all(_is_num(v) and r_isna(float(v)) for v in vals)
         if len(vals) == 1:
             return one(vals[0], all_na)
         return "c(" + ", ".join(one(v, all_na) for v in vals) + ")"
     return one(x, True)
+
+
+def _is_day(v) -> bool:
+    """Datum ohne Uhrzeit (date, datetime64[D] oder NaT)."""
+    if isinstance(v, np.datetime64):
+        return np.isnat(v) or np.datetime_data(v.dtype)[0] == "D"
+    return isinstance(v, _dt.date) and not isinstance(v, _dt.datetime)
+
+
+def _day_na(v) -> bool:
+    return isinstance(v, np.datetime64) and bool(np.isnat(v))
 
 
 _NA_INT = _fmt._NA_INT
@@ -212,7 +350,9 @@ def _sp_scalar(v: Any):
         return (3, None, [v])
     if isinstance(v, (_dt.date, np.datetime64)):
         s = _as_str(v)
-        return (5, float((_dt.date.fromisoformat(s) - _dt.date(1970, 1, 1)).days), [s])
+        if isinstance(v, np.datetime64) and np.isnat(v):   # NaT wie bis 1.6.3 (eigener Befund)
+            return (5, float((_dt.date.fromisoformat(s) - _dt.date(1970, 1, 1)).days), [s])
+        return (5, float(_date_days(v)), [s])   # seit 1.6.4 ohne date.fromisoformat (C-005)
     return (3, None, [str(v)])
 
 

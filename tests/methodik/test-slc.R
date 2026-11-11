@@ -30,9 +30,9 @@ tabelle("slc: Zufall (SplitMix64-Testvektoren, Ströme, Meldungen) und Verteilun
   bed(identical(sl$.sl_u64(2), c("15780b2e0c2ec716", "6104d9866d113a7e")),
       quelle = "Zustand = erste vier Ausgaben von SplitMix64(42) (= java.util.SplittableRandom(42))"))
 for (b in list(1.5, "a", TRUE, 2^53))
-  stopifnot(startsWith(err(simlev_seed(b)), "seed: ganze Zahl erwartet (erhalten: "))
+  stopifnot(identical(err(simlev_seed(b)), "simlev_seed: seed muss eine ganze Zahl mit |seed| < 2^53 sein."))   # seit 1.6.4 ohne Wert (Entscheidung 8), seit K43 T1-R5 mit Funktionsnamen
 tabelle("slc: Zufall (SplitMix64-Testvektoren, Ströme, Meldungen) und Verteilungen gegen bekannte Werte (Rauchprobe Zufall und Verteilungen)",
-  bed(identical(err(simlev_seed(1.5)), "seed: ganze Zahl erwartet (erhalten: 1.5)"),
+  bed(identical(err(simlev_seed(1.5)), "simlev_seed: seed muss eine ganze Zahl mit |seed| < 2^53 sein."),
       quelle = "Handrechnung (Herleitung im Test)"))
 
 # Reproduzierbarkeit, Stroeme, set.seed() unberuehrt

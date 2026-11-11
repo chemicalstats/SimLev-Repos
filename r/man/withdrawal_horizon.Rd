@@ -25,13 +25,15 @@ Fehler.}
 \item{years}{Laufzeit(en) in Jahren: feste Laufzeit (\code{fixed}), moegliche
 Laufzeiten (\code{discrete}) bzw. Stichprobe (\code{sample}). Bei
 \code{discrete} und \code{sample} ist auch ein einzelner Wert erlaubt
-(dann immer diese Laufzeit).}
+(dann immer diese Laufzeit).
+Seit 1.6.4 ganze Zahlen von 1 bis 100 (vorher wurden gebrochene Laufzeiten abgeschnitten).}
 
 \item{prob}{\code{discrete}: Wahrscheinlichkeiten je Eintrag von
 \code{years} (gleiche Laenge, >= 0, Summe > 0; werden normiert).}
 
 \item{min, max}{Untere und obere Grenze in Jahren (\code{uniform},
-\code{normal}, \code{triangular}); \code{min <= max}.}
+\code{normal}, \code{triangular}); \code{min <= max}.
+Seit 1.6.4 ganze Zahlen von 1 bis 100.}
 
 \item{mean, sd}{\code{normal}: Mittelwert und Standardabweichung in Jahren.}
 
@@ -72,11 +74,12 @@ auf \code{[min, max]} begrenzt.}
 Zuruecklegen gezogen wird.}
 }
 
-Gezogene Laufzeiten werden auf ganze Jahre gebracht (bei \code{normal} und
+Gezogene Laufzeiten sind ganze Jahre (bei \code{normal} und
 \code{triangular} gerundet) und sind mindestens 1 Jahr. Laufzeiten ueber
 der Pfadlaenge kuerzt \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} mit Warnung. Die
 Laufzeit-Parameter \code{years}, \code{min}, \code{max}, \code{mean} und
-\code{mode} muessen > 0 sein (sonst Fehler).
+\code{mode} muessen > 0 sein (sonst Fehler); seit 1.6.4 sind \code{years}, \code{min}
+und \code{max} ganze Zahlen von 1 bis 100 (vorher abgeschnitten).
 }
 \examples{
 h <- withdrawal_horizon("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))

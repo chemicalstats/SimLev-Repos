@@ -3,7 +3,7 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tests/schnittstelle/run.py` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tests/schnittstelle/api.json`.
-- **Stand:** 2026-11-05.
+- **Stand:** 2026-11-09.
 - **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 78 Methoden, Julia 129 Funktionen und 77 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tests/schnittstelle/known_differences.tsv`.
@@ -15,7 +15,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 |---|---|---|---|---|
 | 0 | R-Grundfunktionen, Hüllen der C-Bibliothek | (R selbst), `slc*.R` | `simlev/_r/`, `_lib*.py` | `src/r/`, `slib*.jl` |
 | 1 | Daten und Strategie | `data_prep.R`, `strategy.R` … | `data_prep.py`, `config.py` | `data_prep.jl`, `config.jl` |
-| 2 | Engine | `simulation.R`, `sim_*.R`, Kerne | `engine.py`, `_sim_*.py`, `_core.py`, `result.py` | `engine.jl`, `sim_*.jl` |
+| 2 | Engine | `simulation.R`, `sim_*.R`, Kerne | `engine.py`, `_sim_*.py`, `result.py` | `engine.jl`, `sim_*.jl` |
 | 3 | Analysen | je eine `.R` | je ein Modul | je eine Datei |
 | 4 | Ausgabe | `print`-Methoden, `plot_dashboard.R` | `svg.py`, `dashboard.py` | `svg.jl`, `dashboard.jl` |
 
@@ -149,7 +149,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.SimLevHeatmap` | `analysis_tests.R` | `SimLevHeatmap.format` | `analysis_tests.py` | `show(SimLevHeatmap)` | `analysis_tests.jl` |
 | `print.SimLevRealityCheck` | `analysis_tests.R` | `SimLevRealityCheck.format` | `analysis_tests.py` | `show(SimLevRealityCheck)` | `analysis_tests.jl` |
 | `print.SimLevSignalAnalysis` | `analysis_tests.R` | `SimLevSignalAnalysis.format` | `analysis_tests.py` | `show(SimLevSignalAnalysis)` | `analysis_tests.jl` |
-| `print.asset_config` | `asset_config.R` | `AssetConfig.print` | `config.py` | `show(asset_config)` | `config.jl` |
+| `print.asset_config` | `asset_config.R` | `AssetConfig.print` | `_r/rlist.py` | `show(asset_config)` | `config.jl` |
 | `summary.asset_config` | `asset_config.R` | `AssetConfig.summary` | `config.py` | `r_summary(asset_config)` | `config.jl` |
 | `plot.SimLevBackcast` | `backcast.R` | `SimLevBackcast.plot` | `backcast.py` | `r_plot(SimLevBackcast)` | `backcast.jl` |
 | `plot.SimLevBackcastFit` | `backcast.R` | `SimLevBackcastFit.plot` | `backcast.py` | `r_plot(SimLevBackcastFit)` | `backcast.jl` |
@@ -179,13 +179,13 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.SimLevOptimization` | `optimize.R` | `SimLevOptimization.format` | `optimize.py` | `show(SimLevOptimization)` | `optimize.jl` |
 | `plot.SimLevPBO` | `overfitting.R` | `SimLevPBO.plot` | `overfitting.py` | `r_plot(SimLevPBO)` | `overfitting.jl` |
 | `plot.SimLevWalkForward` | `overfitting.R` | `SimLevWalkForward.plot` | `overfitting.py` | `r_plot(SimLevWalkForward)` | `overfitting.jl` |
-| `print.SimLevDSR` | `overfitting.R` | `SimLevDSR.print` | `overfitting.py` | `show(SimLevDSR)` | `overfitting.jl` |
-| `print.SimLevPBO` | `overfitting.R` | `SimLevPBO.print` | `overfitting.py` | `show(SimLevPBO)` | `overfitting.jl` |
-| `print.SimLevWalkForward` | `overfitting.R` | `SimLevWalkForward.print` | `overfitting.py` | `show(SimLevWalkForward)` | `overfitting.jl` |
+| `print.SimLevDSR` | `overfitting.R` | `SimLevDSR.print` | `_r/rlist.py` | `show(SimLevDSR)` | `overfitting.jl` |
+| `print.SimLevPBO` | `overfitting.R` | `SimLevPBO.print` | `_r/rlist.py` | `show(SimLevPBO)` | `overfitting.jl` |
+| `print.SimLevWalkForward` | `overfitting.R` | `SimLevWalkForward.print` | `_r/rlist.py` | `show(SimLevWalkForward)` | `overfitting.jl` |
 | `plot.SimLevParamSearch` | `param_search.R` | `SimLevParamSearch.plot` | `param_search.py` | `r_plot(SimLevParamSearch)` | `param_search.jl` |
 | `print.SimLevParamSearch` | `param_search.R` | `SimLevParamSearch.print` | `param_search.py` | `show(SimLevParamSearch)` | `param_search.jl` |
-| `print.SimLevParamSpace` | `param_search.R` | `SimLevParamSpace.print` | `param_search.py` | `show(SimLevParamSpace)` | `param_search.jl` |
-| `print.summary.SimLevParamSearch` | `param_search.R` | `SummarySimLevParamSearch.print` | `param_search.py` | `show(summary.SimLevParamSearch)` | `param_search.jl` |
+| `print.SimLevParamSpace` | `param_search.R` | `SimLevParamSpace.print` | `_r/rlist.py` | `show(SimLevParamSpace)` | `param_search.jl` |
+| `print.summary.SimLevParamSearch` | `param_search.R` | `SummarySimLevParamSearch.print` | `_r/rlist.py` | `show(summary.SimLevParamSearch)` | `param_search.jl` |
 | `summary.SimLevParamSearch` | `param_search.R` | `SimLevParamSearch.summary` | `param_search.py` | `r_summary(SimLevParamSearch)` | `param_search.jl` |
 | `plot.SimLevGoalPlan` | `planning.R` | `SimLevGoalPlan.plot` | `planning.py` | `r_plot(SimLevGoalPlan)` | `planning.jl` |
 | `print.SimLevGoalPlan` | `planning.R` | `SimLevGoalPlan.format` | `planning.py` | `show(SimLevGoalPlan)` | `planning.jl` |
@@ -194,8 +194,8 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.SimLevHMM` | `regimes.R` | `SimLevHMM.format` | `regimes.py` | `show(SimLevHMM)` | `regimes.jl` |
 | `print.SimLevScenarios` | `scenarios.R` | `SimLevScenarios.format` | `scenarios.py` | `show(SimLevScenarios)` | `scenarios.jl` |
 | `plot.SimLevSensitivity` | `sensitivity.R` | `SimLevSensitivity.plot` | `sensitivity.py` | `r_plot(SimLevSensitivity)` | `sensitivity.jl` |
-| `print.SimLevLumpSum` | `sensitivity.R` | `SimLevLumpSum.print` | `sensitivity.py` | `show(SimLevLumpSum)` | `sensitivity.jl` |
-| `print.SimLevSensitivity` | `sensitivity.R` | `SimLevSensitivity.print` | `sensitivity.py` | `show(SimLevSensitivity)` | `sensitivity.jl` |
+| `print.SimLevLumpSum` | `sensitivity.R` | `SimLevLumpSum.print` | `_r/rlist.py` | `show(SimLevLumpSum)` | `sensitivity.jl` |
+| `print.SimLevSensitivity` | `sensitivity.R` | `SimLevSensitivity.print` | `_r/rlist.py` | `show(SimLevSensitivity)` | `sensitivity.jl` |
 | `print.SimLevDcaPlan` | `sim_blocks.R` | `SimLevDcaPlan.format` | `_sim_blocks.py` | `show(SimLevDcaPlan)` | `sim_blocks.jl` |
 | `print.SimLevFundsCosts` | `sim_blocks.R` | `SimLevFundsCosts.format` | `_sim_blocks.py` | `show(SimLevFundsCosts)` | `sim_blocks.jl` |
 | `print.SimLevHarvestRule` | `sim_blocks.R` | `SimLevHarvestRule.format` | `_sim_blocks.py` | `show(SimLevHarvestRule)` | `sim_blocks.jl` |
@@ -205,14 +205,14 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.SimLevSimCosts` | `sim_blocks.R` | `SimLevSimCosts.format` | `_sim_blocks.py` | `show(SimLevSimCosts)` | `sim_blocks.jl` |
 | `print.SimLevSplitRule` | `sim_blocks.R` | `SimLevSplitRule.format` | `_sim_blocks.py` | `show(SimLevSplitRule)` | `sim_blocks.jl` |
 | `print.SimLevTaxProfile` | `sim_blocks.R` | `SimLevTaxProfile.format` | `_sim_blocks.py` | `show(SimLevTaxProfile)` | `sim_blocks.jl` |
-| `print.SimLevResult` | `simulation.R` | `SimLevResult.print` | `result.py` | `show(SimLevResult)` | `result.jl` |
-| `print.summary.SimLevResult` | `simulation.R` | `SimLevSummary.print` | `result.py` | `show(summary.SimLevResult)` | `result.jl` |
+| `print.SimLevResult` | `simulation.R` | `SimLevResult.print` | `_r/rlist.py` | `show(SimLevResult)` | `result.jl` |
+| `print.summary.SimLevResult` | `simulation.R` | `SimLevSummary.print` | `_r/rlist.py` | `show(summary.SimLevResult)` | `result.jl` |
 | `summary.SimLevResult` | `simulation.R` | `SimLevResult.summary` | `result.py` | `r_summary(SimLevResult)` | `result.jl` |
-| `print.strategy` | `strategy.R` | `Strategy.print` | `config.py` | `show(strategy)` | `config.jl` |
+| `print.strategy` | `strategy.R` | `Strategy.print` | `_r/rlist.py` | `show(strategy)` | `config.jl` |
 | `summary.strategy` | `strategy.R` | `Strategy.summary` | `config.py` | `r_summary(strategy)` | `config.jl` |
 | `plot.SimLevWeights` | `tactical.R` | `SimLevWeights.plot` | `tactical.py` | `r_plot(SimLevWeights)` | `tactical.jl` |
 | `print.SimLevWeights` | `tactical.R` | `SimLevWeights.format` | `tactical.py` | `show(SimLevWeights)` | `tactical.jl` |
-| `print.SimLevTaxTariff` | `tax_tariff.R` | `SimLevTaxTariff.print` | `_tax_tariff.py` | `show(SimLevTaxTariff)` | `tax_tariff.jl` |
+| `print.SimLevTaxTariff` | `tax_tariff.R` | `SimLevTaxTariff.print` | `_r/rlist.py` | `show(SimLevTaxTariff)` | `tax_tariff.jl` |
 | `plot.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.plot` | `withdrawal.py` | `r_plot(SimLevWithdrawal)` | `withdrawal.jl` |
 | `print.SimLevHorizon` | `withdrawal.R` | `SimLevHorizon.format` | `withdrawal.py` | `show(SimLevHorizon)` | `withdrawal.jl` |
 | `print.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.print` | `withdrawal.py` | `show(SimLevWithdrawal)` | `withdrawal.jl` |
@@ -220,7 +220,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.withdrawal_rule` | `withdrawal.R` | `WithdrawalRule.format` | `withdrawal.py` | `show(withdrawal_rule)` | `withdrawal.jl` |
 | `summary.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.summary` | `withdrawal.py` | `r_summary(SimLevWithdrawal)` | `withdrawal.jl` |
 | `[.SimLevWrapperNav` | `wrapper.R` | – | – | – | – |
-| `print.SimLevWrapperConfig` | `wrapper.R` | `SimLevWrapperConfig.print` | `wrapper.py` | `show(SimLevWrapperConfig)` | `wrapper.jl` |
+| `print.SimLevWrapperConfig` | `wrapper.R` | `SimLevWrapperConfig.print` | `_r/rlist.py` | `show(SimLevWrapperConfig)` | `wrapper.jl` |
 | `print.SimLevWrapperNav` | `wrapper.R` | `SimLevWrapperNav.format` | `wrapper.py` | `show(SimLevWrapperNav)` | `wrapper.jl` |
 | – | – | `SimLevParamRange.format` | `param_search.py` | – | – |
 

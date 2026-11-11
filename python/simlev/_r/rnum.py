@@ -108,14 +108,32 @@ def _c64(x) -> np.ndarray:
     return np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
 
 
+def _text(x, kind):
+    """Text wie R (seit 1.6.4, C-060; bis 1.6.3 wandelte numpy Ziffern-Text still in Zahlen): ``kind`` "sum" Fehler
+    (sum, prod), "mean" NA mit Warnung, "num" Umwandlung wie as.numeric (NA mit Warnung bei Nicht-Zahlen; cumsum,
+    cumprod, cummax, var, sd). Ergebnis: x unverändert (kein Text), sonst die Zahlen bzw. None (mean)."""
+    from .libm import _is_text
+    if not _is_text(x):
+        return x
+    if kind == "sum":
+        from .linalg import RError
+        raise RError("invalid 'type' (character) of argument")
+    if kind == "mean":
+        import warnings
+        warnings.warn("argument is not numeric or logical: returning NA")
+        return None
+    from .rexpr import as_numeric
+    return as_numeric(list(np.asarray(x, dtype=object).ravel()) if not isinstance(x, str) else [x])
+
+
 def r_sum(x, na_rm: bool = False) -> float:
     """``sum(x)`` wie in R (long-double-Akkumulator, sequenziell)."""
-    return _ext.slc_r_sum(_c64(x), 0, bool(na_rm))
+    return _ext.slc_r_sum(_c64(_text(x, "sum")), 0, bool(na_rm))
 
 
 def r_cumsum(x) -> np.ndarray:
     """``cumsum(x)`` wie in R (long-double-Akkumulator; NA/NaN über ``handleNaN``)."""
-    a = _c64(x)
+    a = _c64(_text(x, "num"))
     out = np.empty(a.size)
     _ext.slc_r_cum(0, a, out)
     return out
@@ -123,12 +141,12 @@ def r_cumsum(x) -> np.ndarray:
 
 def r_prod(x, na_rm: bool = False) -> float:
     """``prod(x)`` wie in R (long-double-Akkumulator)."""
-    return _ext.slc_r_sum(_c64(x), 1, bool(na_rm))
+    return _ext.slc_r_sum(_c64(_text(x, "sum")), 1, bool(na_rm))
 
 
 def r_cumprod(x) -> np.ndarray:
     """``cumprod(x)`` wie in R (long-double-Akkumulator; NA/NaN über ``handleNaN``)."""
-    a = _c64(x)
+    a = _c64(_text(x, "num"))
     out = np.empty(a.size)
     _ext.slc_r_cum(1, a, out)
     return out
@@ -136,7 +154,7 @@ def r_cumprod(x) -> np.ndarray:
 
 def r_cummax(x) -> np.ndarray:
     """``cummax(x)`` wie in R (ab dem ersten NA/NaN über ``handleNaN``)."""
-    a = _c64(x)
+    a = _c64(_text(x, "num"))
     out = np.empty(a.size)
     _ext.slc_r_cum(2, a, out)
     return out
@@ -144,6 +162,9 @@ def r_cummax(x) -> np.ndarray:
 
 def r_mean(x, na_rm: bool = False) -> float:
     """``mean(x)`` für Doubles wie R (Summe/n in long double plus Korrekturdurchlauf)."""
+    x = _text(x, "mean")
+    if x is None:
+        return NA_REAL
     a = _c64(x)
     if na_rm:
         a = _drop_na(a)
@@ -157,7 +178,7 @@ def r_mean_int(x) -> float:
 
 def r_var(x, na_rm: bool = False) -> float:
     """``var(x)`` (Pearson) wie R (NA bei fehlenden Werten oder n < 2)."""
-    a = _c64(x)
+    a = _c64(_text(x, "num"))
     if na_rm:
         a = _drop_na(a)
     elif np.isnan(a).any():

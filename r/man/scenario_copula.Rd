@@ -21,7 +21,7 @@ scenario_copula(
 
 \item{assets}{Zeichenvektor der Kurs- bzw. Renditespalten.}
 
-\item{n}{Anzahl Szenarien (ganze Zahl, Standard 10000).}
+\item{n}{Anzahl Szenarien (ganze Zahl, Standard 10000). Seit 1.6.4 hoechstens 10^8.}
 
 \item{family}{Copula: \code{"t"} (Standard) oder \code{"gaussian"}.}
 

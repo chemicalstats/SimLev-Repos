@@ -12,7 +12,7 @@
 // r/R/sim_base.R), in derselben Rechenfolge:
 //   income_tax  .tariff_income_tax  T(x) = floor(round((a u + b) u + c, 6)), x = floor(zvE + 1e-9)
 //   soli        .tariff_soli        min(Satz E, Milderung (E - Freigrenze)), auf volle Cent abgerundet
-//   full, diff  .tariff_full, .tariff_diff
+//   full        .tariff_full (Differenzen wie .tariff_diff in close ueber das Lambda df)
 //   close       .tariff_close       Veranlagung eines Jahres (ohne Druck; die Jahreszeile in row)
 // round(x, 6) ist R's fround (nmath/fround.c, R >= 4.0.0), wie r_round in Python und Julia.
 // Geprueft per Zufallsvergleich gegen die R-Funktionen (Gleichlauf: tariff_fuzz.R ueber
@@ -39,6 +39,8 @@
 #endif
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "slc_rbase.h"
@@ -108,12 +110,6 @@ struct TariffCore {
     const double e = income_tax(x), so = soli(e), ki = church_k * e;
     return TariffParts{e, so, ki, e + so + ki};
   }
-  // .tariff_diff
-  TariffParts diff(double x1, double x0) const {
-    if (std::isnan(x1) || std::isnan(x0) || x1 == x0) return TariffParts{0.0, 0.0, 0.0, 0.0};   // x1 == x0: exakt 0
-    const TariffParts p = full(x1), q = full(x0);
-    return TariffParts{p.est - q.est, p.soli - q.soli, p.kist - q.kist, p.total - q.total};
-  }
   // .tariff_close ohne Druck: Saldo D (> 0 Nachzahlung, < 0 Erstattung), na ohne zvE (keine Veranlagung;
   // row und ks_next bleiben dann unveraendert). row (TR_N Werte, TR_YEAR setzt der Aufrufer) darf nullptr
   // sein; ks_next = Saldo des KiSt-Bescheids (Zahlung bzw. Erstattung im Folgejahr).
@@ -122,10 +118,33 @@ struct TariffCore {
     if (std::isnan(zve)) return na;
     // F(zvE) einmal je Veranlagung; F(x) - F(zvE) fuer x == zvE ist exakt 0 (gleiche Werte), daher ohne Rechnung
     const TariffParts Fz = full(zve);
+    // Seit 1.6.4 (A-087) full() je Veranlagung einmal je Argument (bis 1.6.3 bis zu 9 Aufrufe fuer etwa 5 Argumente):
+    // Merker ueber das Bitmuster des Arguments, zvE selbst ueber Fz (full ist eine reine Funktion; gleiche Bits,
+    // gleiche Werte)
+    uint64_t bz;
+    std::memcpy(&bz, &zve, sizeof bz);
+    uint64_t mb[6];
+    TariffParts mf[6];
+    int mn = 0;
+    auto F = [&](double x) -> TariffParts {
+      uint64_t bx;
+      std::memcpy(&bx, &x, sizeof bx);
+      if (bx == bz) return Fz;
+      for (int i = 0; i < mn; i++)
+        if (mb[i] == bx) return mf[i];
+      const TariffParts p = full(x);
+      if (mn < 6) { mb[mn] = bx; mf[mn] = p; mn++; }
+      return p;
+    };
     auto dz = [&](double x) -> TariffParts {
       if (std::isnan(x) || x == zve) return TariffParts{0.0, 0.0, 0.0, 0.0};
-      const TariffParts p = full(x);
+      const TariffParts p = F(x);
       return TariffParts{p.est - Fz.est, p.soli - Fz.soli, p.kist - Fz.kist, p.total - Fz.total};
+    };
+    auto df = [&](double x1, double x0) -> TariffParts {   // .tariff_diff(x1, x0) ueber F; x1 == x0: exakt 0
+      if (std::isnan(x1) || std::isnan(x0) || x1 == x0) return TariffParts{0.0, 0.0, 0.0, 0.0};
+      const TariffParts p = F(x1), q = F(x0);
+      return TariffParts{p.est - q.est, p.soli - q.soli, p.kist - q.kist, p.total - q.total};
     };
     const double k = tariff_max(0.0, k_base), abg = k * abg_rate;
     const double kabg = k * kapest * church_k;
@@ -140,9 +159,9 @@ struct TariffCore {
     const double ks = tot.kist - (fav ? kabg : 0.0);
     ks_next = ks;
     if (row) {
-      const TariffParts ded = dz(Bx), p23 = diff(Bx + g23, Bx);
+      const TariffParts ded = dz(Bx), p23 = df(Bx + g23, Bx);
       TariffParts tk{na, na, na, na};
-      if (use_gp) tk = diff(B1 + g23 + k, B1 + g23);
+      if (use_gp) tk = df(B1 + g23 + k, B1 + g23);
       const double paid = tariff_max(0.0, ks_prev) + (fav ? kabg : 0.0), refunded = tariff_max(0.0, -ks_prev);
       row[TR_ZVE] = zve; row[TR_KS_PAID] = paid; row[TR_KS_REFUNDED] = refunded; row[TR_KS_NET] = paid - refunded;
       row[TR_ZVE_NET] = Bx; row[TR_DED] = ded.total;

@@ -12,7 +12,7 @@ planning_lumpsum_vs_dca(
   horizon = 10,
   step = 1,
   sim_args = list(),
-  cores = 1L
+  cores = "auto"
 )
 }
 \arguments{
@@ -21,14 +21,20 @@ planning_lumpsum_vs_dca(
 \code{\link[=create_strategy]{create_strategy()}}.}
 
 \item{amount}{Anlagebetrag in Waehrungseinheiten (Standard 10000); bei DCA
-in \code{months} Raten von \code{amount / months} aufgeteilt.}
+in \code{months} Raten von \code{amount / months} aufgeteilt.
+Seit 1.6.4 eine Zahl > 0.}
 
-\item{months}{Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).}
+\item{months}{Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
+Seit 1.6.4 eine ganze Zahl >= 1.
+Seit 1.6.4 hoechstens 1200.}
 
-\item{horizon}{Vergleichshorizont in Jahren ab Start (Standard 10).}
+\item{horizon}{Vergleichshorizont in Jahren ab Start (Standard 10).
+Seit 1.6.4 eine ganze Zahl >= 1.
+Seit 1.6.4 hoechstens 100.}
 
 \item{step}{Jeder wievielte moegliche Starttermin verwendet wird (Standard
-1 = jeder Monat; 12 = jaehrlich).}
+1 = jeder Monat; 12 = jaehrlich).
+Seit 1.6.4 eine ganze Zahl >= 1.}
 
 \item{sim_args}{Benannte Liste weiterer Argumente fuer \code{\link[=simulation]{simulation()}}
 (z. B. \code{tax = tax_profile()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
@@ -39,7 +45,25 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 (auch Pfade \code{"dca.*"} und die alten \code{dca_*}) setzt die Funktion selbst
 (in \code{sim_args} ein Fehler).}
 
-\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Fork auf Unix, PSOCK auf Windows):
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
+\code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
+der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).}
 }
 \value{
 data.frame der Klasse \code{SimLevLumpSum} mit einer Zeile je

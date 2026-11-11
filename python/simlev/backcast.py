@@ -29,7 +29,7 @@ from ._r import libm as _libm
 from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import r_cumsum, r_isna, r_mean, r_median, r_sd, r_sum
+from ._r.rnum import _drop_na, r_cumsum, r_isna, r_mean, r_median, r_sd, r_sum
 from .data_prep import (
     _as_dates, _as_date_any, _as_frame, _as_numeric, _col, _date_str, _days, _is_named_numeric,
     _is_number, _match_arg, _named_parts, _names, _names_as_dates_optional, _nrow, _to_date,
@@ -94,8 +94,11 @@ def _resolve_series(x, data, what, default=0):
         nm = _names(xf)
         dcol = "date" if "date" in nm else nm[0]
         vcol = [k for k in nm if k != dcol][0]
-        return _step_series(_days(_to_date(_col(xf, dcol), "%s: Datum" % what)), _as_numeric(_col(xf, vcol)),
-                            _days(_to_date(_col(data, "date"), what)))
+        fd = _days(_to_date(_col(xf, dcol), "%s: Datum" % what))
+        if np.isnan(fd).any():   # seit 1.6.4 abgelehnt wie in R und Julia (Entscheidung 147, T3-N5)
+            from ._pruefen import chk_stop
+            chk_stop("ut3.datum_fehlt", what, int(np.flatnonzero(np.isnan(fd))[0]) + 1)
+        return _step_series(fd, _as_numeric(_col(xf, vcol)), _days(_to_date(_col(data, "date"), what)))
     if isinstance(x, str) or (isinstance(x, (list, tuple, np.ndarray)) and len(x) == 1 and isinstance(list(np.ravel(x))[0], str)):
         x = x if isinstance(x, str) else str(list(np.ravel(x))[0])
         if x not in _names(data):
@@ -232,29 +235,27 @@ def _bc_loss(e, loss):
     raise ValueError("Unbekannte loss-Funktion '%s'." % loss)
 
 
-def _bc_metric_table(err_mat, grid):
-    """Grid-Search-Metriken (R: ``.bc_metric_table``): bestes Gitterelement je Metrik."""
-    def finite_last(x):
-        f = np.flatnonzero(np.isfinite(x))
-        return abs(x[f.max()])
-
-    def nn(x):
-        return x[~np.isnan(x)]
-
-    metrics = {
-        "median_absolute_error": lambda x: r_median(np.abs(nn(x))),
-        "mean_absolute_error": lambda x: r_mean(np.abs(nn(x))),
-        "mean_squared_error": lambda x: r_mean(_sq(nn(x))),
-        "root_mean_squared_error": lambda x: math.sqrt(r_mean(_sq(nn(x)))),
-        "max_absolute_error": lambda x: float(np.max(np.abs(nn(x)))) if len(nn(x)) else -math.inf,
-        "final_absolute_error": finite_last,
-    }
+def _bc_metric_table(err_mat, grid, m=None):
+    """Grid-Search-Metriken (R: ``.bc_metric_table``): bestes Gitterelement je Metrik. ``err_mat``: Matrix (Spalten =
+    Gitterpunkte) oder Liste der Spalten (Länge ``m`` je Spalte). Seit 1.6.4 (B-071) je Spalte einmal NA-Filter und
+    abs (bis 1.6.3 je Metrik eine eigene Kopie); gleiche Werte (``x * x`` = ``|x| * |x|``, dieselben Summen)."""
+    names = ("median_absolute_error", "mean_absolute_error", "mean_squared_error", "root_mean_squared_error",
+             "max_absolute_error", "final_absolute_error")
+    cols = err_mat if isinstance(err_mat, list) else [err_mat[:, j] for j in range(err_mat.shape[1])]
+    M = [[], [], [], [], [], []]
+    for x in cols:
+        x = np.asarray(x, dtype=np.float64)
+        a = np.abs(_drop_na(x))                 # x ohne NA/NaN (_r/rnum.py)
+        q = a * a
+        mq = r_mean(q)
+        M[0].append(r_median(a))
+        M[1].append(r_mean(a))
+        M[2].append(mq)
+        M[3].append(math.sqrt(mq))
+        M[4].append(float(np.max(a)) if len(a) else -math.inf)
+        M[5].append(abs(x[np.flatnonzero(np.isfinite(x)).max()]))
     grid = np.asarray(grid, dtype=np.float64)
-    out = {}
-    for k, f in metrics.items():
-        vals = [f(err_mat[:, j]) for j in np.arange(err_mat.shape[1])]
-        out[k] = float(grid[_which_min(vals, -1)])
-    return pd.Series(out)
+    return pd.Series({k: float(grid[_which_min(M[i], -1)]) for i, k in enumerate(names)})
 
 
 def _recycle2(x, y):
@@ -325,16 +326,20 @@ def _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
 
 def _bc_model_returns(prep, par, model, reg=None):
     """Modellrenditen für einen Parametersatz (R: ``.bc_model_returns``)."""
+    return _bc_base(prep, par, model, reg) - par["spread"] * prep.sp_unit - par["drag"] * prep.dr_unit
+
+
+def _bc_base(prep, par, model, reg=None):
+    """Basis der Modellrenditen ohne spread und drag (R: ``.bc_base``); hängt nur im Strukturmodell von par (beta) ab."""
     if model == "structural":
-        base = par["beta"] * prep.leverage * prep.x + prep.fin - prep.ter_cost
-    elif model == "linear":
+        return par["beta"] * prep.leverage * prep.x + prep.fin - prep.ter_cost
+    if model == "linear":
         coef = np.asarray(reg["coef"], dtype=np.float64)
-        base = coef[0] + coef[1] * prep.x
-    else:
-        base = np.full(prep.n, _NAN)
-        ok = np.isfinite(prep.x)
-        base[ok] = _spline_predict(reg["fit"], prep.x[ok])
-    return base - par["spread"] * prep.sp_unit - par["drag"] * prep.dr_unit
+        return coef[0] + coef[1] * prep.x
+    base = np.full(prep.n, _NAN)
+    ok = np.isfinite(prep.x)
+    base[ok] = _spline_predict(reg["fit"], prep.x[ok])
+    return base
 
 
 def _bc_errors(r, win, obs, objective, horizon):
@@ -487,6 +492,122 @@ class SimLevBackcastFit(RList):
     def summary(self):
         return summary_SimLevBackcastFit(self)
 
+# --- Eingabeprüfung Backcast (seit 1.6.4, K42 E4, B-017, B-087; Hilfen in _pruefen.py und dependence.py) -------
+
+def _bc_check_series(x, data, fn, arg):
+    """Angabe einer Reihe (ter, rate, fx) vor ``_resolve_series`` (R ``.bc_check_series``): Zahl(en) endlich,
+    Spaltenname einer Zahlenspalte mit endlichen Werten oder NA, Tabelle (date, Wert) mit endlichen Zahlen; Kategorie,
+    Wahrheitswerte, Listen aus Text und Matrizen sind ein Fehler."""
+    from ._pruefen import chk_is_factor, chk_stop
+    from .dependence import _e4_numcol, _e4_numscalar, _e4_isna
+    if x is None:
+        return x
+    if chk_is_factor(x):
+        chk_stop("faktor", fn, arg)
+    if isinstance(x, pd.DataFrame):
+        if x.shape[1] >= 2:
+            nm = [str(c) for c in x.columns]
+            dcol = "date" if "date" in nm else nm[0]
+            vcol = [k for k in nm if k != dcol][0]
+            if chk_is_factor(x[dcol]):
+                chk_stop("spalte_faktor", fn, dcol)
+            _e4_numcol(x, vcol, fn)
+            if not np.isfinite(np.asarray(x[vcol], dtype=np.float64)).all():
+                chk_stop("e3.werte", fn, arg)
+        return x
+    if isinstance(x, (list, tuple, np.ndarray)) and len(x) == 1 and isinstance(list(np.ravel(np.asarray(x, dtype=object)))[0], str):
+        x = str(list(np.ravel(np.asarray(x, dtype=object)))[0])
+    if isinstance(x, str):
+        if x == "":
+            chk_stop("e4.reihe", fn, arg)
+        if x in _names(data):
+            _e4_numcol(data, x, fn)
+            if np.isinf(np.asarray(_as_numeric(_col(data, x)), dtype=np.float64)).any():
+                chk_stop("e1.spalte_endlich", fn, x)
+        return x
+    if isinstance(x, Mapping):
+        vals = list(x.values())
+    elif isinstance(x, pd.Series):
+        if not (pd.api.types.is_numeric_dtype(x.dtype) and not pd.api.types.is_bool_dtype(x.dtype)):
+            chk_stop("e4.reihe", fn, arg)
+        vals = list(x.to_numpy(dtype=np.float64))
+    elif isinstance(x, np.ndarray):
+        if x.ndim > 1:
+            chk_stop("e4.reihe", fn, arg)
+        vals = list(x.ravel())
+    elif isinstance(x, (list, tuple)):
+        vals = list(x)
+    else:
+        vals = [x]
+    if not vals or not all(_e4_numscalar(v) or _e4_isna(v) for v in vals):
+        chk_stop("e4.reihe", fn, arg)
+    if not all(_e4_numscalar(v) and math.isfinite(float(v)) for v in vals):
+        chk_stop("e3.werte", fn, arg)
+    return x
+
+
+def _bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_lag, ter_basis, rate_basis):
+    """Gemeinsame Modellangaben von ``backcast_fit()`` und ``backcast()`` ohne Fit (R ``.bc_check_args``)."""
+    from ._pruefen import chk_col_nofactor, chk_df, chk_int1, chk_is_factor, chk_name1, chk_num1
+    from .dependence import _e4_numcol
+    chk_df(data, fn, "data")                                   # Entscheidung 6, B-057
+    chk_name1(product, fn, "product")
+    chk_name1(index, fn, "index")
+    nm = [str(c) for c in data.columns]
+    if "date" in nm:
+        chk_col_nofactor(data, "date", fn)                     # Entscheidung 15
+    for col in (product, index):
+        if col in nm:
+            _e4_numcol(data, col, fn)
+    lv = leverage
+    if (chk_is_factor(lv) or not _is_numeric_value(lv) or np.size(lv) != 1
+            or not math.isfinite(float(np.ravel(lv)[0])) or float(np.ravel(lv)[0]) == 0):
+        raise ValueError("'leverage' muss eine Zahl ungleich 0 sein.")   # seit 1.6.4 auch NA und Inf
+    _bc_check_series(ter, data, fn, "ter")
+    _bc_check_series(rate, data, fn, "rate")
+    _bc_check_series(fx, data, fn, "fx")
+    chk_int1(rate_lag, fn, "rate_lag", lo=0, hi=max(0, len(data) - 1))
+    chk_num1(ter_basis, fn, "ter_basis", lo=0, lo_open=True)
+    chk_num1(rate_basis, fn, "rate_basis", lo=0, lo_open=True)
+    return True
+
+
+def _bc_check_lag(lag, data, fn, auto_ok=True):
+    """lag: ``"auto"`` (nur mit ``auto_ok``) oder ganze Zahl mit ``|lag| < nrow(data)`` (R ``.bc_check_lag``)."""
+    from ._pruefen import chk_scalar, chk_stop
+    from .dependence import _e4_numscalar
+    key = "e4.lag" if auto_ok else "e4.lag_ohne_fit"
+    lag = chk_scalar(lag)
+    if auto_ok and isinstance(lag, str) and lag == "auto":
+        return lag
+    if not (_e4_numscalar(lag) and math.isfinite(float(lag)) and float(lag) == math.trunc(float(lag))
+            and abs(float(lag)) < len(data)):
+        chk_stop(key, fn)
+    return lag
+
+
+def _bc_check_par(p, fn, arg, null_ok=False):
+    """drag, spread, beta als benannte Liste (dict) einzelner endlicher Zahlen (fixed, params; R ``.bc_check_par``)."""
+    from ._pruefen import chk_is_factor, chk_scalar, chk_stop
+    from .dependence import _e4_numscalar
+    if p is None and null_ok:
+        return p
+    ok = isinstance(p, Mapping) and all(k in ("drag", "spread", "beta") for k in p)
+    if ok:
+        for v in p.values():
+            v = v if chk_is_factor(v) else chk_scalar(v)
+            if not (_e4_numscalar(v) and math.isfinite(float(v))):
+                ok = False
+    if not ok:
+        chk_stop("e4.parameter", fn, arg)
+    return p
+
+
+def _chk_scalar1(x):
+    from ._pruefen import chk_scalar
+    return chk_scalar(x)
+
+
 def _as_char_vec(x):
     if x is None:
         return []
@@ -545,11 +666,14 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             oder "max". Bei "hybrid" ohne Wirkung (immer RMS).
         horizon: Renditehorizont in Produktbeobachtungen für "return"/"hybrid" (ganze Zahl >= 1, Standard 1).
             Werte > 1 (z. B. 5) dämpfen asynchrone Schlusskurse (Xetra vs. US-Index).
+            Seit 1.6.4 kleiner als die Zahl der Produktbeobachtungen im Fit-Fenster.
         hybrid_weight: Gewicht des Renditeterms bei "hybrid" als Anteil (0..1, Standard 0.5); der Niveauterm
             erhält 1 - ``hybrid_weight``.
         lag: Verzögerung des Index gegenüber dem Produkt in Zeilen (ganzzahlig, Standard 0; bei k > 0 wird die
             Produktrendite in Zeile t mit der Indexrendite aus Zeile t - k modelliert) oder ``"auto"`` (Lag aus
             -2..2 mit der höchsten Korrelation, bei negativem Hebel der niedrigsten).
+            Seit 1.6.4 mit Betrag kleiner als die Zeilenzahl von data.
+            Ist bei "auto" keine der fünf Korrelationen bestimmbar (jede braucht mindestens 30 gemeinsame Renditen, keine konstante Reihe), meldet die Funktion das seit 1.6.4 (lag dann angeben).
         rate_lag: Verzögerung des Zinssatzes in Zeilen (Standard 0 = Satz des Tages t; k > 0 = Satz aus Zeile t -
             k).
         start, end: Optionales Fit-Fenster (Datum oder Zeichenkette "JJJJ-MM-TT"); ``None`` (Standard) = gesamte
@@ -564,6 +688,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             Eine eigene Liste ergänzt die Standardliste: Nicht genannte Parameter behalten ihr Standardintervall
             (je Eintrag ``[unten, oben]`` mit unten < oben).
         ter_basis, rate_basis: Tagesbasis für TER (Standard 365) und für Zins und Spread (Standard 360, Act/360).
+            Seit 1.6.4 Zahlen > 0.
         accrual: Abgrenzung der TER: ``"linear"`` (Standard, TER * T / 365, Fondsbuchhaltung) oder ``"geometric"``
             ((1 + TER)^(T/365) - 1, wie in den Skripten).
         index_fill: Füllmethode für Indexlücken: "locf" (Standard), "linear" oder "stine" (Stineman-Interpolation
@@ -629,7 +754,34 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
     method = _match_arg(method, ("optimize", "grid"))
     accrual = _match_arg(accrual, ("linear", "geometric"))
     index_fill = _match_arg(index_fill, ("locf", "linear", "stine"))
-    fixed = dict(fixed or {})
+    from ._pruefen import chk_bool1, chk_date1, chk_is_factor, chk_prob, chk_stop
+    from .dependence import _e4_count, _e4_vec
+    fn = "backcast_fit"                                        # seit 1.6.4 vor der Rechnung (K42 E4, B-017)
+    _bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_lag, ter_basis, rate_basis)
+    leverage, ter_basis, rate_basis = _chk_scalar1(leverage), _chk_scalar1(ter_basis), _chk_scalar1(rate_basis)
+    if chk_is_factor(fit):
+        chk_stop("faktor", fn, "fit")
+    _bc_check_par({} if fixed is None else fixed, fn, "fixed")   # B-087
+    horizon = _e4_count(horizon, fn, "horizon")                # B-011, B-017
+    hybrid_weight = chk_prob(hybrid_weight, fn, "hybrid_weight")
+    lag = _bc_check_lag(lag, data, fn)
+    rate_lag = _chk_scalar1(rate_lag)
+    if start is not None:
+        start = chk_date1(start, fn, "start")                  # B-011 (Entscheidung 7: keine Zahl)
+    if end is not None:
+        end = chk_date1(end, fn, "end")
+    if grid is not None:
+        try:
+            _e4_vec(grid, fn, "grid")
+            ga = np.atleast_1d(np.asarray(grid.to_numpy() if isinstance(grid, pd.Series) else grid, dtype=np.float64))
+            gok = bool(np.isfinite(ga).all())
+        except (ValueError, TypeError):
+            gok = False
+        if not gok:
+            chk_stop("e2.zahlen_endlich", fn, "grid")          # B-017
+    validate = chk_bool1(validate, fn, "validate")            # B-051
+    fixed = {k: (v if not isinstance(v, (list, tuple, np.ndarray, pd.Series)) else _chk_scalar1(v))
+             for k, v in dict(fixed or {}).items()}
     grid = _default_grid() if grid is None else np.atleast_1d(np.asarray(grid, dtype=np.float64))
     fit = _r_unique(_as_char_vec(fit))
     if len(fit) and not all(f in ("drag", "spread", "beta") for f in fit):
@@ -641,15 +793,13 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
                          "z. B. list(drag = c(-5, 5)).")
     bounds = _modify_list(_BOUNDS0, bounds)
     for k, b in bounds.items():
-        ok = _is_numeric_value(b) and np.size(b) == 2
+        ok = _is_numeric_value(b) and np.size(b) == 2 and not chk_is_factor(b)
         if ok:
             bb = np.asarray(b, dtype=np.float64).ravel()
-            ok = not np.isnan(bb).any() and bb[0] < bb[1]
-        if not ok:
-            from ._r import fmt as _fmt
-            fb = _fmt.format(b)
-            fb = [fb] if isinstance(fb, str) else list(fb)
-            raise ValueError("bounds$%s muss c(unten, oben) mit unten < oben sein (ist: %s)." % (k, ", ".join(fb)))
+            # seit 1.6.4 auch die Breite endlich (B-005: c(-1e308, 1e308) ergab eine endlose Brent-Suche)
+            ok = bool(np.isfinite(bb).all()) and bb[0] < bb[1] and math.isfinite(float(bb[1]) - float(bb[0]))
+        if not ok:                                             # seit 1.6.4 ohne Wert, endlich
+            raise ValueError("bounds$%s muss c(unten, oben) mit unten < oben sein." % k)
         bounds[k] = [float(bb[0]), float(bb[1])]
     if model != "structural" and "beta" in fit:
         warnings.warn("'beta' wird bei Regressionsmodellen über die Regression geschätzt und hier ignoriert.")
@@ -672,8 +822,9 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             cors.append(_NAN if ok.sum() < 30 else _cor(xs[ok], pr[ok]))
         sg = 1.0 if prep.leverage > 0 else -1.0
         j = _which_max([sg * c for c in cors])
-        if j is None:
-            raise ValueError("argument of length 0")
+        if j is None:   # keine Korrelation bestimmbar: seit 1.6.4 Meldung wie R und Julia (Entscheidung 145)
+            from ._pruefen import chk_stop
+            chk_stop("ut3.lag_auto", "backcast_fit")
         lag = cand[j]
         prep = _bc_prepare(data, product, index, ter, leverage, rate, fx, int(rate_lag), ter_basis, rate_basis,
                            accrual, index_fill, int(lag))
@@ -695,6 +846,9 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
         return {"pos": pos, "logp": _libm.log(prep.prod[rows][pos])}
 
     obs = make_obs(win)
+    # seit 1.6.4: ohne Renditepaare wäre die Zielfunktion leer (B-017; bis 1.6.3 Ergebnis an der Suchgrenze)
+    if objective != "level" and horizon >= len(obs["pos"]):
+        chk_stop("e4.horizont", fn, len(obs["pos"]))
 
     def fit_reg(rows):
         if model == "structural":
@@ -715,48 +869,78 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
     reg = fit_reg(win)
     par0 = _modify_list({"drag": 0.0, "spread": 0.0, "beta": 1.0}, fixed)
 
-    def obj_fun(theta, rows, ob, rg):
-        p = dict(par0)
-        for k, t in zip(fit, np.atleast_1d(np.asarray(theta, dtype=np.float64))):
-            p[k] = float(t)
-        rr = _bc_model_returns(prep, p, model, rg)[rows]
-        return _bc_objective(rr, np.arange(len(rows)), ob, objective, horizon, loss, hybrid_weight)
+    def rows_of(rows, rg):
+        """Fenster rows (seit 1.6.4, B-068, B-106; R ``make_obj``): Einheiten und Basis einmal je Fit auf rows
+        (elementweise wie ``_bc_model_returns(prep, p, model, rg)[rows]``), die Basis ``None``, wenn sie vom gesuchten
+        beta abhängt (Strukturmodell; dann je Auswertung nur auf rows)."""
+        rws = np.asarray(rows)
 
-    def run_fit(rows, ob, rg):
+        def cut(k):
+            return np.broadcast_to(np.asarray(prep[k], dtype=np.float64), (prep.n,))[rws]
+        w = {k: cut(k) for k in ("x", "fin", "ter_cost", "sp_unit", "dr_unit")}
+        w["base"] = None if (model == "structural" and "beta" in fit) else \
+            np.broadcast_to(np.asarray(_bc_base(prep, par0, model, rg), dtype=np.float64), (prep.n,))[rws]
+        return w
+
+    def returns_on(w, p):
+        b = w["base"] if w["base"] is not None else p["beta"] * prep.leverage * w["x"] + w["fin"] - w["ter_cost"]
+        return b - p["spread"] * w["sp_unit"] - p["drag"] * w["dr_unit"]
+
+    def make_obj(rows, ob, rg):
+        w = rows_of(rows, rg)
+        ix = np.arange(len(rows))
+
+        def obj(theta):
+            p = dict(par0)
+            for k, t in zip(fit, np.atleast_1d(np.asarray(theta, dtype=np.float64))):
+                p[k] = float(t)
+            return _bc_objective(returns_on(w, p), ix, ob, objective, horizon, loss, hybrid_weight)
+        return obj
+
+    def run_fit(rows, ob, rg, metrics=True):
+        # metrics=False (Validierung, seit 1.6.4, B-070): im Gitter nur die Zielwerte, ohne Fehlermatrix, Metrik- und
+        # Gittertabelle (genutzt wird dort nur par)
         if not len(fit):
-            return {"par": dict(par0), "value": obj_fun(np.empty(0), rows, ob, rg), "grid": None}
+            return {"par": dict(par0), "value": make_obj(rows, ob, rg)(np.empty(0)), "grid": None}
         if method == "grid":
             if len(fit) != 1:
                 raise ValueError("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
             # Modellrenditen je Gitterpunkt einmal für Zielwert und Fehlermatrix (seit 1.6.3; bis 1.6.2 zweimal),
-            # im strukturellen Modell nur im Fenster rows (elementweise dieselben Ausdrücke wie auf allen Zeilen)
-            pw = prep
-            if model == "structural":
-                rws = np.asarray(rows)
-                pw = _Prep(prep)
-                for k in ("x", "fin", "ter_cost", "sp_unit", "dr_unit"):
-                    pw[k] = np.broadcast_to(np.asarray(prep[k], dtype=np.float64), (prep.n,))[rws]
-                pw["n"] = len(rws)
+            # nur im Fenster rows (elementweise dieselben Ausdrücke wie auf allen Zeilen); seit 1.6.4 die Basis vorab
+            # in allen Modellen (B-068) und je Punkt ein _bc_errors (B-069: "level" bei objective = "level",
+            # horizon bleibt dort unausgewertet, sonst "hybrid"; Zielwert wie _bc_objective)
+            w = rows_of(rows, rg)
+            ix = np.arange(len(rows))
+            eo = "level" if objective == "level" else "hybrid"
             vl, cols = [], []
             for g in grid:
                 p = dict(par0)
                 p[fit[0]] = float(g)
-                rr = _bc_model_returns(pw, p, model, rg)
-                if pw is prep:
-                    rr = rr[rows]
-                vl.append(_bc_objective(rr, np.arange(len(rows)), ob, objective, horizon, loss, hybrid_weight))
-                cols.append(0 - _libm.expm1(_bc_errors(rr, np.arange(len(rows)), ob, "level", 1)))
+                e = _bc_errors(returns_on(w, p), ix, ob, eo, horizon)
+                if objective == "level":
+                    vl.append(_bc_loss(e, loss))
+                    el = e
+                elif objective == "return":
+                    vl.append(_bc_loss(e["ret"], loss))
+                    el = e["level"]
+                else:
+                    vl.append(math.sqrt(hybrid_weight * r_mean(_sq(e["ret"])) + (1 - hybrid_weight) * r_mean(_sq(e["level"]))))
+                    el = e["level"]
+                if metrics:
+                    cols.append(0 - _libm.expm1(el))
             vals = np.array(vl, dtype=np.float64)
             best = float(grid[_which_min(list(vals), -1)])
-            err_mat = np.column_stack(cols) if cols else np.empty((len(ob["pos"]), 0))
             p = dict(par0)
             p[fit[0]] = best
+            if not metrics:
+                return {"par": p, "value": _r_min(vals), "grid": None}
             return {"par": p, "value": _r_min(vals),
                     "grid": pd.DataFrame({"value": grid, "loss": vals}),
-                    "metrics": _bc_metric_table(err_mat, grid)}
+                    "metrics": _bc_metric_table(cols, grid, len(ob["pos"]))}
+        obj = make_obj(rows, ob, rg)
         if len(fit) == 1:
             b = bounds[fit[0]]
-            mn, ov = _optimize(lambda t: obj_fun(t, rows, ob, rg), b[0], b[1], 1e-8)
+            mn, ov = _optimize(lambda t: obj(t), b[0], b[1], 1e-8)
             p = dict(par0)
             p[fit[0]] = mn
             return {"par": p, "value": ov, "grid": None}
@@ -771,7 +955,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             opar, oval, conv = o["par"], float(o["value"]), int(o["convergence"])
         else:
             st = np.array([par0[k] for k in fit], dtype=np.float64)
-            opar, oval, conv = _optim_lbfgsb(st, lambda t: obj_fun(t, rows, ob, rg), lo, hi)
+            opar, oval, conv = _optim_lbfgsb(st, lambda t: obj(t), lo, hi)
         p = dict(par0)
         for k, t in zip(fit, opar):
             p[k] = float(t)
@@ -795,7 +979,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
         except ValueError:
             rg_tr = None
         if model == "structural" or rg_tr is not None:
-            res_tr = run_fit(tr_rows, ob_tr, rg_tr)
+            res_tr = run_fit(tr_rows, ob_tr, rg_tr, metrics=False)   # nur par (B-070)
             d_te = _bc_diagnostics(_bc_model_returns(prep, res_tr["par"], model, rg_tr)[te_rows],
                                    np.arange(len(te_rows)), ob_te, prep.dates[te_rows])
             d_te0 = _bc_diagnostics(_bc_model_returns(prep, par0, model, rg_tr)[te_rows],
@@ -880,9 +1064,11 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
             echten Kursen; erhält die echten Kurse an allen Beobachtungstagen).
         rebase: ``None`` (Standard; Produkteinheiten, echte Kurse bleiben erhalten) oder Startwert der Reihe am
             ersten Indextag, z. B. 100 (``value`` und ``model`` werden skaliert, ``product`` nicht).
+            Seit 1.6.4 eine Zahl > 0.
         **kwargs: Bei ``fit = None``: Argumente wie in ``backcast_fit()`` (``product``, ``index`` als Pflicht;
             ``ter`` (Standard 0), ``leverage`` (1), ``rate`` (``None`` = 0), ``fx``, ``rate_lag``, ``ter_basis``,
             ``rate_basis``, ``accrual``, ``index_fill``, ``lag``; ``model`` nur "structural").
+            Seit 1.6.4 mit ``fit`` nicht erlaubt (die Angaben stammen aus dem Fit).
 
     Returns:
         DataFrame der Klasse ``["SimLevBackcast", "data.frame"]`` mit einer Zeile je Zeile von ``data``: ``date``,
@@ -904,6 +1090,21 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
         print(bc["source"].value_counts())
     """
     fill = _match_arg(fill, ("locf", "linear", "stine", "model"))
+    import datetime as _dtm
+    from ._pruefen import chk_choice, chk_df, chk_dots, chk_num1, chk_scalar, chk_stop
+    fn = "backcast"                                            # seit 1.6.4 vor der Rechnung (K42 E4)
+    chk_dots(list(kwargs), ("product", "index", "ter", "leverage", "rate", "fx", "rate_lag", "ter_basis", "rate_basis",
+                            "accrual", "index_fill", "lag", "model"), fn)   # Entscheidung 21
+    if fit is not None and not isinstance(fit, SimLevBackcastFit):
+        raise ValueError("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+    chk_df(data, fn, "data", null_ok=True)                     # Entscheidung 6
+    _bc_check_par(params, fn, "params", null_ok=True)
+    if params is not None:
+        params = {k: chk_scalar(v) for k, v in params.items()}
+    splice = chk_scalar(splice)
+    if not (isinstance(splice, str) or (isinstance(splice, (_dtm.date, np.datetime64)) and not isinstance(splice, bool))):
+        chk_stop("e4.splice", fn)                              # Entscheidung 7 und 15 (keine Zahl, keine Kategorie)
+    rebase = chk_num1(rebase, fn, "rebase", lo=0, lo_open=True, null_ok=True)   # B-017
     if fit is None:
         dots = dict(kwargs)
         if data is None:
@@ -914,17 +1115,28 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
             raise ValueError("'product' und 'index' müssen angegeben werden.")
         a["data"] = data
         model = dots.get("model") if dots.get("model") is not None else "structural"
-        if model != "structural":
+        if not (isinstance(model, str) and model == "structural"):
             raise ValueError("Ohne Fit ist nur model = 'structural' möglich.")
+        _bc_check_args(fn, data, a["product"], a["index"], a.get("ter"), a.get("leverage"), a.get("rate"), a.get("fx"),
+                       a.get("rate_lag"), a.get("ter_basis"), a.get("rate_basis"))
+        for k in ("leverage", "rate_lag", "ter_basis", "rate_basis", "accrual", "index_fill"):
+            a[k] = chk_scalar(a[k])
+        chk_choice(a["accrual"], fn, "accrual", ("linear", "geometric"))   # bis 1.6.3 unbekannte Werte still "linear"
+        chk_choice(a["index_fill"], fn, "index_fill", ("locf", "linear", "stine"))
+        _bc_check_lag(dots.get("lag") if dots.get("lag") is not None else 0, data, fn, auto_ok=False)   # ohne Fit kein 'auto'
         reg = None
         par = _modify_list({"drag": 0.0, "spread": 0.0, "beta": 1.0}, params or {})
-        lag = int(dots.get("lag") if dots.get("lag") is not None else 0)
+        lag = int(chk_scalar(dots.get("lag")) if dots.get("lag") is not None else 0)
     else:
         if not isinstance(fit, SimLevBackcastFit):
             raise ValueError("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+        if kwargs:
+            chk_stop("e4.fit_angabe", fn, str(next(iter(kwargs))))   # Entscheidung 71 (bis 1.6.3 still ignoriert)
         a = dict(fit["call_args"])
         if data is not None:
-            a["data"] = data
+            a["data"] = data                                   # seit 1.6.4 wie im Fit geprüft
+            _bc_check_args(fn, data, a["product"], a["index"], a.get("ter"), a.get("leverage"), a.get("rate"),
+                           a.get("fx"), a.get("rate_lag"), a.get("ter_basis"), a.get("rate_basis"))
         model, reg, lag = fit["model"], fit["regression"], fit["lag"]
         par = _modify_list(dict(fit["params"]), params or {})
     prep = _bc_prepare(a["data"], a["product"], a["index"], a.get("ter"), a.get("leverage"), a.get("rate"),
@@ -945,8 +1157,8 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
             raise ValueError("splice: \"inception\", \"none\" oder ein Datum ('JJJJ-MM-TT').")
         cand = obs[prep.dates[obs] >= sd0[0]]
         if not len(cand):
-            raise ValueError("Kein Produktkurs ab dem Verkettungsdatum %s vorhanden (letzter Produktkurs am %s)."
-                             % (_date_str(sd0[0]), _date_str(prep.dates[obs.max()])))
+            raise ValueError("Kein Produktkurs ab dem Verkettungsdatum vorhanden (letzter Produktkurs am %s)."
+                             % _date_str(prep.dates[obs.max()]))   # seit 1.6.4 ohne Eingabewert
         k0 = int(cand[0])
     r_out = r_mod.copy()
     source = np.array(["backcast"] * n, dtype=object)
@@ -960,7 +1172,7 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
             lv[po] = _libm.log(pv[po])
             rm = r_mod[seg]
             lr = _libm.log1p(np.maximum(np.where(np.isfinite(rm), rm, 0.0), -0.999999))
-            for j in np.arange(len(po) - 1):
+            for j in np.flatnonzero(np.diff(po) > 1):              # seit 1.6.4 nur die Lücken (B-107)
                 a0, a1 = int(po[j]), int(po[j + 1])
                 if a1 - a0 > 1:
                     step = lr[a0 + 1: a1 + 1]
@@ -1126,6 +1338,8 @@ def _plot_backcast(x, log=True, width=720, height=450):
         :class:`simlev.SimLevPlot`; ``data``: ``backcast`` (``date``, ``value``, ``model``, ``source`` der
         gezeichneten Zeilen, d. h. mit endlichem ``value``).
     """
+    from ._pruefen import chk_bool1
+    log = chk_bool1(log, "plot.SimLevBackcast", "log")        # seit 1.6.4 (B-051)
     val = x["value"].to_numpy(dtype=np.float64)
     mdl = x["model"].to_numpy(dtype=np.float64)
     d = _days(x["date"].to_numpy())

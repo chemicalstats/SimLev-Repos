@@ -307,7 +307,8 @@ ref_case("hc_vec2", "sharpe_haircut(c(0.3, -0.8, 0, 1.4), n_obs = 120, ppy = 12)
          py("result = OF.sharpe_haircut(np.array([0.3, -0.8, 0, 1.4]), n_obs=120, ppy=12)"), jl = jl('result = OF.sharpe_haircut([0.3, -0.8, 0, 1.4]; n_obs = 120, ppy = 12)'))
 ref_case("hc_mat", "sharpe_haircut(R, frequency = 'day')", py("result = OF.sharpe_haircut(R, frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(R; frequency = "day")'))
 ref_case("hc_mat_nt", "sharpe_haircut(Rs, n_tests = 20, dates = dts)", py("result = OF.sharpe_haircut(Rs, n_tests=20, dates=dts)"), I, jl = jl('result = OF.sharpe_haircut(Rs; n_tests = 20, dates = dts)'))
-ref_case("hc_mat_nt2", "sharpe_haircut(R, n_tests = 3, frequency = 'day')", py("result = OF.sharpe_haircut(R, n_tests=3, frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(R; n_tests = 3, frequency = "day")'))
+ref_case("hc_mat_nt2", "sharpe_haircut(R, n_tests = 8, frequency = 'day')", py("result = OF.sharpe_haircut(R, n_tests=8, frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(R; n_tests = 8, frequency = "day")'))   # seit 1.6.4 n_tests >= Spaltenzahl (UT2)
+ref_case("hc_mat_nt2_err", "sharpe_haircut(R, n_tests = 3, frequency = 'day')", py("result = OF.sharpe_haircut(R, n_tests=3, frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(R; n_tests = 3, frequency = "day")'))
 ref_case("hc_flat", "sharpe_haircut(cbind(Rc, cash), frequency = 'day')",
          py("result = OF.sharpe_haircut(np.column_stack([Rc, cash]), frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(hcat(Rc, cash); frequency = "day")'))
 ref_case("hc_attr", "h <- sharpe_haircut(c(1, 0.5, 2), n_obs = 100, n_tests = 7); c(attr(h, 'n_tests'), attr(h, 'n_obs'))",

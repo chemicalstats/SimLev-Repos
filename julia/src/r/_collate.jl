@@ -190,9 +190,6 @@ function str_collate(a::AbstractString, b::AbstractString)
     return _bytecmp(a, b)
 end
 
-"`lt`-Funktion für `sort`/`sortperm` auf Zeichenketten nach R's Kollation."
-str_lt(a, b) = str_collate(a, b) < 0
-
 """
     r_isless(a, b)
 

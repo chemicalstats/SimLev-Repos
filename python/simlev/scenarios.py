@@ -23,8 +23,8 @@ from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._r.rnum import r_colsums, r_cumsum, r_cumprod, r_rowsums, r_sd, r_sum
-from ._util import _match_arg
+from ._r.rnum import r_colsums, r_cummax, r_cumsum, r_cumprod, r_rowsums, r_sd, r_sum
+from ._util import _is_num_scalar, _match_arg
 from ._util import _cov2cor
 
 __all__ = ["view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "scenario_copula", "scenario_risk",
@@ -33,14 +33,11 @@ __all__ = ["view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "sc
 _NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA)
 
 
-def _is_num_scalar(v):
-    return isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_))
-
-
 def _view_value(value, what, lo=-math.inf, hi=math.inf):
     """Zielwert einer Annahme prüfen (eine endliche Zahl, ggf. mit Bereich)."""
     a = np.atleast_1d(np.asarray(value, dtype=object)) if value is not None else np.zeros(0, dtype=object)
-    ok = a.size == 1 and _is_num_scalar(a[0]) and math.isfinite(float(a[0])) and lo <= float(a[0]) <= hi
+    ok = (a.size == 1 and _is_num_scalar(a[0]) and math.isfinite(float(a[0])) and lo <= float(a[0]) <= hi
+          and not _dep.chk_is_factor(value))
     if not ok:
         if math.isfinite(lo) and math.isfinite(hi):
             rng = _fmt.sprintf(" zwischen %g und %g", lo, hi)
@@ -48,8 +45,7 @@ def _view_value(value, what, lo=-math.inf, hi=math.inf):
             rng = _fmt.sprintf(" >= %g", lo)
         else:
             rng = ""
-        got = _dep._fmt1(value) if value is not None and a.size else ""
-        raise ValueError("%s: value muss eine endliche Zahl%s sein (erhalten: %s)." % (what, rng, got))
+        raise ValueError("%s: value muss eine endliche Zahl%s sein." % (what, rng))   # seit 1.6.4 ohne Wert
     return value
 
 
@@ -87,6 +83,7 @@ def view_mean(var, value, *, op=("=", "<=", ">=")):
         ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_mean("aktien", -0.2)])
         print(ep["summary"])
     """
+    var = _dep.chk_name1(var, "view_mean", "var")              # seit 1.6.4 (K42 E4)
     v = _view_value(value, "view_mean")
     return {"type": "mean", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
@@ -110,6 +107,8 @@ def view_prob(expr, value, *, op=("=", "<=", ">=")):
     Args:
         expr: Ereignis als Zeichenkette, ein R-Ausdruck über die Spaltennamen der Szenario-Tabelle, der einen
             logischen Wert je Szenario liefert (z. B. ``"aktien < -5 & inflation > 3"``).
+            Seit 1.6.4 in R, Python und Julia gleich im gemeinsamen Ausdrucksumfang wie die Regeltexte von
+            ``tactical_rules()``; auch eine Funktion der Szenario-Tabelle (Ergebnis ein Wert je Szenario).
         value: Zielwert: bei ``view_mean`` und ``view_vol`` in der Einheit der Spalte (bei Kursdaten Prozent je
             Periode), bei ``view_prob`` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
             ``view_vol`` >= 0, bei ``view_prob`` zwischen 0 und 1 (sonst Fehler).
@@ -126,6 +125,8 @@ def view_prob(expr, value, *, op=("=", "<=", ">=")):
         ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_prob("aktien < -2", 0.15, op=">=")])
         print(ep["summary"])
     """
+    if not callable(expr):                                     # Python: auch eine Funktion (wie bisher)
+        expr = _dep.chk_name1(expr, "view_prob", "expr")       # seit 1.6.4 (K42 E4)
     v = _view_value(value, "view_prob", 0, 1)
     return {"type": "prob", "expr": expr, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
@@ -164,25 +165,42 @@ def view_vol(var, value, *, op=("=", "<=", ">=")):
         ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_vol("anleihen", 0.8)])
         print(ep["summary"])
     """
+    var = _dep.chk_name1(var, "view_vol", "var")               # seit 1.6.4 (K42 E4)
     v = _view_value(value, "view_vol", 0)
     return {"type": "vol", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
 
-def _scen_frame(x, assets, states, frequency):
-    """Szenario-Tabelle aus Daten (Renditen in Prozent je Periode, Zustände verzögert)."""
+def _scen_frame(x, assets, states, frequency, fn):
+    """Szenario-Tabelle aus Daten (Renditen in Prozent je Periode, Zustände verzögert).
+
+    Seit 1.6.4 vor der Rechnung geprüft (K42 E4, R ``.scen_frame``): Namen ohne NA, doppelte und ``'date'``, keine
+    gemeinsame Spalte; Kursdaten wie ``_e4_data``, eine fertige Tabelle bzw. Matrix nur mit Zahlenspalten."""
+    assets = _dep._e4_names(assets, fn, "assets")
+    states = _dep._e4_names(states, fn, "states", null_ok=True)
+    _dep._e4_disjoint(assets, states, fn, "assets", "states")
+    cols = assets + (states or [])
     if isinstance(x, pd.DataFrame) and "date" in x.columns:
+        _dep._e4_data(x, cols, fn)
+    elif isinstance(x, pd.DataFrame):
+        _dep.chk_cols(x, cols, fn)
+        for k in cols:
+            _dep._e4_numcol(x, k, fn)
+    elif not (isinstance(x, np.ndarray) and x.ndim == 2 and x.dtype.kind in "fiu"):
+        _dep.chk_stop("e4.szenarien", fn)
+    if isinstance(x, pd.DataFrame) and "date" in x.columns:
+        if len(x) < 2:
+            _dep.chk_stop("e4.wenige", fn)                         # seit 1.6.4 (0 oder 1 Zeile)
         rd = _dep._dep_returns(x, assets, states, frequency)
         for a in _dep._as_names(assets):
             rd[a] = 100 * _libm.expm1(rd[a].to_numpy(dtype=np.float64))
         ok = _dep._complete_rows(*[rd[c].to_numpy() for c in rd.columns])
+        if int(np.sum(ok)) < 2:
+            _dep.chk_stop("e4.wenige", fn)
         return rd.loc[ok]
     if isinstance(x, pd.DataFrame):
         return x
-    if isinstance(x, Mapping):
-        return pd.DataFrame(dict(x))
+    # sonst eine Zahlenmatrix (geprüft oben; seit 1.6.4 K43 T3-N10 ohne die unerreichbaren Zweige für dict und Vektor)
     a = np.asarray(x)
-    if a.ndim == 1:
-        a = a.reshape(-1, 1)
     return pd.DataFrame(a, columns=["V%d" % (j + 1) for j in range(a.shape[1])])
 
 
@@ -283,21 +301,24 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
         print(ep["summary"])
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
+    fn = "scenario_entropy_pooling"
+    if not (isinstance(views, (list, tuple)) and all(isinstance(v, Mapping) and isinstance(v.get("type"), str)
+                                                     and v.get("type") in ("mean", "prob", "vol") for v in views)):
+        _dep.chk_stop("e4.views", fn)                          # seit 1.6.4 (K42 E4)
+    S = _scen_frame(x, assets, states, frequency, fn)
     assets = _dep._as_names(assets)
     states_l = _dep._as_names(states)
-    S = _scen_frame(x, assets, states, frequency)
     Tn = len(S)
     if prior is not None:
         pa = np.atleast_1d(np.asarray(prior.to_numpy() if isinstance(prior, pd.Series) else prior))
-        isnum = pa.dtype.kind in "fiu"
+        isnum = pa.dtype.kind in "fiu" and not _dep.chk_is_factor(prior)
         bad = (not isnum or pa.size != Tn)
         if not bad:
             pf = pa.astype(np.float64)
             bad = (not np.isfinite(pf).all()) or (pf < 0).any() or r_sum(pf) <= 0
         if bad:
-            neg = ", negative Werte" if isnum and (pa.astype(np.float64)[~np.isnan(pa.astype(np.float64))] < 0).any() else ""
-            raise ValueError("scenario_entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; "
-                             "erhalten: Länge %d%s)." % (Tn, pa.size, neg))
+            raise ValueError("scenario_entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben "
+                             "(einer je Szenario)." % Tn)   # seit 1.6.4 ohne Wert
         p = pa.astype(np.float64)
     else:
         p = np.full(Tn, 1 / Tn)
@@ -330,7 +351,8 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
         else:
             raise ValueError("Unbekannter View-Typ.")
         if f is None or len(f) != Tn:
-            raise ValueError("View '%s' passt nicht zu den Szenarien." % (v.get("var") if v.get("var") is not None else v.get("expr")))
+            raise ValueError("View '%s' passt nicht zu den Szenarien." % (v.get("var") if v.get("var") is not None else
+                                                                          "<Funktion>" if callable(v.get("expr")) else v.get("expr")))
         if t == "vol" and not (_is_num_scalar(v["value"]) and v["value"] >= 0):
             raise ValueError("view_vol: Standardabweichung muss >= 0 sein.")
         val = float(v["value"]) * float(v["value"]) if t == "vol" else float(v["value"])
@@ -355,7 +377,10 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
             mx = _dep._rmax(e)
             w = p * _libm.exp(e - mx)
             Z = r_sum(w)
-            last[0], last[1] = key, (math.log(Z) + mx + r_sum(l * b), w / Z)
+            # seit 1.6.4 (T3-N2) R-Logarithmus: Z = 0 (Prior mit Nullen) ergibt -Inf wie in R und Julia statt
+            # "math domain error"
+            with np.errstate(divide="ignore", invalid="ignore"):
+                last[0], last[1] = key, (float(_libm.log(Z)) + mx + r_sum(l * b), w / Z)
             return last[1]
 
         def fn(l):
@@ -447,6 +472,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             Periodenrenditen ohne ``date``.
         assets: Zeichenvektor der Kurs- bzw. Renditespalten.
         n: Anzahl Szenarien (ganze Zahl, Standard 10000).
+            Seit 1.6.4 höchstens 10^8.
         family: Copula: ``"t"`` (Standard) oder ``"gaussian"``.
         stress: Optional benannte Liste von Quantilbändern je Anlage als Anteile ``[von, bis]`` mit 0 <= von < bis
             <= 1, z. B. ``{"aktien": [0, 0.05]}`` (schlechteste 5 % der Perioden). Unbenannte Einträge, unbekannte
@@ -489,14 +515,15 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
     """
     family = _match_arg(family, ("t", "gaussian"))
     frequency = _match_arg(frequency, ("week", "day", "month"))
+    fn = "scenario_copula"
+    n = int(_dep._e4_count(n, fn, "n"))                        # B-026, Entscheidung 16
+    S = _scen_frame(x, assets, None, frequency, fn)
     assets = _dep._as_names(assets)
-    n = int(n)
-    S = _scen_frame(x, assets, None, frequency)
     X = S[assets].to_numpy(dtype=np.float64)
     Tn, k = X.shape
     U = np.column_stack([_dep._pobs(X[:, j]) for j in range(k)])
     tau = np.asarray(_dep._kendall(pd.DataFrame(X, columns=assets)), dtype=np.float64)
-    R = np.asarray(_libm.sin(_PI_HALF_FACTOR * tau / 2), dtype=np.float64)
+    R = np.asarray(_libm.sin(math.pi * tau / 2), dtype=np.float64)   # sin(pi tau / 2) (bis 1.6.3 als _PI_HALF_FACTOR)
     named = True
     la = _dep._sl()
     ev = la.eigen_sym(R)
@@ -537,8 +564,8 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             good = (ba.size == 2 and all(_is_num_scalar(v) for v in ba) and all(math.isfinite(float(v)) for v in ba)
                     and float(ba[0]) >= 0 and float(ba[1]) <= 1 and float(ba[0]) < float(ba[1]))
             if not good:
-                raise ValueError("stress: Band für '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent; "
-                                 "erhalten: %s)." % (a, _dep._fmt1(b)))
+                raise ValueError("stress: Band für '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine "
+                                 "Prozent)." % a)   # seit 1.6.4 ohne Wert
     rng = _dep._sl()
 
     def draw(rs):
@@ -601,7 +628,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             if fin:
                 Z = Z / np.sqrt(np.asarray(rng.rchisq(n, nu, stream=rs), dtype=np.float64) / nu).reshape(-1, 1)
         return Z
-    sim = draw(rng.main_stream(seed))              # Hauptstrom
+    sim = draw(rng.main_stream(seed, "scenario_copula"))              # Hauptstrom
     if math.isfinite(nu):
         V = np.asarray(nm.pt(sim, nu), dtype=np.float64).reshape(sim.shape)
     else:
@@ -626,8 +653,6 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
     out["kind"] = "copula"
     return out
 
-
-_PI_HALF_FACTOR = math.pi
 
 
 def _named_weights(weights):
@@ -684,12 +709,18 @@ def scenario_risk(x, weights, *, alpha=0.05):
     if not isinstance(x, SimLevScenarios):
         raise ValueError("x muss ein SimLevScenarios sein.")
     av = np.atleast_1d(np.asarray(alpha, dtype=object))
-    if not (av.size == 1 and _is_num_scalar(av[0]) and math.isfinite(float(av[0])) and 0 < float(av[0]) < 1):
-        raise ValueError("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein (erhalten: %s)." % _dep._fmt1(alpha))
+    if not (av.size == 1 and _is_num_scalar(av[0]) and math.isfinite(float(av[0])) and 0 < float(av[0]) < 1
+            and not _dep.chk_is_factor(alpha)):                # seit 1.6.4 ohne Wert
+        raise ValueError("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.")
     alpha = float(av[0])
     names, vals = _named_weights(weights)
-    if not _isnum_arr(vals) or names is None or any(nm_ == "" for nm_ in names):
+    if (not _isnum_arr(vals) or names is None or not names or any(nm_ == "" for nm_ in names)
+            or _dep.chk_is_factor(weights)):                   # seit 1.6.4 auch leer wie R (B-016)
         raise ValueError("scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).")
+    if not np.isfinite(np.asarray(vals, dtype=np.float64)).all():
+        _dep.chk_stop("e3.werte", "scenario_risk", "weights")   # seit 1.6.4 (B-026)
+    if len(set(names)) < len(names):
+        _dep.chk_stop("e2.doppelt", "scenario_risk", "weights")
     unk = [nm_ for nm_ in names if nm_ not in x["scenarios"].columns]
     if unk:
         raise ValueError("scenario_risk: unbekannte Anlage(n) %s." % ", ".join("'%s'" % u for u in dict.fromkeys(unk)))
@@ -778,18 +809,27 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
         raise ValueError("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
     if not isinstance(crises, pd.DataFrame) or not all(c in crises.columns for c in ("crisis", "start", "end")):
         raise ValueError("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+    fn = "scenario_crisis"
     names, vals = _named_weights(weights)
-    if (not _isnum_arr(vals) or names is None or any(nm_ == "" for nm_ in names)
+    if (not _isnum_arr(vals) or names is None or not names or any(nm_ == "" for nm_ in names) or _dep.chk_is_factor(weights)
             or not np.isfinite(np.asarray(vals, dtype=np.float64)).all()):
         raise ValueError("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+    if len(set(names)) < len(names):
+        _dep.chk_stop("e2.doppelt", fn, "weights")             # seit 1.6.4 (B-052)
     unk = [nm_ for nm_ in names if nm_ not in [c for c in data.columns if c != "date"]]
     if unk:
         raise ValueError("scenario_crisis: Kursspalte(n) %s fehlen in data." % ", ".join("'%s'" % u for u in dict.fromkeys(unk)))
+    _dep.chk_col_nofactor(data, "date", fn)                    # seit 1.6.4 (Entscheidung 15, B-009)
+    for k in names:
+        _dep._e4_numcol(data, k, fn)
+    for k in ("start", "end"):
+        if _dep.chk_is_factor(crises[k]):
+            _dep.chk_stop("spalte_faktor", fn, k)
+    rebalance = _dep.chk_bool1(rebalance, fn, "rebalance")
     wv = np.asarray(vals, dtype=np.float64)
     sw = r_sum(wv)
     if sw <= 0:
-        raise ValueError("scenario_crisis: Summe der Gewichte muss positiv sein (erhalten %s); sie wird auf 1 normiert."
-                         % _fmt.sprintf("%g", sw))
+        _dep.chk_stop("ut3.krise_summe", fn)                   # seit 1.6.4 ohne Wert und Zusatz (Entscheidung 8, T3-B2)
     data = _dep._dep_sort_dates(data)
     d = _dep._dates_arr(data["date"].to_numpy())
     dd = _dep._days(d)
@@ -814,7 +854,7 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
             port = r_cumprod(np.concatenate([[1.0], g]))
         else:
             port = _matprod(rel, w.reshape(-1, 1)).ravel()
-        cm = np.maximum.accumulate(port) if not np.isnan(port).any() else _cummax_nan(port)
+        cm = r_cummax(port)   # C-Kern; ohne NaN bitgleich zu np.maximum.accumulate (seit 1.6.4 ein Weg)
         ddn = _dep._rmin(port / cm - 1)
         if e < nd - 1:
             relx = P[e:, :] / P[s, :].reshape(1, -1)
@@ -836,11 +876,6 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
     out["start"] = out["start"].to_numpy(dtype="datetime64[D]")
     out["end"] = out["end"].to_numpy(dtype="datetime64[D]")
     return out
-
-
-def _cummax_nan(x):
-    from ._r.rnum import r_cummax
-    return r_cummax(x)
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)

@@ -6,6 +6,17 @@ from collections import OrderedDict
 __all__ = ["RList"]
 
 
+class _PrintFormat:
+    """``print()`` über ``format()``; gibt das Objekt zurück (wie R's ``print``). Seit 1.6.4 eine Fassung für die
+    Ergebnisklassen mit eigener ``format()``-Methode (bis 1.6.3 zwölf gleiche Methoden)."""
+
+    __slots__ = ()
+
+    def print(self):
+        print(self.format())
+        return self
+
+
 class RList(OrderedDict):
     """Geordnetes ``dict`` mit Attributzugriff, wie eine benannte R-Liste.
 

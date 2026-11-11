@@ -398,11 +398,17 @@ int sl_pnorm(sl_ctx *cx, int64_t n, const double *x, double mu, double sd, int l
     int st = check_musd(mu, sd, &nv), warned = 0;
     for (i = 0; i < n; i++) {
         double xi = x[i];
+        /* Reihenfolge seit 1.6.4 wie R's pnorm5 (C-043, Entscheidung 95): x = mu = ±Inf NaN ohne Warnung vor der
+         * sd-Prüfung; nicht endliches (x - mu) / sd (auch sd = Inf mit x oder mu unendlich) als Grenzwert 0/1 */
         if (isnan(xi)) out[i] = xi;
         else if (st == 1) out[i] = nv;
+        else if (!isfinite(xi) && mu == xi) out[i] = NAN;
         else if (st == 2) { out[i] = NAN; warned = 1; }
         else if (sd == 0) out[i] = (xi < mu) ? (lower ? 0.0 : 1.0) : (lower ? 1.0 : 0.0);
-        else out[i] = sl_pnorm1((xi - mu) / sd, lower);
+        else {
+            double z = (xi - mu) / sd;
+            out[i] = isfinite(z) ? sl_pnorm1(z, lower) : ((xi < mu) ? (lower ? 0.0 : 1.0) : (lower ? 1.0 : 0.0));
+        }
         SL_POLL(cx, i);
     }
     if (warned) sl_warn(cx, "pnorm: NaN erzeugt");
@@ -416,10 +422,12 @@ int sl_qnorm(sl_ctx *cx, int64_t n, const double *p, double mu, double sd, int l
     int st = check_musd(mu, sd, &nv), warned = 0;
     for (i = 0; i < n; i++) {
         double pi = p[i];
+        /* seit 1.6.4 wie R's qnorm (C-043): die Ränder p = 0, 1 (±Inf) vor der sd-Prüfung (R_Q_P01_boundaries) */
         if (isnan(pi)) out[i] = pi;
         else if (st == 1) out[i] = nv;
-        else if (st == 2 || pi < 0 || pi > 1) { out[i] = NAN; warned = 1; }
+        else if (pi < 0 || pi > 1) { out[i] = NAN; warned = 1; }
         else if (pi == 0 || pi == 1) out[i] = sl_qnorm1(pi, lower);
+        else if (st == 2) { out[i] = NAN; warned = 1; }
         else if (sd == 0) out[i] = mu;
         else out[i] = mu + sd * slc_qnorm_std(pi, lower);
         SL_POLL(cx, i);
@@ -435,13 +443,17 @@ int sl_dnorm(sl_ctx *cx, int64_t n, const double *x, double mu, double sd, int g
     int st = check_musd(mu, sd, &nv), warned = 0;
     for (i = 0; i < n; i++) {
         double xi = x[i];
+        /* Reihenfolge seit 1.6.4 wie R's dnorm (C-043): sd < 0 NaN, sd = Inf 0 (log -Inf), x = mu = ±Inf NaN, sd = 0,
+         * nicht endliches (x - mu) / sd 0 (log -Inf) */
         if (isnan(xi)) out[i] = xi;
         else if (st == 1) out[i] = nv;
         else if (st == 2) { out[i] = NAN; warned = 1; }
+        else if (!isfinite(sd)) out[i] = give_log ? -INFINITY : 0.0;
+        else if (!isfinite(xi) && mu == xi) out[i] = NAN;
         else if (sd == 0) out[i] = (xi == mu) ? INFINITY : (give_log ? -INFINITY : 0.0);
         else {
             double z = (xi - mu) / sd;
-            if (isnan(z)) out[i] = z;
+            if (!isfinite(z)) out[i] = give_log ? -INFINITY : 0.0;
             else out[i] = give_log ? sl_dnorm1(z, 1) - log(sd) : sl_dnorm1(z, 0) / sd;
         }
         SL_POLL(cx, i);

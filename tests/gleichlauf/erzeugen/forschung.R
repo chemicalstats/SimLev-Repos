@@ -406,6 +406,31 @@ z(x) = (x["elapsed"] = 0.0; x)
 dropcol(f, c) = RFrame([k => f[k] for k in names(f) if k != c]...)
 dropE(s) = (s["best"] = dropcol(s["best"], "error"); s["best_plateau"] = dropcol(s["best_plateau"], "error"); s)
 result = PS.param_search(d, b, PS.param_space(n = 10.0, band = 0.0); objective = "foo"))", inp = ein("param_search/ps_err_obj", c("d"))),
+  zeile("ps_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(st <- create_strategy(A = asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell', spread = 0.1))
+b <- function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band))
+st2 <- create_strategy(A = asset_config('etf', 'bnh', 0.5, spread = 0.1), B = asset_config('etf', 'bnh', 0.5, spread = 0.1))
+z <- function(x) { x$elapsed <- 0; x }
+dropE <- function(s) { s$best$error <- NULL; s$best_plateau$error <- NULL; s }
+param_search(d, b, param_space(n = 10, band = 0), cores = 0))",
+    r"(st = create_strategy(A=asset_config(asset_class='etf', trading='signal', signal_buy='buy', signal_sell='sell', spread=0.1))
+def b(p):
+    return {'strategy': st, 'signal': lambda df: SG.signal_sma(df['A'], n=p['n'], band=p['band'])}
+st2 = create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.5, spread=0.1), B=asset_config(asset_class='etf', trading='bnh', share=0.5, spread=0.1))
+def z(x):
+    x['elapsed'] = 0.0
+    return x
+def dropE(s):
+    s['best'] = s['best'].drop(columns='error'); s['best_plateau'] = s['best_plateau'].drop(columns='error')
+    return s
+result = PS.param_search(d, b, PS.param_space(n=10.0, band=0.0), cores=0))",
+    r"(st = create_strategy("A" => asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell", spread = 0.1))
+b(p) = RList("strategy" => st, "signal" => df -> SL.Signals.signal_sma(df["A"]; n = p["n"], band = p["band"]))
+st2 = create_strategy("A" => asset_config("etf", "bnh", 0.5, spread = 0.1), "B" => asset_config("etf", "bnh", 0.5, spread = 0.1))
+z(x) = (x["elapsed"] = 0.0; x)
+dropcol(f, c) = RFrame([k => f[k] for k in names(f) if k != c]...)
+dropE(s) = (s["best"] = dropcol(s["best"], "error"); s["best_plateau"] = dropcol(s["best_plateau"], "error"); s)
+result = PS.param_search(d, b, PS.param_space(n = 10.0, band = 0.0); cores = 0))", inp = ein("param_search/ps_err_obj", c("d"))),
   zeile("ps_err_none",
     r"(st <- create_strategy(A = asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell', spread = 0.1))
 b <- function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band))
@@ -850,6 +875,10 @@ TB("sensitivity_grid", "Meldungen und Warnungen von sensitivity_grid je Zeile (E
     r"(sensitivity_grid(d, st, list(dca.span = c(1, 3))))",
     r"(result = SE.sensitivity_grid(d, st, {'dca.span': [1, 3]}))",
     r"(result = SE.sensitivity_grid(d, st, RList("dca.span" => [1, 3])))", inp = ein("sensitivity/sg_path_novalue", c("d"))),
+  zeile("sg_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(sensitivity_grid(d, st, list(rebalance.thresh = c(5, 10)), cores = 0))",
+    r"(result = SE.sensitivity_grid(d, st, {'rebalance.thresh': [5.0, 10.0]}, cores=0))",
+    r"(result = SE.sensitivity_grid(d, st, RList("rebalance.thresh" => [5.0, 10.0]); cores = 0))", inp = ein("sensitivity/sg_path_novalue", c("d"))),
   zeile("sg_err_flat2",
     r"(sensitivity_grid(d, st, list(marginal_tax_rate = c(14, 42))))",
     r"(result = SE.sensitivity_grid(d, st, {'marginal_tax_rate': [14, 42]}))",
@@ -862,12 +891,25 @@ TB("sensitivity_rebalancing", "Meldungen und Warnungen von sensitivity_rebalanci
   zeile("rs_errall",
     r"(sensitivity_rebalancing(d, st, frequencies = list(x = c('monat', 1)), include_none = FALSE))",
     r"(result = SE.sensitivity_rebalancing(d, st, frequencies={'x': ('monat', 1)}, include_none=False))",
-    r"(result = SE.sensitivity_rebalancing(d, st; frequencies = ["x" => ("monat", 1)], include_none = false))", inp = ein("sensitivity/rs_errall", c("d")))))
+    r"(result = SE.sensitivity_rebalancing(d, st; frequencies = ["x" => ("monat", 1)], include_none = false))", inp = ein("sensitivity/rs_errall", c("d"))),
+  zeile("rs_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(sensitivity_rebalancing(d, st, frequencies = list(x = c('month', 1)), include_none = FALSE, cores = 0))",
+    r"(result = SE.sensitivity_rebalancing(d, st, frequencies={'x': ('month', 1)}, include_none=False, cores=0))",
+    r"(result = SE.sensitivity_rebalancing(d, st; frequencies = ["x" => ("month", 1)], include_none = false, cores = 0))", inp = ein("sensitivity/rs_errall", c("d")))))
+TB("sensitivity_leverage", "Meldungen und Warnungen von sensitivity_leverage je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("lvs_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(sensitivity_leverage(d, 'A', leverages = c(1, 1.5, 2), rate = 2, spread = 0.4, cores = 0))",
+    r"(result = SE.sensitivity_leverage(d, 'A', leverages=[1, 1.5, 2], rate=2, spread=0.4, cores=0))",
+    r"(result = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2], rate = 2, spread = 0.4, cores = 0))", inp = ein("sensitivity/lvs_opt", c("d")))))
 TB("planning_lumpsum_vs_dca", "Meldungen und Warnungen von planning_lumpsum_vs_dca je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("ls_tax",
     r"(planning_lumpsum_vs_dca(d5, st1, months = 6, horizon = 3, step = 12, sim_args = list(tax = tax_profile())))",
     r"(result = SE.planning_lumpsum_vs_dca(d5, st1, months=6, horizon=3, step=12, sim_args={'tax': tax_profile()}))",
     r"(result = SE.planning_lumpsum_vs_dca(d5, st1; months = 6, horizon = 3, step = 12, sim_args = RList("tax" => SL.tax_profile())))", print = TRUE, inp = ein("sensitivity/ls_tax", c("d5"))),
+  zeile("ls_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
+    r"(planning_lumpsum_vs_dca(d5, st1, months = 6, horizon = 3, step = 12, cores = 0))",
+    r"(result = SE.planning_lumpsum_vs_dca(d5, st1, months=6, horizon=3, step=12, cores=0))",
+    r"(result = SE.planning_lumpsum_vs_dca(d5, st1; months = 6, horizon = 3, step = 12, cores = 0))", inp = ein("sensitivity/ls_tax", c("d5"))),
   zeile("ls_err_sv",
     r"(planning_lumpsum_vs_dca(d5, st1, horizon = 2, step = 6, sim_args = list(start_value = 5000)))",
     r"(result = SE.planning_lumpsum_vs_dca(d5, st1, horizon=2, step=6, sim_args={'start_value': 5000}))",

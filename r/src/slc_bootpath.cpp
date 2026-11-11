@@ -22,26 +22,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static inline double quiet_(double x)
-{
-    uint64_t b;
-    memcpy(&b, &x, sizeof b);
-    b |= UINT64_C(0x0008000000000000);
-    memcpy(&x, &b, sizeof b);
-    return x;
-}
-/* linker NaN-Operand gewinnt (wie R auf x86-64) */
-static inline double lnan_(double r, double a, double b)
-{
-    if (r == r) return r;
-    if (a != a) return quiet_(a);
-    if (b != b) return quiet_(b);
-    return r;
-}
-static inline double add_(double a, double b) { return lnan_(a + b, a, b); }
-static inline double sub_(double a, double b) { return lnan_(a - b, a, b); }
-static inline double mul_(double a, double b) { return lnan_(a * b, a, b); }
-static inline double div_(double a, double b) { return lnan_(a / b, a, b); }
+/* linker NaN-Operand gewinnt (wie R auf x86-64): slc_lnan (slc_internal.h, seit 1.6.4) */
+static inline double add_(double a, double b) { return slc_lnan(a + b, a, b); }
+static inline double sub_(double a, double b) { return slc_lnan(a - b, a, b); }
+static inline double mul_(double a, double b) { return slc_lnan(a * b, a, b); }
+static inline double div_(double a, double b) { return slc_lnan(a / b, a, b); }
 
 /* out (n + 1) = start * cumprod(c(1, x)) */
 static void cp_(int64_t n, const double *x, double start, double *buf, double *out)

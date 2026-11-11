@@ -8,7 +8,7 @@ tail_dependence(x, y, q = c(0.01, 0.025, 0.05, 0.1, 0.2))
 }
 \arguments{
 \item{x, y}{Numerische Vektoren gleicher Laenge (z. B. Periodenrenditen).
-Paare mit nicht endlichen Werten werden entfernt.}
+Paare mit nicht endlichen Werten werden entfernt. Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).}
 
 \item{q}{Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil
 echt zwischen 0 und 1 (0.05 = die unteren bzw. oberen 5 \% der

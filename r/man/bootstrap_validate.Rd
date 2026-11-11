@@ -10,10 +10,12 @@ bootstrap_validate(result, min_rows = NULL, verbose = TRUE)
 \item{result}{Objekt der Klasse \code{bootstrap_result} aus \code{\link[=bootstrap]{bootstrap()}}.}
 
 \item{min_rows}{Mindestzeilenzahl je Pfad; \code{NULL} (Standard) = keine
-Mindestlaenge.}
+Mindestlaenge.
+Seit 1.6.4 eine ganze Zahl >= 0.}
 
 \item{verbose}{Logisch: Anzahl entfernter und gueltiger Pfade ausgeben
-(Standard \code{TRUE}).}
+(Standard \code{TRUE}).
+Seit 1.6.4 nur TRUE oder FALSE.}
 }
 \value{
 Das bereinigte \code{bootstrap_result} (\code{paths},

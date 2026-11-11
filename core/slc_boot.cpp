@@ -58,6 +58,7 @@
 #include "slc_internal.h"
 #include "slc_la_internal.h"
 
+#include <float.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -109,7 +110,8 @@ int sl_boot_idx_stationary(sl_ctx *cx, sl_rng *r, int n_src, int n_out, double L
     double p, g;
     int i = 0, len, start, t, st;
     if (n_src < 1) return sl_fail(cx, SL_EARG, "Keine Quellzeilen");
-    if (!(L >= 1.0)) return sl_fail(cx, SL_EARG, "L muss >= 1 sein");
+    /* seit 1.6.4 (B-003, A-033): L endlich; bis 1.6.3 ergab L = Inf (int) NaN und einen Ganzzahlueberlauf */
+    if (!(L >= 1.0 && L <= DBL_MAX)) return sl_fail(cx, SL_EARG, "L muss eine endliche Zahl >= 1 sein");
     if (n_out < 0) return sl_fail(cx, SL_EARG, "n_out muss >= 0 sein");
     p = 1.0 / L;
     while (i < n_out) {
@@ -117,7 +119,7 @@ int sl_boot_idx_stationary(sl_ctx *cx, sl_rng *r, int n_src, int n_out, double L
         else {
             st = sl_rgeom(cx, r, 1, p, &g);
             if (st != SL_OK) return st;
-            len = g >= (double) n_out ? n_out : (int) g + 1;
+            len = !(g < (double) n_out) ? n_out : (int) g + 1;   /* NaN wie zu gross (kein (int) NaN) */
         }
         start = draw_int(r, n_src);
         if (len > n_out - i) len = n_out - i;
@@ -155,7 +157,8 @@ int sl_boot_idx_regime(sl_ctx *cx, sl_rng *r, int n, const int32_t *regimes, int
     int *cnt, *off, *pool, i, k, t, cur;
     double *pi, *nw, *row, s = 0.0;
     if (K < 1) return sl_fail(cx, SL_EARG, "Übergangsmatrix ist leer");
-    if (n_out < 0 || n < 0) return sl_fail(cx, SL_EARG, "n_out muss >= 0 sein");
+    if (n_out < 0) return sl_fail(cx, SL_EARG, "n_out muss >= 0 sein");
+    if (n < 0) return sl_fail(cx, SL_EARG, "n muss >= 0 sein");   /* seit 1.6.4 eigene Meldung (A-066) */
     if (!slc_all_finite((int64_t) K * K, trans)) return sl_fail(cx, SL_ENONFINITE, "Übergangsmatrix enthält nicht endliche Werte");
     cnt = (int *) calloc((size_t) (2 * (K + 1) + n + 1), sizeof(int));
     pi = (double *) malloc(3 * (size_t) K * sizeof(double));
@@ -188,9 +191,14 @@ int sl_boot_idx_tails(sl_ctx *cx, sl_rng *r, int n_out, double p_l, double p_r, 
                       const int32_t *bulk_idx, int nl, const int32_t *left_idx, int nr,
                       const int32_t *right_idx, int32_t *idx)
 {
-    int t;
+    int t, st;
     if (nb == 0) return sl_fail(cx, SL_EARG, "Keine Bulk-Beobachtungen");
     if (n_out < 0) return sl_fail(cx, SL_EARG, "n_out muss >= 0 sein");
+    /* seit 1.6.4 (A-033, B-030): Anzahlen >= 0 und Indizes >= 1 (bis 1.6.3 gab der Kern z. B. -3 als Zeile zurueck) */
+    if (nb < 0 || nl < 0 || nr < 0) return sl_fail(cx, SL_EARG, "interner Fehler: negative Anzahl von Indizes");
+    if ((st = check_idx(cx, nb, bulk_idx, INT32_MAX, "bulk_idx")) != SL_OK) return st;
+    if ((st = check_idx(cx, nl, left_idx, INT32_MAX, "left_idx")) != SL_OK) return st;
+    if ((st = check_idx(cx, nr, right_idx, INT32_MAX, "right_idx")) != SL_OK) return st;
     for (t = 0; t < n_out; t++) {
         double u = sl_unif01(r);
         if (u < p_l && nl > 0) idx[t] = left_idx[draw_int(r, nl)];
@@ -209,7 +217,8 @@ int sl_boot_wild(sl_ctx *cx, sl_rng *r, int n, int k, const double *ret, int typ
     double *mu;
     int i, j, st;
     if (type < 0 || type > 2) return sl_fail(cx, SL_EARG, "wild_type muss 0, 1 oder 2 sein (erhalten: %d)", type);
-    if (n < 1 || k < 0) return sl_fail(cx, SL_ESMALL, "Keine Quellzeilen");
+    if (k < 0) return sl_fail(cx, SL_EARG, "k muss >= 0 sein");   /* seit 1.6.4 eigene Meldung (A-066) */
+    if (n < 1) return sl_fail(cx, SL_ESMALL, "Keine Quellzeilen");
     mu = (double *) malloc(((size_t) k + 1) * sizeof(double));
     if (mu == NULL) return sl_fail(cx, SL_ENOMEM, "Bootstrap: kein Speicher");
     for (j = 0; j < k; j++) { double s = 0; for (i = 0; i < n; i++) s += ret[i + (size_t) n * j]; mu[j] = s / n; }
@@ -231,6 +240,9 @@ int sl_boot_reset(sl_ctx *cx, sl_rng *r, int n, int k, const double *ret, double
 {
     int t, j, flipped = 0;
     if (!(p_break >= 0.0 && p_break <= 1.0)) return sl_fail(cx, SL_EARG, "p_break muss in [0, 1] liegen");
+    /* seit 1.6.4 (B-030): bis 1.6.3 meldete der Kern bei n < 0 bzw. k < 0 Erfolg, ohne out zu beschreiben */
+    if (n < 0) return sl_fail(cx, SL_EARG, "n muss >= 0 sein");
+    if (k < 0) return sl_fail(cx, SL_EARG, "k muss >= 0 sein");
     for (t = 0; t < n; t++) {
         if (sl_unif01(r) < p_break) flipped = !flipped;
         for (j = 0; j < k; j++) {
@@ -331,10 +343,13 @@ int sl_boot_garch(sl_ctx *cx, sl_rng *r, int n_out, int base, int k, double mu, 
     cross_state cs;
     double s2 = s2_init, eps = 0.0;
     int t, st;
-    if (omega <= 0) return sl_fail(cx, SL_EARG, "omega muss > 0 sein");
+    if (!(omega > 0)) return sl_fail(cx, SL_EARG, "omega muss > 0 sein");   /* seit 1.6.4 auch NaN (A-066) */
     if (nv == 0) return sl_fail(cx, SL_EARG, "Keine gültigen Residuen");
     if (base < 0 || base >= k) return sl_fail(cx, SL_EARG, "interner Fehler: Basisreihe außerhalb 0 ... %d", k - 1);
     if ((st = check_idx(cx, nv, valid, n_src, "valid")) != SL_OK) return st;
+    /* seit 1.6.4 (B-030): gezogene Residuen endlich (bis 1.6.3 rechnete der Kern mit NaN in z_base still weiter) */
+    for (t = 0; t < nv; t++)
+        if (!isfinite(z_base[valid[t] - 1])) return sl_fail(cx, SL_ENONFINITE, "z_base enthält nicht endliche Werte");
     if ((st = cross_init(cx, &cs, m, n_src, k, base, cross_cols, cmu, com, cal, cbe, cratio, cs2, z_cross)) != SL_OK) return st;
     for (t = 0; t < n_out; t++) {
         const double ind = (eps < 0.0) ? 1.0 : 0.0;
@@ -368,11 +383,16 @@ int sl_boot_ms_garch(sl_ctx *cx, sl_rng *r, int n_out, int base, int k, int K, c
     int i, j, t, st, rg, tvtp = 0;
     if (K < 1) return sl_fail(cx, SL_EARG, "Anzahl Regime muss >= 1 sein");
     if (base < 0 || base >= k) return sl_fail(cx, SL_EARG, "interner Fehler: Basisreihe außerhalb 0 ... %d", k - 1);
+    /* seit 1.6.4 (A-066): Modellparameter ohne NaN (bis 1.6.3 zog der Kern dann still aus der letzten Marktphase) */
+    if (!slc_all_finite((int64_t) K * K, trans)) return sl_fail(cx, SL_ENONFINITE, "Übergangsmatrix enthält nicht endliche Werte");
+    if (!slc_all_finite((int64_t) K * K, delta)) return sl_fail(cx, SL_ENONFINITE, "delta enthält nicht endliche Werte");
+    if (!slc_all_finite(K, stat_prob)) return sl_fail(cx, SL_ENONFINITE, "stat_prob enthält nicht endliche Werte");
+    if (!slc_all_finite(K, omega)) return sl_fail(cx, SL_ENONFINITE, "omega enthält nicht endliche Werte");
     for (i = 0; i < K; i++) {
         double rs = 0;
         for (j = 0; j < K; j++) rs += trans[i + K * j];
         if (fabs(rs - 1.0) > 1e-6) return sl_fail(cx, SL_EARG, "Zeile %d der Uebergangsmatrix summiert nicht auf 1", i + 1);
-        if (unc_var[i] <= 0) return sl_fail(cx, SL_EARG, "unc_var[%d] <= 0", i + 1);
+        if (!(unc_var[i] > 0)) return sl_fail(cx, SL_EARG, "unc_var[%d] <= 0", i + 1);
     }
     if (pool_off[0] != 0) return sl_fail(cx, SL_EARG, "interner Fehler: Grenzen der Regime-Pools");
     for (i = 0; i < K; i++) if (pool_off[i + 1] < pool_off[i]) return sl_fail(cx, SL_EARG, "interner Fehler: Grenzen der Regime-Pools");

@@ -48,7 +48,7 @@ struct SimLevPlot
     source::Any
     kind::String
 end
-"Übergang (Stufe B): nur SVG, `data` leer; `_plot_method` setzt `source` und `kind`."
+"Nur SVG, `data` leer (exportierter Konstruktor; `_plot_method` setzt `source` und `kind`)."
 SimLevPlot(svg::AbstractString) = SimLevPlot(String(svg), RList(), nothing, "")
 Base.show(io::IO, ::MIME"image/svg+xml", d::SimLevPlot) = print(io, d.svg)
 Base.show(io::IO, d::SimLevPlot) = print(io, "SimLevPlot(", d.kind, ", SVG, ", sizeof(d.svg), " Bytes",
@@ -102,8 +102,7 @@ function _kwnames(f)
     return out
 end
 
-"`data` einer Zeichenfunktion vereinheitlichen: `RList` mit `RFrame`-Einträgen."
-_as_plotdata(::Nothing, who) = RList()
+"`data` einer Zeichenfunktion vereinheitlichen: `RList` mit `RFrame`-Einträgen (seit 1.6.4 ohne den Übergang `nothing`)."
 function _as_plotdata(d, who)
     (d isa AbstractDict || d isa AbstractVector{<:Pair} || d isa Tuple) ||
         error("$who: die Grafikmethode lieferte keine Daten als RList (sondern $(typeof(d))).")
@@ -114,9 +113,8 @@ function _as_plotdata(d, who)
     return out
 end
 
-"Ergebnis einer Zeichenfunktion → `SimLevPlot(svg, data, x, cls)`; ein reiner String ergibt leere `data` (Übergang)."
+"Ergebnis einer Zeichenfunktion → `SimLevPlot(svg, data, x, cls)` (seit 1.6.4 ohne den Übergang „nur String“)."
 _as_plot(d::SimLevPlot, who, x, cls) = SimLevPlot(d.svg, d.data, x, String(cls))
-_as_plot(s::AbstractString, who, x, cls) = SimLevPlot(String(s), RList(), x, String(cls))
 _as_plot(t::Tuple{AbstractString,Any}, who, x, cls) = SimLevPlot(String(t[1]), _as_plotdata(t[2], who), x, String(cls))
 _as_plot(r, who, x, cls) = error("$who: die Grafikmethode lieferte kein SVG (sondern $(typeof(r))).")
 
@@ -127,17 +125,20 @@ Macht aus einer Zeichenfunktion `f(x; kw...)` die plot-Methode für die
 S3-Klasse `cls` (für `register_plot!`): nur die von `f` deklarierten
 Schlüsselwörter werden weitergegeben, unbekannte ergeben eine Warnung;
 Positionsargumente nach `x` ergeben eine Warnung und werden ignoriert. `f`
-liefert `(svg, data)` (`data`: `RList`, `Dict` oder Paare `"panel" => RFrame`),
-ein `SimLevPlot` oder (Übergang) nur den SVG-Text, dann ist `data` leer.
+liefert `(svg, data)` (`data`: `RList`, `Dict` oder Paare `"panel" => RFrame`)
+oder ein `SimLevPlot`.
 Ergebnis immer `SimLevPlot(svg, data, x, cls)`; geschrieben wird nur mit
 `file = "….svg"` (deklariert `f` selbst `file`, bekommt es `file = nothing`).
 """
-function _plot_method(f, cls::AbstractString)
+# strict = true (drittes Argument, seit 1.6.4, plot.SimLevResult, Entscheidung 57): unbekannte Schlüsselwörter
+# sind ein Fehler.
+function _plot_method(f, cls::AbstractString, strict::Bool = false)
     who = "plot.$cls"
     known = _kwnames(f)
     takes_file = :file in known
     return function (x, args...; file = nothing, kw...)
         isempty(args) || @warn "$who: $(length(args)) zusätzliche(s) Positionsargument(e) wird/werden ignoriert; Optionen bitte als Schlüsselwort angeben."
+        strict && SimLev.chk_dots([k for k in keys(kw) if !(k in known)], String[], who)
         _warn_unknown_kw(who, [k for k in keys(kw) if !(k in known)])
         file === nothing || _check_svg_file(file, who)
         good = (k => v for (k, v) in kw if k in known)
@@ -155,6 +156,42 @@ end
 # ── Textschutz ──────────────────────────────────────────────────────────────
 # Ein `_esc` für Titel, Achsen- und Legendentexte aller Stile (& < > ").
 _esc(s) = replace(string(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
+
+# ── Farbverläufe wie R (seit 1.6.4, B-062/B-063, Entscheidung 99) ───────────────────────────
+"`seq.int(0, 1, length.out = n)` wie R (`do_seq`: 0 + i by mit by = 1 / (n - 1), letztes Element genau 1)."
+function _r_seq01(n::Integer)
+    n <= 0 && return Float64[]
+    n == 1 && return [0.0]
+    by = 1.0 / (n - 1)
+    out = Float64[0.0 + i * by for i in 0:n-1]
+    out[n] = 1.0
+    out
+end
+"Lineare Interpolation wie R's `approx1` (Bisektion, Stützstellen exakt)."
+function _r_approx1(v::Float64, x::Vector{Float64}, y::Vector{Float64})
+    i = 1; j = length(x)
+    while i < j - 1
+        ij = (i + j) ÷ 2
+        if v < x[ij]; j = ij; else; i = ij; end
+    end
+    v == x[j] && return y[j]
+    v == x[i] && return y[i]
+    return y[i] + (y[j] - y[i]) * ((v - x[i]) / (x[j] - x[i]))
+end
+"""`colorRampPalette(cols)(n)` aus Kanälen `col2rgb(cols) / 255` (0 … 1): linear über `seq.int(0, 1, length.out =
+length(cols))`, auf [0, 1] begrenzt, mal 255 und wie `rgb(…, maxColorValue = 255)` abgeschnitten, Großbuchstaben."""
+function _r_ramp_rgb(chans, n::Integer)
+    xs = _r_seq01(length(chans))
+    out = String[]
+    for v in _r_seq01(n)
+        c = ntuple(k -> trunc(Int, clamp(_r_approx1(v, xs, Float64[Float64(ch[k]) for ch in chans]), 0.0, 1.0) * 255), 3)
+        push!(out, r_sprintf("#%02X%02X%02X", c[1], c[2], c[3]))
+    end
+    out
+end
+"`colorRampPalette(cols)(n)` für Farbtexte `#RRGGBB` (wie R, siehe `_r_ramp_rgb`)."
+_r_ramp(cols, n::Integer) = _r_ramp_rgb([(parse(Int, c[2:3]; base = 16) / 255, parse(Int, c[4:5]; base = 16) / 255,
+                                          parse(Int, c[6:7]; base = 16) / 255) for c in cols], n)
 
 # ── R-Achsenteilung ─────────────────────────────────────────────────────────
 "Nachbildung von R's `pretty()` (R_pretty aus src/appl/pretty.c)."
@@ -232,7 +269,7 @@ function _col2rgba(v)
     v isa Bool && error("invalid color name '$(v ? "TRUE" : "FALSE")'")
     if v isa Real
         f = Float64(v)
-        isnan(f) && return (1.0, 1.0, 1.0, 0.0)
+        (isfinite(f) && abs(f) < 2147483648) || return (1.0, 1.0, 1.0, 0.0)   # seit 1.6.4 wie R (NA nach as.integer) transparent (B-049)
         f < 0 && error("numerical color values must be >= 0, found $(Int(trunc(f)))")
         i = Int(trunc(f))
         i == 0 && error("numerical color values must be positive")
@@ -250,7 +287,11 @@ function _col2rgba(v)
         return Tuple(c / 255 for c in vals)
     end
     v in ("NA", "transparent") && return (1.0, 1.0, 1.0, 0.0)
-    isdigit(first(v * " ")) && return _col2rgba(all(isdigit, v) ? Float64(parse(Int, v)) : NaN)
+    # seit 1.6.4 nur reine ASCII-Ganzzahltexte als Farbnummer (Entscheidung 55; "3.0", "2e0", "0x1", "9abc" Fehler)
+    if isdigit(first(v * " "))
+        all(isdigit, v) || error("invalid color specification \"$v\"")
+        return _col2rgba(parse(Float64, v))
+    end
     hx = get(_color_table(), lowercase(replace(v, " " => "")), nothing)
     hx === nothing && error("invalid color name '$v'")
     return _col2rgba(hx)
@@ -316,7 +357,9 @@ function _decimate(xs::Vector{Float64}, ys::Vector{Float64}, maxn::Int = 1600)
         seg = s:min(n, s + bucket - 1)
         good = [i for i in seg if isfinite(ys[i])]
         isempty(good) && continue
-        imin = good[argmin(ys[good])]; imax = good[argmax(ys[good])]
+        # seit 1.6.4 -0.0 wie +0.0 (B-101: argmin/argmax trennten ±0, numpy nicht; erster von Gleichen wie Python)
+        yz = ys[good] .+ 0.0
+        imin = good[argmin(yz)]; imax = good[argmax(yz)]
         for i in sort(unique([imin, imax]))
             push!(ox, xs[i]); push!(oy, ys[i])
         end
@@ -517,19 +560,8 @@ function _ana_legend(s::_AnaSvg, p::_AnaPanel, labels, cols; x = nothing, y = no
         print(s.buf, "<text x=\"$(_ana_n(lx + 20))\" y=\"$(_ana_n(yy))\" font-size=\"10\">$(_esc(l))</text>\n")
     end
 end
-"Farbverlauf wie `colorRampPalette(cols)(n)`."
-function _ana_ramp(cols::Vector{String}, n::Int)
-    rgb = [(parse(Int, c[2:3]; base = 16), parse(Int, c[4:5]; base = 16), parse(Int, c[6:7]; base = 16)) for c in cols]
-    n == 1 && return [cols[1]]
-    out = String[]
-    for i in 0:n-1
-        t = i / (n - 1) * (length(cols) - 1)
-        k = min(Int(floor(t)) + 1, length(cols) - 1); f = t - (k - 1)
-        c = ntuple(j -> round(Int, rgb[k][j] + f * (rgb[k+1][j] - rgb[k][j])), 3)
-        push!(out, "#" * join(string.(c; base = 16, pad = 2)))
-    end
-    out
-end
+"Farbverlauf wie `colorRampPalette(cols)(n)`; seit 1.6.4 wie R abgeschnitten, Großbuchstaben (B-063; bis 1.6.3 gerundet)."
+_ana_ramp(cols::Vector{String}, n::Int) = _r_ramp(cols, n)
 "SVG abschließen; Text zurück (geschrieben wird nur über `_plot_method`/`_write_svg`; seit 1.6.3 ohne `file`)."
 function _ana_svg_done(s::_AnaSvg)
     print(s.buf, "</svg>\n")
@@ -565,7 +597,9 @@ struct _GridBox
     x0::Float64; y0::Float64; w::Float64; h::Float64
 end
 
-function _grid_svg(keys, makefn; ncol = 2, file = nothing, width = 900, height = 650)
+"Felder `keys` im Raster (`ncol` Spalten); `makefn(key)(io, box)` zeichnet ein Feld. Ergebnis: der SVG-Text (seit 1.6.4;
+bis 1.6.3 ein `SimLevPlot`, von dem alle Aufrufer nur `svg` nahmen, und ein ungenutzter Parameter `file`)."
+function _grid_svg(keys, makefn; ncol = 2, width = 900, height = 650)
     n = length(keys)
     nc = n == 1 ? 1 : min(ncol, n)
     nr = cld(n, nc)
@@ -580,9 +614,7 @@ function _grid_svg(keys, makefn; ncol = 2, file = nothing, width = 900, height =
         makefn(key)(io, box)
     end
     println(io, "</svg>")
-    d = SimLevPlot(String(take!(io)))
-    file === nothing || write(String(file), d.svg)
-    d
+    String(take!(io))
 end
 
 function _grid_range(vals, lim)
@@ -845,14 +877,10 @@ function _res_legend!(f, x, y, labels, colors)
         _res_text!(f, x + 24, Y + 4, l; size = 10, anchor = "start")
     end
 end
-"Farbverlauf wie `colorRampPalette(c(\"#B5562B\", \"#F2E9DC\", \"#2C6E9B\"))(64)`."
-function _res_ramp(t)
-    a = (0xB5, 0x56, 0x2B) .% Int; b = (0xF2, 0xE9, 0xDC) .% Int; c = (0x2C, 0x6E, 0x9B) .% Int   # Int: UInt8-Differenzen liefen über
-    t = clamp(t, 0.0, 1.0)
-    u, v, s = t < 0.5 ? (a, b, 2t) : (b, c, 2t - 1)
-    rgb = [round(Int, u[i] + (v[i] - u[i]) * s) for i in 1:3]
-    return "#" * join(string.(rgb; base = 16, pad = 2))
-end
+const _RES_PAL = Ref{Vector{String}}(String[])
+"""64 Stufen `colorRampPalette(c("#B5562B", "#F2E9DC", "#2C6E9B"))(64)` wie R `plot(<SimLevParamSearch>)` (seit 1.6.4,
+B-063; bis 1.6.3 stetiger Verlauf `_res_ramp`)."""
+_res_pal() = (isempty(_RES_PAL[]) && (_RES_PAL[] = _r_ramp(["#B5562B", "#F2E9DC", "#2C6E9B"], 64)); _RES_PAL[])
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 8. Stil Rückrechnung (`_bc_*`)
@@ -864,10 +892,12 @@ end
 _bc_esc(s) = replace(string(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;")
 
 """
-    _bc_panel(io, series; x0, y0, w, h, title, xlab, ylab, logy = false, hlines = [], vlines = [])
+    _bc_panel(io, series; x0, y0, w, h, title, xlab, ylab, logy = false, hlines = [], vlines = [], xdate = false,
+              legend = [])
 
-Ein Liniendiagramm in ein SVG schreiben. `series`: Vektor aus
-`(x::Vector{Float64}, y::Vector{Float64}, farbe, linienbreite, strich)`.
+Ein Liniendiagramm in ein SVG schreiben. `series`: Vektor aus `(x::Vector{Float64}, y::Vector{Float64}, farbe,
+linienbreite)`; mit `logy` fallen Punkte ≤ 0 weg. `xdate`: x-Werte sind Tage seit 1970 (Achse als Datum);
+`legend`: Paare `(Text, Farbe)`.
 """
 function _bc_panel(io, series; x0 = 0, y0 = 0, w = 720, h = 360, title = "", xlab = "", ylab = "",
                    logy = false, hlines = Float64[], vlines = Float64[], xdate = false, legend = Tuple{String,String}[])
@@ -923,15 +953,14 @@ function _bc_panel(io, series; x0 = 0, y0 = 0, w = 720, h = 360, title = "", xla
     end
 end
 
-function _bc_doc(f, w, h, file)
+# seit 1.6.4 ohne den ungenutzten Parameter file (beide Aufrufer übergaben nothing)
+function _bc_doc(f, w, h)
     io = IOBuffer()
     print(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$(w)\" height=\"$(h)\" viewBox=\"0 0 $(w) $(h)\" font-family=\"sans-serif\">\n")
     print(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n")
     f(io)
     print(io, "</svg>\n")
-    svg = String(take!(io))
-    file === nothing || write(file, svg)
-    return svg
+    return String(take!(io))
 end
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -954,20 +983,8 @@ function _alloc_ticks(lo, hi; n = 5)
     collect((ceil(lo / step) * step):step:(hi+1e-12))
 end
 
-"Farbverlauf wie `colorRampPalette(c(...))(n)`."
-function _alloc_ramp(n)
-    base = [(0x2C, 0x6E, 0x9B), (0x3E, 0x8E, 0x5A), (0xC4, 0x9A, 0x2C), (0xB5, 0x56, 0x2B), (0x8A, 0x5B, 0xA8), (0x4A, 0x4A, 0x4A)]
-    n == 1 && return ["#2C6E9B"]
-    out = String[]
-    for i in 0:(n-1)
-        p = i / (n - 1) * (length(base) - 1)
-        k = min(Int(floor(p)), length(base) - 2)
-        f = p - k
-        c = [round(Int, (1 - f) * base[k+1][j] + f * base[k+2][j]) for j in 1:3]
-        push!(out, "#" * join(string(v; base = 16, pad = 2) for v in c))
-    end
-    out
-end
+"Farbverlauf wie `colorRampPalette(c(...))(n)`; seit 1.6.4 wie R abgeschnitten, Großbuchstaben (B-063; bis 1.6.3 gerundet)."
+_alloc_ramp(n) = _r_ramp(["#2C6E9B", "#3E8E5A", "#C49A2C", "#B5562B", "#8A5BA8", "#4A4A4A"], n)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 10. Zahlen wie in Julia (nur Python)

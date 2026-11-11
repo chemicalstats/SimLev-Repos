@@ -106,8 +106,8 @@ Besonderheiten:
   `regime_subset()`, `view_prob()`) werden in **R-Syntax** ausgewertet
   (`"cagr > 0 & max_drawdown <= 0.3"`, `"x %in% c(1, 2)"`); eine
   Python-Funktion geht ebenfalls.
-- `result.trades` enthält alle Buchungen (Lots, Verkäufe, Steuerbuchungen)
-  je Asset; in R gibt es kein Gegenstück.
+- `result.trades` enthält je Asset die Käufe, Verkäufe und Steuerbuchungen
+  (`buys`, `sells`, `taxes`); in R gibt es kein Gegenstück.
 - `simlev.bootstrap`, `simlev.backcast` und `simlev.param_search` sind
   zugleich Modul und aufrufbare Funktion.
 - `cores > 1` rechnet mit Fork-Prozessen, wo es keinen Fork gibt (Windows,

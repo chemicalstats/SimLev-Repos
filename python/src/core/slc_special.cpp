@@ -220,8 +220,13 @@ static void cf_terms(double a, double b, double x, double y, long m, double *bet
         *beta = 1.0 + dm * (b - dm) * x / ((c - 1.0) * c)
                 - (a + dm) * (a + b + dm) * x / (c * (c + 1.0));
     }
-    *alpha = (a + dm - 1.0) * (a + b + dm - 1.0) * dm * (b - dm) * x * x
-             / ((c - 2.0) * (c - 1.0) * (c - 1.0) * c);
+    /* seit 1.6.4 (C-075, Entscheidung 110): ist a so klein, dass a + 2 = 2 gilt, wäre das erste Glied 0/0 (bis 1.6.3
+     * NaN, z. B. pt(1e300, df = 1e-300)); dort ist (a + m - 1)/(c - 2) = a/a = 1 exakt. Sonst unverändert. */
+    if (m == 1 && c - 2.0 == 0.0)
+        *alpha = (a + b) * (b - 1.0) * x * x / ((c - 1.0) * (c - 1.0) * c);
+    else
+        *alpha = (a + dm - 1.0) * (a + b + dm - 1.0) * dm * (b - dm) * x * x
+                 / ((c - 2.0) * (c - 1.0) * (c - 1.0) * c);
 }
 
 /* Das Lentz-Verfahren bestimmt die nötige Tiefe M (bis |Delta - 1| <= 2^-52). Braucht es mehr als
@@ -304,8 +309,11 @@ static void ibeta_eval(const ibeta_par *P, double x, double y, double lx, double
     *conv = 1;
     if (isinf(lxs) && lxs < 0) v = 0.0;
     else {
-        double f = ibeta_cf(a, b, xs, ys, conv);
-        v = exp(ibeta_lnpre(P, swap, xs, ys, lxs, lys)) * f;
+        double f = ibeta_cf(a, b, xs, ys, conv), pre = exp(ibeta_lnpre(P, swap, xs, ys, lxs, lys));
+        /* seit 1.6.4 (C-075, Entscheidung 110): Vorfaktor 0 ergibt 0, auch wenn die Glieder überlaufen (bis 1.6.3
+         * 0 * NaN = NaN mit Warnung, z. B. pbeta(0.5, 1e-300, 1e300)); sonst unverändert */
+        if (pre == 0.0 && !isfinite(f)) { v = 0.0; *conv = 1; }
+        else v = pre * f;
         if (v > 1.0) v = 1.0;
     }
     *direct = swap;
@@ -317,8 +325,12 @@ int sl_pbeta(sl_ctx *cx, int64_t n, const double *x, double a, double b, int low
 {
     int64_t i;
     ibeta_par P;
-    int bad = !(a > 0 && b > 0 && isfinite(a) && isfinite(b)), warned = 0, noconv = 0;
-    if (!bad && !isnan(a) && !isnan(b)) ibeta_init(&P, a, b);
+    /* Ränder seit 1.6.4 wie R 4.3.3 pbeta (C-075, Entscheidung 96; Tabelle in R nachgeprüft): a < 0 oder b < 0 NaN;
+     * x >= 1 ergibt 1; a, b = 0 oder Inf als Punktmassen (bis 1.6.3 NaN), auch für x <= 0: a = b = 0 je 1/2 bei 0 und 1
+     * (0,5), a = 0 oder b/a = Inf bei 0 (1), b = 0 oder a/b = Inf bei 1 (0), a = b = Inf bei 1/2 (x < 1/2: 0, sonst 1) */
+    int bad = isnan(a) || isnan(b) || a < 0 || b < 0, warned = 0, noconv = 0;
+    int edge = !bad && (a == 0 || b == 0 || !isfinite(a) || !isfinite(b));
+    if (!bad && !edge) ibeta_init(&P, a, b);
     for (i = 0; i < n; i++) {
         double xi = x[i], yi, w, w1, lx, ly;
         int direct, conv;
@@ -326,8 +338,17 @@ int sl_pbeta(sl_ctx *cx, int64_t n, const double *x, double a, double b, int low
         if (isnan(a)) { out[i] = a; continue; }
         if (isnan(b)) { out[i] = b; continue; }
         if (bad) { out[i] = NAN; warned = 1; continue; }
-        if (xi <= 0) { out[i] = lower ? 0.0 : 1.0; continue; }
         if (xi >= 1) { out[i] = lower ? 1.0 : 0.0; continue; }
+        if (edge) {
+            int one;                                     /* 1: P(X <= x) = 1 */
+            if (a == 0 && b == 0) { out[i] = 0.5; continue; }
+            if (a == 0 || b / a == INFINITY) one = 1;
+            else if (b == 0 || a / b == INFINITY) one = 0;
+            else one = !(xi < 0.5);                      /* a = b = Inf */
+            out[i] = (one == (lower != 0)) ? 1.0 : 0.0;
+            continue;
+        }
+        if (xi <= 0) { out[i] = lower ? 0.0 : 1.0; continue; }
         yi = 1.0 - xi;                                   /* exakt für x >= 1/2 */
         lx = (xi <= 0.5) ? log(xi) : log1p(-yi);
         ly = (xi >= 0.5) ? log(yi) : log1p(-xi);
@@ -402,23 +423,43 @@ static double t_logdens(const t_par *T, double t)
     return T->lnc - 0.5 * (T->nu + 1.0) * L;
 }
 
+/* Parameter von pt/qt (für sl_pt, sl_qt und die Threads in t_mt; seit 1.6.4 eine Fassung): bad = df nicht > 0,
+ * normal = df > 1e20 (seit 1.6.4, C-075, Entscheidung 96, wie R's qt: ndf > 1e20 über qnorm; pt dort wie pnorm bis
+ * auf die letzte Stelle von R; bis 1.6.3 nur df = +Inf, darüber ab etwa 1e80 still falsche Werte); T nur sonst gesetzt */
+static void t_setup(double df, t_par *T, int *bad, int *normal)
+{
+    *bad = !(df > 0);
+    *normal = df > 1e20;
+    if (!*bad && !*normal && !isnan(df)) t_init(T, df);
+}
+
+/* Ein Element von pt (seit 1.6.4 eine Fassung für sl_pt und t_range): Wert nach *out; *warned bei NaN aus
+ * ungültigem df, *noconv ohne Konvergenz des Kettenbruchs. Rückgabe 1, wenn über t_tails gerechnet wurde (nur dann
+ * prüft sl_pt den Benutzerabbruch, wie bis 1.6.3), sonst 0 (Sonderfall). */
+static int pt1(const t_par *T, double ti, double df, int bad, int normal, int lower, double *out, int *warned,
+               int *noconv)
+{
+    double sm, lg, h;
+    int conv = 1, direct;
+    if (isnan(ti)) { *out = ti; return 0; }
+    if (isnan(df)) { *out = df; return 0; }
+    if (bad) { *out = NAN; *warned = 1; return 0; }
+    if (normal) { *out = sl_pnorm1(ti, lower); return 0; }
+    if (isinf(ti)) { *out = ((ti < 0) == (lower != 0)) ? 0.0 : 1.0; return 0; }
+    t_tails(T, ti, &sm, &lg, &h, &direct, &conv);
+    if (!conv) *noconv = 1;
+    *out = ((ti < 0) == (lower != 0)) ? sm : lg;
+    return 1;
+}
+
 int sl_pt(sl_ctx *cx, int64_t n, const double *t, double df, int lower, double *out)
 {
     int64_t i;
     t_par T;
-    int bad = !(df > 0), warned = 0, noconv = 0, normal = isinf(df) && df > 0;
-    if (!bad && !normal && !isnan(df)) t_init(&T, df);
+    int bad, normal, warned = 0, noconv = 0;
+    t_setup(df, &T, &bad, &normal);
     for (i = 0; i < n; i++) {
-        double ti = t[i], sm, lg, h;
-        int conv = 1, direct;
-        if (isnan(ti)) { out[i] = ti; continue; }
-        if (isnan(df)) { out[i] = df; continue; }
-        if (bad) { out[i] = NAN; warned = 1; continue; }
-        if (normal) { out[i] = sl_pnorm1(ti, lower); continue; }
-        if (isinf(ti)) { out[i] = ((ti < 0) == (lower != 0)) ? 0.0 : 1.0; continue; }
-        t_tails(&T, ti, &sm, &lg, &h, &direct, &conv);
-        if (!conv) noconv = 1;
-        out[i] = ((ti < 0) == (lower != 0)) ? sm : lg;
+        if (!pt1(&T, t[i], df, bad, normal, lower, &out[i], &warned, &noconv)) continue;
         SL_POLL(cx, i);
     }
     if (warned) sl_warn(cx, "pt: NaN erzeugt");
@@ -486,27 +527,37 @@ static double qt_low(const t_par *T, double p, int *conv)
     return t;
 }
 
+/* Ein Element von qt (seit 1.6.4 eine Fassung für sl_qt und t_range); Rückgabe wie pt1 */
+static int qt1(const t_par *T, double pi, double df, int bad, int normal, int lower, double *out, int *warned,
+               int *noconv)
+{
+    double q, r;
+    int conv = 1, neg;
+    /* seit 1.6.4 wie R's qt (C-075): die Ränder p = 0, 1 (±Inf) vor der df-Prüfung (R_Q_P01_boundaries) */
+    if (isnan(pi)) { *out = pi; return 0; }
+    if (isnan(df)) { *out = df; return 0; }
+    if (pi < 0 || pi > 1) { *out = NAN; *warned = 1; return 0; }
+    if (pi == 0) { *out = lower ? -INFINITY : INFINITY; return 0; }
+    if (pi == 1) { *out = lower ? INFINITY : -INFINITY; return 0; }
+    if (bad) { *out = NAN; *warned = 1; return 0; }
+    if (normal) { *out = slc_qnorm_std(pi, lower); return 0; }
+    /* auf das untere Ende mit q <= 1/2 zurückführen */
+    neg = !lower;                       /* oberes Ende: -qt(p, lower) */
+    if (pi > 0.5) { q = 1.0 - pi; neg = !neg; } else q = pi;
+    r = qt_low(T, q, &conv);            /* <= 0 */
+    if (!conv) *noconv = 1;
+    *out = (neg ? -r : r) + 0.0;
+    return 1;
+}
+
 int sl_qt(sl_ctx *cx, int64_t n, const double *p, double df, int lower, double *out)
 {
     int64_t i;
     t_par T;
-    int bad = !(df > 0), warned = 0, noconv = 0, normal = isinf(df) && df > 0;
-    if (!bad && !normal && !isnan(df)) t_init(&T, df);
+    int bad, normal, warned = 0, noconv = 0;
+    t_setup(df, &T, &bad, &normal);
     for (i = 0; i < n; i++) {
-        double pi = p[i], q, r;
-        int conv = 1, neg;
-        if (isnan(pi)) { out[i] = pi; continue; }
-        if (isnan(df)) { out[i] = df; continue; }
-        if (bad || pi < 0 || pi > 1) { out[i] = NAN; warned = 1; continue; }
-        if (pi == 0) { out[i] = lower ? -INFINITY : INFINITY; continue; }
-        if (pi == 1) { out[i] = lower ? INFINITY : -INFINITY; continue; }
-        if (normal) { out[i] = slc_qnorm_std(pi, lower); continue; }
-        /* auf das untere Ende mit q <= 1/2 zurückführen */
-        neg = !lower;                       /* oberes Ende: -qt(p, lower) */
-        if (pi > 0.5) { q = 1.0 - pi; neg = !neg; } else q = pi;
-        r = qt_low(&T, q, &conv);           /* <= 0 */
-        if (!conv) noconv = 1;
-        out[i] = (neg ? -r : r) + 0.0;
+        if (!qt1(&T, p[i], df, bad, normal, lower, &out[i], &warned, &noconv)) continue;
         SL_POLL(cx, i);
     }
     if (warned) sl_warn(cx, "qt: NaN erzeugt");
@@ -546,12 +597,13 @@ int sl_qlogis(sl_ctx *cx, int64_t n, const double *p, double *out)
 }
 
 /* ── t-Verteilung auf mehreren Threads (seit 1.6.0) ──
- * Je Element dieselbe Rechnung wie sl_pt/sl_qt oben; die Elemente sind unabhängig, jeder Thread rechnet einen
- * zusammenhängenden Teil (sl_par_run, slc_prep.cpp). Warnungen als Vereinigung der Merker; das Ergebnis hängt
+ * Je Element dieselbe Rechnung wie sl_pt/sl_qt oben (seit 1.6.4 dieselben Funktionen pt1/qt1, bis 1.6.3 eine
+ * wortgleiche Kopie); die Elemente sind unabhängig, jeder Thread rechnet einen zusammenhängenden Teil (sl_par_run, slc_prep.cpp). Warnungen als Vereinigung der Merker; das Ergebnis hängt
  * nicht von der Zahl der Threads ab. Abbruchprüfung nur ohne Threads (der Host darf nur aus seinem Thread
  * gefragt werden). */
 #include "slc_prep.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -559,7 +611,7 @@ typedef struct {
     double *out, df;
     int lower, bad, normal, qt;
     t_par T;
-    int warned[64], noconv[64];
+    int *warned, *noconv;      /* je Teil ein Merker; Felder je Aufruf (seit 1.6.4 ohne feste Grenze, T4-R1) */
     int64_t n;
     int nt;
 } t_job;
@@ -570,28 +622,8 @@ static void t_range(void *arg, int64_t lo, int64_t hi, int slot)
     int warned = 0, noconv = 0;
     int64_t i;
     for (i = lo; i < hi; i++) {
-        double xi = J->x[i], q, r, sm, lg, h;
-        int conv = 1, neg, direct;
-        if (isnan(xi)) { J->out[i] = xi; continue; }
-        if (isnan(J->df)) { J->out[i] = J->df; continue; }
-        if (J->qt) {
-            if (J->bad || xi < 0 || xi > 1) { J->out[i] = NAN; warned = 1; continue; }
-            if (xi == 0) { J->out[i] = J->lower ? -INFINITY : INFINITY; continue; }
-            if (xi == 1) { J->out[i] = J->lower ? INFINITY : -INFINITY; continue; }
-            if (J->normal) { J->out[i] = slc_qnorm_std(xi, J->lower); continue; }
-            neg = !J->lower;
-            if (xi > 0.5) { q = 1.0 - xi; neg = !neg; } else q = xi;
-            r = qt_low(&J->T, q, &conv);
-            if (!conv) noconv = 1;
-            J->out[i] = (neg ? -r : r) + 0.0;
-        } else {
-            if (J->bad) { J->out[i] = NAN; warned = 1; continue; }
-            if (J->normal) { J->out[i] = sl_pnorm1(xi, J->lower); continue; }
-            if (isinf(xi)) { J->out[i] = ((xi < 0) == (J->lower != 0)) ? 0.0 : 1.0; continue; }
-            t_tails(&J->T, xi, &sm, &lg, &h, &direct, &conv);
-            if (!conv) noconv = 1;
-            J->out[i] = ((xi < 0) == (J->lower != 0)) ? sm : lg;
-        }
+        if (J->qt) qt1(&J->T, J->x[i], J->df, J->bad, J->normal, J->lower, &J->out[i], &warned, &noconv);
+        else pt1(&J->T, J->x[i], J->df, J->bad, J->normal, J->lower, &J->out[i], &warned, &noconv);
     }
     if (warned) J->warned[slot] = 1;
     if (noconv) J->noconv[slot] = 1;
@@ -601,13 +633,17 @@ static int t_mt(sl_ctx *cx, int qt, int64_t n, const double *x, double df, int l
 {
     t_job J;
     int t, nt = sl_par_threads(nthreads, n, 512), warned = 0, noconv = 0;
-    if (nt <= 1) return qt ? sl_qt(cx, n, x, df, lower, out) : sl_pt(cx, n, x, df, lower, out);
+    int *flags = NULL;
+    if (nt > 1) flags = (int *) calloc((size_t) nt * 2, sizeof(int));
+    /* ein Thread oder ohne Speicher fuer die Merker: nacheinander (gleiche Werte und Warnungen) */
+    if (flags == NULL) return qt ? sl_qt(cx, n, x, df, lower, out) : sl_pt(cx, n, x, df, lower, out);
     memset(&J, 0, sizeof J);
     J.x = x; J.out = out; J.df = df; J.lower = lower; J.qt = qt; J.n = n; J.nt = nt;
-    J.bad = !(df > 0); J.normal = isinf(df) && df > 0;
-    if (!J.bad && !J.normal && !isnan(df)) t_init(&J.T, df);
+    J.warned = flags; J.noconv = flags + nt;
+    t_setup(df, &J.T, &J.bad, &J.normal);
     sl_par_run(nt, n, t_range, &J);
     for (t = 0; t < nt; t++) { warned |= J.warned[t]; noconv |= J.noconv[t]; }
+    free(flags);
     if (warned) sl_warn(cx, qt ? "qt: NaN erzeugt" : "pt: NaN erzeugt");
     if (noconv) sl_warn(cx, qt ? "qt: Kettenbruch nicht konvergiert" : "pt: Kettenbruch nicht konvergiert");
     return SL_OK;

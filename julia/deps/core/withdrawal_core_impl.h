@@ -109,11 +109,17 @@ enum { P_RATE = 0, P_CEIL, P_FLOOR, P_CUT, P_RAISE, P_CPR_YEARS, P_INFL_CAP, P_S
        P_MIN_REAL, P_MAX_REAL, P_AGE, P_MAX_AGE, P_FV, P_FLOOR95, P_SKIP_NEG, P_MAX_RATE,
        P_N };
 // Zustands-Slots
-enum { S_T = 0, S_WPREV, S_W1, S_P1, S_WR0, S_LAST_RATCH, S_PREAL_AFTER, S_CPI1, S_N };
+// (bis 1.6.3 dazu S_CPI1 = cpi_rel im ersten Planjahr; der erste Aufruf kommt stets mit cpi_rel = 1.0, darum entfallen
+// die Teilungen dadurch; x / 1.0 und max(1.0, 1e-12) sind exakt)
+enum { S_T = 0, S_WPREV, S_W1, S_P1, S_WR0, S_LAST_RATCH, S_PREAL_AFTER, S_N };
 
 static inline double pmt_due(double r, double n) {          // Annuitaet (vorschuessig) je 1 Kapital
   if (n <= 1.0) return 1.0;
-  if (std::fabs(r) < 1e-12) return 1.0 / n;
+  // seit 1.6.4 (K43 T2-R12) nur r = +-0 exakt 1/n; bis dahin auch 0 < |r| < 1e-12 (Fehler bis 5e-10 relativ)
+  if (r == 0.0) return 1.0 / n;
+  // seit 1.6.4 (A-094, Entscheidung 90) fuer |r| < 1e-4 ohne Ausloeschung: 1 - (1 + r)^-n = -expm1(-n log1p(r))
+  // (bis 1.6.3 bis zu 1e-5 relativer Fehler nahe 0); sonst wie bisher (bitgleich fuer uebliche Renditen)
+  if (std::fabs(r) < 1e-4) return r / ((-std::expm1(-n * std::log1p(r))) * (1.0 + r));
   return r / ((1.0 - std::pow(1.0 + r, -n)) * (1.0 + r));
 }
 
@@ -129,8 +135,8 @@ static double rule_amount(int rule, const double* rp, double* st, double P, doub
   double W = 0.0;
   if (P < 0) P = 0;
   const bool first = (t <= 1.0);
-  if (first) { st[S_P1] = P; st[S_CPI1] = cpi_rel; st[S_LAST_RATCH] = 1.0; }
-  const double W1_real = st[S_W1] / std::max(st[S_CPI1], 1e-12);
+  if (first) { st[S_P1] = P; st[S_LAST_RATCH] = 1.0; }
+  const double W1_real = st[S_W1];
 
   switch (rule) {
   case 1: W = first ? rate * P : st[S_WPREV] * infl_prev; break;
@@ -159,7 +165,7 @@ static double rule_amount(int rule, const double* rp, double* st, double P, doub
   case 7: {
     if (first) { W = rate * P; break; }
     W = st[S_WPREV] * infl_prev;
-    double p_real = P / cpi_rel, p1_real = st[S_P1] / st[S_CPI1];
+    double p_real = P / cpi_rel, p1_real = st[S_P1];
     if (p_real > rp[P_RATCH_THR] * p1_real && t - st[S_LAST_RATCH] >= rp[P_RATCH_GAP]) {
       W *= (1.0 + rp[P_RAISE]); st[S_LAST_RATCH] = t;
     }
@@ -364,7 +370,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
   if (tax_on && vp_on && (BASE.nrow() < np || BASE.ncol() != paths))
     SIMLEV_FAIL("Basiszins-Matrix %d x %d passt nicht zu den Renditen %d x %d", BASE.nrow(), BASE.ncol(), np, paths);
   if (np > 0 && income_real.size() < 1) SIMLEV_FAIL("income_real darf nicht leer sein");
-  const int ny = (np + ppy - 1) / ppy;
+  const int ny = (int) (((int64_t) np + ppy - 1) / ppy);   // seit 1.6.4 in 64 Bit (A-033: Ueberlauf bei ppy = 2^31 - 1)
   auto wealth = SIMLEV_MATRIX(keep ? ny + 1 : 0, keep ? paths : 0);    // real, Jahresanfang
   auto spend = SIMLEV_MATRIX(ny, paths);                                 // real, Konsum je Planjahr
   auto planned = SIMLEV_MATRIX(ny, paths);                               // real, geplante Entnahme
@@ -374,7 +380,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
   // Vorabpauschale wie am Pfadende); Zeile y + 1 = nach Planjahr y, Zeile 1 = Start
   auto wealth_end = SIMLEV_MATRIX(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0),
        taxes_end = SIMLEV_MATRIX(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0);
-  auto st = SIMLEV_NUM(S_N);
+  double st[S_N];   // Zustand der Regel je Pfad (seit 1.6.4 lokal, bis 1.6.3 ein Ergebnisfeld des Hosts)
   // Tarifweg (tariff_par leer = aus): Jahreszeilen je Pfad und Planjahr als Spalten einer Matrix TR_N x (ny + 1) Pfade
   // (Spalte k (ny + 1) + y, Planjahre und Folgejahr; Zeilen wie tariff_core_impl.h, Jahr NA = keine Veranlagung)
   TariffCore TC;
@@ -387,7 +393,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
   double trow[TR_N];
 
   for (int k = 0; k < paths; k++) {
-    std::fill(st.begin(), st.end(), 0.0);
+    std::fill(st, st + S_N, 0.0);
     double u = 1.0, n = start_value, basis = start_value * basis_ratio, cpi = 1.0, cpi_dec = 1.0;
     double yr_ret = 1.0, W = 0.0, vp_due = 0.0, vp_pending = 0.0, u0 = 1.0, tax_sum = 0.0;
     TaxState ts{loss0, spb_annual};
@@ -515,7 +521,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
         if (vp_pending > 0) { vp_due += tax_on_gain(vp_pending, tfs, tax_rate, ts, kacc); vp_pending = 0.0; }
         double infl_prev = (y == 0) ? 1.0 : cpi / cpi_dec;
         double cp = has_cape ? CAPE(p, k) : 0.0;
-        W = rule_amount(rule, rp.begin(), st.begin(), V, infl_prev, cpi, yr_ret - 1.0, cp, (double)(ny - y));
+        W = rule_amount(rule, rp.begin(), st, V, infl_prev, cpi, yr_ret - 1.0, cp, (double)(ny - y));
         planned(y, k) = W / cpi;
         cpi_dec = cpi; yr_ret = 1.0; u0 = u;
         // Verzehrregeln (one_over_n, vpw, abw, hebeler) leeren das Depot planmaessig: im Jahr, fuer das sie das

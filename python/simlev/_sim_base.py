@@ -18,8 +18,8 @@ import pandas as pd
 from . import _ext
 from ._dates import days_from_civil, from_days
 from ._meldungen import EVAL_WARN as _MELD_EVAL_WARN
-from ._r.rformat import _is_num, r_as_character, r_format, r_format1, r_sprintf  # noqa: F401 (_is_num auch für Nachbarmodule)
-from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum
+from ._r.rformat import _is_num, r_as_character, r_sprintf  # noqa: F401 (_is_num auch für Nachbarmodule)
+from ._r.rnum import r_mean, r_pow, r_sd, r_sum
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
@@ -367,8 +367,28 @@ def _memo_seed_dates(col: Any) -> None:
     _StudyCache.m["dates_full"] = (days.copy(), True)
 
 
+_TICKS_PER_DAY = {"s": 86400, "ms": 86400 * 10 ** 3, "us": 86400 * 10 ** 6, "ns": 86400 * 10 ** 9}
+
+
 def _column_dt(v: pd.Series, dt: Any) -> tuple[str, np.ndarray]:
     """Datums-/Zeitspalte (pandas datetime64) in ("date" bzw. "posixct", Tage seit 1970)."""
+    # seit 1.6.4 (A-056) ohne Zeitzone über die ganzzahligen Zeitstempel (Tag = abgerundeter Quotient, Mitternacht =
+    # Rest 0, NaT -> NA) statt dt.normalize(); gleiche Werte wie der Weg über pandas (normalize rundet ebenfalls ab)
+    if isinstance(dt, np.dtype) and dt.kind == "M":
+        unit, cnt = np.datetime_data(dt)
+        tpd = _TICKS_PER_DAY.get(unit)
+        if tpd is not None and cnt == 1:
+            raw = v.to_numpy()
+            nat = np.isnat(raw)
+            q, r = np.divmod(raw.view(np.int64), tpd)
+            # erster darstellbarer Tag der Auflösung und davor (bei ns 1677-09-22 bzw. 1677-09-21): wie bisher über
+            # pandas und numpy (dort OverflowError bzw. „Cannot normalize Timestamp without integer overflow“)
+            if not bool(np.any(~nat & (q <= -((2 ** 63 - 1) // tpd)))):
+                midnight = bool(np.all(nat | (r == 0)))
+                days = q.astype(np.float64)
+                if nat.any():
+                    days[nat] = NA
+                return ("date" if midnight else "posixct"), days
     s = v
     midnight = True
     if getattr(dt, "tz", None) is not None:
@@ -409,6 +429,10 @@ def _column(v: Any) -> tuple[str, np.ndarray]:
             if raw is not None:
                 _memo_set("datecol", raw, (out[0], out[1].copy()))
             return out
+        if pd.api.types.is_complex_dtype(dt):
+            # seit 1.6.4 (C-007, Entscheidung 81): komplexe Zahlen nicht still in ihren Realteil umwandeln (bis 1.6.3
+            # mit numpys ComplexWarning); Art "other" wie andere nicht darstellbare Werte
+            return "other", v.to_numpy(dtype=object)
         if pd.api.types.is_numeric_dtype(dt):
             return "numeric", v.to_numpy(dtype=np.float64, na_value=np.nan)
         if pd.api.types.is_string_dtype(dt) and not pd.api.types.is_object_dtype(dt):
@@ -483,25 +507,43 @@ class _FeeEnv:
 _FEE = _FeeEnv()
 
 
-def _fee_spec(x: Any) -> dict | None:
+def _fee_spec(x: Any, fn: str, arg: str) -> dict | None:
+    """Gebührenangabe normalisieren (R ``.fee_spec``); ``fn``/``arg`` für Meldungen (seit 1.6.4, K43 T1-R5; bis dahin
+    "order_fee/dca_fee" bzw. ganz ohne Funktionsnamen)."""
+    from ._pruefen import _to_float, chk_scalar, chk_stop
     if x is None:
         return None
+    if isinstance(x, (list, tuple, np.ndarray, pd.Series)) and _is_num(chk_scalar(x)):   # Länge 1 wie Einzelwert
+        x = chk_scalar(x)
     if _is_num(x):
-        x = {"fixed": float(x)}
+        x = {"fixed": _to_float(x)}   # seit K43 T1-R4: 10**400 ergibt inf (Meldung wie R) statt OverflowError
     if not isinstance(x, Mapping):
-        _stop("order_fee/dca_fee: Zahl (EUR je Order) oder list(fixed, percent, min, max).")
+        chk_stop("ut1.gebuehr", fn, arg)
     names = [str(k) for k in x.keys()]
+    # Tippfehler nicht still ignorieren; seit K43 T1-R5 je Fall eine Meldung aus der Tabelle
+    if len(x) and any(k == "" for k in names):
+        chk_stop("e2.benannt", fn, arg)
     unk = [k for k in names if k not in ("fixed", "percent", "min", "max")]
-    if len(x) and (any(k == "" for k in names) or unk):
-        _stop("order_fee/dca_fee: unbekannte oder unbenannte Felder (%s); erlaubt sind fixed, percent, min, max."
-              % ", ".join(unk if unk else ["ohne Namen"]))
+    if unk:
+        chk_stop("ut1.gebuehr_feld", fn, unk[0], arg)
+    # seit 1.6.4 (A-046): je Feld eine einzelne Zahl, nicht NA, endlich (max auch Inf); bis 1.6.3 rechnete Python
+    # mit Text wie mit der Zahl. Negative Werte und min > max meldet die Prüfung danach.
+    vals = {}
+    for k in names:
+        v = chk_scalar(x[k])
+        if v is None:
+            continue
+        if not (_is_num(v) and not math.isnan(_to_float(v))
+                and (math.isfinite(_to_float(v)) or (k == "max" and _to_float(v) == math.inf))):
+            chk_stop("e1.zahl_inf" if k == "max" else "zahl", fn, "%s$%s" % (arg, k))
+        vals[k] = v
 
     def g(k, dflt):
-        v = x.get(k)
-        return dflt if v is None else float(v)
+        v = vals.get(k)
+        return dflt if v is None else _to_float(v)
     s = {"fixed": g("fixed", 0.0), "percent": g("percent", 0.0) / 100, "min": g("min", 0.0), "max": g("max", math.inf)}
     if s["fixed"] < 0 or s["percent"] < 0 or s["min"] < 0 or s["max"] < s["min"]:
-        _stop("Geb\u00fchren m\u00fcssen nicht negativ sein (min <= max).")
+        chk_stop("ut1.gebuehr_negativ", fn, arg)
     if s["fixed"] == 0 and s["percent"] == 0 and s["min"] == 0:
         return None
     return s
@@ -566,6 +608,10 @@ def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", pla
                 _stop(who + ": taxable_income als data.frame braucht die Spalten year und taxable_income (oder "
                       "genau zwei Spalten Jahr, Betrag); vorhanden: %s." % ", ".join(str(c) for c in x.columns))
             yc, vc = 0, 1
+        for j in (yc, vc):   # Entscheidung 15 (bis 1.6.3 Jahr still als Text)
+            if isinstance(x.iloc[:, j].dtype, pd.CategoricalDtype):
+                from ._pruefen import chk_stop
+                chk_stop("spalte_faktor", who, str(x.columns[j]))
         kind, col = _column(x.iloc[:, vc])
         if kind != "numeric":
             _stop(who + ": taxable_income: Spalte '%s' (Betrag) muss numerisch sein." % x.columns[vc])
@@ -585,15 +631,14 @@ def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", pla
             names = [r_as_character(k) if _is_num(k) else str(k) for k in x.keys()]
     else:
         vals = _num_vec(x)
-        if vals is not None and len(vals) == 0:
-            vals = None
+    if vals is not None and len(vals) == 0:   # seit 1.6.4 auch eine leere Tabelle (wie R)
+        vals = None
     if vals is None or (isinstance(x, np.ndarray) and x.ndim > 1):
-        shown = r_format(list(x) if isinstance(x, (list, tuple, np.ndarray)) else x)
-        _stop(who + ": taxable_income muss %s sein, nicht %s." % (form, ", ".join(shown[:3])))
+        _stop(who + ": taxable_income muss %s sein." % form)   # seit 1.6.4 ohne Eingabewert
     for i, v in enumerate(vals):
         if not math.isfinite(v):
-            _stop(who + ": taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche "
-                  "Betr\u00e4ge in EUR." % (r_format1(v), (" f\u00fcr %s" % names[i]) if names is not None else ""))
+            _stop(who + ": taxable_income enth\u00e4lt einen ung\u00fcltigen Wert%s; erwartet werden endliche "
+                  "Betr\u00e4ge in EUR." % ((" (f\u00fcr %s)" % names[i]) if names is not None else ""))
     if len(vals) == 1 and names is None:
         return {"all": vals[0], "by_year": None}
     if plan_ok and names is None:
@@ -604,10 +649,11 @@ def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", pla
                  if names is None else ""))
     yy = []
     for nm in names:
-        t = nm.strip()
-        try:
-            y = int(float(t)) if re.match(r"^[-+]?\d+(\.\d*)?([eE][-+]?\d+)?$", t) else None
-        except ValueError:
+        # wie R as.integer(trimws(nm)) und as.character(yy) == trimws(nm): nur ASCII-Leerraum abschneiden, Ziffern 0-9,
+        # Ganzzahl im R-Bereich (seit 1.6.4, A-034; bis 1.6.3 Unicode-Leerraum und Jahre wie 3000000000 angenommen)
+        t = nm.strip(" \t\r\n")
+        y = int(t) if re.fullmatch(r"-?[0-9]+", t) else None
+        if y is not None and abs(y) > 2147483647:
             y = None
         if y is None or str(y) != t:
             _stop(who + ": taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\")." % nm)
@@ -634,16 +680,8 @@ class _TariffEnv:
         self.zve: dict | None = None
         self.ks: dict = {}
         self.church_k = 0.0
-        self.kapest_rate = 0.25
         self.use_gp = False
         self.rows: list = []
-        self.refund_due = 0.0
-        self.due_info: list | None = None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Jahreswechsel (_handle_year_change)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -673,7 +711,8 @@ def _calculate_skewness(x: np.ndarray) -> float:
     sd_x = r_sd(x)
     if sd_x == 0:
         return NA
-    return (n / ((n - 1.0) * (n - 2.0))) * r_sum(r_pow_vec(x - mean_x, 3.0)) / r_pow(sd_x, 3.0)
+    d = x - mean_x            # seit 1.6.4 (K43 T1-R11) (d * d) * d statt pow, wie der Kern (simlev_eval::moments)
+    return (n / ((n - 1.0) * (n - 2.0))) * r_sum(d * d * d) / r_pow(sd_x, 3.0)
 
 
 def _calculate_kurtosis(x: np.ndarray, excess: bool = True) -> float:
@@ -686,7 +725,9 @@ def _calculate_kurtosis(x: np.ndarray, excess: bool = True) -> float:
     if sd_x == 0:
         return NA
     nf = float(n)
-    kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * r_sum(r_pow_vec(x - mean_x, 4.0)) / r_pow(sd_x, 4.0)
+    d = x - mean_x            # seit 1.6.4 (K43 T1-R11) (d * d) * (d * d) statt pow, wie der Kern
+    q = d * d
+    kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * r_sum(q * q) / r_pow(sd_x, 4.0)
     if excess:
         kurt = kurt - (3 * r_pow(nf - 1, 2.0)) / ((nf - 2) * (nf - 3))
     return kurt

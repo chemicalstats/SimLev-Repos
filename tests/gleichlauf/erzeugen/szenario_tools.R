@@ -17,7 +17,9 @@
 # Die Teile tragen die bisherige Fallkennung als Namen (Feld teile; tests/lib: fall("<modul>/<teil>")).
 
 teil <- function(r, py, jl, druck = FALSE, inp = NULL, oben = FALSE) list(r = r, py = py, jl = jl, druck = druck, inp = inp, oben = oben)
-zeile <- function(z, r, py, jl, print = FALSE, inp = NULL) list(z = z, r = r, py = py, jl = jl, print = print, inputs = inp)
+# nur = "py" bzw. "jl" (seit 1.6.4): Zeile nur für diese Sprache (z. B. wenn die Eingabe der anderen Sprache eine andere
+# Meldung ergibt, etwa ein Dateiname der eigenen Sprache); R rechnet die Erwartung wie sonst
+zeile <- function(z, r, py, jl, print = FALSE, inp = NULL, nur = NULL) list(z = z, r = r, py = py, jl = jl, print = print, inputs = inp, nur = nur)
 
 # Eingabe `n`: globales Objekt n, sonst Element n einer globalen Eingabeliste (z. B. I$d), wenn eindeutig
 .sz_get <- function(n) {

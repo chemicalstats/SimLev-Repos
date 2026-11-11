@@ -32,7 +32,8 @@ doppeltem Datum gilt die letzte Zeile (mit Hinweis).}
 
 \item{signal}{Spaltenname in \code{data} oder numerischer Vektor der
 Laenge \code{nrow(data)}. Der Wert in Zeile t muss nur mit Daten bis
-einschliesslich Zeile t berechnet sein (sonst Zukunftsinformation).}
+einschliesslich Zeile t berechnet sein (sonst Zukunftsinformation).
+Seit 1.6.4 keine Faktoren (Spalte oder Vektor).}
 
 \item{target}{Name der Kursspalte (Niveaus, keine Renditen). Fehlende
 Kurse werden mit dem letzten bekannten Wert fortgeschrieben.}
@@ -62,11 +63,13 @@ eine 2D-Tabelle. \code{NULL} (Standard) = keine 2D-Tabelle.}
 
 \item{splits}{Anzahl gleich grosser Gruppen aufeinanderfolgender
 Stichtage fuer die Stabilitaetspruefung (ganze Zahl, Standard 1 = keine
-Aufteilung).}
+Aufteilung).
+Seit 1.6.4 eine ganze Zahl >= 1.}
 
 \item{degree}{Grad der Polynom-Regression \code{forward ~ poly(signal,
   degree)} (ganze Zahl, Standard 2; 0 = keine). Wird nur geschaetzt, wenn
-es mehr als \code{degree + 1} verschiedene Signalwerte gibt.}
+es mehr als \code{degree + 1} verschiedene Signalwerte gibt.
+Seit 1.6.4 eine ganze Zahl >= 0.}
 
 \item{x}{Objekt der Klasse \code{SimLevSignalAnalysis}.}
 

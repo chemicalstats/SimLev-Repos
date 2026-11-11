@@ -34,10 +34,13 @@ Spalten ohne endlichen Wert werden verworfen, danach alle Zeilen mit
 einem fehlenden Wert; bei \code{metric = "sharpe"} ausserdem Spalten ohne
 Schwankung (Standardabweichung <= 1e-10 je Periode, mit Warnung), deren
 Sharpe Ratio nicht definiert ist. Mindestens zwei Spalten noetig. Bei
-\code{print()}/\code{plot()}: Objekt der Klasse \code{SimLevPBO}.}
+\code{print()}/\code{plot()}: Objekt der Klasse \code{SimLevPBO}.
+Seit 1.6.4 keine logischen Spalten und keine unendlichen Renditen; nach dem Entfernen der Zeilen mit fehlenden Werten mindestens zwei Perioden.}
 
 \item{S}{Anzahl Bloecke (gerade ganze Zahl >= 2, Standard 16 ergibt
-\eqn{\binom{16}{8}} = 12870 Aufteilungen).}
+\eqn{\binom{16}{8}} = 12870 Aufteilungen).
+Seit 1.6.4 ohne Abschneiden: eine gebrochene Zahl ist ein Fehler; hoechstens 24
+(\eqn{\binom{24}{12}} = 2704156 Aufteilungen, rund 0,5 GB Speicher, in Julia 0,8 GB).}
 
 \item{metric}{Kennzahl je Periode (nach Abzug von \code{risk_free}, nicht
 annualisiert): \code{"sharpe"} (Standard; Mittelwert /
@@ -59,7 +62,8 @@ annualisiert (betrifft annualisierte Sharpe Ratios und
 
 \item{dates}{Datum je Zeile von \code{x} (Date oder umwandelbar), nur bei
 Matrix-Eingabe; \code{NULL} (Standard) = keine Aggregation. Bei
-\code{SimLevParamSearch} wird \code{x$dates} verwendet.}
+\code{SimLevParamSearch} wird \code{x$dates} verwendet.
+Seit 1.6.4 genau ein Datum je Zeile, aufsteigend, ohne NA und kein Faktor.}
 
 \item{risk_free}{Risikoloser Zins in Prozent p. a. (2 = 2 \%, Standard 0);
 wird als \code{risk_free / 100 / ppy} von jeder Periodenrendite

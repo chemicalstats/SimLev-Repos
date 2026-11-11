@@ -1,9 +1,9 @@
 """Kerne für Kendalls Tau, Quantilsregression und HMM (Python-Hüllen).
 
-Rufen aus ``core/research_core_impl.h`` (über ``simlev._ext``) ``.kendall_tau_core``,
-``.quantile_reg_core`` und ``.hmm_forward_backward`` mit denselben Quellen wie R und Julia auf. Seit
-1.0.0 entfallen die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``, samt der
-Nachbildung von libstdc++ ``std::sort``) und der Port des DCC-Filters (``.dcc_filter``,
+Rufen aus ``core/research_core_impl.h`` (über ``simlev._ext``) ``.kendall_tau_core``, ``.quantile_reg_core``,
+``.hmm_em_core``, ``.goal_dp`` und ``.pbo_cscv`` mit denselben Quellen wie R und Julia auf (``.hmm_forward_backward``
+ohne Aufrufer im Paket entfällt seit 1.6.4). Seit 1.0.0 entfallen die bitgleichen Python-Ports als Rückfall
+(``SIMLEV_NO_EXT=1``, samt der Nachbildung von libstdc++ ``std::sort``) und der Port des DCC-Filters (``.dcc_filter``,
 ``chol_small``); den DCC-Filter rechnet die C-Bibliothek slc (:func:`simlev._lib.dcc_filter`).
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import numpy as np
 
 from . import _ext
 
-__all__ = ["kendall_tau_core", "quantile_reg_core", "hmm_forward_backward", "hmm_em", "goal_dp", "pbo_cscv", "QuantileRegError"]
+__all__ = ["kendall_tau_core", "quantile_reg_core", "hmm_em", "goal_dp", "pbo_cscv", "QuantileRegError"]
 
 
 class QuantileRegError(RuntimeError):
@@ -42,21 +42,6 @@ def quantile_reg_core(y, X, tau, beta0, sc, tol, maxit):
     if b is None:
         return np.zeros(0), None
     return np.frombuffer(b, dtype=np.float64), opt
-
-
-def hmm_forward_backward(B, A, p0):
-    """``.hmm_forward_backward(B, A, p0)`` → dict filtered, smoothed, xi, scale."""
-    Bm = np.asarray(B, dtype=np.float64)
-    T, K = Bm.shape
-    Am = np.asarray(A, dtype=np.float64)
-    p0a = np.ascontiguousarray(np.asarray(p0, dtype=np.float64).ravel())
-    al, ga = np.empty((K, T)), np.empty((K, T))
-    xi = np.empty((K, K))
-    cs = np.empty(T)
-    _ext.hmm_forward_backward(np.ravel(Bm, order="F"), T, K, np.ravel(Am, order="F"), Am.shape[0], p0a,
-                              al, ga, xi, cs)
-    al, ga = (np.ascontiguousarray(a.T) for a in (al, ga))
-    return {"filtered": al, "smoothed": ga, "xi": np.ascontiguousarray(xi.T), "scale": cs}
 
 
 def hmm_em(X, k, mu, S, A, n_iter, tol, ridge):

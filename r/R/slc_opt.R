@@ -21,6 +21,8 @@
 #                (reltol = factr * eps, Standard factr = 1e7 wie optim), pgtol = gtol.
 #   reltol (Standard sqrt(eps)), gtol (Standard 1e-8), xtol (Standard eps), fnscale, parscale.
 #   trace = TRUE: Mitschrift aller Auswertungen im Ergebnis (Feld trace).
+#   Abweichung von optim (Befund B-133): maxit = 0 bzw. maxfev = 0 bedeutet im Kern "ohne Grenze", nicht "kein
+#   Schritt" wie bei optim; kein Aufrufer im Paket uebergibt 0.
 .sl_opt_control <- function(control, m, n) {
   known <- c("maxit", "maxfev", "reltol", "factr", "pgtol", "gtol", "xtol", "fnscale", "parscale", "trace")
   if (!is.list(control)) stop("optim: control muss eine Liste sein", call. = FALSE)
@@ -46,6 +48,9 @@
               else num1("reltol", if (m == 2L) 1e7 * eps else sqrt(eps))
   }
   gtol <- num1("gtol", num1("pgtol", 1e-8))
+  # seit 1.6.4 (B-028, Entscheidung 76): maxit/maxfev im Bereich von int (bis 1.6.3 undefinierte Umwandlung im Kern)
+  for (k in c("maxit", "maxfev")) { v <- get(k)
+    if (!(v >= -2147483648 && v <= 2147483647)) chk_stop("sp.optim_ganz", "optim", k) }
   ctrl <- c(maxit, maxfev, reltol, gtol, num1("xtol", eps), num1("fnscale", 1))
   ps <- control$parscale
   if (!is.null(ps)) {

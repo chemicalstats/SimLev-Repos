@@ -28,11 +28,14 @@ from ._r.stats_sort import _warn as _rwarn
 from . import _dependence_core as _dcore
 from ._r.rnum import r_mean, r_sd, r_sum
 from .deep_analysis import (
-    _ext, _fill_na, _is_num_scalar, _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl,
+    _ext, _fill_na, _is_num_scalar, _key_month, _key_year, _last_of_key, _mean_lgl,
     _sp, _stats, _to_date_days,
 )
 from .svg import _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 from ._util import _num_col
+from ._pruefen import (chk_cols, chk_df, chk_int1, chk_max, chk_name1, chk_nofactor, chk_num1, chk_range_text,
+                       chk_stop)
+from ._pruefen import SL_MAX_GITTER, SL_MAX_JAHRE, SL_MAX_N, SL_MAX_TAGE, chk_jahre  # seit 1.6.4 (Entscheidungen 46 und 47)
 
 __all__ = ["series_shift_return", "bootstrap_pooled", "portfolio_returns", "planning_goal", "SimLevGoalPlan"]
 
@@ -86,6 +89,9 @@ def series_shift_return(data, columns, target, *, type=("returns", "prices"), pp
         ppy: Renditen (Zeilen) je Jahr. ``None`` (Standard): bei einem DataFrame mit ``date`` Anzahl der Renditen
             geteilt durch die Spanne von ``date`` in Jahren (Tage / 365.25), sonst 252.
 
+    Eingaben (seit 1.6.4): ``data`` nur als Tabelle; ``columns`` nicht leere Namen von Zahlenspalten; ``target``
+    endlich und > -100; ``ppy`` eine Zahl > 0.
+
     Returns:
         ``data`` mit angepassten Spalten. Attribut ``shift``: benannter Vektor der angewendeten Verschiebung je
         Spalte in Prozent p. a. (geometrisch; negativ = Rendite abgesenkt). Fehlende Werte werden bei der
@@ -99,24 +105,32 @@ def series_shift_return(data, columns, target, *, type=("returns", "prices"), pp
         d2 = simlev.series_shift_return(d, "us", 4)
         print(np.prod(d2["us"]) ** (365.25 / 3650) - 1)   # etwa 0.04 = 4 % p. a.
     """
-    type = _match_arg(type, ("returns", "prices"))  # noqa: A001
-    if not isinstance(data, pd.DataFrame):
-        raise ValueError("data muss ein data.frame sein.")
-    columns = [columns] if isinstance(columns, str) else [str(c) for c in columns]
+    W = _wd()
+    fn = "series_shift_return"
+    type = W._e3_choice(type, ("returns", "prices"), fn, "type")  # noqa: A001
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): Tabelle, Spaltennamen, Zahlenspalten, target endlich > -100,
+    # ppy > 0
+    chk_df(data, fn, "data")
+    columns = W._e3_names(columns, fn, "columns")
     names = [str(c) for c in data.columns]
     miss = [c for c in dict.fromkeys(columns) if c not in names]
     if miss:
-        raise ValueError("Spalte(n) nicht in data: %s." % ", ".join(miss))
+        chk_stop("spalten", fn, ", ".join("'%s'" % m for m in miss))
+    for k in columns:
+        W._e3_numcol(data, k, fn)
+    W._e3_datecol(data, fn)
     tv, tn = _numvals(target)
     if not _all_num(tv) or np.isnan(_as_num(tv)).any():
-        raise ValueError("target muss numerisch sein (Prozent p. a., z. B. 4).")
+        chk_stop("ut2.target_zahlen", "series_shift_return")
     tv = _as_num(tv)
+    if not (np.isfinite(tv) & (tv > -100)).all():
+        chk_stop("e3.werte_bereich", fn, "target", chk_range_text(lo=-100, lo_open=True))
+    ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True, null_ok=True)
     if len(tv) == 1 and tn is None:
         tg = {c: float(tv[0]) for c in columns}
     elif tn is None or [c for c in columns if c not in tn]:
         lst = columns if tn is None else [c for c in columns if c not in tn]
-        raise ValueError("target braucht einen Skalar oder einen benannten Eintrag je Spalte aus columns; fehlt für: %s."
-                         % ", ".join(lst))
+        chk_stop("rs.target_spalten", fn, ", ".join(lst))
     else:
         tg = {}
         for k, v in zip(tn, tv):
@@ -131,11 +145,12 @@ def series_shift_return(data, columns, target, *, type=("returns", "prices"), pp
     if type == "prices" and dd is not None:
         vals = ["NA" if math.isnan(v) else v for v in dd.tolist()]
         if len(set(vals)) < len(vals):
-            raise ValueError("type = 'prices': date enthält doppelte Daten; Kursniveaus brauchen eine eindeutige Zeitfolge.")
+            chk_stop("rs.preise_doppelt", fn)
     if ppy is None:
         if dd is not None:
             ok = dd[~np.isnan(dd)]
-            ppy = (n - (1 if type == "prices" else 0)) / ((float(np.max(ok)) - float(np.min(ok))) / 365.25)
+            with np.errstate(divide="ignore", invalid="ignore"):   # Spanne 0 (eine Zeile): wie R Inf bzw. NaN
+                ppy = float(np.float64(n - (1 if type == "prices" else 0)) / np.float64((float(np.max(ok)) - float(np.min(ok))) / 365.25))
         else:
             ppy = 252.0
     ppy = float(ppy)
@@ -172,10 +187,13 @@ def _period_keys(d, frequency):
     return _key_year(d)
 
 
-def _period_gross(df, columns, frequency):
-    """Periodenrenditen (brutto) aus Kursreihen, ``.period_gross``; ``DataFrame`` Perioden x Spalten."""
+def _period_gross(df, columns, frequency, fn=None, land=None):
+    """Periodenrenditen (brutto) aus Kursreihen, ``.period_gross``; ``DataFrame`` Perioden x Spalten. Mit ``fn``
+    (seit 1.6.4): Spalte ``date`` aufsteigend und ohne NA, sonst Meldung."""
     columns = [columns] if isinstance(columns, str) else list(columns)
     d = _to_date_days(df["date"], "data$date")
+    if fn is not None:
+        _wd()._e3_dates_sorted(d, fn, land)
     key = _period_keys(d, frequency)
     end = _last_of_key(key)
     V = np.column_stack([_fill_na(_num_col(df[k]),
@@ -183,6 +201,12 @@ def _period_gross(df, columns, frequency):
     G = V[1:, :] / V[:-1, :]
     ok = ~np.isnan(G).any(axis=1)
     return pd.DataFrame(G[ok, :], columns=columns)
+
+
+def _wd():
+    """Modul ``withdrawal`` (Eingabeprüfung Entnahme und Planung, spät geladen)."""
+    from . import withdrawal
+    return withdrawal
 
 
 def _wd_ppy(frequency):
@@ -220,21 +244,29 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
             CPI), die in allen Ländern vorhanden ist. Sie wird im selben Block wie die Kurse gezogen.
         frequency: Periodenlänge: ``"year"`` (Standard), ``"quarter"`` oder ``"month"``.
         n: Anzahl simulierter Pfade (Standard 1000).
+            Seit 1.6.4 höchstens 10^8.
         years: Länge jedes Pfads in Jahren (Standard 30); ergibt ``years`` x Perioden je Jahr (1, 4 bzw. 12)
-            Perioden.
+            Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei ``"quarter"`` und ``"month"`` (vorher jede Zahl,
+            die ganze Perioden ergab).
         L: Mittlere Blocklänge in Perioden der gewählten ``frequency`` (Blocklänge = 1 + geometrisch verteilte
             Zahl mit Mittel ``L`` - 1). ``None`` (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw. 120
-            Monate.
+            Monate. Seit 1.6.4 höchstens 100 Jahre (100 Jahre, 400 Quartale bzw. 1200 Monate).
         country_weights: Numerischer Vektor der Ziehungswahrscheinlichkeiten je Land in der Reihenfolge von
             ``datasets`` (wird auf Summe 1 normiert). ``None`` (Standard) = alle Länder gleich wahrscheinlich.
         target: Optional Renditeannahmen in Prozent p. a. (geometrisch): Skalar für alle ``columns`` oder
             benannter Vektor je Spalte. Die Verschiebung wird über die gepoolten Renditen aller Länder bestimmt
             und für alle Länder gleich angewendet (wie ``series_shift_return()``). ``None`` (Standard) =
             historische Renditen.
+            Benannt auch für die Spalte aus inflation (seit 1.6.4 dokumentiert).
         seed: Startwert der Ziehung (Standard ``None``). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das
             Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau
             einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte
             Aufrufe liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
+
+    Eingaben (seit 1.6.4): je Land eine Tabelle mit aufsteigender Spalte ``date`` ohne NA und den Zahlenspalten
+    aus ``columns`` (und ``inflation``); ``n`` ganze Zahl >= 1; ``years`` ganze Zahl von 1 bis 100; ``L``
+    >= 1 und höchstens 100 Jahre in Perioden; ``country_weights`` je Land >= 0 mit Summe > 0, benannt nach den Ländern zugeordnet; ``target``
+    endlich > -100, benannt nur mit Spalten aus ``columns`` (bzw. ``inflation``).
 
     Returns:
         Objekt der Klasse ``withdrawal_paths`` (Liste) mit ``returns`` (Matrix Perioden x Pfade der
@@ -269,27 +301,73 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
                                      weights={"aktien": 0.6, "anleihen": 0.4}, inflation="cpi", n=200, years=30, L=5, seed=1)
         print(pb["returns"].shape)   # 30 Jahre x 200 Pfade
     """
-    frequency = _match_arg(frequency, ("year", "quarter", "month"))
-    if not isinstance(datasets, Mapping) or any(str(k) == "" for k in datasets.keys()):
-        raise ValueError("datasets muss eine benannte Liste sein (Land -> data.frame).")
-    columns = [columns] if isinstance(columns, str) else list(columns)
+    W = _wd()
+    fn = "bootstrap_pooled"
+    frequency = W._e3_choice(frequency, ("year", "quarter", "month"), fn, "frequency")
+    if not isinstance(datasets, Mapping) or not datasets or any(str(k) == "" for k in datasets.keys()):
+        chk_stop("ut2.datasets", fn)
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): je Land eine Tabelle mit date und den Spalten, Anzahlen,
+    # Blocklänge, Ländergewichte, Renditeannahmen
+    columns = W._e3_names(columns, fn, "columns")
+    chk_nofactor(inflation, fn, "inflation")
+    inflation = chk_name1(inflation, fn, "inflation", null_ok=True)
+    xc = columns + ([inflation] if inflation is not None else [])
+    for k, df in datasets.items():
+        chk_df(df, fn, "datasets[['%s']]" % k)
+        nms = [str(c) for c in df.columns] if isinstance(df, pd.DataFrame) else list(df.names)
+        miss = [c for c in dict.fromkeys(["date"] + xc) if c not in nms]
+        if miss:
+            chk_stop("e3.spalten_land", fn, ", ".join("'%s'" % c for c in miss), str(k))
+        for cl in xc:
+            W._e3_numcol(df, cl, fn)
+        W._e3_datecol(df, fn)
     ppy = _wd_ppy(frequency)
+    n = chk_int1(n, fn, "n", lo=1)
+    chk_max(n, SL_MAX_N, fn, "n")                # seit 1.6.4 (Entscheidung 16)
+    # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; vorher
+    # Baustein e3.jahre_perioden: jede Zahl > 0, die ganze Perioden ergab)
+    years = chk_jahre(years, fn, "years")
+    L = chk_num1(L, fn, "L", lo=1, null_ok=True)
+    if L is not None:
+        chk_max(L, SL_MAX_JAHRE * ppy, fn, "L")  # seit 1.6.4 höchstens 100 Jahre in Perioden (K43 T2-N1)
+    if country_weights is not None:
+        nc0 = len(datasets)
+        cwv, cwn = _numvals(country_weights)
+        if not (len(cwv) == nc0 and _all_num(cwv) and np.isfinite(_as_num(cwv)).all() and (_as_num(cwv) >= 0).all()
+                and r_sum(_as_num(cwv)) > 0):
+            chk_stop("e3.gewichte", fn, "country_weights", "Land aus datasets (%d)" % nc0)
+        cwv = _as_num(cwv)
+        if cwn is not None:                                  # benannt: nach den Namen der Länder (wie weights)
+            dn = [str(k) for k in datasets.keys()]
+            if len(set(cwn)) != len(cwn) or set(cwn) != set(dn):
+                chk_stop("e3.namen_passen", fn, "country_weights", "datasets")
+            cwv = np.array([cwv[cwn.index(k)] for k in dn], dtype=np.float64)
+        country_weights = cwv
+    if target is not None:
+        tv0, tn0 = _numvals(target)
+        if not len(tv0) or not _all_num(tv0):
+            chk_stop("zahlen", fn, "target")
+        tv0 = _as_num(tv0)
+        if not (np.isfinite(tv0) & (tv0 > -100)).all():
+            chk_stop("e3.werte_bereich", fn, "target", chk_range_text(lo=-100, lo_open=True))
+        if (len(tv0) != 1) if tn0 is None else (len(set(tn0)) != len(tn0) or any(k not in xc for k in tn0)):
+            chk_stop("e3.ziel", fn)
     if weights is not None:
         wv, wn = _numvals(weights)
         if (not _all_num(wv) or len(wv) != len(columns) or np.isnan(_as_num(wv)).any() or (_as_num(wv) < 0).any()
                 or r_sum(_as_num(wv)) <= 0):
-            raise ValueError("weights muss je Spalte aus columns (%d) ein Gewicht >= 0 enthalten (Summe > 0)." % len(columns))
+            chk_stop("e3.gewichte", fn, "weights", "Spalte aus columns (%d)" % len(columns))
         wv = _as_num(wv)
         if wn is None:
             wn = list(columns)
         elif set(wn) != set(columns):
-            raise ValueError("Namen von weights (%s) passen nicht zu columns (%s)." % (", ".join(wn), ", ".join(columns)))
+            chk_stop("rs.weights_namen", fn, ", ".join(wn), ", ".join(columns))
         weights = (wn, wv)
     cols = columns + ([inflation] if inflation is not None else [])
     ctry_names = [str(k) for k in datasets.keys()]
-    G = [np.array(_period_gross(df, cols, frequency).to_numpy(dtype=np.float64)) for df in datasets.values()]
+    G = [np.array(_period_gross(df, cols, frequency, fn, str(k)).to_numpy(dtype=np.float64)) for k, df in datasets.items()]
     if any(g.shape[0] < 2 for g in G):
-        raise ValueError("Ein Land hat zu wenige Perioden.")
+        chk_stop("rs.land_kurz", fn)
     ci = {c: i for i, c in reversed(list(enumerate(cols)))}
     if target is not None:
         tv, tn = _numvals(target)
@@ -333,7 +411,7 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
             out.append((ctry, row))
         return out
 
-    draw = draw_all(_sl.main_stream(seed))          # Hauptstrom
+    draw = draw_all(_sl.main_stream(seed, "bootstrap_pooled"))          # Hauptstrom
     Gall = np.vstack(G)
     off = np.concatenate([[0], np.cumsum(nrs)])[:nc]
     gi = np.column_stack([off[c - 1] + r for c, r in draw]) if draw else np.zeros((nper, 0), dtype=np.int64)
@@ -383,6 +461,10 @@ def portfolio_returns(data, candidates, *, frequency=("year", "quarter", "month"
             werden Spaltennamen des Ergebnisses; ohne Namen ``"P1"``, ``"P2"``, ...
         frequency: Periodenlänge und Rebalancing-Rhythmus: ``"year"`` (Standard), ``"quarter"`` oder ``"month"``.
 
+    Eingaben (seit 1.6.4): ``data`` nur als Tabelle mit aufsteigender Spalte ``date`` ohne NA; ``candidates``
+    nicht leer, je Kandidat benannte Gewichte (Namen = Zahlenspalten), endlich mit Summe > 0 (einzelne negative
+    Gewichte erlaubt).
+
     Returns:
         Numerische Matrix Perioden x Kandidaten mit Brutto-Renditen (z. B. 1.05 = +5 %); nur Perioden, in denen
         alle beteiligten Kursspalten Werte haben.
@@ -398,19 +480,38 @@ def portfolio_returns(data, candidates, *, frequency=("year", "quarter", "month"
         cand = {"a20": {"aktien": 0.2, "anleihen": 0.8}, "a60": {"aktien": 0.6, "anleihen": 0.4}}
         print(simlev.portfolio_returns(d, cand)[:3])
     """
-    frequency = _match_arg(frequency, ("year", "quarter", "month"))
+    W = _wd()
+    fn = "portfolio_returns"
+    frequency = W._e3_choice(frequency, ("year", "quarter", "month"), fn, "frequency")
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): Tabelle; Kandidaten als benannte Gewichtsvektoren mit endlichen
+    # Werten und positiver Summe (einzelne negative Gewichte bleiben erlaubt); Spalten vorhanden und numerisch
+    chk_df(data, fn, "data")
     if isinstance(candidates, Mapping):
         cnames = [str(k) for k in candidates.keys()]
         cands = list(candidates.values())
-    else:
+    elif isinstance(candidates, (list, tuple)):
         cands = list(candidates)
         cnames = ["P%d" % (i + 1) for i in range(len(cands))]
+    else:
+        cands = []
     ws = []
     for w in cands:
-        wv, wn = _numvals(w)
+        wv, wn = _numvals(w) if isinstance(w, (Mapping, pd.Series)) else (None, None)
+        if wn is None or not len(wv) or not _all_num(wv) or not all(isinstance(k, str) and k != "" for k in wn):
+            ws = []
+            break
         ws.append((wn, _as_num(wv)))
+    if not ws:
+        chk_stop("e3.kandidaten", fn)
+    for (wn, wv), cnm in zip(ws, cnames):
+        if not np.isfinite(wv).all() or r_sum(wv) <= 0:
+            chk_stop("e3.kandidat_summe", fn, cnm)
     a = list(dict.fromkeys(k for wn, _ in ws for k in (wn or [])))
-    G = _period_gross(data, a, frequency)
+    chk_cols(data, ["date"] + a, fn)
+    for k in a:
+        W._e3_numcol(data, k, fn)
+    W._e3_datecol(data, fn)
+    G = _period_gross(data, a, frequency, fn)
     Gm = G.to_numpy(dtype=np.float64)
     cols = []
     for wn, wv in ws:
@@ -423,16 +524,6 @@ def portfolio_returns(data, candidates, *, frequency=("year", "quarter", "month"
 # ═══════════════════════════════════════════════════════════════════════════
 # planning_goal
 # ═══════════════════════════════════════════════════════════════════════════
-
-def _fmt_vals(v):
-    a = np.atleast_1d(np.asarray(v, dtype=object)).ravel()
-    try:
-        f = np.asarray(a, dtype=np.float64)
-        out = _fmt.format(f) if f.size != 1 else _fmt.format(float(f[0]))
-    except (TypeError, ValueError):
-        out = _fmt.format(a)
-    return ", ".join(str(s) for s in np.atleast_1d(out))
-
 
 def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_grid=301, n_sim=5000, seed=None):
     """Zielbasierte Allokation per dynamischer Programmierung (Das et al. 2020).
@@ -457,16 +548,21 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
         horizon: Anzahl Perioden bis zum Ziel (ganze Zahl >= 1; Periodenlänge wie die Zeilen von ``returns``, z.
             B. Jahre bei Jahresrenditen). Nicht zu verwechseln mit ``horizon`` in ``withdrawal_simulation()``
             (Objekt aus ``withdrawal_horizon()`` oder Jahre).
+            Seit 1.6.4 höchstens 36600 Perioden (wie path_length: 100 Jahre in Tagen).
         contributions: Zahlung je Periode als Geldbetrag (Standard 0): Skalar oder Vektor (wird mit ``rep_len()``
             auf ``horizon`` Perioden gebracht); positiv = Einzahlung, negativ = Entnahme, jeweils zu
             Periodenbeginn vor der Rendite.
         n_grid: Anzahl Punkte des logarithmischen Vermögensrasters (Standard 301, mindestens 2; dazu Ziel und
             Startwert); mehr Punkte = genauer, aber langsamer.
+            Seit 1.6.4 höchstens 10^6.
         n_sim: Anzahl Pfade der Vorwärtssimulation der optimalen Politik (Standard 5000).
+            Seit 1.6.4 höchstens 10^8.
         seed: Startwert für die Vorwärtssimulation (Standard ``None``). Mit Startwert (ganze Zahl, |seed| < 2^53)
             ist das Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None``
             wird genau einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``),
             wiederholte Aufrufe liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
+
+    Eingaben (seit 1.6.4): ``n_grid`` und ``n_sim`` sind ganze Zahlen.
 
     Returns:
         Objekt der Klasse ``SimLevGoalPlan`` (Liste):
@@ -536,27 +632,35 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
         cn0 = None
     S, K = (R.shape if R is not None else (0, 0))
     if not isnum or not S or not K or (~np.isfinite(R)).any() or (R < 0).any():
-        raise ValueError("returns muss eine Matrix (Szenarien x Kandidaten) endlicher Brutto-Renditen >= 0 ohne NA sein "
-                         "(z. B. 1.05).")
+        chk_stop("ut2.goal_returns", "planning_goal")
 
     def num1(v):
         a = np.atleast_1d(np.asarray(v, dtype=object)).ravel()
         return len(a) == 1 and _is_num_scalar(a[0]) and math.isfinite(float(a[0]))
 
+    def whole(v):
+        f = float(np.ravel(v)[0])
+        return f == _fmt.r_round(f)
+
+    # Meldungen ohne den Eingabewert (seit 1.6.4, Entscheidung 8); n_grid und n_sim seit 1.6.4 ganzzahlig
     if not num1(start_value) or float(np.ravel(start_value)[0]) <= 0:
-        raise ValueError("start_value muss ein Geldbetrag > 0 sein (erhalten: %s)." % _fmt_vals(start_value))
+        chk_stop("ut2.geldbetrag_gt0", "planning_goal", "start_value")
     if not num1(goal) or float(np.ravel(goal)[0]) < 0:
-        raise ValueError("goal muss ein Geldbetrag >= 0 sein (erhalten: %s)." % _fmt_vals(goal))
-    if not num1(horizon) or float(np.ravel(horizon)[0]) < 1 or float(np.ravel(horizon)[0]) != _fmt.r_round(float(np.ravel(horizon)[0])):
-        raise ValueError("horizon muss eine ganze Zahl >= 1 sein (Anzahl Perioden; erhalten: %s)." % _fmt_vals(horizon))
-    if not num1(n_grid) or float(np.ravel(n_grid)[0]) < 2:
-        raise ValueError("n_grid muss eine ganze Zahl >= 2 sein (erhalten: %s)." % _fmt_vals(n_grid))
-    if not num1(n_sim) or float(np.ravel(n_sim)[0]) < 1:
-        raise ValueError("n_sim muss eine ganze Zahl >= 1 sein (erhalten: %s)." % _fmt_vals(n_sim))
+        chk_stop("ut2.geldbetrag_ge0", "planning_goal", "goal")
+    if not num1(horizon) or float(np.ravel(horizon)[0]) < 1 or not whole(horizon):
+        chk_stop("ganz", "planning_goal", "horizon", "1")
+    if not num1(n_grid) or float(np.ravel(n_grid)[0]) < 2 or not whole(n_grid):
+        chk_stop("ganz", "planning_goal", "n_grid", "2")
+    if not num1(n_sim) or float(np.ravel(n_sim)[0]) < 1 or not whole(n_sim):
+        chk_stop("ganz", "planning_goal", "n_sim", "1")
+    # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46; horizon in Perioden wie path_length: 36 600 = 100 Jahre in Tagen)
+    chk_max(horizon, SL_MAX_TAGE, "planning_goal", "horizon")
+    chk_max(n_grid, SL_MAX_GITTER, "planning_goal", "n_grid")
+    chk_max(n_sim, SL_MAX_N, "planning_goal", "n_sim")
     cv = np.atleast_1d(np.asarray(contributions.to_numpy() if isinstance(contributions, pd.Series) else contributions,
                                   dtype=object)).ravel()
     if not _all_num(cv) or not len(cv) or (~np.isfinite(_as_num(cv))).any():
-        raise ValueError("contributions muss ein endlicher Geldbetrag oder Vektor von Geldbeträgen sein.")
+        chk_stop("ut2.contributions", "planning_goal")
     start_value = float(np.ravel(start_value)[0])
     goal = float(np.ravel(goal)[0])
     horizon = int(float(np.ravel(horizon)[0]))
@@ -606,7 +710,7 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
             W = np.where(alive, base * R[draw - 1, k - 1], 0.0)
         return {"terminal": W, "choice": choice, "success": ~ruined & (W >= goal)}
 
-    sim = run(_sl.main_stream(seed))                # Hauptstrom
+    sim = run(_sl.main_stream(seed, "planning_goal"))                # Hauptstrom
     p_sim = _mean_lgl(sim["success"])
     se = math.sqrt(p_sim * (1 - p_sim) / n_sim)
     tol = 4 * math.sqrt(max(p_sim * (1 - p_sim), 1 / n_sim) / n_sim) + 0.01
@@ -697,7 +801,7 @@ def _plot_goalplan(x):
 
 def _goal_grid(x):
     """Vermögensgitter als Zahlen (``DA._f64(x$grid)``)."""
-    return [NA_REAL if v is None else float(v) for v in np.atleast_1d(x["grid"]).tolist()]
+    return [float(v) for v in np.atleast_1d(x["grid"]).tolist()]   # grid ist float64 (planning_goal)
 
 
 # plot.SimLevGoalPlan (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_goalplan, "SimLevGoalPlan")``

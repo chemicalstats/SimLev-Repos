@@ -53,22 +53,16 @@ const double* signal(SEXP x, R_xlen_t n, std::vector<double>& store, int& logica
 SEXP names_of(std::initializer_list<const char*> nm) {
   SEXP x = sl::alloc(STRSXP, (R_xlen_t) nm.size());
   R_xlen_t i = 0;
-  for (const char* s : nm) SET_STRING_ELT(x, i++, Rf_mkChar(s));
+  for (const char* s : nm) SET_STRING_ELT(x, i++, sl::mkchar(s));   // seit 1.6.4 unter rcall (K43 T1-B2)
   return x;
 }
-SEXP num_scalar(double v) {
-  SEXP x = sl::alloc(REALSXP, 1);
-  REAL(x)[0] = v;
-  return x;
-}
+// Neue geschuetzte Zahlenvektoren ueber sl::num_copy (simlev_capi.h; seit 1.6.4 statt eigener Kopien;
+// sl::wrap schuetzt nicht)
+SEXP num_scalar(double v) { return sl::num_copy(&v, &v + 1).sexp; }
+SEXP num_vec(const std::vector<double>& v) { return sl::num_copy(v.begin(), v.end()).sexp; }
 SEXP lgl_scalar(int v) {
   SEXP x = sl::alloc(LGLSXP, 1);
   LOGICAL(x)[0] = v;
-  return x;
-}
-SEXP num_vec(const std::vector<double>& v) {
-  SEXP x = sl::alloc(REALSXP, (R_xlen_t) v.size());
-  for (std::size_t i = 0; i < v.size(); i++) REAL(x)[i] = v[i];
   return x;
 }
 SEXP int_vec(const std::vector<int>& v) {
@@ -180,7 +174,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
         reps[5 * a + k] = v;
         SET_VECTOR_ELT(r, k, x);
       }
-      Rf_setAttrib(r, R_NamesSymbol, rep_names);
+      sl::set_attr_sym(r, R_NamesSymbol, rep_names);
       SET_VECTOR_ELT(report, a, r);
     }
     I.reports = reps.data();
@@ -205,9 +199,9 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     buf.assign(TT_N, 0.0);
     E.totals_out(buf.data());
     SEXP totals = num_vec(buf);
-    SEXP date_class = Rf_mkString("Date");
-    sl::keep(date_class);
-    // compact (seit 1.6.3 Pflicht; Engine::open_lots_n/open_lots_out): je Asset die Zahl der Kaeufe und Verkaeufe
+    SEXP date_class = sl::mkstring("Date");   // gehalten (seit 1.6.4 unter rcall, K43 T1-B2)
+    // compact (seit 1.6.3 Pflicht: fehlt es, gilt 0 und der Aufruf bricht unten ab; Engine::open_lots_n/open_lots_out):
+    // je Asset die Zahl der Kaeufe und Verkaeufe
     // (n_buys, n_sells, double); 2 dazu open_lots: offene Lots je Asset als list(date <Date>, units, price, vp)
     // (Spalten von .sim_lots_frame, ohne Klasse und Zeilennamen), 1 open_lots = NULL. Die Listen je Lot, Verkauf und
     // Steuerbuchung (bis 1.6.2) las in R niemand ausser ihrer Laenge (R-r-1).
@@ -232,7 +226,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
       for (R_xlen_t i = 0; i < ne; i++) REAL(x)[i] = evd[2 * i + k];
       SET_VECTOR_ELT(ev, 9 + k, x);
     }
-    Rf_setAttrib(ev, R_NamesSymbol, names_of({"code", "site", "day", "asset", "aux", "y_off", "ny", "v_off", "nv",
+    sl::set_attr_sym(ev, R_NamesSymbol, names_of({"code", "site", "day", "asset", "aux", "y_off", "ny", "v_off", "nv",
                                               "d0", "d1"}));
     SEXP err = R_NilValue;
     if (rc != 0) {
@@ -242,7 +236,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
       SET_VECTOR_ELT(err, 2, int_vec({E.err.asset + 1}));
       SET_VECTOR_ELT(err, 3, int_vec({E.err.code}));
       SET_VECTOR_ELT(err, 4, num_scalar(E.err.d0));
-      Rf_setAttrib(err, R_NamesSymbol, names_of({"site", "day", "asset", "code", "d0"}));
+      sl::set_attr_sym(err, R_NamesSymbol, names_of({"site", "day", "asset", "code", "d0"}));
     }
     buf.assign(simlev::TR_N * E.rows.size(), 0.0);
     E.rows_out(buf.data());
@@ -267,10 +261,10 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
         for (int c = 0; c < 4; c++) {
           SEXP x = sl::alloc(REALSXP, k);
           for (R_xlen_t j = 0; j < k; j++) REAL(x)[j] = buf[(std::size_t) (c * k + j)];
-          if (c == 0) Rf_setAttrib(x, R_ClassSymbol, date_class);
+          if (c == 0) sl::set_attr_sym(x, R_ClassSymbol, date_class);
           SET_VECTOR_ELT(cols, c, x);
         }
-        Rf_setAttrib(cols, R_NamesSymbol, ol_names);
+        sl::set_attr_sym(cols, R_NamesSymbol, ol_names);
         SET_VECTOR_ELT(open, a, cols);
       }
     }
@@ -287,11 +281,11 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     SET_VECTOR_ELT(res, 9, int_vec(E.ev_ints));
     SET_VECTOR_ELT(res, 10, num_vec(E.ev_vals));
     SET_VECTOR_ELT(res, 11, err);
-    SET_VECTOR_ELT(res, 12, int_vec(std::vector<int>(E.prep_flags.begin(), E.prep_flags.end())));
+    SET_VECTOR_ELT(res, 12, int_vec(E.prep_flags));
     SET_VECTOR_ELT(res, 13, nb);
     SET_VECTOR_ELT(res, 14, ns);
     SET_VECTOR_ELT(res, 15, open);
-    Rf_setAttrib(res, R_NamesSymbol, names_of({"status", "report", "prices", "totals", "fee_paid", "tax_unpaid", "rows",
+    sl::set_attr_sym(res, R_NamesSymbol, names_of({"status", "report", "prices", "totals", "fee_paid", "tax_unpaid", "rows",
                                               "ks", "events", "ev_ints", "ev_vals", "error", "flags", "n_buys",
                                               "n_sells", "open_lots"}));
     return res;
@@ -386,7 +380,7 @@ extern "C" SEXP C_sim_evaluate(SEXP inp) {
     SET_VECTOR_ELT(res, 14, msgs_out(R.msgs, mv));
     SET_VECTOR_ELT(res, 15, mv);
     SET_VECTOR_ELT(res, 16, int_vec({R.err_site, R.err_phase}));
-    Rf_setAttrib(res, R_NamesSymbol, names_of({"total_worth", "twr_index", "invested", "drawdowns", "scal", "has_ext",
+    sl::set_attr_sym(res, R_NamesSymbol, names_of({"total_worth", "twr_index", "invested", "drawdowns", "scal", "has_ext",
                                               "stats", "ints", "buys", "sells", "why_i", "why_v", "um_i", "um_v",
                                               "msg_code", "msg_v", "err"}));
     return res;

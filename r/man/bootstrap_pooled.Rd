@@ -23,7 +23,8 @@ bootstrap_pooled(
 Spalte \code{date} (Klasse Date oder umwandelbar), den Kursspalten aus
 \code{columns} (Total-Return-Niveaus, keine Renditen) und ggf. der
 Preisindex-Spalte aus \code{inflation}. Jedes Land braucht mindestens
-2 vollstaendige Periodenrenditen.}
+2 vollstaendige Periodenrenditen.
+Die Spalte \code{date} muss aufsteigend sortiert sein und darf kein NA enthalten; Kurs- und Preisindex-Spalten sind Zahlenspalten.}
 
 \item{columns}{Zeichenvektor der Kursspalten (in allen Laendern gleich benannt).}
 
@@ -41,25 +42,31 @@ vorhanden ist. Sie wird im selben Block wie die Kurse gezogen.}
 \item{frequency}{Periodenlaenge: \code{"year"} (Standard), \code{"quarter"}
 oder \code{"month"}.}
 
-\item{n}{Anzahl simulierter Pfade (Standard 1000).}
+\item{n}{Anzahl simulierter Pfade (ganze Zahl >= 1, Standard 1000).
+Seit 1.6.4 hoechstens 10^8.}
 
 \item{years}{Laenge jedes Pfads in Jahren (Standard 30); ergibt
-\code{years} x Perioden je Jahr (1, 4 bzw. 12) Perioden.}
+\code{years} x Perioden je Jahr (1, 4 bzw. 12) Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
+\code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze Perioden ergab).}
 
 \item{L}{Mittlere Blocklaenge in Perioden der gewaehlten \code{frequency}
 (Blocklaenge = 1 + geometrisch verteilte Zahl mit Mittel \code{L} - 1).
 \code{NULL} (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw.
-120 Monate.}
+120 Monate.
+Angegeben eine Zahl >= 1, seit 1.6.4 hoechstens 100 Jahre (100 Jahre, 400 Quartale bzw. 1200 Monate).}
 
 \item{country_weights}{Numerischer Vektor der Ziehungswahrscheinlichkeiten
 je Land in der Reihenfolge von \code{datasets} (wird auf Summe 1
-normiert). \code{NULL} (Standard) = alle Laender gleich wahrscheinlich.}
+normiert). \code{NULL} (Standard) = alle Laender gleich wahrscheinlich.
+Werte >= 0 mit Summe > 0; ein benannter Vektor wird den Laendern nach Namen zugeordnet.}
 
 \item{target}{Optional Renditeannahmen in Prozent p. a. (geometrisch):
 Skalar fuer alle \code{columns} oder benannter Vektor je Spalte. Die
 Verschiebung wird ueber die gepoolten Renditen aller Laender bestimmt und
 fuer alle Laender gleich angewendet (wie \code{\link[=series_shift_return]{series_shift_return()}}).
-\code{NULL} (Standard) = historische Renditen.}
+\code{NULL} (Standard) = historische Renditen.
+Werte endlich und > -100; Namen nur aus \code{columns} (bzw. \code{inflation}).
+Benannt auch fuer die Spalte aus inflation (seit 1.6.4 dokumentiert).}
 
 \item{seed}{Startwert der Ziehung (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein

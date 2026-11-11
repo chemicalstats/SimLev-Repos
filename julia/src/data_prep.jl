@@ -15,7 +15,8 @@
 module DataPrep
 
 import ..SimLev
-using ..SimLev: _match_arg, _which_min   # util.jl (seit 1.6.1 eine Fassung)
+using ..SimLev: _match_arg, _which_min   # util.jl (_match_arg auch für Backcast über DP.) (seit 1.6.1 eine Fassung)
+using ..SimLev: chk_numvec   # pruefen.jl (seit 1.6.4)
 using ..SimLev: RList, RFrame, RVector, nrow, attrs, NA, rows,
                 register_print!, inherits
 using Dates
@@ -31,7 +32,7 @@ export series_align, series_check, series_align_macro, series_convert_currency, 
 message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io); nothing)
 
 using ..SimLev: _isna   # r/rnum.jl (seit 1.6.3; ein Datum ist nie NA)
-_isnum(x) = x isa Real && !(x isa Bool)
+using ..SimLev: _isnum   # util.jl (seit 1.6.4 eine Fassung)
 
 "R-`format(x)` für eine einzelne Zahl."
 function _fmt_num(x)
@@ -155,9 +156,9 @@ end
 const _RX4 = r"^[0-9]{4}[-/]"
 _trimws(s) = s === nothing ? nothing : String(strip(s, [' ', '\t', '\r', '\n']))
 
+# seit 1.6.4 ohne Eingabewert (Entscheidung 8)
 function _todate_numeric_error(what, x1)
-    error(_sprintf("%s: Datum ist numerisch (z. B. %s); erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'.",
-                   what, _fmt_num(x1)))
+    error(_sprintf("%s: Datum ist numerisch; erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'.", what))
 end
 
 """
@@ -165,12 +166,13 @@ end
 
 Datumsangaben in Date umwandeln (R: `.to_date`): `Date`/`DateTime`
 (Kalendertag), Text nur "JJJJ-MM-TT" und "JJJJ/MM/TT" mit vierstelliger
-Jahreszahl; numerische Werte werden abgelehnt. Mit `strict = true` Fehler für
+Jahreszahl; numerische Werte und (seit 1.6.4) Faktoren werden abgelehnt. Mit `strict = true` Fehler für
 nicht lesbare Werte, sonst NA. Liefert immer einen Vektor (`Vector{Date}`,
 mit NA `Vector{Union{Missing,Date}}`).
 """
 function _to_date(x, what = "date"; strict::Bool = true)
     x === nothing && return Date[]
+    x isa SimLev.RFmt.RFactor && chk_stop("e5.datum_faktor", what)   # seit 1.6.4 (Entscheidung 61; bis 1.6.3 als Text)
     x isa RVector && (x = x.values)
     x isa Union{Date,DateTime,AbstractString,Real,Missing} && (x = [x])
     x isa Tuple && (x = collect(x))
@@ -200,11 +202,127 @@ function _to_date(x, what = "date"; strict::Bool = true)
     end
     bad = [i for i in eachindex(s) if s[i] !== nothing && (isnan(d[i]) || !occursin(_RX4, s[i]))]
     if !isempty(bad) && strict
-        error(_sprintf("%s: %d Datumswerte nicht als 'JJJJ-MM-TT' lesbar (z. B. '%s'). Andere Formate vorher umwandeln, z. B. as.Date(x, format = \"%%d.%%m.%%Y\") für '31.12.2024' oder format = \"%%d-%%m-%%Y\".",
-                       what, length(bad), s[bad[1]]))
+        error(_sprintf("%s: %d Datumswerte nicht als 'JJJJ-MM-TT' lesbar (erstmals in Zeile %d). Andere Formate vorher umwandeln, z. B. as.Date(x, format = \"%%d.%%m.%%Y\") für '31.12.2024' oder format = \"%%d-%%m-%%Y\".",
+                       what, length(bad), bad[1]))
     end
     d[bad] .= NA
     return _as_dates(d)
+end
+
+# --- Eingabeprüfung Forschung, Taktik, Datenaufbereitung, Dashboard (seit 1.6.4, K42 E5; Hilfen in pruefen.jl) ---
+using ..SimLev: chk_cols, chk_col_nofactor, chk_date1, chk_df, chk_dots, chk_fmt, chk_int1, chk_intvec, chk_max,
+                chk_msg, chk_name1, chk_nofactor, chk_num1, chk_scalar, chk_stop, chk_text1
+
+"""Auswahl wie R `match.arg` (`nothing` oder der ganze Auswahlvektor = erste Wahl, eindeutige Präfixe werden ergänzt;
+Länge 1 wie Einzelwert); alles andere mit der Meldung `auswahl` (R `.e5_choice`, gleiche Regel wie
+`Withdrawal._e3_match_arg`)."""
+function _e5_match_arg(@nospecialize(x), choices, fn, arg)
+    ch = String[String(c) for c in choices]
+    x === nothing && return ch[1]
+    chk_nofactor(x, fn, arg)
+    if x isa Union{AbstractVector,Tuple} && length(x) == length(ch) && all(v -> v isa AbstractString, x) &&
+       String[String(v) for v in x] == ch
+        return ch[1]
+    end
+    x = chk_scalar(x)
+    if x isa AbstractString
+        v = String(x)
+        i = findfirst(==(v), ch)
+        if i === nothing && !isempty(v)
+            hits = findall(c -> startswith(c, v), ch)
+            length(hits) == 1 && (i = hits[1])
+        end
+        i === nothing || return ch[i]
+    end
+    chk_stop("auswahl", fn, arg, join(("\"$c\"" for c in ch), ", "))
+end
+
+"Vektor nicht leerer Namen (mindestens einer, kein Faktor); Ergebnis `Vector{String}` (R `.e5_names`)."
+function _e5_names(@nospecialize(x), fn, arg; null_ok::Bool = false)
+    x === nothing && null_ok && return nothing
+    chk_nofactor(x, fn, arg)
+    v = x isa AbstractString ? Any[x] : x isa Union{AbstractVector,Tuple} ? Any[e for e in x] : nothing
+    (v === nothing || isempty(v) || !all(c -> c isa AbstractString && !isempty(c), v)) && chk_stop("e3.namen", fn, arg)
+    return String[String(c) for c in v]
+end
+
+"""
+Zahlenvektor wie `chk_numvec`; ein Vektor nur aus `missing`/NaN (ohne Text-Elementtyp) gilt wie in R (`c(NA, NA)`) als
+Zahlenvektor mit NA (Entscheidung 14 sinngemäß; R `.e5_numvec`). Ergebnis: `x` bzw. bei nur `missing` ein Vektor aus NA.
+"""
+function _e5_numvec(@nospecialize(x), fn, arg)
+    if x isa AbstractVector && !isempty(x)
+        T = nonmissingtype(eltype(x))
+        if (T === Union{} || T === Any) && all(z -> z === missing || (z isa AbstractFloat && isnan(z)), x) &&
+           !all(z -> z isa AbstractFloat, x)
+            return fill(NA, length(x))
+        end
+    end
+    chk_numvec(x, fn, arg)
+    return x
+end
+
+"Zahlenspalten (kein Faktor, kein Text, kein Datum); nur NA gilt als Zahlenspalte (Entscheidung 14; R `.e5_numcols`)."
+function _e5_numcols(@nospecialize(data), cols, fn)
+    for col in cols
+        v = data[col]
+        v isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", fn, col)   # Entscheidung 15
+        k, a = SimLev._column(v)
+        (k == :numeric || (!(k in (:character, :date, :posixct, :factor)) &&
+                           all(z -> z === missing || z === nothing || (z isa AbstractFloat && isnan(z)), a))) ||
+            chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
+    end
+    return data
+end
+
+"Tage (Float64, NaN = NA) ohne NA und aufsteigend (R `!anyNA(d) && !is.unsorted(d)`)."
+_e5_sorted(d) = !(any(isnan, d) || any(i -> d[i] < d[i-1], 2:length(d)))
+
+"""Tabelle mit Datumsspalte: `RFrame`, Spalte `date` vorhanden und kein Faktor, mindestens eine Zeile, Datum ohne NA
+und aufsteigend; Ergebnis das Datum (R `.e5_data_dates`)."""
+function _e5_data_dates(@nospecialize(data), fn, what)
+    chk_df(data, fn, "data")
+    chk_cols(data, ["date"], fn)
+    chk_col_nofactor(data, "date", fn)
+    nrow(data) < 1 && chk_stop("zeilen_keine", fn, "data")
+    d = _to_date(data["date"], what)
+    _e5_sorted(Float64[v === missing ? NaN : Float64(Dates.value(v - Date(1970, 1, 1))) for v in d]) || chk_stop("e3.datum", fn)
+    return d
+end
+
+"""Benannte Gewichte (`NamedTuple`, `Dict`, Paar-Vektor, `RVector` mit Namen): Namen nicht leer, Werte endliche
+Zahlen ≥ 0 (kein `Bool`); `nothing`, wenn nicht."""
+function _e5_weights_items(@nospecialize(w))
+    w isa SimLev.RFmt.RFactor && return nothing
+    items = w isa RVector ? (w.names === nothing ? nothing : collect(zip(w.names, w.values))) :
+            w isa Union{AbstractDict,NamedTuple} ? [(string(k), v) for (k, v) in pairs(w)] :
+            w isa Pair ? [(string(w.first), w.second)] :
+            (w isa AbstractVector && !isempty(w) && all(p -> p isa Pair, w)) ? [(string(p.first), p.second) for p in w] :
+            nothing
+    (items === nothing || isempty(items)) && return nothing
+    for (k, v) in items
+        (k isa AbstractString && !isempty(k)) || return nothing
+        (v isa Real && !(v isa Bool) && isfinite(Float64(v)) && Float64(v) >= 0) || return nothing
+    end
+    return items
+end
+
+"Gewichte: benannter Vektor endlicher Zahlen ≥ 0, Namen nicht doppelt (R `.e5_weights`)."
+function _e5_weights(@nospecialize(w), fn, arg)
+    chk_nofactor(w, fn, arg)
+    items = _e5_weights_items(w)
+    items === nothing && chk_stop("e5.gewichte", fn, arg)
+    nm = [k for (k, _) in items]
+    length(unique(nm)) == length(nm) || chk_stop("e2.doppelt", fn, arg)
+    return w
+end
+
+"Rückblicke in Monaten: ganze Zahlen 1 bis 1200 (R `.e5_lookbacks`)."
+function _e5_lookbacks(@nospecialize(lookbacks), fn)
+    chk_nofactor(lookbacks, fn, "lookbacks")
+    chk_intvec(lookbacks, fn, "lookbacks"; lo = 1)
+    chk_max(lookbacks, 1200, fn, "lookbacks")
+    return lookbacks
 end
 
 "`as.Date(x)` (Date, Zeitstempel oder Text mit `tryFormats`) → Float64-Tage."
@@ -373,12 +491,9 @@ end
 "Fehlermeldung für Zahlen als Text (R: `.num_text_stop`)."
 function _num_text_stop(x, cols, name)
     cols isa AbstractString && (cols = [cols])
-    x = _as_frame(x)
-    ex = [e for e in _chr_vals(_col(x, cols[1])) if e !== nothing && e != ""]
-    ex = vcat([e for e in ex if occursin(',', e)], ex)
-    ex0 = isempty(ex) ? "NA" : ex[1]
-    error(_sprintf("'%s': Spalte %s enthält Zahlen als Text bzw. Faktor (z. B. '%s'), vermutlich mit Dezimalkomma. Vorher umwandeln, z. B. mit read.csv2() oder as.numeric(sub(\",\", \".\", x, fixed = TRUE)).",
-                   name, join(("'" * c * "'" for c in cols), ", "), ex0))
+    # seit 1.6.4 ohne Beispielwert aus den Daten (Entscheidung 8)
+    error(_sprintf("'%s': Spalte %s enthält Zahlen als Text bzw. Faktor, vermutlich mit Dezimalkomma. Vorher umwandeln, z. B. mit read.csv2() oder as.numeric(sub(\",\", \".\", x, fixed = TRUE)).",
+                   name, join(("'" * c * "'" for c in cols), ", ")))
 end
 
 "Benannter numerischer Vektor (`RVector` mit Namen, Paare oder Dict aus Zahlen)?"
@@ -409,6 +524,23 @@ function _duplicated(v; from_last::Bool = false)
     out
 end
 
+# seit 1.6.4 für Gleitkommafelder mit Set{Float64} (B-079; bis 1.6.3 Set{Any}, jeder Wert geboxt): dieselbe
+# Gleichheit (isequal: alle NaN ein Schlüssel wie :NA, -0.0 und 0.0 verschieden wie bisher)
+function _duplicated(v::AbstractVector{Float64}; from_last::Bool = false)
+    out = falses(length(v))
+    seen = Set{Float64}()
+    idx = from_last ? (length(v):-1:1) : (1:length(v))
+    for i in idx
+        key = v[i]
+        if key in seen
+            out[i] = true
+        else
+            push!(seen, key)
+        end
+    end
+    out
+end
+
 _stable_order(x) = sortperm(x; alg = Base.Sort.DEFAULT_STABLE)
 
 """
@@ -419,7 +551,7 @@ Eine Quelle in `RFrame(date, ...)` mit numerischen Spalten wandeln (R:
 sortieren, bei doppeltem Datum den letzten Wert behalten. Bei genau einer
 numerischen Spalte heißt sie `name`.
 """
-function _dp_frame(x, name)
+function _dp_frame(x, name, fn = nothing)
     if _is_named_numeric(x)
         nm, vals = _named_parts(x)
         x = RFrame("date" => _to_date(nm, "'$(name)' (Namen)"), "value" => vals)
@@ -434,6 +566,7 @@ function _dp_frame(x, name)
         isempty(dc) ? (isempty(nms) ? nothing : nms[1]) : dc[1]
     end
     dcol === nothing && error("'$(name)': keine numerische Spalte.")
+    fn !== nothing && x[dcol] isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", fn, dcol)   # seit 1.6.4 (Entscheidung 15)
     _is_numeric_col(_col(x, dcol)) &&
         error("'$(name)': keine Datumsspalte; Spalte '$(dcol)' ist numerisch (z. B. Zeilennummern aus write.csv). Spalte 'date' (Date oder 'JJJJ-MM-TT') angeben.")
     num = [k for k in nms if _is_numeric_col(_col(x, k)) && k != dcol]
@@ -509,10 +642,9 @@ ist. Renditereihen vorher in einen Index umrechnen, z. B. `100 * cumprod(1 + r)`
   `"none"`. Gefüllt wird nur innerhalb der Laufzeit einer Reihe (erstes bis letztes vorhandenes Datum).
 - `max_gap`: Höchste Lücke in Kalendertagen zwischen zwei vorhandenen Werten, die noch gefüllt wird; längere
   Lücken bleiben NA (mit Hinweis). Standard `Inf` = alle Lücken füllen.
-- `start`: Optional Beginn und Ende des Zeitraums (Date oder `"JJJJ-MM-TT"`); `nothing` = durch `range`
-  bestimmt.
-- `start`: Optional Beginn und Ende des Zeitraums (Date oder `"JJJJ-MM-TT"`); `nothing` = durch `range`
-  bestimmt.
+  Seit 1.6.4 Zahl >= 0 oder Inf.
+- `start`, `end_`: Optional Beginn und Ende des Zeitraums (Date oder `"JJJJ-MM-TT"`; `end_`, weil `end` in Julia ein
+  Schlüsselwort ist); `nothing` = durch `range` bestimmt. Seit 1.6.4 keine Zahl.
 - `sources`: Benannte Quellen als Schlüsselwörter oder Paare `"name" => quelle`.
 - `kwargs...`: Benannte Quellen (Name = Spaltenname im Ergebnis): `data.frame(date, value)` mit genau einer
   numerischen Spalte (sie wird nach dem Argument benannt), `data.frame(date, A, B, ...)` mit mehreren
@@ -554,13 +686,20 @@ println(series_align(us = a, eu = b))
 function series_align(args...; calendar = ("day", "union", "intersect"), range = ("common", "all"),
                       fill = ("locf", "linear", "none"), max_gap = Inf, start = nothing, end_ = nothing,
                       sources...)
-    calendar = _match_arg(calendar, ("day", "union", "intersect"))
-    rng = _match_arg(range, ("common", "all"))
-    fill = _match_arg(fill, ("locf", "linear", "none"))
+    fn = "series_align"
+    calendar = _e5_match_arg(calendar, ("day", "union", "intersect"), fn, "calendar")
+    rng = _e5_match_arg(range, ("common", "all"), fn, "range")
+    fill = _e5_match_arg(fill, ("locf", "linear", "none"), fn, "fill")
+    # seit 1.6.4 (K42 E5): max_gap Zahl >= 0 oder Inf, start/end Datum (keine Zahl, Entscheidung 7)
+    max_gap = chk_scalar(max_gap)
+    (max_gap isa Real && !(max_gap isa Bool) && !isnan(Float64(max_gap)) && Float64(max_gap) >= 0) ||
+        chk_stop("e5.max_gap", fn)
+    start = chk_date1(start, fn, "start"; null_ok = true)
+    end_ = chk_date1(end_, fn, "end"; null_ok = true)
     src = _named_sources(args, sources)
     (src === nothing || isempty(src) || any(p -> p[1] == "", src)) &&
         error("series_align: Quellen benennen, z. B. series_align(us = df1, eu = df2).")
-    fr = [(k, _dp_frame(v, k)) for (k, v) in src]
+    fr = [(k, _dp_frame(v, k, fn)) for (k, v) in src]
     fdays = [_days(f["date"]) for (_, f) in fr]
     first_ = [isempty(d) ? NA : d[1] for d in fdays]
     last_ = [isempty(d) ? NA : d[end] for d in fdays]
@@ -596,14 +735,15 @@ function series_align(args...; calendar = ("day", "union", "intersect"), range =
     fcols = AbstractVector[]
     for (j, (nm, f)) in enumerate(fr)
         fd = fdays[j]
+        # seit 1.6.4 einmal je Quelle (B-110; fd ist nicht leer, sonst bricht series_align schon oben ab)
+        mi = _match_days(dates, fd)
+        in_life = [d >= fd[1] && d <= fd[end] for d in dates]
         for k in names(f)
             k == "date" && continue
             k in onames && error("series_align: Spaltenname '$(k)' kommt mehrfach vor.")
             vals = f[k]
-            mi = _match_days(dates, fd)
             v = Float64[m > 0 ? vals[m] : NA for m in mi]
             obs = .!isnan.(v)
-            in_life = [d >= fd[1] && d <= fd[end] for d in dates]
             if fill != "none" && any(obs)
                 w = SimLev.Backcast._fill_na(v, fill; keep_leading = true)
                 w[.!in_life] .= NA
@@ -661,6 +801,7 @@ Funktion ändert die Daten nicht.
 - `data`: Tabelle (RFrame) mit Spalte `date` (Date oder `"JJJJ-MM-TT"`) und Kursspalten.
 - `columns`: Zeichenvektor der zu prüfenden Spalten (Standard `nothing` = alle numerischen Spalten außer
   `date`).
+  Seit 1.6.4 müssen die Spalten vorhanden und numerisch sein und dürfen nicht doppelt vorkommen.
 - `jump`: Sprungschwelle in Prozent (20 = 20 %): Veränderung zum vorigen vorhandenen Wert, ab der ein Sprung
   gemeldet wird.
 - `stale`: Mindestlänge in Zeilen einer Folge unveränderter Werte, die als stehender Kurs gemeldet wird (bei
@@ -697,14 +838,26 @@ println(series_check(d)["summary"])
 ```
 """
 function series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
+    fn = "series_check"
+    # seit 1.6.4 (K42 E5): Tabelle mit Spalte date (kein Faktor), Spalten vorhanden, numerisch, ohne Doppel
+    # (B-046, B-052), Schwellen als Zahlen
+    chk_df(data, fn, "data")
+    chk_cols(data, ["date"], fn)
+    chk_col_nofactor(data, "date", fn)
+    if columns !== nothing && (columns isa AbstractString || !isempty(columns))   # leer: keine Spalten (wie bisher)
+        columns = _e5_names(columns, fn, "columns")
+        allunique(columns) || chk_stop("e1.doppelt", fn, "columns")   # Entscheidung 53 (B-052)
+        chk_cols(data, columns, fn)
+        _e5_numcols(data, columns, fn)
+    end
+    jump = chk_num1(jump, fn, "jump"; lo = 0)
+    stale = chk_int1(stale, fn, "stale"; lo = 1)
+    revert = chk_num1(revert, fn, "revert"; lo = 0)
     data = SimLev.as_rframe(data)
     data = _as_frame(data)
-    (data isa RFrame && "date" in _names(data)) || error("series_check: data.frame mit Spalte 'date' erwartet.")
     d = _days(_to_date(_col(data, "date"), "series_check: date"; strict = false))
     if columns === nothing
         columns = [k for k in _names(data) if _is_numeric_col(_col(data, k)) && k != "date"]
-    elseif columns isa AbstractString
-        columns = [columns]
     end
     iss_col = String[]; iss_date = Float64[]; iss_type = String[]; iss_val = Float64[]; iss_info = Float64[]
     add(col, i, type_, value, info = NA) = (push!(iss_col, col); push!(iss_date, d[i]); push!(iss_type, type_);
@@ -860,9 +1013,11 @@ Signale Informationen aus der Zukunft.
 - `macro_`: `data.frame(date, value)` (es zählt die erste numerische Spalte; fehlt `date`, gilt die erste
   Spalte als Datum) oder benannter numerischer Vektor mit Datumsnamen. `date` ist der Referenzzeitpunkt (z. B.
   Monatsanfang des Referenzmonats).
-- `name`: Name der neuen Spalte, wenn `data` ein Tabelle (RFrame) ist (Standard `"macro"`).
+- `name`: Name der neuen Spalte, wenn `data` ein Tabelle (RFrame) ist (Standard `"macro"`); seit 1.6.4 darf es
+  keine Spalte von `data` sein.
 - `lag`: Veröffentlichungsverzug als Zahl in Einheiten von `lag_unit` (Standard 0 = ab dem Referenzdatum
   bekannt).
+  Seit 1.6.4 ganze Zahl >= 0 (kein Blick in die Zukunft), höchstens 36600 Tage bzw. 1200 Monate.
 - `lag_unit`: Einheit von `lag`: `"day"` (Standard; Kalendertage) oder `"month"` (Kalendermonate; der Tag wird
   auf das Monatsende begrenzt, z. B. 31.01. + 1 Monat = 29.02. bzw. 28.02.).
 - `transform`: `"level"` (Standard; Wert unverändert), `"yoy"` (Veränderung gegen Vorjahr in Prozent, 2 = 2
@@ -873,6 +1028,7 @@ Signale Informationen aus der Zukunft.
   1, 4 und 12 wird der Bezugswert per Datum gesucht (Vorjahr bzw. Vormonat/-quartal desselben Kalenders; fehlt
   er, etwa bei einem fehlenden Monat, ist das Ergebnis NA), sonst per Zeile (`periods` bzw. eine Zeile
   zurück).
+  Seit 1.6.4 ganze Zahl >= 1; ohne Angabe braucht macro mindestens zwei Werte.
 
 # Rückgabe
 Bei Datumsvektor ein numerischer Vektor gleicher Länge, sonst `data` mit neuer Spalte `name` (NA vor dem
@@ -895,11 +1051,26 @@ println(d["inflation"][end])
 """
 function series_align_macro(data, macro_; name = "macro", lag = 0, lag_unit = ("day", "month"),
                      transform = ("level", "yoy", "mom", "diff", "yoy_diff"), periods = nothing)
+    fn = "series_align_macro"
+    lag_unit = _e5_match_arg(lag_unit, ("day", "month"), fn, "lag_unit")
+    transform = _e5_match_arg(transform, ("level", "yoy", "mom", "diff", "yoy_diff"), fn, "transform")
+    # seit 1.6.4 (K42 E5): data Tabelle mit Datum oder Datumsvektor, name, lag ganze Zahl >= 0 (kein Vorausblick,
+    # B-025; höchstens 36600 Tage bzw. 1200 Monate, Entscheidung 46), periods ganze Zahl >= 1
+    if data isa RFrame
+        chk_cols(data, ["date"], fn)
+        chk_col_nofactor(data, "date", fn)
+        name = chk_name1(name, fn, "name")
+        name in _names(data) && chk_stop("spalte_vorhanden", fn, name, "data", "name")   # Entscheidung 58
+    else
+        chk_nofactor(data, fn, "data")
+    end
+    lag = chk_int1(lag, fn, "lag"; lo = 0)
+    chk_max(lag, lag_unit == "day" ? 36600 : 1200, fn, "lag")
+    periods = chk_int1(periods, fn, "periods"; lo = 1, null_ok = true)
     data = SimLev.as_rframe(data)
     macro_ = SimLev.as_rframe(macro_)
-    lag_unit = _match_arg(lag_unit, ("day", "month"))
-    transform = _match_arg(transform, ("level", "yoy", "mom", "diff", "yoy_diff"))
-    m = _dp_frame(macro_, "macro")
+    m = _dp_frame(macro_, "macro", fn)
+    periods === nothing && nrow(m) < 2 && chk_stop("e5.makro_kurz", fn)
     v = m[names(m)[2]]
     md = _days(m["date"])
     if periods === nothing
@@ -994,17 +1165,25 @@ println(series_convert_currency(d, "sp500_usd", "eurusd"; suffix = "_eur"))
 ```
 """
 function series_convert_currency(data, columns, fx; method = ("divide", "multiply"), suffix = nothing)
+    fn = "series_convert_currency"
+    method = _e5_match_arg(method, ("divide", "multiply"), fn, "method")
+    # seit 1.6.4 (K42 E5): Tabelle, Spaltennamen, Zahlenspalten, fx kein Faktor, suffix Text
+    chk_df(data, fn, "data")
+    columns = _e5_names(columns, fn, "columns")
+    suffix = chk_text1(suffix, fn, "suffix"; null_ok = true)
     data = SimLev.as_rframe(data)
     fx = SimLev.as_rframe(fx)
-    method = _match_arg(method, ("divide", "multiply"))
-    columns isa AbstractString && (columns = [columns])
     data = _as_frame(data)
     nms = _names(data)
     miss = unique([c for c in columns if !(c in nms)])
     isempty(miss) || error("series_convert_currency: Spalte(n) $(join(("'" * m * "'" for m in miss), ", ")) fehlen in data (vorhanden: $(join(nms, ", "))).")
+    _e5_numcols(data, columns, fn)
+    chk_nofactor(fx, fn, "fx")
+    (fx isa Union{AbstractVector,Tuple} && length(fx) == 1 && first(fx) isa AbstractString) && (fx = first(fx))
+    fx isa AbstractString && fx in nms && _e5_numcols(data, [String(fx)], fn)
     f = SimLev.Backcast._resolve_series(fx, data, "fx")
     bad = [i for i in eachindex(f) if !isfinite(f[i]) || f[i] <= 0]
-    isempty(bad) || error("series_convert_currency: Wechselkurs fx muss positiv sein; $(length(bad)) Zeilen ungültig (z. B. Zeile $(bad[1]): $(_fmt_num(f[bad[1]]))).")
+    isempty(bad) || error("series_convert_currency: Wechselkurs fx muss positiv sein; $(length(bad)) Zeilen ungültig (erstmals Zeile $(bad[1])).")
     data = copy(data)
     for k in columns
         nm = suffix === nothing ? k : k * suffix
@@ -1030,8 +1209,10 @@ Abstand zur Vorzeile in Kalendertagen.
 - `price`: Kursreihe als numerischer Vektor (Niveaus); NA werden per LOCF gefüllt.
 - `dividends`: Ausschüttung je Anteil in Währungseinheiten am Ex-Tag (numerischer Vektor gleicher Länge, 0
   oder NA an Tagen ohne Ausschüttung). Standard `nothing` = keine.
+  Seit 1.6.4 ein Fehler bei anderer Länge.
 - `yield`: Dividendenrendite in Prozent p. a. (2 = 2 %; Skalar oder Vektor gleicher Länge), anteilig je Zeile
   aufgezinst. Standard `nothing` = keine.
+  Seit 1.6.4 endlich, Länge 1 oder wie price.
 - `withholding`: Quellensteuer in Prozent (15 = 15 %), mindert `dividends` und `yield`. Standard 0.
 - `dates`: Datumsvektor gleicher Länge für Δ t, aufsteigend sortiert wie `price` (sonst Fehler); Standard
   `nothing` = 1 Tag je Zeile (nur für `yield` von Bedeutung).
@@ -1060,6 +1241,26 @@ println(index_total_return(p; dividends = div, withholding = 15))
 function index_total_return(price; dividends = nothing, yield = nothing, yield_ = nothing, withholding = 0,
                             dates = nothing, start = nothing)
     yv = yield === nothing ? yield_ : yield
+    fn = "index_total_return"
+    # seit 1.6.4 (K42 E5): Zahlenvektoren (kein Faktor, B-009), dividends gleich lang wie price (B-023), yield ein
+    # Wert oder je Zeile und endlich, withholding 0 bis 100, start Zahl > 0
+    chk_nofactor(price, fn, "price"); price = _e5_numvec(price, fn, "price")
+    (price isa AbstractMatrix || price isa RFrame) && chk_stop("zahlen", fn, "price")
+    np_ = price isa Union{AbstractVector,Tuple} ? length(price) : 1
+    if dividends !== nothing
+        chk_nofactor(dividends, fn, "dividends"); dividends = _e5_numvec(dividends, fn, "dividends")
+        (dividends isa Union{AbstractVector,Tuple} ? length(dividends) : 1) == np_ ||
+            chk_stop("laenge", fn, "dividends", chk_fmt(np_))
+    end
+    if yv !== nothing
+        chk_nofactor(yv, fn, "yield"); yv = _e5_numvec(yv, fn, "yield")
+        yy = _as_numeric(yv isa Union{AbstractVector,Tuple} ? yv : [yv])
+        all(isfinite, yy) || chk_stop("e2.zahlen_endlich", fn, "yield")
+        (length(yy) == 1 || length(yy) == np_) || chk_stop("laenge", fn, "yield", chk_fmt(np_))
+    end
+    withholding = chk_num1(withholding, fn, "withholding"; lo = 0, hi = 100)
+    start = chk_num1(start, fn, "start"; lo = 0, lo_open = true, null_ok = true)
+    dates === nothing || chk_nofactor(dates, fn, "dates")
     p = _as_numeric(price)
     n = length(p)
     w = withholding / 100
@@ -1151,9 +1352,21 @@ println(series_deflate(d, "depot", "cpi")["depot_real"][end])
 ```
 """
 function series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
+    fn = "series_deflate"
+    # seit 1.6.4 (K42 E5): Tabelle mit date, Spalten vorhanden und numerisch (B-046), cpi kein Faktor, base_date
+    # Datum, suffix Text
+    chk_df(data, fn, "data")
+    chk_cols(data, ["date"], fn)
+    chk_col_nofactor(data, "date", fn)
+    columns = _e5_names(columns, fn, "columns")
+    chk_cols(data, columns, fn)
+    _e5_numcols(data, columns, fn)
+    chk_nofactor(cpi, fn, "cpi")
+    cpi isa AbstractString && cpi in names(data) && _e5_numcols(data, [String(cpi)], fn)
+    base_date = chk_date1(base_date, fn, "base_date"; null_ok = true)
+    suffix = chk_text1(suffix, fn, "suffix")
     data = SimLev.as_rframe(data)
     cpi = SimLev.as_rframe(cpi)
-    columns isa AbstractString && (columns = [columns])
     data = _as_frame(data)
     dts = _days(_to_date(_col(data, "date"), "series_deflate: data\$date"))
     c0 = _cpi_level(cpi, data, dts, "cpi")
@@ -1191,6 +1404,7 @@ Proxy-Index.
 
 # Argumente
 - `dates`: Datumsvektor, wenn Vektoren übergeben werden (sonst ignoriert).
+  Seit 1.6.4 müssen alle Vektoren so lang wie dates sein.
 - `series`: Benannte Reihen als Schlüsselwörter oder Paare `"name" => reihe`.
 
 # Rückgabe
@@ -1218,9 +1432,25 @@ function series_splice(args...; dates = nothing, series...)
     src = _named_sources(args, series)
     (src === nothing || length(src) < 2 || any(p -> p[1] == "", src)) && error("series_splice: mindestens zwei benannte Reihen.")
     nms = [s[1] for s in src]
+    fn = "series_splice"
+    # seit 1.6.4 (K42 E5): Vektoren numerisch und gleich lang wie dates (B-047)
+    if !all(s -> _as_frame(s[2]) isa RFrame, src)
+        dates === nothing && error("series_splice: 'dates' angeben, wenn Vektoren übergeben werden.")
+        chk_nofactor(dates, fn, "dates")
+        nd = dates isa Union{AbstractVector,Tuple} ? length(dates) : 1
+        for (i, (k, v)) in enumerate(src)
+            chk_nofactor(v, fn, k); v = _e5_numvec(v, fn, k); src[i] = (k, v)
+            (v isa AbstractMatrix || v isa RFrame) && chk_stop("zahlen", fn, k)
+            (v isa Union{AbstractVector,Tuple} ? length(v) : 1) == nd || chk_stop("laenge", fn, k, chk_fmt(nd))
+        end
+    end
     Fl = nothing
     if all(s -> _as_frame(s[2]) isa RFrame, src)
         al = series_align((k => _as_frame(v) for (k, v) in src)...; range = "all")
+        # Quelle mit mehreren Wertspalten (seit 1.6.4 Meldung wie R und Python, T3-N7; bis 1.6.3 KeyError)
+        for k in nms
+            k in names(al) || chk_stop("ut3.splice_spalte", "series_splice", k)
+        end
         dates = al["date"]
         V = [Float64.(al[k]) for k in nms]
         F = attrs(al)["filled"]
@@ -1306,6 +1536,8 @@ den Standardwerten von `asset_config()` (ETF, Buy and Hold, ohne Spread).
   werden je Asset zugeordnet, auch mit einem einzigen Element wie `partial_exemption = (aktien = 30,)`
   (fehlende Assets behalten den Standardwert, Namen ohne passendes Asset werden ignoriert). Nur ein einzelner
   benannter Wert, dessen Name kein Asset ist, gilt für alle Assets.
+  Seit 1.6.4 ist ein unbekanntes Argument oder share (setzt die Funktion aus weights) ein Fehler mit einheitlicher
+  Meldung.
 
   `wrapper` (Fonds-Wrapper, `wrapper_config`) ist eine Ausnahme, weil ein `SimLevWrapperConfig` selbst eine
   benannte Liste ist: Ein einzelnes `SimLevWrapperConfig` gilt für alle Assets; eine benannte Liste solcher
@@ -1332,10 +1564,14 @@ function strategy_from_weights(weights; kwargs...)
         u = unique(nms[dup])
         error("weights: doppelte Namen $(join(("'" * k * "'" for k in u), ", ")); jedes Asset nur einmal angeben.")
     end
+    chk_numvec(collect(vals), "strategy_from_weights", "weights")   # seit 1.6.4 (bis 1.6.3: Text MethodError)
     w = Float64[_isna(v) ? NA : Float64(v) for v in vals]
     (any(isnan, w) || any(<=(0), w)) && error("Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen).")
     s = SimLev.r_sum(w)
     abs(s - 1) > 1e-6 && error(_sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", s))
+    # seit 1.6.4 (Entscheidung 21): Argumente für asset_config() vor dem Aufruf prüfen (bis 1.6.3 eigene Meldung bzw.
+    # MethodError); share setzt die Funktion selbst
+    SimLev.chk_dots(keys(kwargs), [f for f in SimLev._FIELDS if f != "share"], "strategy_from_weights"; taken = ["share"])
     # Fonds-Wrapper: ein SimLevWrapperConfig gilt für alle Assets, eine benannte Liste je Asset
     wmap = Dict{String,Any}()
     if haskey(kwargs, :wrapper)
@@ -1389,7 +1625,7 @@ function _sfw_wrappers(wv, assets::Vector{String})
     wv === nothing && return Dict{String,Any}()
     inherits(wv, "SimLevWrapperConfig") && return Dict{String,Any}(nm => wv for nm in assets)
     if wv isa RFrame || !(wv isa Union{AbstractDict,NamedTuple,AbstractVector,Tuple,Pair})
-        error("wrapper muss ein Objekt aus wrapper_config() (gilt für alle Assets) oder eine benannte Liste solcher Objekte sein (Name = Asset), nicht $(SimLev._cls_all(wv)).")
+        error("wrapper muss ein Objekt aus wrapper_config() (gilt für alle Assets) oder eine benannte Liste solcher Objekte sein (Name = Asset).")   # seit 1.6.4 ohne Klasse
     end
     _rlen(wv) == 0 && return Dict{String,Any}()
     nm, vals = wv isa Tuple ? (nothing, collect(Any, wv)) : _named(wv)
@@ -1404,7 +1640,7 @@ function _sfw_wrappers(wv, assets::Vector{String})
     isempty(unk) || error("wrapper: $(join(("'" * k * "'" for k in unk), ", ")) $(length(unk) == 1 ? "ist kein Asset der Strategie" : "sind keine Assets der Strategie") (Assets: $(join(assets, ", "))).")
     for (k, v) in zip(nm, vals)
         inherits(v, "SimLevWrapperConfig") ||
-            error("wrapper: Eintrag '$k' muss ein Objekt aus wrapper_config() sein, nicht $(SimLev._cls_all(v)).")
+            error("wrapper: Eintrag '$k' muss ein Objekt aus wrapper_config() sein.")
     end
     return Dict{String,Any}(zip(nm, vals))
 end
@@ -1467,6 +1703,7 @@ function portfolio_template(name_pos = nothing; name = name_pos, map = nothing, 
             error("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name liefert portfolio_template() die Liste der Vorlagen.")
         return _template_list()
     end
+    name = chk_name1(name, "portfolio_template", "name")   # seit 1.6.4 (K42 E5)
     i = findfirst(p -> p.first == name, _PORTFOLIO_TEMPLATES)
     i === nothing && error("Unbekannte Vorlage '$(name)'. Verfügbar: $(join(first.(_PORTFOLIO_TEMPLATES), ", "))")
     w = _PORTFOLIO_TEMPLATES[i].second
@@ -1474,7 +1711,7 @@ function portfolio_template(name_pos = nothing; name = name_pos, map = nothing, 
     vals = Float64[p.second for p in w]
     if map !== nothing
         mn, mv = _named(map)
-        (mn === nothing || any(k -> k == "", mn)) &&
+        (mn === nothing || any(k -> k == "", mn) || any(v -> !(v isa AbstractString) || isempty(v), mv)) &&
             error("map muss benannt sein: Rolle -> Spaltenname, z. B. c(stocks = \"msci_world\").")
         unk = unique([k for k in mn if !(k in roles)])
         isempty(unk) || error("map: unbekannte Rolle(n) $(join(("'" * k * "'" for k in unk), ", ")) für Vorlage '$(name)'; Rollen: $(join(roles, ", ")).")

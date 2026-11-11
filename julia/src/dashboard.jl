@@ -77,7 +77,7 @@ function _check_colors(colors)
     defnames = [p.first for p in DEFAULT_COLORS]
     items = colors isa RVector ? (colors.names === nothing ? nothing : [n => v for (n, v) in zip(colors.names, colors.values)]) :
             _is_mapping(colors) ? _kvpairs(colors) : nothing
-    if items === nothing || any(p -> isempty(p.first), items)
+    if items === nothing || isempty(items) || any(p -> isempty(p.first), items)   # seit 1.6.4 leer wie R ein Fehler (B-057)
         error("plot.SimLevResult: colors muss eine benannte Liste (oder ein benannter Zeichenvektor) sein, z. B. list(primary = \"#003366\"); möglich: $(join(defnames, ", ")).")
     end
     unk = unique([p.first for p in items if !(p.first in defnames)])
@@ -98,8 +98,8 @@ function _check_colors(colors)
     end
     bad = [p for p in items if !ok(p.second)]
     if !isempty(bad)
-        dep(v) = v === nothing || v === missing ? "NA" : (v isa AbstractFloat && isnan(v)) ? "NA_real_" : r_deparse(v)
-        error("plot.SimLevResult: ungültige Farbe(n) in colors: $(join(("$(p.first) = $(dep(p.second))" for p in bad), ", ")); erwartet je Element ein R-Farbname (z. B. \"navy\", siehe grDevices::colors()) oder ein Hex-Code \"#RRGGBB\" bzw. \"#RRGGBBAA\".")
+        # seit 1.6.4 nur die Namen (Entscheidung 8)
+        error("plot.SimLevResult: ungültige Farbe(n) in colors: $(join(("'$(p.first)'" for p in bad), ", ")); erwartet je Element ein R-Farbname (z. B. \"navy\", siehe grDevices::colors()) oder ein Hex-Code \"#RRGGBB\" bzw. \"#RRGGBBAA\".")
     end
     out = Dict{String,Any}(DEFAULT_COLORS)
     for (k, v) in items
@@ -145,7 +145,7 @@ function _tot_ret(r)
     w = r["worth"]
     return w[end] / w[1] - 1
 end
-_ann_vol(r) = (sd = r["statistics"]["sd"]; _isna_any(sd) ? NA : sd * sqrt(_dashboard_returns(r).ppy))
+_ann_vol(r) = (sd = r["statistics"]["sd"]; _isna(sd) ? NA : sd * sqrt(_dashboard_returns(r).ppy))
 
 "Texte des Kennzahlen-Panels (Abschnitt → Zeilen) wie in R."
 function _stats_sections(x, compare = nothing)
@@ -334,8 +334,12 @@ function _panel_distribution(c, cell, x, dash)
     br = r_pretty(lo, hi, 50; min_n = 1)
     length(br) < 2 && (br = [lo, hi == lo ? lo + 1 : hi])
     counts = zeros(Int, length(br) - 1)
+    # seit 1.6.4 mit der Toleranz von hist.default (B-061, Entscheidung 99): fuzz = 1e-7 median(diff(br)), erste
+    # Grenze - fuzz, übrige + fuzz (bis 1.6.3 ohne; Werte auf einer Grenze fielen in die Nachbarklasse)
+    fz = 1e-7 * r_median(diff(br))
+    fbr = br .+ fz; fbr[1] = br[1] - fz
     for v in rets
-        j = searchsortedfirst(br, v) - 1      # rechts geschlossene Klassen (wie hist())
+        j = searchsortedfirst(fbr, v) - 1      # rechts geschlossene Klassen (wie hist())
         j = clamp(j, 1, length(counts))
         counts[j] += 1
     end
@@ -356,7 +360,8 @@ function _panel_distribution(c, cell, x, dash)
     if sd > 0
         xsq = [lo + (hi - lo) * i / 99 for i in 0:99]
         dn = SLib.dnorm(xsq, mu, sd)   # Normaldichte der C-Bibliothek slc (wie R)
-        yn = [d * length(rets) * (hi - lo) / 50 for d in dn]
+        bw = br[2] - br[1]                 # seit 1.6.4 Klassenbreite der Balken (B-001, Entscheidung 91; bis 1.6.3 (hi - lo) / 50)
+        yn = [d * length(rets) * bw for d in dn]
         _polyline!(c, p, xsq, yn; color = _col(col["secondary"]), width = 2, dash = "6,4")
     end
     _line!(c, _px(p, mu), p.y0, _px(p, mu), p.y0 + p.h; color = _col(col["positive"]), width = 2, dash = "6,4")
@@ -405,13 +410,12 @@ function _panel_monthly(c, cell, x)
     ny = length(years)
     p = _Panel(cell..., 0.5, 12.5, 0.5, ny + 0.5)
     _title!(c, p, "Monatsrenditen (%)")
-    neg = _col2rgba(col["negative"]); pos = _col2rgba(col["positive"])
-    function heat(v)
-        t = (clamp(v, -10, 10) + 10) / 20
-        k = clamp(floor(Int, t * 20), 0, 19) / 19       # 20 Farbstufen
-        a, b, u = k < 0.5 ? (neg, (1.0, 1.0, 1.0), k * 2) : ((1.0, 1.0, 1.0), pos, (k - 0.5) * 2)
-        return _svgcol((a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u, a[3] + (b[3] - a[3]) * u, 1.0))
-    end
+    # seit 1.6.4 wie R's image(breaks = seq(-10, 10, length.out = 21)) mit colorRampPalette(c(negative, "white",
+    # positive))(20) (B-062, Entscheidung 99): Klassen rechts geschlossen (.bincode), Farben abgeschnitten
+    # (bis 1.6.3 floor-Klassen und gerundete Farben, jede ganze Zahl eine Stufe höher)
+    pal = _r_ramp_rgb([_col2rgba(col["negative"]), (1.0, 1.0, 1.0), _col2rgba(col["positive"])], 20)
+    hbr = collect(-10.0:1.0:10.0)
+    heat(v) = pal[clamp(searchsortedfirst(hbr, clamp(v, -10.0, 10.0)) - 1, 1, 20)]
     cw = p.w / 12; ch = p.h / max(ny, 1)
     ry = Int[]; rm = Int[]; rv = Float64[]
     for i in 1:ny, j in 1:12
@@ -521,9 +525,10 @@ Mehrteiliges Dashboard wie R's `plot.SimLevResult` als SVG ([`SimLevPlot`](@ref)
 `style`: `"full"` (alle Panels), `"compact"` (4 Kern-Panels) oder `"custom"`
 (Panels aus `panels`, eindeutige Abkürzungen erlaubt). `compare`: zweites
 Ergebnis über dieselben Tage. `colors`: benannte Liste eigener Farben
-(R-Farbname oder Hex-Code). `file`: zusätzlich als SVG-Datei speichern (nur
+(R-Farbname oder Hex-Code; Farbnummer als Text nur aus ASCII-Ziffern, z. B. `"3"`, seit 1.6.4
+nicht `"3.0"`/`"0x1"`). `file`: zusätzlich als SVG-Datei speichern (nur
 Endung `.svg`); ohne `file` wird nichts geschrieben. Unbekannte Schlüsselwörter
-ergeben eine Warnung. Auch über `r_plot(x; ...)`.
+sind seit 1.6.4 ein Fehler (wie in R; bis 1.6.3 eine Warnung). Auch über `r_plot(x; ...)`.
 
 `data` des Ergebnisses enthält je gezeichnetem Panel (Zeichenreihenfolge) ein `RFrame`:
 `performance` (`date`, `strategy`, ggf. `compare`, `invested`), `drawdown` (`date`,
@@ -532,15 +537,19 @@ ergeben eine Warnung. Auch über `r_plot(x; ...)`.
 (`date`, `correlation`), `comparison` (`label`, `value`, `compare`, `diff`).
 """
 function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothing, compare = nothing,
-                        colors = nothing, width::Real = 1400, height = nothing, file = nothing, kwargs...)
-    _warn_unknown_kw("plot_dashboard", collect(keys(kwargs)))
+                        colors = nothing, width = 1400, height = nothing, file = nothing, kwargs...)
+    SimLev.chk_dots(collect(keys(kwargs)), String[], "plot.SimLevResult")   # seit 1.6.4 (Entscheidung 57; bis 1.6.3 Warnung)
+    # seit 1.6.4 (K42 E5, B-027, C-010): x Ergebnis von simulation(), Größe 300 bis 10000 Pixel = 3 bis 100 Zoll
+    # (Entscheidungen 54, 62)
+    x isa SimLevResult || SimLev.chk_stop("klasse", "plot_dashboard", "x", "simulation()")
+    width = SimLev.chk_num1(width, "plot_dashboard", "width"; lo = 300, hi = 10000)
+    height = SimLev.chk_num1(height, "plot_dashboard", "height"; lo = 300, hi = 10000, null_ok = true)
     file === nothing || _check_svg_file(file, "plot_dashboard")
     style = _match_arg(style, ("full", "compact", "custom"))
     panels_given = panels !== nothing
     pv = panels === nothing ? collect(_DEFAULT_PANELS) : panels isa AbstractString ? [panels] : panels
     if !(pv isa Union{AbstractVector,Tuple}) || isempty(pv) || !all(p -> p isa AbstractString, pv)
-        shown = pv === nothing ? "" : join(r_format(pv isa Union{AbstractVector,Tuple} ? collect(Any, pv) : pv), ", ")
-        error("plot.SimLevResult: panels muss ein Zeichenvektor sein (erhalten: $shown); möglich: $(join(("\"$p\"" for p in _ALL_PANELS), ", ")).")
+        error("plot.SimLevResult: panels muss ein Zeichenvektor sein; möglich: $(join(("\"$p\"" for p in _ALL_PANELS), ", ")).")   # seit 1.6.4 ohne Wert
     end
     pm = [_pmatch(String(p), _ALL_PANELS) for p in pv]
     if any(isnothing, pm)
@@ -550,9 +559,9 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
     panels_given && style != "custom" && @warn "plot.SimLevResult: panels wirkt nur mit style = \"custom\" und wird bei style = \"$style\" ignoriert."
     col = _check_colors(colors)
     if compare !== nothing && (!inherits(compare, "SimLevResult") || length(compare["worth"]) != length(x["worth"]))
-        why = !inherits(compare, "SimLevResult") ? "erhalten: Objekt der Klasse '$(_r_class1(compare))'" :
-              "$(length(compare["worth"])) statt $(length(x["worth"])) Tage"
-        error("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein ($why); NULL = kein Vergleich.")
+        # seit 1.6.4 ohne Klasse der Eingabe (Entscheidung 8)
+        inherits(compare, "SimLevResult") || error("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein; NULL = kein Vergleich.")
+        error("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein ($(length(compare["worth"])) statt $(length(x["worth"])) Tage); NULL = kein Vergleich.")
     end
     skipped = String[]
     if style == "custom" && compare === nothing && any(p -> p in ("correlation", "comparison"), panels)
@@ -595,7 +604,7 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
                color = _col(col["neutral"]), anchor = "middle")
     else
         dash = _dashboard_returns(x)
-        order = [p for p in ("performance", "drawdown", "distribution", "rolling", "monthly", "stats", "correlation", "comparison") if p in selected]
+        order = [p for p in _ALL_PANELS if p in selected]
         for (slot, pn) in enumerate(order)
             cell = cell_of(slot)
             pn == "performance" && (data[pn] = _panel_performance(c, cell, x, compare, dash))
@@ -604,8 +613,8 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
             pn == "rolling" && (data[pn] = _panel_rolling(c, cell, x, dash))
             pn == "monthly" && (data[pn] = _panel_monthly(c, cell, x))
             pn == "stats" && (data[pn] = _panel_stats(c, cell, x, compare))
-            pn == "correlation" && compare !== nothing && (data[pn] = _panel_correlation(c, cell, x, compare))
-            pn == "comparison" && compare !== nothing && (data[pn] = _panel_comparison(c, cell, x, compare))
+            pn == "correlation" && (data[pn] = _panel_correlation(c, cell, x, compare))   # nur mit compare ausgewählt
+            pn == "comparison" && (data[pn] = _panel_comparison(c, cell, x, compare))
         end
     end
     print(io, "</svg>\n")
@@ -625,7 +634,7 @@ Methoden und Export-Funktionen für `"SimLevResult"`-Objekte, die von `simulatio
 Renditeverteilung, rollierende Renditen, Monatsrenditen-Heatmap, Kennzahlen, Korrelation, Strategievergleich).
 Korrelation und Strategievergleich gibt es nur mit `compare`.
 
-`export_dashboard` speichert das Dashboard als PDF.
+`export_dashboard` speichert das Dashboard als SVG-Datei (in R als PDF).
 
 `print` gibt die wichtigsten Kennzahlen und ggf. die Steuerzusammenfassung auf der Konsole aus. `summary`
 liefert eine Liste der Klasse `"summary.SimLevResult"` und druckt nicht selbst; ihre Methode `print` zeigt die
@@ -634,7 +643,7 @@ erst mit `print(s)` bzw. `s`).
 
 # Argumente
 - `x`: Ein `"SimLevResult"`-Objekt (bei `print.summary.SimLevResult`: das Ergebnis von `summary`).
-- `filename`: Character. Pfad der Ausgabedatei. Standard: `"dashboard.pdf"`.
+- `filename`: Character. Pfad der Ausgabedatei (Endung `.svg`). Standard: `"dashboard.svg"`.
 - `width`: Numerisch. Breite in Zoll. Standard: `14`.
 - `height`: Numerisch. Höhe in Zoll. Standard: `10`.
 - `kwargs...`: Für `plot`, `print`, `summary`: wird ignoriert. Für `export_dashboard`: wird an
@@ -662,8 +671,8 @@ erst mit `print(s)` bzw. `s`).
 - `print.summary.SimLevResult`: Unsichtbar `x`; gibt die kompakte Zusammenfassung aus (nicht definierte
   Kennzahlen als „nicht definiert (Ursache)“).
 
-- `export_dashboard`: Unsichtbar `nothing` (PDF-Datei wird geschrieben; das PDF-Gerät wird auch bei einem
-  Fehler wieder geschlossen).
+- `export_dashboard`: Unsichtbar `nothing` (die SVG-Datei wird geschrieben; seit 1.6.4 werden `x`, `filename`,
+  `width` und `height` (Zahlen von 3 bis 100 Zoll) und die weiteren Argumente vor dem Zeichnen geprüft).
 
 # Details
 Die Kennzahlen des Dashboards entsprechen `x["statistics"]`: Die Sharpe Ratio ist `statistics["sharpe"]` (mit
@@ -703,7 +712,14 @@ res = simulation(d, create_strategy(ETF = asset_config("etf")))
 export_dashboard(res, joinpath(mktempdir(), "bericht.svg"))
 ```
 """
-function export_dashboard(x, filename_pos::AbstractString = "dashboard.svg"; filename::AbstractString = filename_pos, width::Real = 14, height::Real = 10, kwargs...)
+function export_dashboard(x, filename_pos = "dashboard.svg"; filename = filename_pos, width = 14, height = 10, kwargs...)
+    # seit 1.6.4 (K42 E5, B-027, C-010): Prüfung vor dem Zeichnen; kwargs nur Argumente von plot.SimLevResult
+    fn = "export_dashboard"
+    x isa SimLevResult || SimLev.chk_stop("klasse", fn, "x", "simulation()")
+    filename = SimLev.chk_name1(filename, fn, "filename")
+    width = SimLev.chk_num1(width, fn, "width"; lo = 3, hi = 100)
+    height = SimLev.chk_num1(height, fn, "height"; lo = 3, hi = 100)
+    SimLev.chk_dots(collect(keys(kwargs)), ["style", "panels", "compare", "colors"], fn)
     _check_svg_file(filename, "export_dashboard")
     d = plot_dashboard(x; width = width * 100, height = height * 100, kwargs...)
     _write_svg(filename, d, "export_dashboard")
@@ -711,7 +727,7 @@ function export_dashboard(x, filename_pos::AbstractString = "dashboard.svg"; fil
     return nothing
 end
 
-const _PLOT_RESULT = _plot_method(plot_dashboard, "SimLevResult")
+const _PLOT_RESULT = _plot_method(plot_dashboard, "SimLevResult", true)   # unbekannte Argumente: Fehler
 
 "Wie R's `plot(<SimLevResult>)` (= `r_plot(x; …)`): `SimLevPlot`, Datei nur mit `file`."
 plot(x::SimLevResult, args...; kwargs...) = _PLOT_RESULT(x, args...; kwargs...)

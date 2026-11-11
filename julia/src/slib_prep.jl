@@ -55,6 +55,15 @@ struct Letf
     spread::Float64
 end
 
+# seit 1.6.4 (C-018): Längen der Hilfsreihen wie die Python-Hülle (bis 1.6.3 las der Kern bei zu kurzen Feldern dahinter)
+function _bp_check(aux, aux_ratio, aux_start, level, na)
+    na == 0 && return nothing
+    ok = (aux_ratio === nothing || size(aux_ratio) == size(aux)) && (aux_start === nothing || length(aux_start) == na) &&
+         length(level) == na
+    ok || error("interner Fehler: boot_path Laengen")
+    nothing
+end
+
 """Bootstrap-Pfad (`sl_boot_path`): ret n_out × k, idx 1-basiert, aux/aux_ratio n_aux × na oder `nothing`;
 Ergebnis `(P, lv)` (lv `nothing` ohne aux_ratio) oder `nothing` (ungültiger Pfad)."""
 function boot_path(ret::Matrix{Float64}, idx::Vector{Int64}, aux, aux_ratio, aux_start, level::Vector{Cint},
@@ -63,6 +72,8 @@ function boot_path(ret::Matrix{Float64}, idx::Vector{Int64}, aux, aux_ratio, aux
     na = aux === nothing ? 0 : size(aux, 2)
     n_aux = aux === nothing ? 0 : size(aux, 1)
     nL = length(letf)
+    length(idx) == n_out || error("interner Fehler: boot_path Laengen")   # seit 1.6.4 (C-018, wie Python)
+    _bp_check(aux, aux_ratio, aux_start, level, na)
     P = Matrix{Float64}(undef, n_out + 1, k + nL + na)
     lv = aux_ratio === nothing || na == 0 ? nothing : Matrix{Float64}(undef, n_out + 1, na)
     cx = _ctx()
@@ -84,6 +95,7 @@ function boot_path_src(src::Matrix{Float64}, idx::Vector{Int64}, aux, aux_ratio,
     na = aux === nothing ? 0 : size(aux, 2)
     n_aux = aux === nothing ? 0 : size(aux, 1)
     nL = length(letf)
+    _bp_check(aux, aux_ratio, aux_start, level, na)   # seit 1.6.4 (C-018, wie Python)
     P = Matrix{Float64}(undef, n_out + 1, k + nL + na)
     lv = aux_ratio === nothing || na == 0 ? nothing : Matrix{Float64}(undef, n_out + 1, na)
     cx = _ctx()
@@ -121,12 +133,15 @@ function tcop_nu(U::Matrix{Float64}, Ri::Matrix{Float64}, ldR::Float64, lower::F
     return s == 0 && flag[] == 0 ? nu[] : nothing
 end
 
-# Brent fmin als Frage/Antwort (Arbeitsfeld mit SL_FMIN_WS = 24 Werten)
+# Brent fmin als Frage/Antwort (Arbeitsfeld mit SL_FMIN_WS = 24 Werten; seit 1.6.4 geprüft, C-018)
+_fmin_ws(ws) = length(ws) >= 24 || error("interner Fehler: Arbeitsfeld von fmin muss mindestens 24 Werte haben")
 fmin_init!(ws::Vector{Float64}, ax::Float64, bx::Float64, tol::Float64) =
-    ccall((:sl_fmin_init, LIBSLC), Cvoid, (Ptr{Float64}, Float64, Float64, Float64), ws, ax, bx, tol)
+    (_fmin_ws(ws); ccall((:sl_fmin_init, LIBSLC), Cvoid, (Ptr{Float64}, Float64, Float64, Float64), ws, ax, bx, tol))
 function fmin_ask!(ws::Vector{Float64})
+    _fmin_ws(ws)
     x = Ref{Float64}(0.0)
     need = ccall((:sl_fmin_ask, LIBSLC), Cint, (Ptr{Float64}, Ptr{Float64}), ws, x)
     return need != 0, x[]
 end
-fmin_tell!(ws::Vector{Float64}, f::Float64) = ccall((:sl_fmin_tell, LIBSLC), Cvoid, (Ptr{Float64}, Float64), ws, f)
+fmin_tell!(ws::Vector{Float64}, f::Float64) =
+    (_fmin_ws(ws); ccall((:sl_fmin_tell, LIBSLC), Cvoid, (Ptr{Float64}, Float64), ws, f))

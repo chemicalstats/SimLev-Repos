@@ -48,10 +48,10 @@ const _ENGINE_ROWS = ("year", "taxable_income", "church_tax_paid_deductible", "c
                       "tariff_burden", "burden_without_gp", "burden_with_gp", "guenstiger", "settlement", "refund",
                       "church_tax_settlement_next_year")
 
-"Freibetrag ab harvest_day (\"MM-TT\"): erster Monat * 100 + Tag, den der Zeichenvergleich zulässt (wie R)."
 # Zeiger auf eine Signalspalte; leer (keine Spalte, seit 1.6.1) → C_NULL, der Kern liest FALSE an jedem Tag
 _sig_ptr(v::Vector{Float64}) = isempty(v) ? Ptr{Float64}(C_NULL) : pointer(v)
 
+"Freibetrag ab harvest_day (\"MM-TT\"): erster Monat * 100 + Tag, den der Zeichenvergleich zulässt (wie R)."
 function _harvest_md(harvest_day)
     harvest_day isa AbstractString && occursin(r"^[0-9]{2}-[0-9]{2}$", harvest_day) &&
         return parse(Int, harvest_day[1:2]) * 100 + parse(Int, harvest_day[4:5])
@@ -159,7 +159,7 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
         rc == 0 || rc == 6 || CAbi.check(rc)
         fl.flag_harvest = BitVector((flags_out .& Int32(128)) .!= 0)
         status = zeros(8na); tv = zeros(13); nlots = zeros(Int64, na); nsells = zeros(Int64, na)
-        ntaxes = zeros(Int64, na); pxc = zeros(Int32, na); cnt = zeros(Int64, 5); scal = zeros(3)
+        ntaxes = zeros(Int64, na); pxc = zeros(Int32, na); cnt = zeros(Int64, 5); scal = zeros(2)
         err = zeros(Int32, 1); err_d0 = Ref{Float64}(0.0)
         ccall((:simlev_c_engine_counts, LIBSLC), Cvoid,
               (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int32}, Ptr{Int64},
@@ -167,9 +167,7 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
               h, status, tv, nlots, nsells, ntaxes, pxc, cnt, scal, err, err_d0)
         for a in 1:na
             o = 8 * (a - 1)
-            s = sim.status[a]
-            s.count, s.price, s.worth, s.money = status[o+1], status[o+2], status[o+3], status[o+4]
-            s.total, s.target, s.actual, s.differ = status[o+5], status[o+6], status[o+7], status[o+8]
+            sim.status[a].money = status[o+4]   # Status je Asset: gelesen wird nur money (wie R seit 1.6.3)
             tr = sim.trades[a]
             L = zeros(7 * nlots[a])
             ccall((:simlev_c_engine_lots, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, L)
@@ -220,8 +218,6 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
             for i in 0:(nk - 1)
                 env.ks[string(Int(ks[2i+1]))] = ks[2i+2]
             end
-            env.refund_due = scal[3]
-            empty!(env.due_info)
         end
         nev = Int(cnt[1])
         evi = zeros(Int32, 9 * nev); evd = zeros(2 * nev); evy = zeros(Int32, Int(cnt[2])); evv = zeros(Int(cnt[5]))
@@ -274,6 +270,8 @@ function _sim_engine_signal(R::Run, fl::Flags, evi::Vector{Int32}, evd::Vector{F
     end
     if failed
         err_code == 101 && error(r_sprintf(m["101"], r_format1(err_d0)))
+        err_code == 102 && chk_stop("fa.nicht_endlich")      # seit 1.6.4 (A-005, Entscheidung 103)
+        err_code == 103 && chk_stop("ut1.unterlauf")         # seit 1.6.4 (K43 T1-R9)
         error(m["na"])
     end
     return nothing

@@ -45,7 +45,7 @@ end
 function _rb_median(x::Vector{Float64}, narm::Bool, isint::Bool)
     r = Ref{Float64}(0.0)
     st = ccall((:sl_r_median, LIBSLC), Cint, (Int64, Ptr{Float64}, Cint, Cint, Ref{Float64}), length(x), x, narm, isint, r)
-    st == 7 && throw(OutOfMemoryError())
+    st == _SL_ENOMEM && throw(OutOfMemoryError())   # rbase_c.jl (seit 1.6.4 benannt, C-092)
     st == 0 ? r[] : nothing
 end
 
@@ -113,6 +113,7 @@ function _rb_p_adjust(p::Vector{Float64}, n::Float64, method::Int)
     out = Vector{Float64}(undef, length(p))
     st = ccall((:sl_r_p_adjust, LIBSLC), Cint, (Int64, Ptr{Float64}, Float64, Cint, Ptr{Float64}),
                length(p), p, n, method, out)
+    st == 1 && error("interner Fehler: n ungültig")   # seit 1.6.4 (C-017, SL_EARG)
     st == 0 || throw(OutOfMemoryError())
     out
 end

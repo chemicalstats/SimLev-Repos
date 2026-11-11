@@ -8,7 +8,7 @@
 module ParamSearch
 
 import ..SimLev
-using ..SimLev: _res_fig, _res_finish, _res_line!, _res_panel, _res_points!, _res_ramp, _res_range, _res_rect!,
+using ..SimLev: _res_fig, _res_finish, _res_line!, _res_panel, _res_points!, _res_pal, _res_range, _res_rect!,
                 _res_text!, _res_tx, _res_ty
 using Dates
 
@@ -17,6 +17,11 @@ const NA = SimLev.NA
 const OF = SimLev.Overfitting
 # Platzhalter für ein R-Argument ohne Standardwert (space in param_search)
 const _MISSING = SimLev.Bootstrap._MISSING
+
+# Kennzahlen aus metrics() als (Namen, Werte); seit 1.6.4 ergibt ein unbenannter Zahlenvektor keine Namen (statt eines
+# Fehlers in OF._metric_pairs), damit chk_kennzahlen ihn wie in R und Python als unbenannt meldet (Entscheidung 43)
+_e2_pairs(m) = (m isa AbstractVector && !(m isa SL.RVector) && !isempty(m) && all(v -> v isa Real, m)) ?
+    (String[], Float64[SL._f64(v) for v in m]) : OF._metric_pairs(m)
 
 export param_space, param_range, param_search, param_plateau
 
@@ -69,10 +74,11 @@ function param_space(args...; dims...)
     for (k, v) in items
         _is_range(v) || _is_atomic(v) || error("param_space: Dimension '$k' muss ein Vektor oder param_range() sein.")
     end
+    for (k, v) in items
+        SL.chk_nofactor(v, "param_space", k)   # seit 1.6.4 (Entscheidung 15)
+    end
     return SL.RList(items...; class = "SimLevParamSpace")
 end
-
-_fmt_any(v) = join(OF._formatv(v), ", ")
 
 """
     param_range(lower, upper; n = 5, step = nothing, integer = false, log = false)
@@ -87,12 +93,14 @@ ausgewählt und Bereiche stetig zwischen `lower` und `upper` gezogen (`n` und `s
 # Argumente
 - `lower`, `upper`: Bereichsgrenzen (Zahlen in der Einheit des Parameters, `lower <= upper`; bei `log = true`
   `lower > 0`).
-- `n`: Anzahl Rasterpunkte des Bereichs bei `method = "grid"` (ganze Zahl >= 1, Standard 5); wird ignoriert,
-  wenn `step` angegeben ist.
+  Seit 1.6.4 je eine endliche Zahl.
+- `n`: Anzahl Rasterpunkte des Bereichs bei `method = "grid"` (ganze Zahl von 1 bis 1e6, Standard 5); wird
+  ignoriert, wenn `step` angegeben ist.
 - `step`: Schrittweite des Rasters in der Einheit des Parameters (`seq(lower, upper, by = step)`, > 0); hat
   Vorrang vor `n` und `log` (`log` gilt dann nur für Zufallsziehungen). `nothing` (Standard) = `n` Punkte.
 - `integer`: Logisch (Standard `false`): Raster- und Zufallswerte auf ganze Zahlen runden; doppelte
   Rasterwerte entfallen.
+  Seit 1.6.4 nur TRUE oder FALSE.
 - `log`: Logisch (Standard `false`): Raster gleichabständig auf der Log-Skala und Ziehung log-gleichverteilt,
   z. B. für Fensterlängen.
 
@@ -107,14 +115,24 @@ sp = param_space(n = param_range(50, 400; n = 8, integer = true, log = true), ba
 println(sp)
 ```
 """
-function param_range(lower, upper; n = 5, step = nothing, integer::Bool = false, log::Bool = false)
-    (_is_num(lower) && _is_num(upper) && !(upper < lower)) || error("param_range: lower <= upper erforderlich.")
+function param_range(lower, upper; n = 5, step = nothing, integer = false, log = false)
+    # seit 1.6.4: Grenzen je eine endliche Zahl (vorher NaN/Inf still als Stufe), integer/log TRUE/FALSE, Meldungen
+    # ohne Eingabewert; Länge 1 wie Einzelwert (Entscheidung 4)
+    lower, upper, n, step = SL.chk_scalar(lower), SL.chk_scalar(upper), SL.chk_scalar(n), SL.chk_scalar(step)
+    isnumv(x) = _is_num(x) || (x isa AbstractArray && !(eltype(x) <: Bool) && all(_is_num, x))
+    (isnumv(lower) && isnumv(upper)) || error("param_range: lower <= upper erforderlich.")
+    lower = SL.chk_num1(lower, "param_range", "lower")
+    upper = SL.chk_num1(upper, "param_range", "upper")
+    upper < lower && error("param_range: lower <= upper erforderlich.")
+    integer = SL.chk_bool1(integer, "param_range", "integer")
+    log = SL.chk_bool1(log, "param_range", "log")
     log && lower <= 0 && error("param_range: log = TRUE erfordert lower > 0.")
     if step === nothing && !(_is_num(n) && isfinite(n) && n >= 1 && n == OF._r_round(n))
-        error("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein (erhalten: $(_fmt_any(n))).")
+        error("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein.")
     end
+    step === nothing && SL.chk_max(n, SL.SL_MAX_GITTER, "param_range", "n")   # seit 1.6.4 (B-004, wie n_grid; Entscheidung 16)
     if step !== nothing && !(_is_num(step) && isfinite(step) && step > 0)
-        error("param_range: step muss eine Zahl > 0 sein (erhalten: $(_fmt_any(step))).")
+        error("param_range: step muss eine Zahl > 0 sein.")
     end
     return SL.RList("lower" => lower, "upper" => upper, "n" => trunc(Int, n), "step" => step, "integer" => integer,
                     "log" => log; class = "SimLevParamRange")
@@ -356,7 +374,7 @@ _par_lapply(X, f, cores) = SL.RParallel.par_lapply(X, f, cores)
     param_search(data, builder, space; strategy = nothing, method = "grid", n = 50,
                  constraint = nothing, sim_args = nothing, burn_in = 0,
                  metrics = nothing, objective = "sharpe", maximize = true,
-                 keep_returns = "day", seed = nothing, cores = 1)
+                 keep_returns = "day", seed = nothing, cores = "auto")
     param_search(data; builder = nothing, space, strategy, ...)
 
 Parametersuche über Strategie- und Simulationsparameter.
@@ -368,6 +386,7 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
 # Argumente
 - `data`: Tabelle (RFrame) wie in `simulation()` (Spalte `date` und Kursspalten als Niveaus), inklusive
   Vorlauf für Signale (siehe `burn_in`).
+  Seit 1.6.4 mindestens eine Datenzeile (vorab geprüft).
 - `builder`: Funktion `function(p)`, die aus einer benannten Liste `p` (ein Punkt des Raums) entweder eine
   Strategie oder eine Liste `RList("strategy" => …, "signal" => …, "args" => …, "map" => …, "data" => …)`
   liefert: `signal` wie in `bootstrap_study()` (Funktion `df ->` Tabelle (RFrame) oder Liste von Spalten, z.
@@ -383,6 +402,7 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
   gleichmäßige Abdeckung bei vielen Dimensionen).
 - `n`: Anzahl Punkte bei `"random"` und `"lhs"` (ganze Zahl, Standard 50); bei `"grid"` ignoriert. Doppelte
   Punkte werden entfernt und in höchstens 20 Runden nachgezogen; es können weniger Punkte entstehen.
+  Seit 1.6.4 höchstens 10^8.
 - `constraint`: Optional `function(p)`, die `true` für zulässige Punkte liefert (z. B. Gewichte summieren sich
   höchstens zu 1); Punkte ohne `true` entfallen. `nothing` (Standard) = alle Punkte.
 - `sim_args`: Benannte Liste gemeinsamer Argumente für `simulation()` (Standard: keine): Argumente von
@@ -392,8 +412,11 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
   nennt.
 - `burn_in`: Anzahl Zeilen am Anfang von `data` (bei Tagesdaten: Tage), die nach der Signalberechnung
   verworfen werden (Signal-Vorlauf; ganze Zahl, Standard 0).
+  Seit 1.6.4 eine ganze Zahl ≥ 0.
 - `metrics`: Funktion `SimLevResult ->` benannter numerischer Vektor (Standard `bootstrap_study_metrics()`: u.
   a. `cagr`, `max_drawdown` als Anteil, `sharpe`; `cagr` ist mit Sparplan geldgewichtet, XIRR).
+  Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen keiner festen Spalte des
+  Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
 - `objective`: Name der Zielgröße (Element von `metrics`, Standard `"sharpe"`) für Ranking, Plateau und
   `param_bootstrap()`.
 - `maximize`: Logisch: Zielgröße maximieren (Standard `true`; `false` z. B. für `max_drawdown`).
@@ -406,8 +429,25 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
   SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe liefern dann verschiedene Ergebnisse.
   `set.seed()` wirkt nicht. Die Auswertung der Punkte ist deterministisch, das Ergebnis hängt nicht von
   `cores` ab.
-- `cores`: Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter Unix per Fork (`parallel::mclapply`),
-  unter Windows per PSOCK-Cluster.
+- `cores`: Anzahl paralleler Läufe:
+  `"auto"` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+  Mit `"auto"` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+  die Zahl der Aufgaben (Tasks auf Threads statt Prozesse) und der Kern-Threads je Lauf selbst (Planer,
+  gleiche Regel in R, Python und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende
+  Prozesse gleicher oder höherer Priorität) und der Julia-Threads, so viele, wie
+  der freie Speicher trägt, und nur, wenn die Startkosten kleiner sind als der Gewinn (kleine Rechnungen
+  bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
+  Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
+  Einheitenreihenfolge.
+  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
+  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
+  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Ausgaben, die eigene Funktionen
+  (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
+  in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
+  Einheitenreihenfolge (R und Python: alle Ausgaben in Einheitenreihenfolge). Das Ergebnis hängt nicht von cores ab.
+  Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
 
 # Rückgabe
 Objekt der Klasse `SimLevParamSearch`, eine Liste mit
@@ -449,17 +489,39 @@ println(ps["results"])
 SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder = builder_pos, space = space_pos,
                       strategy = nothing, method = nothing, n = 50, constraint = nothing,
                       sim_args = nothing, burn_in = 0, metrics = nothing, objective = "sharpe", maximize = true,
-                      keep_returns = nothing, seed = nothing, cores = 1)
+                      keep_returns = nothing, seed = nothing, cores = "auto")
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
-    data = SimLev.as_rframe(data)
+    SimLev.DataPrep._e5_match_arg(method, ("grid", "random", "lhs"), "param_search", "method")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     method = OF._match_arg(method, ("grid", "random", "lhs"))
     # Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
     keep_returns isa Bool && error("param_search: keep_returns ist \"day\" oder \"none\" (früher TRUE/FALSE).")
+    SimLev.DataPrep._e5_match_arg(keep_returns, ("day", "none"), "param_search", "keep_returns")
     keep_returns = OF._match_arg(keep_returns, ("day", "none"))
     keep_ret = keep_returns == "day"
+    # einheitliche Eingabeprüfung (seit 1.6.4); data/strategy mit den Meldungen von simulation(), data nur als RFrame
+    # (Entscheidung 6; vorher NamedTuple/Dict umgewandelt)
+    fn = "param_search"
+    (data isa SL.RFrame || data isa SL._Frame) ||
+        error("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein ($(SL.chk_msg("tabelle.formen"))).")
+    (data isa SL.RFrame ? SL.nrow(data) : SL._fnrow(data)) == 0 && SL.chk_stop("zeilen_keine", fn, "data")   # seit 1.6.4 (Entscheidung 38)
+    builder === nothing || builder isa Function || SL.chk_stop("e2.funktion", fn, "builder")
+    space === _MISSING && SL.chk_stop("fehlt", fn, "space")
+    (space isa Union{SL.RList,NamedTuple,AbstractDict,AbstractVector,Tuple}) || SL.chk_stop("liste", fn, "space")
+    builder === nothing && strategy !== nothing && SL.Sensitivity._e2_check_strategy(strategy)
+    n = SL.chk_int1(n, fn, "n")
+    SL.chk_max(n, SL.SL_MAX_N, fn, "n")   # seit 1.6.4 (Entscheidungen 16 und 36)
+    constraint === nothing || constraint isa Function || SL.chk_stop("e2.funktion", fn, "constraint")
+    SL.Bootstrap._is_listlike(sim_args) || SL.chk_stop("liste", fn, "sim_args")
+    sim_args = SL.Bootstrap._e2_sim_args(sim_args)
+    burn_in = SL.chk_int1(burn_in, fn, "burn_in"; lo = 0)
+    metrics === nothing || metrics isa Function || SL.chk_stop("e2.funktion", fn, "metrics")
+    objective = SL.chk_name1(objective, fn, "objective")
+    maximize = SL.chk_bool1(maximize, fn, "maximize")
+    cores = SL.chk_cores(cores, fn)   # seit 1.6.4 höchstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
     sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
     metrics === nothing && (metrics = SL.Bootstrap.bootstrap_study_metrics)
-    space === _MISSING && error("argument \"space\" is missing, with no default")
+    # R: unbenannter Vektor -> Meldung von param_space
+    space isa Union{Tuple,AbstractVector} && !(space isa AbstractVector{<:Pair}) && error("param_space: alle Dimensionen müssen benannt sein.")
     (space isa SL.RList && SL.inherits(space, "SimLevParamSpace")) || (space = param_space(OF._kv(space)...))
     if builder === nothing
         strategy === nothing && error("param_search: 'builder' oder 'strategy' angeben.")
@@ -469,7 +531,7 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
     end
     sim_run_args = SL._sim_args_set(SL.RList(), sim_args, "param_search")
     # Zufall nur im Versuchsplan (Hauptstrom); die Auswertung je Punkt ist deterministisch
-    design = _ps_design(space, method, n, constraint, method == "grid" ? nothing : SL.SLib.main_stream(seed))
+    design = _ps_design(space, method, n, constraint, method == "grid" ? nothing : SL.SLib.main_stream(seed, "param_search"))
     t0 = time()
     function run(i)
         p = _row_list(design, i)
@@ -486,7 +548,7 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
             nothing
         end
         m === nothing && return (m = nothing, err = "metrics() fehlgeschlagen", date = nothing, ret = nothing)
-        mp = OF._metric_pairs(m)
+        mp = _e2_pairs(m)
         if keep_ret
             ix = SL.Withdrawal.result_index(res)
             v = Float64[Float64(e) for e in ix["value"]]
@@ -497,8 +559,13 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
     out = _par_lapply(1:SL.nrow(design), run, cores)
     okm = [o for o in out if o.m !== nothing]
     isempty(okm) && error("param_search: alle Punkte fehlgeschlagen, z. B.: $(out[1].err)")
+    # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
+    # feste Spalte (id, Parameter, error); geprüft nach dem Rechnen, bei jedem cores gleich (R: gleiche Prüfung)
+    for o in okm
+        SL.chk_kennzahlen(o.m[1], length(o.m[2]), vcat("id", String[string(k) for k in names(design)], "error"), fn)
+    end
     mnames = okm[1].m[1]
-    objective in mnames || error("objective '$objective' nicht in metrics(): $(join(mnames, ", "))")
+    objective in mnames || SL.chk_stop("rs.objective", fn, objective, join(mnames, ", "))
     np = length(out)
     M = fill(NA, np, length(mnames))
     for (i, o) in enumerate(out)
@@ -586,6 +653,57 @@ function _ps_grid_nb(Lm::Matrix{Int}, Lok::BitMatrix, nr::Int, np_::Int, radius)
     return out
 end
 
+# Rasternachbarn über die Zellen der (2 radius + 1)^d Versätze (seit 1.6.4, B-074; R `.ps_neighbours`): dieselben
+# Zeilen wie _ps_grid_nb (alle Stufen vorhanden, Abstand <= radius je Dimension), aufsteigend; `nothing`, wenn es
+# mindestens so viele Versätze wie Punkte gibt (dann paarweise wie bisher)
+function _ps_grid_nb_box(Lm::Matrix{Int}, Lok::BitMatrix, nr::Int, np_::Int, radius, nl::Vector{Int})
+    (nr == 0 || np_ == 0 || !(radius isa Real) || !isfinite(radius) || radius < 0) && return nothing
+    r = Int(floor(radius))
+    (Float64(2r + 1)^np_ > nr || prod(Float64.(nl)) > 2.0^52) && return nothing
+    mult = ones(Int, np_)
+    for c in 2:np_
+        mult[c] = mult[c-1] * nl[c-1]
+    end
+    okr = [all(c -> Lok[i, c], 1:np_) for i in 1:nr]
+    cells = Dict{Int,Vector{Int}}()
+    for i in 1:nr
+        okr[i] || continue
+        key = 0
+        for c in 1:np_
+            key += (Lm[i, c] - 1) * mult[c]
+        end
+        push!(get!(() -> Int[], cells, key), i)
+    end
+    w = 2r + 1
+    noff = w^np_
+    offs = Matrix{Int}(undef, noff, np_)
+    for o in 0:noff-1
+        t = o
+        for c in 1:np_
+            offs[o+1, c] = t % w - r
+            t = div(t, w)
+        end
+    end
+    out = [Int[] for _ in 1:nr]
+    for i in 1:nr
+        okr[i] || continue
+        acc = out[i]
+        for o in 1:noff
+            key = 0; inb = true
+            for c in 1:np_
+                l = Lm[i, c] + offs[o, c]
+                (l < 1 || l > nl[c]) && (inb = false; break)
+                key += (l - 1) * mult[c]
+            end
+            inb || continue
+            hit = get(cells, key, nothing)
+            hit === nothing || append!(acc, hit)
+        end
+        sort!(acc)
+    end
+    return out
+end
+
 "Nachbarschaften im Parameterraum (`.ps_neighbours`): je Punkt 1-basierte Zeilennummern."
 function _ps_neighbours(x; radius = 1, k = 5)
     params = OF._strs(x["params"])
@@ -601,6 +719,8 @@ function _ps_neighbours(x; radius = 1, k = 5)
             a = L[c][r]
             a === nothing || (Lm[r, c] = a; Lok[r, c] = true)
         end
+        nb = _ps_grid_nb_box(Lm, Lok, nr, np_, radius, Int[length(_ps_levels(x["space"][p])) for p in params])
+        nb === nothing || return nb
         return _ps_grid_nb(Lm, Lok, nr, np_, radius)
     end
     zs = Vector{Vector{Float64}}()
@@ -631,8 +751,11 @@ Rasterstufen unterscheiden; bei Zufallssuche/LHS die `k` nächsten Punkte im ran
 # Argumente
 - `x`: `SimLevParamSearch` aus `param_search()` (gespeicherte Renditen sind nicht nötig).
 - `metric`: Name einer Kennzahlspalte von `x["results"]` (Standard: Zielgröße der Suche, `x["objective"]`).
+  Seit 1.6.4 muss es eine Spalte von x\$results sein.
 - `radius`: Maximaler Abstand in Rasterstufen je Dimension (ganze Zahl, Standard 1); nur `method = "grid"`.
+  Seit 1.6.4 eine ganze Zahl ≥ 0.
 - `k`: Anzahl Nachbarn inklusive Punkt selbst (ganze Zahl, Standard 5); nur `method = "random"` und `"lhs"`.
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
 
 # Rückgabe
 Tabelle (RFrame) je Punkt mit `id`, `value` (Kennzahl des Punkts), `plateau_mean` (Mittel der Kennzahl über
@@ -660,8 +783,13 @@ println(param_plateau(ps))
 ```
 """
 function param_plateau(x; metric = nothing, radius = 1, k = 5)
-    (x isa SL.RList && SL.inherits(x, "SimLevParamSearch")) || error("x muss ein SimLevParamSearch sein.")
+    (x isa SL.RList && SL.inherits(x, "SimLevParamSearch")) || SimLev.chk_stop("klasse", "param_plateau", "x", "param_search()")
     metric === nothing && (metric = x["objective"])
+    # seit 1.6.4: metric als Spalte der Ergebnisse, radius und k als ganze Zahlen
+    metric = SL.chk_name1(metric, "param_plateau", "metric")
+    metric in names(x["results"]) || SL.chk_stop("e2.spalte_von", "param_plateau", "metric", "x\$results")
+    radius = SL.chk_int1(radius, "param_plateau", "radius"; lo = 0)
+    k = SL.chk_int1(k, "param_plateau", "k")
     tab = x["results"]
     v = OF._tofloat(tab[metric])
     nb = _ps_neighbours(x; radius = radius, k = k)
@@ -740,6 +868,8 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, kw...)
     params = params === nothing ? OF._strs(x["params"])[1:min(2, end)] : OF._strs(params)
     agg(v) = (w = filter(isfinite, v); isempty(w) ? NA : fun(w))
     vals = OF._tofloat(tab[metric])
+    # seit 1.6.4 (Entscheidung 40): ohne endlichen Wert der Zielgröße ein Fehler wie in R (bis 1.6.3 ein leeres Bild)
+    any(isfinite, vals) || SL.chk_stop("grafik_leer", "plot", metric)
     f = _res_fig(700, 460)
     if length(params) == 1
         g = tab[params[1]]
@@ -753,8 +883,12 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, kw...)
     end
     if x["method"] != "grid"
         xs = OF._tofloat(tab[params[1]]); ys = OF._tofloat(tab[params[2]])
-        lo, hi = extrema(filter(!isnan, vals); init = (0.0, 1.0))
-        cols = [isnan(v) ? "#cccccc" : _res_ramp((v - lo) / max(hi - lo, 1e-12)) for v in vals]
+        # seit 1.6.4 wie R (B-063, Entscheidung 99): 64 Stufen über range(v), Stufe round(1 + 63 (v - lo) /
+        # max(hi - lo, 1e-12)), begrenzt auf 1 … 64 (bis 1.6.3 stetig über mindestens [0, 1]); NaN grau wie bisher
+        fin = filter(!isnan, vals)
+        lo, hi = isempty(fin) ? (0.0, 1.0) : (minimum(fin), maximum(fin))
+        pal = _res_pal()
+        cols = [isnan(v) ? "#cccccc" : pal[Int(clamp(round(1 + 63 * (v - lo) / max(hi - lo, 1e-12)), 1.0, 64.0))] for v in vals]
         p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(ys); title = "$metric (Farbe; blau = hoch)",
                        xlab = params[1], ylab = params[2])
         _res_points!(f, p, xs, ys; color = cols, r = 5)
@@ -774,12 +908,18 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, kw...)
                    xlab = params[1], ylab = params[2], xticks = collect(1.0:length(l1)), xticklabels = OF._formatv(l1),
                    yticks = collect(1.0:length(l2)), yticklabels = OF._formatv(l2), grid = false)
     sc = metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") ? 100 : 1
+    # seit 1.6.4 wie R's image() mit 64 Farben (B-063): zlim = range(M), bei Breite 0 erweitert, Stufe
+    # floor(63 z + 0.5) (bis 1.6.3 stetig)
+    pal = _res_pal()
+    zl0, zl1 = lo, hi
+    zl1 - zl0 == 0 && ((zl0, zl1) = zl0 == 0 ? (-1.0, 1.0) : (zl0 - 0.4 * abs(zl0), zl0 + 0.4 * abs(zl0)))
     ci = Int[]; cj = Int[]
     for i in eachindex(l1), j in eachindex(l2)
         v = M[i, j]
         isnan(v) && continue
         push!(ci, i); push!(cj, j)
-        _res_rect!(f, p, i - 0.5, j - 0.5, i + 0.5, j + 0.5; fill = _res_ramp((v - lo) / max(hi - lo, 1e-12)))
+        zi = floor(Int, 63 * ((v - zl0) / (zl1 - zl0)) + 0.5)
+        _res_rect!(f, p, i - 0.5, j - 0.5, i + 0.5, j + 0.5; fill = 0 <= zi < 64 ? pal[zi+1] : "none")
         length(M) <= 300 && _res_text!(f, _res_tx(p, i), _res_ty(p, j) + 4, OF._spf(sc == 100 ? "%.1f" : "%.2f", sc * v); size = 9)
     end
     # gezeichnete Zellen (Zielgröße unskaliert): x = Stufe von params[1], y = Stufe von params[2]

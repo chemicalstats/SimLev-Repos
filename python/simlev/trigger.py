@@ -5,35 +5,43 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from ._pruefen import chk_choice, chk_df, chk_msg, chk_name1, chk_num1, chk_stop
+
 __all__ = ["rebalance_trigger"]
 
 
 def _col(df: Any, name: str):
-    if hasattr(df, "columns"):
-        return df[name] if name in df.columns else None
-    return df.get(name) if isinstance(df, Mapping) else None
+    """Spalte ``name`` von ``df`` oder ``None``."""
+    return df[name] if name in df.columns else None
 
 
-def _nrow(df: Any) -> int:
-    if hasattr(df, "columns"):
-        return len(df)
-    if isinstance(df, Mapping):
-        return len(np.atleast_1d(next(iter(df.values())))) if len(df) else 0
-    raise ValueError("rebalance_trigger: df muss ein data.frame sein.")
+_FN = "rebalance_trigger"
+_TYPES = ("abs_leverage", "rel_leverage", "vol_band", "combined")
+_SUB_FIELDS = ("type", "threshold", "lev_col", "vol_col", "triggers", "df")
 
 
 def _first_obs(v: np.ndarray) -> int:
-    """Index (0-basiert) des ersten nicht fehlenden Werts; nur NA: letzter Index."""
+    """Index des ersten nicht fehlenden Werts (sonst der letzte Index)."""
     ok = np.flatnonzero(~np.isnan(v))
     return int(ok[0]) if ok.size else v.size - 1
 
 
-def _trig_series(df, name):
-    """Spalte ``name`` als Liste von Python-Zahlen (statt float()/np.isnan je Tag, seit 1.5.2) und erste Beobachtung."""
+def _trig_series(df, name, arg):
+    """Spalte als Liste (numerisch, ohne ±Inf; eine Spalte nur aus NA zählt als Zahlenspalte) und erster Wert."""
+    from ._sim_base import _column
     col = _col(df, name)
-    if col is None:
-        raise ValueError("Spalte '%s' fehlt." % name)
-    v = np.asarray(col, dtype=np.float64)
+    if col is None:   # seit K43 T1-R5 mit Funktions- und Argumentnamen (bis dahin "Spalte '<name>' fehlt.")
+        chk_stop("e2.spalte_von", _FN, arg, "df")
+    kind, arr = _column(col)
+    if kind == "logical" and all(v is None for v in arr):
+        arr, kind = np.full(len(arr), np.nan), "numeric"
+    if kind == "factor":   # Entscheidung 15
+        chk_stop("spalte_faktor", _FN, name)
+    if kind != "numeric":
+        chk_stop("spalte_typ", _FN, name, chk_msg("typ.numerisch"))
+    v = np.asarray(arr, dtype=np.float64)
+    if np.isinf(v).any():
+        chk_stop("e1.spalte_endlich", _FN, name)
     return v.tolist(), _first_obs(v)
 
 
@@ -87,6 +95,12 @@ def rebalance_trigger(
             ``type`` und ggf. ``threshold`` (in Prozent, fehlt er: ``10``), ``lev_col``, ``vol_col``. Jeder
             Sub-Trigger führt seinen eigenen Referenzwert; die Ergebnisse werden OR-verknüpft. Standard: ``None``.
         out_col: Character. Name der zu erzeugenden logischen Spalte in ``df``. Standard: ``"rebal_trigger"``.
+            Seit 1.6.4 darf die Spalte in ``df`` noch nicht vorhanden sein (vorher still überschrieben).
+
+    Seit 1.6.4 geprüft: ``df`` nur als ``pandas.DataFrame``; ``threshold`` eine einzelne endliche Zahl ``>= 0``;
+    Spaltennamen einzeln und nicht leer; die genutzte Spalte nur Zahlen oder NA (kein ``inf``, keine Kategorie);
+    Teil-Trigger nur mit den Feldern ``type``, ``threshold``, ``lev_col``, ``vol_col``, ``triggers`` und ``df`` (gleiche
+    Zeilenzahl).
 
     Returns:
         ``df`` mit einer zusätzlichen logischen Spalte ``out_col``. ``True`` bedeutet: an diesem Tag wird
@@ -97,7 +111,7 @@ def rebalance_trigger(
         bei ``"rel_leverage"``/``"vol_band"`` relative Abweichung. Die Referenz ist der erste nicht
         fehlende Wert und springt nur an Trigger-Tagen; NA löst nicht aus. ``"combined"`` verknüpft
         die Sub-Trigger aus ``triggers`` per ODER. Gibt eine Kopie von ``df`` (``pandas.DataFrame``)
-        bzw. ein neues ``dict`` mit der Spalte ``out_col`` zurück; Tag 1 ist immer ``False``.
+        mit der Spalte ``out_col`` zurück; Tag 1 ist immer ``False``.
 
     Beispiel::
 
@@ -111,13 +125,26 @@ def rebalance_trigger(
         d = simlev.rebalance_trigger(d, "abs_leverage", threshold=10)
         print(d["rebal_trigger"].sum())     # Anzahl der Rebalancing-Tage
     """
-    n = _nrow(df)
+    # seit 1.6.4 Eingabeprüfung vor der Rechnung (A-013, A-036): df nur als pandas.DataFrame (Entscheidung 6), type
+    # aus der Liste, threshold eine einzelne endliche Zahl >= 0, Spaltennamen einzeln und nicht leer, die genutzte
+    # Spalte numerisch und ohne ±Inf, Teil-Trigger von "combined" mit den Feldern type, threshold, lev_col, vol_col,
+    # triggers und df (eigenes df mit gleicher Zeilenzahl; out_col dort nicht; bis 1.6.3 verwarf Python einen Teil-Trigger
+    # mit eigenem out_col still)
+    chk_df(df, _FN, "df")
+    n = len(df)
     if n < 1:
-        raise ValueError("rebalance_trigger: leerer data.frame.")
+        chk_stop("zeilen_keine", _FN, "df")   # seit K43 T1-R5 aus der Tabelle
+    type = chk_choice(type, _FN, "type", _TYPES)
+    threshold = chk_num1(threshold, _FN, "threshold", lo=0)
+    lev_col = chk_name1(lev_col, _FN, "lev_col")
+    vol_col = chk_name1(vol_col, _FN, "vol_col")
+    out_col = chk_name1(out_col, _FN, "out_col")
+    if out_col in df.columns:   # seit 1.6.4 (Entscheidung 26): vorhandene Spalte nicht still überschreiben
+        chk_stop("spalte_vorhanden", _FN, out_col, "df", "out_col")
     threshold = threshold / 100
     trig = np.zeros(n, dtype=bool)
     if type in ("abs_leverage", "rel_leverage"):
-        lv, t0 = _trig_series(df, lev_col)
+        lv, t0 = _trig_series(df, lev_col, "lev_col")
         held = lv[t0]
         for t in range(t0 + 1, n):
             v = lv[t]
@@ -131,27 +158,38 @@ def rebalance_trigger(
                 trig[t] = True
                 held = v
     elif type == "vol_band":
-        vl, t0 = _trig_series(df, vol_col)
+        vl, t0 = _trig_series(df, vol_col, "vol_col")
         ref = vl[t0]
         for t in range(t0 + 1, n):
             v = vl[t]
             if v == v and ref != 0 and abs(v / ref - 1) > threshold:
                 trig[t] = True
                 ref = v
-    elif type == "combined":
-        if not triggers:
-            raise ValueError("type='combined' benötigt eine nicht-leere Liste 'triggers'.")
-        for sub in triggers:
+    else:
+        # seit K43 T1-R5 aus der Tabelle (bis dahin "type='combined' benötigt eine nicht-leere Liste 'triggers'.")
+        if triggers is None:
+            chk_stop("fehlt", _FN, "triggers")
+        if isinstance(triggers, (list, tuple, Mapping, np.ndarray)) and len(triggers) == 0:
+            chk_stop("ut1.liste_leer", _FN, "triggers")
+        if isinstance(triggers, (str, Mapping)) or not isinstance(triggers, (list, tuple)):
+            chk_stop("liste", _FN, "triggers")
+        subs = []
+        for i, sub in enumerate(triggers, start=1):
+            if not isinstance(sub, Mapping):
+                chk_stop("liste", _FN, "triggers[[%d]]" % i)
+            bad = [str(k) for k in sub.keys() if k not in _SUB_FIELDS]
+            if bad:
+                chk_stop("e1.trigger_feld", _FN, bad[0], i)
+            if sub.get("type") is None:
+                chk_stop("fehlt", _FN, "triggers[[%d]]$type" % i)
+            subs.append({k: v for k, v in sub.items() if v is not None})   # R modifyList: NULL entfernt das Feld
+        for sub in subs:
             args = {"df": df, "out_col": "..__sub__.."}
             args.update(sub)
             sub_df = rebalance_trigger(**args)
+            if len(sub_df) != n:   # eigenes df eines Teil-Triggers: gleiche Zeilenzahl
+                chk_stop("e1.trigger_df", _FN, n)
             trig = trig | np.asarray(_col(sub_df, "..__sub__.."), dtype=bool)
-    else:
-        raise ValueError("Unbekannter type='%s'." % type)
-    if hasattr(df, "columns"):
-        out = df.copy()
-        out[out_col] = trig
-        return out
-    out = dict(df)
+    out = df.copy()
     out[out_col] = trig
     return out

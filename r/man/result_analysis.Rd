@@ -39,14 +39,16 @@ deflationiert (real). \code{upi}, rollierende Sharpe und M² verwenden
 den daraus aufgezinsten Zins p. a.}
 
 \item{rolling_years}{Fensterlaenge der rollierenden Kennzahlen in Jahren
-(auf ganze Monate gerundet, mindestens 2 Monate; Standard 3).}
+(auf ganze Monate gerundet, mindestens 2 Monate, endlich; Standard 3).}
 
 \item{var_levels}{Wahrscheinlichkeiten fuer VaR und CVaR als Anteile
 (Standard \code{c(0.01, 0.05, 0.10)}); historisch aus Tages- und
-Monatsrenditen.}
+Monatsrenditen. Keine doppelten Werte.}
 
 \item{top_drawdowns}{Anzahl Eintraege der Drawdown-Tabelle je Reihe
-(Standard 10, nach Tiefe sortiert).}
+(Standard 10, nach Tiefe sortiert); eine ganze Zahl \code{>= 0} oder
+\code{Inf} (alle). \code{risk_free} und \code{inflation} als einzelne
+Zahl muessen endlich sein (\code{inflation > -100}); Faktoren sind ein Fehler.}
 
 \item{inflation}{Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 \%)
 oder ein Preisindex-Niveau als \code{data.frame(date, value)} bzw.
@@ -70,7 +72,9 @@ Jahren, \code{longest_drawdown_days} in Kalendertagen;
 \code{correlation_up}, \code{correlation_down}, \code{up_capture},
 \code{down_capture}, \code{capture_spread}, \code{active_return},
 \code{tracking_error}, \code{information_ratio}, \code{m2},
-\code{treynor}; \code{NULL} ohne Benchmark.}
+\code{treynor}; \code{NULL} ohne Benchmark.
+Seit 1.6.4 rechnet die Funktion auch mit einem Benchmark ohne Schwankung (Ueberschussrendite konstant):
+\code{alpha} und \code{beta} sind dann NaN, \code{treynor} NA (bis 1.6.3 Abbruch in R und Python).}
 \item{benchmark}{Name der Benchmark-Reihe oder \code{NULL}.}
 \item{annual}{Matrix Jahr x Reihe der Jahresrenditen (Anteile); Zeilen
 = alle Jahre aller Reihen, NA, wo eine Reihe kein Jahr hat.}

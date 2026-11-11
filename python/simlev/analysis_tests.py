@@ -32,7 +32,10 @@ from .deep_analysis import (
 from .svg import (_AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_points, _ana_ramp, _ana_rect,
                   _ana_svg_done)
 from ._util import _num_col
+from .data_prep import _e5_choice  # seit 1.6.4 (K43 T2-N4)
 from ._util import _cagr_q, _pow1m
+from ._pruefen import chk_col_nofactor, chk_col_type, chk_int1, chk_max, chk_num1, chk_scalar, chk_stop  # seit 1.6.4
+from ._pruefen import SL_MAX_JAHRE, SL_MAX_N  # seit 1.6.4 (Entscheidung 46)
 
 __all__ = ["signal_analysis", "sharpe_test", "overfit_reality_check", "sharpe_min_track_record", "result_heatmap",
            "SimLevSignalAnalysis", "SimLevRealityCheck", "SimLevHeatmap"]
@@ -195,6 +198,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
             die letzte Zeile (mit Hinweis).
         signal: Spaltenname in ``data`` oder numerischer Vektor der Länge ``nrow(data)``. Der Wert in Zeile t muss
             nur mit Daten bis einschließlich Zeile t berechnet sein (sonst Zukunftsinformation).
+            Seit 1.6.4 keine Faktoren (Spalte oder Vektor).
         target: Name der Kursspalte (Niveaus, keine Renditen). Fehlende Kurse werden mit dem letzten bekannten
             Wert fortgeschrieben.
         horizon: Vorwärtshorizont in Zeilen der Daten (ganze Zahl von 1 bis ``nrow(data) - 1``, Standard 21), z.
@@ -211,8 +215,10 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
             Quantilsbereiche (Standard 3) für eine 2D-Tabelle. ``None`` (Standard) = keine 2D-Tabelle.
         splits: Anzahl gleich großer Gruppen aufeinanderfolgender Stichtage für die Stabilitätsprüfung (ganze
             Zahl, Standard 1 = keine Aufteilung).
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
         degree: Grad der Polynom-Regression ``forward ~ poly(signal, degree)`` (ganze Zahl, Standard 2; 0 =
             keine). Wird nur geschätzt, wenn es mehr als ``degree + 1`` verschiedene Signalwerte gibt.
+            Seit 1.6.4 eine ganze Zahl ≥ 0.
 
     Returns:
         Objekt der Klasse ``SimLevSignalAnalysis``, eine Liste mit
@@ -260,28 +266,37 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     """
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
         raise ValueError("signal_analysis: data muss ein data.frame mit Spalte 'date' sein.")
+    chk_col_nofactor(data, "date", "signal_analysis")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     n = len(data)
     d = _to_date_days(data["date"], "signal_analysis: data$date")
     names = [str(c) for c in data.columns]
 
-    def getcol(v, what):
+    def getcol(v, what, type="logisch_oder_numerisch"):
         if isinstance(v, str) or (isinstance(v, (list, tuple, np.ndarray)) and len(v) and isinstance(np.ravel(v)[0], str)):
             vl = [v] if isinstance(v, str) else [str(e) for e in np.ravel(v)]
             if len(vl) != 1 or vl[0] not in names:
                 raise ValueError("signal_analysis: %s: Spalte '%s' fehlt in data (vorhanden: %s)." % (
                     what, vl[0], ", ".join(names)))
+            chk_col_nofactor(data, vl[0], "signal_analysis")   # Entscheidung 15
+            chk_col_type(data, vl[0], "signal_analysis", type)   # seit 1.6.4 (vorher Kategorie-Codes bzw. Text)
             col = data[vl[0]]
             return _num_col(col) \
                 if col.dtype != bool else col.to_numpy(dtype=np.float64)
+        # seit 1.6.4: Vektoren nur numerisch oder logisch (keine Tabelle, Matrix, Kategorie oder dict)
+        if (isinstance(v, pd.Categorical) or (isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype))):
+            chk_stop("faktor", "signal_analysis", what)   # Entscheidung 15
+        if not _numlgl_vec(v):
+            chk_stop("e2.spalte_oder_vektor", "signal_analysis", what)
         a = _num_vec(v) if not isinstance(v, pd.Series) else v.to_numpy(dtype=np.float64)
         if len(a) != n:
             raise ValueError("signal_analysis: %s hat Länge %d, data hat %d Zeilen." % (what, len(a), n))
         return a.astype(np.float64)
 
     sig = getcol(signal, "signal")
+    target = chk_scalar(target)
     if not isinstance(target, str):
         raise ValueError("signal_analysis: target muss ein Spaltenname sein.")
-    px = getcol(target, "target")
+    px = getcol(target, "target", "numerisch")
     s2all = getcol(signal2, "signal2") if signal2 is not None else None
     o = np.argsort(np.where(np.isnan(d), np.inf, d), kind="stable")
     o = o[~np.isnan(d[o])]
@@ -300,11 +315,24 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
         s2all = s2all[o]
     n = len(o)
     px = _fill_na(px, "locf", keep_leading=True)
+    # seit 1.6.4: ganze Zahlen (vorher z. B. 2.5 abgeschnitten, Text gelesen), Meldung ohne Eingabewert
+    horizon, step, bins = chk_scalar(horizon), chk_scalar(step), chk_scalar(bins)
+
+    def int1(v):
+        return _is_num_scalar(v) and math.isfinite(float(v)) and float(v) == math.trunc(float(v))
+    if not int1(horizon):
+        chk_stop("ganz", "signal_analysis", "horizon", "1")
+    if step is not None and not (int1(step) and step >= 1):
+        raise ValueError("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
+    if not (int1(bins) and bins >= 2):
+        raise ValueError("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+    bins2 = chk_int1(bins2, "signal_analysis", "bins2", lo=2)
+    splits = chk_int1(splits, "signal_analysis", "splits")
+    degree = chk_int1(degree, "signal_analysis", "degree", lo=0)
     hz = _as_int(horizon)
     stp = _as_int(step if step is not None else horizon)
     if len(hz) != 1 or hz[0] is None or hz[0] < 1 or hz[0] >= n:
-        raise ValueError("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen (ist: %s)." % (
-            n - 1, ", ".join("NA" if h is None else str(h) for h in hz)))
+        raise ValueError("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen." % (n - 1))
     if len(stp) != 1 or stp[0] is None or stp[0] < 1:
         raise ValueError("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
     horizon, step = hz[0], stp[0]
@@ -334,7 +362,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
         raise ValueError("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorwärtsrendite." % len(df))
     sv = df["signal"].to_numpy(dtype=np.float64)
     if len(np.unique(sv)) < 2:
-        raise ValueError("signal_analysis: Signal ist an allen Stichtagen gleich (%s); keine Bereiche möglich." % _sp("%g", sv[0]))
+        raise ValueError("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche möglich.")
     ppy = (n - 1) / (float(d[-1] - d[0]) / 365.25)
 
     def ann(m):
@@ -473,10 +501,43 @@ def _hac_cov(Y, lag=None):
     return S
 
 
-def _main_stream(seed):
-    """Hauptstrom."""
+def _numlgl_vec(v) -> bool:
+    """R ``is.numeric(v) || is.logical(v)`` ohne Faktor und ohne Dimension (Vektor, Zahl oder Wahrheitswert)."""
+    if isinstance(v, pd.Series):
+        return v.dtype.kind in "iufb"
+    if isinstance(v, np.ndarray):
+        return v.ndim <= 1 and v.dtype.kind in "iufb"
+    if isinstance(v, (list, tuple)):
+        return all(e is None or isinstance(e, (bool, int, float, np.bool_, np.integer, np.floating)) for e in v)
+    return isinstance(v, (bool, int, float, np.bool_, np.integer, np.floating))
+
+
+def _bench_ok(b) -> bool:
+    """benchmark: Zahl, Zahlenvektor oder ein einzelner Name (R: numerisch oder Text der Länge 1, kein Faktor)."""
+    if isinstance(b, str):
+        return True
+    if isinstance(b, pd.Series):
+        if isinstance(b.dtype, pd.CategoricalDtype):
+            return False
+        b = b.to_numpy()
+    if isinstance(b, np.ndarray):
+        if b.ndim > 1 or b.size == 0:
+            return False
+        if b.dtype.kind in "iuf":
+            return True
+        b = list(b.ravel())
+    if isinstance(b, (list, tuple)):
+        if len(b) == 1 and isinstance(b[0], str):
+            return True
+        return len(b) > 0 and all(isinstance(e, (int, float, np.integer, np.floating)) and not isinstance(e, (bool, np.bool_))
+                                  for e in b)
+    return isinstance(b, (int, float, np.integer, np.floating)) and not isinstance(b, (bool, np.bool_))
+
+
+def _main_stream(seed, fn):
+    """Hauptstrom (``fn`` für die Meldung eines ungültigen ``seed``)."""
     from ._lib import main_stream
-    return main_stream(seed)
+    return main_stream(seed, fn)
 
 
 def _boot_idx(n, m, L, stream):
@@ -520,12 +581,15 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
             der Bootstrap-Differenzen, p-Wert = Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5-
             und 97.5-%-Quantil der Bootstrap-Differenzen).
         B: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur bei ``method = "bootstrap"``.
+            Seit 1.6.4 höchstens 10^8.
         block: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
             Blöcke laufen zyklisch über das Ende); ``None`` (Standard) = ``max(2, round(T^(1/3)))`` mit T = Anzahl
             Renditepaare. Nur bei ``method = "bootstrap"``.
+            Seit 1.6.4 eine Zahl ≥ 1.
         ppy: Perioden je Jahr für die Annualisierung. ``None`` (Standard) = bei Vektoren 252 (``"day"``), 52
             (``"week"``) bzw. 12 (``"month"``); bei Ergebnissen und DataFrames aus den gemeinsamen Daten
             geschätzt: (Anzahl Perioden - 1) / (Zeitspanne in Tagen / 365.25).
+            Seit 1.6.4 eine Zahl > 0.
         seed: Startwert für den Bootstrap (Standard ``None``). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das
             Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau
             einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte
@@ -559,8 +623,18 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
         d["b"] = 100 * np.cumprod(1 + rng.normal(2e-4, 0.01, n))
         print(simlev.sharpe_test(d[["date", "a"]], d[["date", "b"]]))
     """
+    _e5_choice(frequency, ("week", "day", "month"), "sharpe_test", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
+    _e5_choice(method, ("hac", "bootstrap"), "sharpe_test", "method")
     frequency = _match_arg(frequency, ("week", "day", "month"))
     method = _match_arg(method, ("hac", "bootstrap"))
+    # seit 1.6.4: B, block, ppy und seed vor der Rechnung
+    B = chk_int1(B, "sharpe_test", "B")
+    chk_max(B, SL_MAX_N, "sharpe_test", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
+    block = chk_num1(block, "sharpe_test", "block", lo=1, null_ok=True)
+    ppy = chk_num1(ppy, "sharpe_test", "ppy", lo=0, lo_open=True, null_ok=True)
+    seed = chk_scalar(seed)
+    if seed is not None:
+        _lib.check_seed(seed, "sharpe_test")
     a = _ret_from(x, frequency)
     b = _ret_from(y, frequency)
     if (a["date"] is None) != (b["date"] is None):
@@ -618,7 +692,7 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
         if block is None:
             block = max(2.0, float(_fmt.r_round(r_pow(Tn, 1 / 3))))
 
-        S = _main_stream(seed)
+        S = _main_stream(seed, "sharpe_test")
         db = np.empty(int(B))
         for i in range(int(B)):
             k = _boot_idx(Tn, Tn, block, S)
@@ -664,9 +738,12 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
             Spaltennummer bzw. -name in ``x`` (nach dem Verwerfen leerer Spalten), diese Spalte wird aus den
             Kandidaten entfernt; ein numerischer Vektor (Länge > 1) = Benchmark-Renditen als Anteil mit genau
             einem Wert je Periode nach Aggregation und Entfernen unvollständiger Zeilen.
+            Seit 1.6.4 eine Spaltennummer als ganze Zahl, kein Faktor.
         B: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 999).
+            Seit 1.6.4 höchstens 10^8.
         block: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
             zyklisch); ``None`` (Standard) = ``max(2, round(T^(1/3)))`` mit T = Anzahl Perioden.
+            Seit 1.6.4 eine Zahl ≥ 1.
         frequency: Periodenlänge: ``"week"`` (Standard), ``"day"`` oder ``"month"``. Mit Datum (bei
             ``SimLevParamSearch`` immer, bei Matrizen über ``dates``) werden die Renditen geometrisch zu
             ISO-Wochen bzw. Kalendermonaten verkettet; ohne Datum wird nicht aggregiert, die Zeilen gelten dann
@@ -703,7 +780,20 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
         R = rng.normal(0, 0.01, (800, 10)); R[:, 1] += 0.003   # eine Strategie mit echter Überrendite
         print(simlev.overfit_reality_check(R, B=200, frequency="day", seed=1))
     """
+    _e5_choice(frequency, ("week", "day", "month"), "overfit_reality_check", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     frequency = _match_arg(frequency, ("week", "day", "month"))
+    # seit 1.6.4: benchmark nur Zahl(en) oder ein Name (vorher Kategorie als Codes), Spaltennummer ganz; B, block,
+    # seed vorab
+    if (isinstance(benchmark, pd.Categorical) or (isinstance(benchmark, pd.Series) and isinstance(benchmark.dtype, pd.CategoricalDtype))):
+        chk_stop("faktor", "overfit_reality_check", "benchmark")   # Entscheidung 15
+    if benchmark is not None and not _bench_ok(benchmark):
+        chk_stop("e2.benchmark", "overfit_reality_check")
+    B = chk_int1(B, "overfit_reality_check", "B")
+    chk_max(B, SL_MAX_N, "overfit_reality_check", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
+    block = chk_num1(block, "overfit_reality_check", "block", lo=1, null_ok=True)
+    seed = chk_scalar(seed)
+    if seed is not None:
+        _lib.check_seed(seed, "overfit_reality_check")
     rr = _ext("overfitting", "_of_returns")(x, frequency, dates)
     Rf = rr["R"]
     if isinstance(Rf, pd.DataFrame):
@@ -724,7 +814,7 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
             else:
                 try:
                     f = float(e)
-                    j = None if math.isnan(f) else int(f)
+                    j = int(f) if math.isfinite(f) and f == math.trunc(f) else None
                 except (TypeError, ValueError):
                     j = None
             if j is None or j < 1 or j > R.shape[1]:
@@ -735,20 +825,21 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
         else:
             b = barr.astype(np.float64)
     if len(b) != R.shape[0]:
-        raise ValueError("benchmark passt nicht zur Länge der Renditen.")
+        chk_stop("rs.benchmark_laenge", "overfit_reality_check")
     D = R - b[:, None]
     Tn, K = D.shape
     fbar = _col_means(D)
     if block is None:
         block = max(2.0, float(_fmt.r_round(r_pow(Tn, 1 / 3))))
 
-    S = _main_stream(seed)
+    S = _main_stream(seed, "overfit_reality_check")
     Fb = np.empty((int(B), K))
     D = np.ascontiguousarray(D, dtype=np.float64)
+    DF = np.ascontiguousarray(D.ravel(order="F"))   # seit 1.6.4 spaltenweise (B-073; bis 1.6.3 zeilenweise, langsamer)
     for i in range(int(B)):   # colMeans(D[idx, ]) im Kern ohne Zeilenkopie (seit 1.6.3; dieselbe Summenfolge)
         idx = np.ascontiguousarray(_boot_idx(Tn, Tn, block, S), dtype=np.int64)
         if Tn and K:
-            _cext.slc_r_colsums_idx(D, Tn, K, K, 1, idx, 0, False, True, Fb[i])
+            _cext.slc_r_colsums_idx(DF, Tn, K, 1, Tn, idx, 0, False, True, Fb[i])
         else:
             Fb[i] = _col_means(D[idx, :])
     sq = math.sqrt(Tn)
@@ -805,13 +896,17 @@ def sharpe_min_track_record(x, *, target=0, prob=0.95, frequency=("week", "day",
             Werte werden entfernt), ``SimLevResult`` aus ``simulation()`` (bereinigter Wertindex aus
             ``result_index()``) oder ``data.frame`` mit ``date`` und einer Wertspalte (``value``, sonst erste
             numerische Spalte; Niveaus). Die beiden letzten werden in Renditen der ``frequency`` umgerechnet.
+            Seit 1.6.4 mindestens zwei endliche Renditen, die nicht alle gleich sind (sonst Fehler, in allen Sprachen
+            wie bisher in R).
         target: Vergleichs-Sharpe-Ratio SR^* p. a. (Standard 0); intern durch √(ppy) geteilt.
         prob: Geforderte Sicherheit als Anteil (Standard 0.95 = 95 %).
+            Seit 1.6.4 eine Zahl > 0 und < 1.
         frequency: Periodenlänge ``"week"`` (Standard, ISO-Wochen), ``"day"`` oder ``"month"``: bei
             ``SimLevResult`` und DataFrame die Aggregation (Wert am Periodenende); bei Vektoren nur für den
             Standardwert von ``ppy``.
         ppy: Perioden je Jahr. ``None`` (Standard) = bei Vektoren 252 (``"day"``), 52 (``"week"``) bzw. 12
             (``"month"``); sonst geschätzt als (Anzahl Renditen - 1) / (Zeitspanne in Tagen / 365.25).
+            Seit 1.6.4 eine Zahl > 0.
 
     Returns:
         Benannter numerischer Vektor: ``sharpe`` (Sharpe Ratio p. a.), ``periods`` (vorhandene Perioden),
@@ -828,9 +923,17 @@ def sharpe_min_track_record(x, *, target=0, prob=0.95, frequency=("week", "day",
         r = np.random.default_rng(1).normal(0.002, 0.02, 520)   # 10 Jahre Wochenrenditen
         print(simlev.sharpe_min_track_record(r, target=0, ppy=52))
     """
+    _e5_choice(frequency, ("week", "day", "month"), "sharpe_min_track_record", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     frequency = _match_arg(frequency, ("week", "day", "month"))
+    # seit 1.6.4: target endlich, prob in (0, 1), ppy > 0
+    target = chk_num1(target, "sharpe_min_track_record", "target")
+    prob = chk_num1(prob, "sharpe_min_track_record", "prob", lo=0, hi=1, lo_open=True, hi_open=True)
+    ppy = chk_num1(ppy, "sharpe_min_track_record", "ppy", lo=0, lo_open=True, null_ok=True)
     a = _ret_from(x, frequency)
     r = a["r"][np.isfinite(a["r"])]
+    # seit 1.6.4 (Entscheidung 37): entartete Renditen (weniger als zwei, alle gleich) sind ein Fehler wie in R
+    if len(r) < 2 or not r_sd(r) > 0:
+        chk_stop("renditen_entartet", "sharpe_min_track_record")
     if ppy is None:
         if a["date"] is not None:
             dd = _days(a["date"])
@@ -879,6 +982,8 @@ def result_heatmap(x, *, inflation=None, max_years=30):
             numerischer Vektor mit Datumsnamen. Die Werte werden durch den Index relativ zum Startdatum geteilt.
         max_years: Längste Haltedauer in Jahren (ganze Zahl, Standard 30); höchstens die Zahl der verfügbaren
             Jahre.
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
+            Seit 1.6.4 höchstens 100.
 
     Returns:
         Objekt der Klasse ``SimLevHeatmap``, eine Liste mit ``matrix`` (Zeilen = Startjahr, Spalten = Haltedauer
@@ -907,6 +1012,8 @@ def result_heatmap(x, *, inflation=None, max_years=30):
         hm = simlev.result_heatmap(d, inflation=2, max_years=10)
         print(hm["matrix"].shape)
     """
+    max_years = chk_int1(max_years, "result_heatmap", "max_years")   # seit 1.6.4
+    chk_max(max_years, SL_MAX_JAHRE, "result_heatmap", "max_years")   # Entscheidungen 16 und 46
     s = _da_series(x, "x")
     if inflation is not None:
         s = _da_deflate(s, inflation)

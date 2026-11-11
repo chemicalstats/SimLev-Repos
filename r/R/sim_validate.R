@@ -209,6 +209,35 @@
        effective_tax_rate = effective_tax_rate, church_k = church_k, soli_factor_income = soli_factor_income)
 }
 
+#' Felder eines Assets der Strategie pruefen (seit 1.6.4)
+#'
+#' Zweck: Listen-Assets (ohne asset_config()) gehen durch dieselben Regeln wie asset_config(): share in (0, 1],
+#' spread >= 0 und endlich, partial_exemption in [0, 100], deliverable TRUE/FALSE, start als Datum, Signalspalten
+#' als Name (bis 1.6.3 liefen negative Spreads, Teilfreistellung ueber 100 % oder start = NA still durch; FW1-1).
+#' Meldungen aus der Tabelle eingabe mit "simulation: Asset '<name>'" als Funktion.
+#' @keywords internal
+#' @noRd
+.sim_check_asset_fields <- function(a, nm) {
+  w <- sprintf("simulation: Asset '%s'", nm)
+  if (is.null(a[["share"]])) chk_stop("fehlt", w, "share")
+  s <- a[["share"]]   # bei 1 < share <= 100 wertfreier Hinweis (Entscheidung 12; seit 1.6.4, K43 KE)
+  if (is.numeric(s) && length(s) == 1L && is.finite(s) && s > 1 && s <= 100)
+    chk_stop("ke.zahl_bereich_prozent", w, "share", chk_range_text(0, 1, lo_open = TRUE))
+  chk_num1(a[["share"]], w, "share", lo = 0, hi = 1, lo_open = TRUE)
+  chk_num1(a[["spread"]], w, "spread", lo = 0, null_ok = TRUE)
+  chk_num1(a[["partial_exemption"]], w, "partial_exemption", lo = 0, hi = 100, null_ok = TRUE)
+  if (!is.null(a[["deliverable"]])) chk_bool1(a[["deliverable"]], w, "deliverable")   # Feld fehlt: Standard FALSE
+  st <- a[["start"]]
+  if (!is.null(st)) {
+    d <- if (length(st) == 1L && (inherits(st, c("Date", "POSIXt")) || is.character(st)))
+           tryCatch(as.Date(st), error = function(e) NA) else NA
+    if (length(d) != 1L || !is.finite(unclass(d))) chk_stop("datum", w, "start")
+  }
+  chk_name1(a[["signal_buy"]], w, "signal_buy", null_ok = TRUE)
+  chk_name1(a[["signal_sell"]], w, "signal_sell", null_ok = TRUE)
+  invisible(NULL)
+}
+
 #' Phase 1 von simulation(): Eingabepruefung
 #'
 #' Zweck: Argumente von simulation() pruefen (Fehler und Warnungen wie dokumentiert), Prozentangaben
@@ -232,24 +261,24 @@
                               use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax,
                               base_rate, fractions, risk_free, split_mode, split_thresh,
                               event_col, church_tax, order_fee, dca_fee, harvest_mode,
-                              taxable_income, tariff) {
+                              taxable_income, tariff, liquidate = FALSE) {
     # === PARAMETER-VALIDIERUNG ===
   tax_mode <- match.arg(tax_mode)
   
   # Pflichtparameter
+  # seit 1.6.4 ohne Eingabewert bzw. Klasse; die Meldung zu data nennt die Tabellenform je Sprache und die Umwandlung
   if (missing(data) || !is.data.frame(data)) {
-    stop(sprintf("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht %s.",
-                 if (missing(data)) "fehlend" else paste(class(data), collapse = "/")))
+    stop(sprintf("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).",
+                 chk_msg("tabelle.formen")))
   }
   if (missing(strategy) || length(strategy) == 0) {
-    stop(sprintf("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()), nicht %s.",
-                 if (missing(strategy)) "fehlend" else "leer (L\u00e4nge 0)"))
+    stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()).")
   }
 
   # --- Eingabepruefung der Daten ---
   filled_attr <- attr(data, "filled")                 # series_align(): gefuellte Werte (Matrix)
   if (!identical(class(data), "data.frame")) data <- as.data.frame(data, stringsAsFactors = FALSE)  # z. B. tibble
-  if (is.null(names(strategy)) || any(names(strategy) == ""))
+  if (is.null(names(strategy)) || any(is.na(names(strategy)) | names(strategy) == ""))   # seit 1.6.4 auch NA
     stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
   if (anyDuplicated(names(strategy)))
     stop(sprintf("simulation: Asset-Name '%s' kommt in 'strategy' mehrfach vor; jeder Name darf nur einmal vorkommen.",
@@ -257,6 +286,9 @@
   if (anyDuplicated(names(data)))   # R2: sonst wuerde still die erste gleichnamige Spalte verwendet
     stop(sprintf("simulation: Spaltenname '%s' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein.",
                  names(data)[anyDuplicated(names(data))]))
+  # seit 1.6.4: .filled ist der interne Name der aufgefuellten Tage (bis 1.6.3 schaltete eine solche Spalte den
+  # Handel still ab)
+  if (".filled" %in% names(data)) chk_stop("spalte_intern", "simulation", ".filled")
   # C7-01: Listen-Strategien (ohne create_strategy()/asset_config()) wie asset_config() pruefen; ein
   # ungueltiges Steuerregime (z. B. "none") fuehrte sonst still zu einer Rechnung ohne Steuern.
   # In einer Studie (seit 1.5.1, .sim_study) nur einmal je Strategie: die Pruefung meldet nur Fehler
@@ -265,25 +297,26 @@
     a <- strategy[[nm]]
     if (!is.list(a))
       stop(sprintf("simulation: Asset '%s' in 'strategy' muss eine Liste bzw. asset_config() sein.", nm), call. = FALSE)
+    if (!inherits(a, "asset_config")) .asset_list_fields(a, nm, "simulation")   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
     cls_ok <- c("etf", "etn", "etc", "certificate", "etn_standard", "etn_deliverable")
     if (!is.character(a$asset_class) || length(a$asset_class) != 1L || !a$asset_class %in% cls_ok)
-      stop(sprintf("simulation: asset_class %s von Asset '%s' ist ung\u00fcltig; erlaubt sind %s (veraltet: etn_standard, etn_deliverable). Strategie am besten mit create_strategy()/asset_config() bauen.",
-                   .show_arg_s(a$asset_class), nm, paste(cls_ok[1:4], collapse = ", ")), call. = FALSE)
+      stop(sprintf("simulation: asset_class von Asset '%s' ist ung\u00fcltig; erlaubt sind %s (veraltet: etn_standard, etn_deliverable). Strategie am besten mit create_strategy()/asset_config() bauen.",
+                   nm, paste(cls_ok[1:4], collapse = ", ")), call. = FALSE)
     if (!is.null(a$tax_regime) && (!is.character(a$tax_regime) || length(a$tax_regime) != 1L ||
                                    !a$tax_regime %in% c("investment_fund", "capital_gains", "private_sale")))
-      stop(sprintf("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden.",
-                   .show_arg_s(a$tax_regime), nm, "tax = NULL"), call. = FALSE)
+      stop(sprintf("simulation: tax_regime von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden.",
+                   nm, "tax = NULL"), call. = FALSE)
     if (!is.character(a$trading) || length(a$trading) != 1L || !a$trading %in% c("bnh", "signal"))
-      stop(sprintf("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
-                   .show_arg_s(a$trading), nm), call. = FALSE)
+      stop(sprintf("simulation: trading von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
+                   nm), call. = FALSE)
     if (!is.null(a[["wrapper"]])) {   # Fonds-Wrapper (wrapper.R)
       if (!inherits(a[["wrapper"]], "SimLevWrapperConfig"))
-        stop(sprintf("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein, nicht %s.",
-                     nm, paste(class(a[["wrapper"]]), collapse = "/")), call. = FALSE)
+        stop(sprintf("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein.", nm), call. = FALSE)
       if (a$trading != "bnh")
         stop(sprintf("simulation: Asset '%s' ist ein Fonds-Wrapper; daf\u00fcr ist nur trading = \"bnh\" m\u00f6glich (keine Signale auf den Anteilswert).",
                      nm), call. = FALSE)
     }
+    .sim_check_asset_fields(a, nm)
   }
   if (!strat_ok) .sim_memo_set("strategy", strategy)
   if (!"date" %in% names(data)) stop("simulation: Spalte 'date' fehlt in 'data'.")
@@ -298,12 +331,13 @@
                  if (length(miss) == 1L) "Kursspalte" else "Kursspalten", paste(paste0("'", miss, "'", collapse = ", "),
                  if (length(miss) == 1L) "fehlt" else "fehlen"), paste(setdiff(names(data), "date"), collapse = ", ")))
   if (nrow(data) < 1L) stop("simulation: 'data' enth\u00e4lt keine Zeilen.")
-  if (is.factor(data$date)) data$date <- as.character(data$date)
+  # seit 1.6.4 kein Faktor als Datumsspalte (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
+  chk_col_nofactor(data, "date", "simulation")
   if (is.character(data$date)) {
     dd <- as.Date(data$date, format = "%Y-%m-%d")
     bad <- which(is.na(dd) & !is.na(data$date))
-    if (length(bad)) stop(sprintf("simulation: Spalte 'date' ist Text und '%s' (Zeile %d) ist kein Datum im Format JJJJ-MM-TT; vorher mit as.Date(..., format = ...) umwandeln.",
-                                  data$date[bad[1]], bad[1]))
+    if (length(bad)) stop(sprintf("simulation: Spalte 'date' ist Text und Zeile %d ist kein Datum im Format JJJJ-MM-TT; vorher mit as.Date(..., format = ...) umwandeln.",
+                                  bad[1]))   # seit 1.6.4 ohne den Text der Zelle
     data$date <- dd
     message("Hinweis: Spalte 'date' wurde von Text in Date umgewandelt.")
   } else if (inherits(data$date, "POSIXt")) {
@@ -311,7 +345,7 @@
     message("Hinweis: Spalte 'date' wurde von Datum-Uhrzeit in Date umgewandelt.")
   }
   if (!inherits(data$date, "Date"))
-    stop(sprintf("simulation: Spalte 'date' muss die Klasse Date haben (ist: %s).", class(data$date)[1]))
+    stop("simulation: Spalte 'date' muss die Klasse Date haben.")
   # In einer Studie (seit 1.5.1) nur einmal je Datumsspalte, wenn sie ohne Meldung durchging (kein NA, sortiert,
   # eindeutig); sonst je Lauf wie bisher mit Meldung bzw. Fehler
   dates_ok <- !is.null(.sim_memo_get("dates", data$date))
@@ -365,10 +399,19 @@
   pre_filled <- pre_filled | all_na
   for (nm in names(strategy)) {
     v <- data[[nm]]
-    if (!is.numeric(v)) stop(sprintf("simulation: Kursspalte '%s' muss numerisch sein (ist: %s).", nm, class(v)[1]))
+    if (!is.numeric(v)) stop(sprintf("simulation: Kursspalte '%s' muss numerisch sein.", nm))
+    # seit 1.6.4 (A-086) Schnellweg ohne NA: Bereich ueber min/max statt der Indexvektoren; nur bei einem Fehler wie
+    # bisher ueber which() (gleiche Meldung, gleiche Reihenfolge der Pruefungen)
+    if (length(v) && !is.object(v) && !anyNA(v)) {
+      lo <- min(v); hi <- max(v)
+      if (is.finite(lo) && is.finite(hi) && lo >= 1e-100 && hi <= 1e100) next
+    }
     bad <- which(!is.na(v) & !(is.finite(v) & v > 0))
-    if (length(bad)) stop(sprintf("simulation: Kursspalte '%s' enth\u00e4lt ung\u00fcltige Kurse (<= 0 oder unendlich), erstmals am %s (Wert %s); erwartet werden positive Kursniveaus.",
-                                  nm, format(data$date[bad[1]]), format(v[bad[1]])))
+    if (length(bad)) stop(sprintf("simulation: Kursspalte '%s' enth\u00e4lt ung\u00fcltige Kurse (<= 0 oder unendlich), erstmals am %s; erwartet werden positive Kursniveaus.",
+                                  nm, format(data$date[bad[1]])))
+    # seit 1.6.4 (A-005, Entscheidung 103): Kurse von 1e-100 bis 1e100 (sonst laeuft die Stueckzahl Geld / Kurs ueber)
+    bad <- which(!is.na(v) & (v < 1e-100 | v > 1e100))
+    if (length(bad)) chk_stop("fa.kurs_bereich", "simulation", nm, format(data$date[bad[1]]))
     ok <- which(!is.na(v))
     if (!length(ok)) stop(sprintf("simulation: Kursspalte '%s' enth\u00e4lt nur NA.", nm))
     if (length(ok) < length(v)) {
@@ -385,15 +428,15 @@
     }
   }
 
-  # start_value
-  if (is.null(start_value) || is.na(start_value)) {
+  # start_value (seit 1.6.4 Laenge 1 und endlich; bis 1.6.3 Rohfehler bei Laenge 0/2, Inf ergab still ein Depot von 0)
+  if (is.null(start_value) || (length(start_value) == 1L && is.na(start_value))) {
     start_value <- 10000
     message("Hinweis: start_value ist NULL oder NA; verwendet wird der Standardwert 10000 EUR.")
   }
-  if (!is.numeric(start_value) || start_value <= 0) {
-    stop(sprintf("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht %s.",
-                 paste(deparse(start_value), collapse = "")))
+  if (!is.numeric(start_value) || length(start_value) != 1L || start_value <= 0) {
+    stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000).")
   }
+  if (start_value == Inf) chk_stop("zahl", "simulation", "start_value")
   
   # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprueft (tax_profile(), sim_costs(),
   # dca_plan(), rebalance_plan(), split_rule(); die Pruefungen des flachen Wegs sind entfallen).
@@ -403,8 +446,22 @@
       warning(sprintf("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
                       arg, format(x), format(x), format(x * 100)), call. = FALSE)
   }
-  if (!is.logical(fractions) || length(fractions) != 1L || is.na(fractions))
-    stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "fractions", .show_arg_s(fractions)), call. = FALSE)
+  # seit 1.6.4 liquidate und details wie fractions (bis 1.6.3 je Sprache eigene Wahrheitsregel: R isTRUE, Python
+  # bool(), Julia == true)
+  for (lg in c("fractions", "liquidate", "details")) {
+    v <- switch(lg, fractions = fractions, liquidate = liquidate, details = details)
+    if (!is.logical(v) || length(v) != 1L || is.na(v))
+      stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein.", lg), call. = FALSE)
+  }
+  # seit 1.6.4 risk_free: NULL, eine endliche Zahl oder ein Spaltenname mit Zahlen (bis 1.6.3 in R Vektoren je Tag
+  # reihum, Faktoren als Codes; in Python/Julia Rohfehler)
+  if (!is.null(risk_free)) {
+    if (!((is.numeric(risk_free) && length(risk_free) == 1L && is.finite(risk_free)) ||
+          (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && nzchar(risk_free))))
+      chk_stop("zahl_oder_spalte", "simulation", "risk_free")
+    # Spalte: nur Zahlen (Entscheidung 2; bis 1.6.3 Text und Wahrheitswerte ueber as.numeric, Faktoren als Codes)
+    if (is.character(risk_free) && risk_free %in% names(data)) chk_col_type(data, risk_free, "simulation", "numerisch")
+  }
   .frac_warn(risk_free, "risk_free", hi = 0.05)
   # dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
   if (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && risk_free %in% names(data))
@@ -448,19 +505,19 @@
   # "relative" = Prozent des Zielgewichts (z. B. 25 -> Ziel 40 % darf 30-50 % sein)
   balance_thresh_type <- match.arg(balance_thresh_type)
   # Ordergebuehren: Angaben fuer die Tagesengine (sim_engine.R); .fee_env$paid summiert die gezahlten Gebuehren
-  fee_order <- .fee_spec(order_fee); fee_dca <- if (is.null(dca_fee)) fee_order else .fee_spec(dca_fee)
+  fee_order <- .fee_spec(order_fee, "simulation", "order_fee")
+  fee_dca <- if (is.null(dca_fee)) fee_order else .fee_spec(dca_fee, "simulation", "dca_fee")
   fees_on <- !is.null(fee_order) || !is.null(fee_dca)
   .fee_env$paid <- 0
-  # base_rate: KEINE Division hier — .calculate_flat_rate teilt an der Verbrauchsstelle /100
+  # base_rate: KEINE Division hier; die Tagesengine teilt bei der Vorabpauschale durch 100 (core/engine_core_impl.h)
 
   # Gewichtssumme validieren
   total_weight <- .sim_memo_val("share", strategy, function() sum(sapply(strategy, function(a) a$share), na.rm = TRUE))
   if (abs(total_weight - 1.0) > 1e-6) {
+    # seit 1.6.4 ohne die Eingabewerte (bis 1.6.3 "Aktuelle Gewichte: A=0.300, ..."); die Summe bleibt
     stop(sprintf(
-      "simulation: Asset-Gewichte (share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
-      total_weight,
-      paste(sprintf("%s=%.3f", names(strategy), sapply(strategy, function(a) a$share)), collapse = ", ")
-    ))
+      "simulation: Asset-Gewichte (share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).",
+      total_weight))
   }
 
   # Steuersaetze (Kirchensteuer, Prozent -> Anteil, Guenstigerpruefung) im gemeinsamen Helfer (seit 1.1.0

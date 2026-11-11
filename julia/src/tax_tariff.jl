@@ -36,7 +36,7 @@ function _split_csv_line(line::AbstractString)
         i += 1
     end
     push!(out, String(take!(cur)))
-    return [String(strip(x)) for x in out]
+    return [String(strip(x, (' ', '\t'))) for x in out]   # wie read.csv(strip.white = TRUE): nur Leerzeichen und Tabulator
 end
 
 """
@@ -53,6 +53,8 @@ Datei anzugeben; der Code bleibt unverändert.
 # Argumente
 - `file`: Zeichenkette oder nothing. Pfad der Tarifdatei; nothing = mitgelieferte Datei
   `system.file("extdata", "steuertarif.csv", package = "SimLev")`.
+  Zahlen der Datei seit 1.6.4 nur mit ASCII-Ziffern und -Leerzeichen, unabhängig von der Spracheinstellung (z. B. ein
+  geschütztes Leerzeichen ist ein Fehler); ein UTF-8-BOM am Anfang wird übergangen.
 
 # Rückgabe
 Objekt der Klasse "SimLevTaxTariff" (Liste) mit `zones` (Tabelle (RFrame) ab, bezug, teiler, a, b, c), `soli`
@@ -74,7 +76,8 @@ Einheiten: `ab`, `bezug`, `teiler` und `c` in EUR; bei Progressionszonen (`teile
 auch `a`, `b` in EUR; bei linearen Zonen (`a = 0, bezug = 0, teiler = 1`) ist `b` der Grenzsteuersatz als
 Anteil (`0.42` für 42 %, nicht 42); die Soli-Sätze dagegen in Prozent (`5.5` für 5,5 %).
 
-Geprüft wird: Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV, bzw. hat eine Zeile
+Geprüft wird (seit 1.6.4 auch: kein Ordner, Kodierung UTF-8, ein UTF-8-BOM am Anfang wird übergangen,
+geschlossene Anführungszeichen, keine Pflichtspalte doppelt, Zahlen nur mit ASCII-Ziffern): Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV, bzw. hat eine Zeile
 mehr Felder als die Kopfzeile, z. B. Dezimalkomma: Fehler mit Hinweis), Pflichtspalten vorhanden, `art` nur
 "zone" oder "soli", alle benötigten Werte numerisch und endlich, `teiler > 0`, Zonen streng aufsteigend mit
 erster Zone ab 0, genau eine soli-Zeile mit Sätzen von 0 bis 100. Plausibilität: Der Grenzsteuersatz jeder
@@ -126,21 +129,32 @@ function _tax_tariff_read(file)
     warned = false
     (file isa AbstractString) || error("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.")
     file = String(file)
+    # seit 1.6.4 (A-071, A-037): Ordner, Kodierung und Anführungszeichen vorab mit Meldung; ein UTF-8-BOM am
+    # Dateianfang (Excel "CSV UTF-8") wird übergangen
+    isdir(file) && chk_stop("e1.tarif_ordner", "tax_tariff", file)
     isfile(file) || error("tax_tariff: Datei '$file' nicht gefunden.")
-    raw = readlines(file)
+    txt = read(file, String)
+    isvalid(txt) || chk_stop("e1.tarif_utf8", "tax_tariff", file)
+    startswith(txt, "\ufeff") && (txt = txt[nextind(txt, 1):end])
+    raw = readlines(IOBuffer(txt))
     gl = [ln for ln in raw if occursin(r"^#\s*Geltung\s*:", ln)]
-    geltung = isempty(gl) ? missing : String(strip(replace(gl[1], r"^#\s*Geltung\s*:" => "")))
-    body = [String(strip(replace(ln, r"#.*$" => ""))) for ln in raw]
+    # seit 1.6.4 (K43 T1-N6) wie R's trimws nur [ \t\r\n] abschneiden (bis dahin auch Unicode-Leerraum,
+    # Entscheidung 27)
+    ws = (' ', '\t', '\r', '\n')
+    geltung = isempty(gl) ? missing : String(strip(replace(gl[1], r"^#\s*Geltung\s*:" => ""), ws))
+    body = [String(strip(replace(ln, r"#.*$" => ""), ws)) for ln in raw]
     body = [ln for ln in body if !isempty(ln)]
     if !isempty(body)
+        any(ln -> isodd(count(==('"'), ln)), body) && chk_stop("e1.tarif_quote", "tax_tariff", file)
         nf = [count(==(','), ln) + 1 for ln in body]
+        # seit 1.6.4 ohne die Zeileninhalte (Entscheidung 8); die Datenzeile bleibt als Ort
         if nf[1] == 1
-            error("tax_tariff: In '$file' wurde nur eine Spalte gelesen (Kopfzeile '$(body[1])'). Erwartet wird Komma als Trennzeichen" *
+            error("tax_tariff: In '$file' wurde nur eine Spalte gelesen. Erwartet wird Komma als Trennzeichen" *
                   (occursin(';', body[1]) ? " (die Datei verwendet offenbar Semikolon, z. B. aus deutschem Excel)" : "") *
                   " und Punkt als Dezimalzeichen, z. B. 'zone,69879,0,1,0,0.42,-11135.63'.")
         end
         for i in 2:length(nf)
-            nf[i] != nf[1] && error("tax_tariff: In '$file' hat die Zeile '$(body[i])' $(nf[i]) Felder, die Kopfzeile $(nf[1]). Dezimalzeichen ist der Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen.")
+            nf[i] != nf[1] && error("tax_tariff: In '$file' hat Datenzeile $(i - 1) insgesamt $(nf[i]) Felder, die Kopfzeile $(nf[1]). Dezimalzeichen ist der Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen.")
         end
     end
     isempty(body) && error("tax_tariff: Datei '$file' ist keine lesbare CSV-Datei (no lines available in input).")
@@ -148,17 +162,20 @@ function _tax_tariff_read(file)
     rws = [_split_csv_line(ln) for ln in body[2:end]]
     d = Dict{String,Vector{String}}(h => String[j <= length(r) ? r[j] : "" for r in rws] for (j, h) in enumerate(header))
     need = ["art", "ab", "bezug", "teiler", "a", "b", "c"]
+    dup = [c for c in need if count(==(c), header) > 1]   # seit 1.6.4 (A-039): Pflichtspalte doppelt
+    isempty(dup) || chk_stop("e1.tarif_doppelt", "tax_tariff", file, dup[1])
     miss = [c for c in need if !haskey(d, c)]
     isempty(miss) || error("tax_tariff: In '$file' fehlen die Spalten $(join(miss, ", ")) (erwartet: $(join(need, ","))).")
     art = lowercase.(d["art"])
     bad = findfirst(a -> !(a in ("zone", "soli")), art)
-    bad === nothing || error("tax_tariff: Datenzeile $bad hat art = '$(d["art"][bad])'; erlaubt sind \"zone\" und \"soli\".")
+    bad === nothing || error("tax_tariff: Datenzeile $bad hat ein ungültiges art; erlaubt sind \"zone\" und \"soli\".")
+    # seit 1.6.4 Felder mit Nicht-ASCII-Zeichen als NA (A-038, C-022; wie R für fremde Ziffern)
     function num(col, rows)
-        v = Float64[r_as_numeric(d[col][i]) for i in rows]
+        v = Float64[chk_as_num(d[col][i]) for i in rows]   # nur ASCII (Entscheidung 27, gemeinsame Hilfe)
         nb = findfirst(x -> !isfinite(x), v)
         if nb !== nothing
             i = rows[nb]
-            error("tax_tariff: Spalte '$col' in Datenzeile $i (art = $(art[i])) ist nicht numerisch bzw. nicht endlich ('$(d[col][i])').")
+            error("tax_tariff: Spalte '$col' in Datenzeile $i (art = $(art[i])) ist nicht numerisch bzw. nicht endlich.")
         end
         v
     end
@@ -167,17 +184,17 @@ function _tax_tariff_read(file)
     length(sr) == 1 || error("tax_tariff: Es muss genau eine soli-Zeile geben (gefunden: $(length(sr))).")
     zd = Dict(c => num(c, zr) for c in ("ab", "bezug", "teiler", "a", "b", "c"))
     ab = zd["ab"]
-    ab[1] != 0 && error("tax_tariff: Die erste Zone muss bei ab = 0 beginnen (ist $(r_format1(ab[1]))).")
+    ab[1] != 0 && error("tax_tariff: Die erste Zone muss bei ab = 0 beginnen.")
     for k in 1:length(ab)-1
-        ab[k+1] - ab[k] <= 0 && error("tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone $(k + 1) ab $(r_format1(ab[k+1])) folgt auf ab $(r_format1(ab[k]))).")
+        ab[k+1] - ab[k] <= 0 && error("tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone $(k + 1)).")
     end
     k0 = findfirst(<=(0), zd["teiler"])
-    k0 === nothing || error("tax_tariff: teiler muss > 0 sein (Zone ab $(r_format1(ab[k0]))).")
+    k0 === nothing || error("tax_tariff: teiler muss > 0 sein (Zone $k0).")
     soli = RList("freigrenze" => num("ab", sr)[1], "satz" => num("a", sr)[1], "milderung" => num("b", sr)[1])
     soli["freigrenze"] < 0 && error("tax_tariff: Die Soli-Freigrenze (ab) darf nicht negativ sein.")
     for s in ("satz", "milderung")
         (soli[s] < 0 || soli[s] > 100) &&
-            error("tax_tariff: Soli-$(s == "satz" ? "Zuschlagsatz (a)" : "Milderungssatz (b)") muss zwischen 0 und 100 Prozent liegen (ist $(r_format1(soli[s]))).")
+            error("tax_tariff: Soli-$(s == "satz" ? "Zuschlagsatz (a)" : "Milderungssatz (b)") muss zwischen 0 und 100 Prozent liegen.")
     end
     zones = RFrame("ab" => zd["ab"], "bezug" => zd["bezug"], "teiler" => zd["teiler"], "a" => zd["a"],
                    "b" => zd["b"], "c" => zd["c"])

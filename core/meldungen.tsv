@@ -1,4 +1,5 @@
-# core/meldungen.tsv – Code->Text-Tabellen der Kerne (Tagesengine, Auswertung), eine Quelle fuer R, Python und Julia.
+# core/meldungen.tsv – Code->Text-Tabellen der Kerne (Tagesengine, Auswertung) und der Eingabepruefung (Tabelle eingabe,
+# seit 1.6.4; Nutzung r/R/pruefen.R, python/simlev/_pruefen.py, julia/src/pruefen.jl), eine Quelle fuer R, Python und Julia.
 # Spalten: tabelle, schluessel, text (Vorlage im Format von sprintf; \t, \n und \\ als Fluchtfolgen).
 # Erzeugt von core/gen_meldungen.py: r/R/meldungen.R, python/simlev/_meldungen.py, julia/src/meldungen.jl.
 # Nach einer Aenderung: python3 core/gen_meldungen.py (core/sync.py --check prueft, dass die Dateien aktuell sind).
@@ -145,3 +146,260 @@ eval_warn	15	simulation: zeitgewichteter Wertindex am %s nicht positiv (Tagesren
 eval_warn	16	simulation: Depotwert am %s negativ (%.2f EUR, Steuerschuld); Drawdowns auf 100 %% begrenzt.
 eval_warn	17	no non-missing arguments to max; returning -Inf
 eval_warn	unbekannt	simulation: interner Fehler: unbekannter Ereigniscode %d der Auswertung.
+eingabe	fehlt	%s: %s fehlt.
+eingabe	zahl	%s: %s muss eine einzelne endliche Zahl sein.
+eingabe	zahl_bereich	%s: %s muss eine einzelne endliche Zahl %s sein.
+eingabe	ganz	%s: %s muss eine ganze Zahl ≥ %s sein.
+eingabe	wahr	%s: %s muss TRUE oder FALSE sein.
+eingabe	text	%s: %s muss ein einzelner Text sein.
+eingabe	name	%s: %s muss ein einzelner, nicht leerer Name sein.
+eingabe	auswahl	%s: %s muss einer von %s sein.
+eingabe	datum	%s: %s muss ein einzelnes Datum sein (Date oder "JJJJ-MM-TT").
+eingabe	laenge	%s: %s muss die Länge %s haben.
+eingabe	tabelle	%s: %s muss eine Tabelle sein (%s).
+eingabe	tabelle.formen	R: data.frame, Python: pandas.DataFrame, Julia: RFrame; andere Formen vorher umwandeln, z. B. as.data.frame(x), pandas.DataFrame(x) bzw. RFrame(pairs(x)...)
+eingabe	zahlen	%s: %s muss ein numerischer Vektor sein.
+eingabe	zahl_oder_spalte	%s: %s muss eine einzelne endliche Zahl oder ein Spaltenname in data sein.
+eingabe	liste	%s: %s muss eine Liste sein.
+eingabe	klasse	%s: %s muss ein Objekt aus %s sein.
+eingabe	spalten	%s: Spalte(n) %s fehlen in data.
+eingabe	spalte_typ	%s: Spalte '%s' muss %s sein.
+eingabe	spalte_faktor	%s: Spalte '%s' darf kein Faktor (Kategorie) sein.
+eingabe	spalte_intern	%s: Spalte '%s' ist ein interner Name von SimLev und darf nicht in data stehen.
+eingabe	spalte_signal	%s: Spalte '%s' muss Signale enthalten: TRUE/FALSE oder 0/1 (NA erlaubt).
+eingabe	typ.logisch	logisch (TRUE/FALSE)
+eingabe	typ.numerisch	numerisch
+eingabe	typ.logisch_oder_numerisch	logisch (TRUE/FALSE) oder numerisch
+eingabe	bereich.gt	> %s
+eingabe	bereich.ge	≥ %s
+eingabe	bereich.lt	< %s
+eingabe	bereich.le	≤ %s
+eingabe	bereich.und	%s und %s
+eingabe	e1.zahl_inf	%s: %s muss eine einzelne Zahl sein (endlich oder Inf).
+eingabe	e1.event_weight	%s: event_weight muss benannt sein (Asset = Spaltenname), z. B. c(A = "wA", B = "wB").
+eingabe	e1.trigger_feld	%s: Feld '%s' in triggers[[%s]] ist nicht erlaubt; erlaubt sind type, threshold, lev_col, vol_col, triggers und df.
+eingabe	e1.spalte_endlich	%s: Spalte '%s' darf nur endliche Zahlen oder NA enthalten.
+eingabe	e1.signal	%s: Signal %s muss eine Liste mit buy und sell sein (TRUE/FALSE oder 0/1, NA erlaubt).
+eingabe	e1.doppelt	%s: %s darf keinen Wert doppelt enthalten.
+eingabe	e1.tarif_ordner	%s: '%s' ist ein Ordner, keine Datei.
+eingabe	e1.tarif_utf8	%s: Datei '%s' ist nicht in UTF-8 kodiert (z. B. in Excel als „CSV UTF-8“ speichern).
+eingabe	e1.tarif_quote	%s: In '%s' fehlt ein schließendes Anführungszeichen.
+eingabe	e1.tarif_doppelt	%s: In '%s' kommt die Spalte '%s' mehrfach vor.
+eingabe	e1.tabelle_spalten	%s: data muss eine Tabelle mit Spalte 'date' und den Kursspalten der inneren Strategie sein (%s).
+eingabe	e1.ganz_inf	%s: %s muss eine ganze Zahl ≥ %s oder Inf sein.
+eingabe	e1.trigger_df	%s: df eines Teil-Triggers muss %s Zeilen haben (wie df).
+eingabe	e2.funktion	%s: %s muss eine Funktion sein.
+eingabe	e2.doppelt	%s: %s darf keine doppelten Namen enthalten.
+eingabe	e2.zahlen_matrix	%s: %s muss ein numerischer Vektor oder eine numerische Matrix sein.
+eingabe	e2.benannt	%s: %s muss eine benannte Liste sein.
+eingabe	e2.bedingung	%s: mindestens eine Bedingung angeben (in ... oder über thresholds).
+eingabe	e2.spalte_von	%s: %s muss der Name einer Spalte von %s sein.
+eingabe	e2.spalte_oder_vektor	%s: %s muss ein Spaltenname in data oder ein numerischer Vektor mit einem Wert je Zeile sein.
+eingabe	e2.frequenz	%s: frequencies: Eintrag '%s' muss Einheit und Abstand enthalten, z. B. c("month", 1).
+eingabe	e2.benchmark	%s: benchmark muss NULL, eine Spaltennummer, ein Spaltenname oder ein numerischer Vektor sein.
+eingabe	e2.zahlen_endlich	%s: %s muss ein numerischer Vektor mit endlichen Werten sein.
+eingabe	e2.zahlen_na	%s: %s muss ein numerischer Vektor mit Werten %s oder NA sein.
+eingabe	e2.gitter	%s: ess_grid muss eine benannte Liste von Wertevektoren sein, z. B. list(L = c(20, 50)).
+eingabe	e2.verzeichnis	%s: %s muss ein Verzeichnis sein (dort liegt eine Datei).
+eingabe	e3.namen	%s: %s muss ein Vektor nicht leerer Namen sein.
+eingabe	e3.werte	%s: %s muss endliche Werte enthalten.
+eingabe	e3.werte_bereich	%s: %s muss endliche Werte %s enthalten.
+eingabe	e3.spalten_land	%s: Spalte(n) %s fehlen im Datensatz '%s'.
+eingabe	e3.datum	%s: Spalte 'date' muss aufsteigend sortiert sein und darf kein NA enthalten.
+eingabe	e3.datum_land	%s: Spalte 'date' im Datensatz '%s' muss aufsteigend sortiert sein und darf kein NA enthalten.
+eingabe	e3.gewichte	%s: %s muss je %s ein Gewicht ≥ 0 enthalten (Summe > 0).
+eingabe	e3.namen_passen	%s: Namen von %s passen nicht zu %s.
+eingabe	e3.ziel	%s: target muss eine Zahl oder ein nach Spalten aus columns benannter Vektor sein.
+eingabe	e3.kandidaten	%s: candidates muss eine nicht leere Liste benannter Gewichtsvektoren sein (Namen = Kursspalten).
+eingabe	e3.kandidat_summe	%s: Gewichte von Kandidat '%s' müssen endlich sein und eine Summe > 0 haben.
+eingabe	e3.pfadspalte	%s: Spalte '%s' aus %s nicht im Pfad; verfügbar: %s.
+eingabe	faktor	%s: %s darf kein Faktor (Kategorie) sein.
+eingabe	ganz_bis	%s: %s muss eine ganze Zahl von %s bis %s sein.
+eingabe	ganz_vektor	%s: %s muss ein Vektor ganzer Zahlen %s sein.
+eingabe	obergrenze	%s: %s darf höchstens %s sein.
+eingabe	argument_unbekannt	%s: unbekanntes Argument '%s'.
+eingabe	argument_doppelt	%s: doppeltes Argument '%s'.
+eingabe	na	%s: %s darf kein NA enthalten%s.
+eingabe	spalte_na	%s: Spalte '%s' darf kein NA enthalten%s.
+eingabe	hinweis.basiszins	 (Basiszins für jeden Tag bzw. jede Periode angeben; Jahre ohne Basiszins als 0)
+eingabe	hinweis.cape	 (CAPE für jeden Tag bzw. jede Periode angeben)
+eingabe	zeilen_keine	%s: %s hat keine Datenzeilen.
+eingabe	spalte_vorhanden	%s: Spalte '%s' ist in %s schon vorhanden; für %s einen anderen Namen wählen.
+eingabe	kennzahl_namen	%s: metrics muss einen Vektor mit eindeutigen, nicht leeren Namen liefern, die nicht path, weight, combo, tries oder strategy heißen.
+eingabe	chunk_kaputt	%s: Zwischendatei von Chunk %s in chunk_dir ist unvollständig oder beschädigt (z. B. nach einem Abbruch); die Datei löschen und neu starten.
+eingabe	pfad	%s: result muss ein Ergebnis von bootstrap() oder ein einzelner Pfad (Matrix oder Tabelle mit Zahlenspalten) sein.
+eingabe	gitter_zahlen	%s: ess_grid darf nur Zahlen enthalten.
+eingabe	renditen_entartet	%s: x muss mindestens zwei endliche Renditen enthalten, die nicht alle gleich sind.
+eingabe	ess_kurz	%s: für ess = TRUE braucht die Historie mindestens %s Renditen.
+eingabe	hinweis.prozessoren	Hinweis: %s auf %s begrenzt (Zahl der Prozessoren).
+eingabe	grafik_leer	%s: Spalte '%s' hat keine endlichen Werte; die Grafik wäre leer.
+eingabe	n2.kennzahl_namen	%s: metrics muss einen Vektor mit eindeutigen, nicht leeren Namen liefern, die nicht %s heißen.
+eingabe	n2.einkommen_start	%s: start eines Eintrags in income muss ein ganzes Planjahr ≥ 1 sein (Eintrag weglassen, wenn kein Einkommen).
+eingabe	e5.renditen_inf	%s: x darf keine unendlichen Renditen enthalten.
+eingabe	e5.perioden	%s: x hat nach dem Entfernen der Zeilen mit fehlenden Werten weniger als zwei Perioden.
+eingabe	e5.renditen_kurz	%s: %s muss mindestens zwei endliche Renditen enthalten, die nicht alle gleich sind.
+eingabe	e5.jahre_monat	%s: %s muss eine Zahl von Jahren sein, die gerundet mindestens einen Monat ergibt (12 * Jahre ≥ 1).
+eingabe	e5.ids	%s: ids muss ganze Zahlen aus x$results$id ohne Doppel enthalten.
+eingabe	e5.map	%s: map muss ein benannter Vektor nicht leerer Spaltennamen sein (Name = Spalte der Suche, Wert = Spalte im Pfad), z. B. c(letf = "eu_l2").
+eingabe	e5.gewichte	%s: %s muss ein benannter Vektor endlicher Gewichte ≥ 0 sein.
+eingabe	e5.signal	%s: signal muss eine Liste mit buy und sell gleicher Länge sein (TRUE/FALSE oder 0/1, NA erlaubt).
+eingabe	e5.regel	%s: rules[[%s]] muss eine Liste mit when und weights sein.
+eingabe	e5.regel_feld	%s: Feld '%s' in rules[[%s]] ist nicht erlaubt; erlaubt sind when und weights.
+eingabe	e5.when	%s: when in rules[[%s]] muss ein Ausdruck (Text), eine Funktion von data, ein Signal (Liste mit buy und sell gleicher Länge) oder ein Vektor aus TRUE/FALSE bzw. 0/1 (NA erlaubt) sein.
+eingabe	e5.datum_vektor	%s: %s muss aufsteigend sortiert sein und darf kein NA enthalten.
+eingabe	e5.max_gap	%s: max_gap muss eine Zahl ≥ 0 (Kalendertage) oder Inf sein.
+eingabe	e5.makro_kurz	%s: macro braucht mindestens zwei Werte, um periods zu schätzen; sonst periods angeben.
+eingabe	e5.named	%s: Argumente müssen Paare Name => Wert mit nicht leerem Namen sein, z. B. named("a" => 1.0).
+eingabe	e5.rows	%s: idx muss Zeilennummern von 1 bis %s oder ein logischer Vektor der Länge %s sein.
+eingabe	e5.methode	%s: keine Methode für dieses Objekt.
+eingabe	e5.pbo_S	%s: S darf höchstens 24 sein (choose(24, 12) = 2704156 Aufteilungen der CSCV; größere S brauchen zu viel Speicher).
+eingabe	e5.datum_faktor	%s: Datum ist ein Faktor (Kategorie); erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'.
+eingabe	e4.date	%s: %s darf die Spalte 'date' nicht enthalten.
+eingabe	e4.gemeinsam	%s: %s und %s dürfen keine gemeinsame Spalte enthalten.
+eingabe	e4.anteile	%s: %s muss ein Vektor von Anteilen echt zwischen 0 und 1 ohne doppelte Werte sein.
+eingabe	e4.breaks	%s: breaks muss eine nach Zustandsspalten benannte Liste streng steigender Grenzen ohne NA sein, z. B. list(inflation = c(-Inf, 2, 4, Inf)).
+eingabe	e4.breaks_name	%s: breaks: '%s' ist keine Spalte aus conditions.
+eingabe	e4.bedingung	%s: condition muss ein Ausdruck (einzelner Text) oder ein Vektor aus Wahrheitswerten sein (wie as.logical, NA = FALSE).
+eingabe	e4.parameter	%s: %s muss eine benannte Liste mit einzelnen endlichen Zahlen für drag, spread und/oder beta sein, z. B. list(spread = 0.4).
+eingabe	e4.lag	%s: lag muss "auto" oder eine ganze Zahl mit Betrag kleiner als die Zeilenzahl von data sein.
+eingabe	e4.horizont	%s: horizon muss kleiner als die Zahl der Produktbeobachtungen im Fit-Fenster sein (%s).
+eingabe	e4.views	%s: views muss eine Liste von Annahmen aus view_mean(), view_prob() oder view_vol() sein.
+eingabe	e4.szenarien	%s: x muss eine Tabelle mit Spalte 'date' und Kursspalten oder eine Szenario-Tabelle bzw. -Matrix mit Zahlenspalten sein.
+eingabe	e4.matrix	%s: R muss eine numerische Matrix oder eine Tabelle mit Zahlenspalten sein.
+eingabe	e4.reihe	%s: %s muss NULL, eine Zahl, ein Vektor mit einem Wert je Zeile, ein Spaltenname in data, eine Tabelle (date, Wert) oder ein nach Datum benannter Vektor sein.
+eingabe	e4.daten	%s: dates muss ein Datumsvektor (Date oder Text "JJJJ-MM-TT") oder eine Tabelle mit Spalte 'date' sein.
+eingabe	e4.splice	%s: splice muss "inception", "none" oder ein einzelnes Datum (Date oder "JJJJ-MM-TT") sein.
+eingabe	e4.wenige	%s: x liefert zu wenige Szenarien (mindestens zwei Perioden mit vollständigen Kursen nötig).
+eingabe	e4.lag_ohne_fit	%s: lag muss ohne Fit eine ganze Zahl mit Betrag kleiner als die Zeilenzahl von data sein ("auto" nur in backcast_fit()).
+eingabe	e4.bedingung_text	%s: condition enthält Text, der kein Wahrheitswert ist (erlaubt wie as.logical: TRUE/FALSE, T/F, true/false, True/False, NA).
+eingabe	e4.fit_angabe	%s: Modellangabe '%s' gehört zu backcast_fit(); mit fit ist sie nicht erlaubt.
+eingabe	e4.risiko0	%s: Gesamtrisiko des Portfolios ist 0 (z. B. alle Gewichte 0 oder nur Anlagen ohne Schwankung); Risikoanteile sind nicht definiert.
+eingabe	e4.lw	Ledoit-Wolf: nicht definiert, weil die Stichproben-Kovarianz schon ein Vielfaches der Einheitsmatrix ist (d^2 = 0, z. B. nur Anlagen ohne Schwankung); cov = "sample" verwenden.
+eingabe	sp.optim_ganz	%s: Steuerwert %s muss eine Zahl von -2147483648 bis 2147483647 sein
+eingabe	sp.rexpr_tiefe	RExpr: Ausdruck ist zu tief verschachtelt (höchstens %s Ebenen)
+eingabe	sp.rexpr_spalte	RExpr: Spalte '%s' hat einen Typ, den Regeltexte nicht unterstützen (nur Zahlen, Wahrheitswerte, Text und Datum)
+eingabe	sp.rexpr_laenge	RExpr: Ergebnis wäre zu lang (höchstens %s Elemente)
+eingabe	fa.probs_leer	%s: probs muss mindestens einen Wert enthalten.
+eingabe	fa.kurs_bereich	%s: Kursspalte '%s' enthält Kurse außerhalb von 1e-100 bis 1e100, erstmals am %s; Kurse in einer passenden Einheit angeben (z. B. mit einem festen Faktor umrechnen).
+eingabe	fa.nicht_endlich	simulation: eine Stückzahl oder ein Depotwert ist nicht mehr endlich (Kurse oder Beträge zu groß bzw. zu klein für den Zahlbereich); Kurse und Beträge in einer passenden Einheit angeben.
+eingabe	rp.wert_typ	%s: Werttyp wird nicht unterstützt (nur Zahlen, Text, Wahrheitswerte und Datumswerte)
+eingabe	rp.stat_art	%s: %s werden nicht unterstützt; vorher in Zahlen umwandeln
+eingabe	rp.rank_random	rank: ties.method = "random" wird nicht unterstützt (braucht den Zufallszahlengenerator von R)
+eingabe	par.cores	%s: %s muss "auto" oder eine ganze Zahl ≥ 1 sein.
+eingabe	ut4.kde_weights	%s: weights muss so lang wie x sein
+eingabe	ut1.unterlauf	simulation: ein Kaufbetrag ist im Verhältnis zum Kurs zu klein für den Zahlbereich (die Stückzahl wäre 0); Kurse und Beträge in einer passenden Einheit angeben.
+eingabe	ut1.rendite	%s: yield muss je Kuponperiode größer als -100 Prozent sein (yield / coupon_frequency > -100).
+eingabe	ut1.gebuehr	%s: %s muss eine Zahl (EUR je Order) oder eine Liste mit fixed, percent, min und max sein.
+eingabe	ut1.gebuehr_feld	%s: Feld '%s' in %s ist nicht erlaubt; erlaubt sind fixed, percent, min und max.
+eingabe	ut1.gebuehr_negativ	%s: in %s müssen fixed, percent und min ≥ 0 sein und max ≥ min.
+eingabe	ut1.liste_leer	%s: %s muss eine nicht leere Liste sein.
+eingabe	ut1.seed	%s: seed muss eine ganze Zahl mit |seed| < 2^53 sein.
+eingabe	ut1.unbenannt	%s: alle Angaben in ... müssen benannt sein (z. B. share = 0.5).
+eingabe	ut1.asset_feld	%s: unbekanntes Feld '%s' in Asset '%s'.
+eingabe	ut1.asset_feld_doppelt	%s: Feld '%s' kommt in Asset '%s' mehrfach vor.
+eingabe	ut1.asset_unbenannt	%s: alle Felder von Asset '%s' müssen benannt sein (z. B. share = 0.5).
+eingabe	ut2.prozess	%s: Ein Hilfsprozess endete ohne Ergebnis.
+eingabe	ut2.n_tests	%s: n_tests muss mindestens so groß sein wie die Zahl der Sharpe Ratios bzw. der ausgewerteten Spalten von x.
+eingabe	ut2.target_zahlen	%s: target muss numerisch sein (Prozent p. a., z. B. 4).
+eingabe	ut2.datasets	%s: datasets muss eine benannte Liste sein (Land -> data.frame).
+eingabe	ut2.goal_returns	%s: returns muss eine Matrix (Szenarien x Kandidaten) endlicher Brutto-Renditen >= 0 ohne NA sein (z. B. 1.05).
+eingabe	ut2.geldbetrag_gt0	%s: %s muss ein Geldbetrag > 0 sein.
+eingabe	ut2.geldbetrag_ge0	%s: %s muss ein Geldbetrag >= 0 sein.
+eingabe	ut2.contributions	%s: contributions muss ein endlicher Geldbetrag oder Vektor von Geldbeträgen sein.
+eingabe	ut2.of_x	%s: x muss ein SimLevParamSearch oder eine numerische Renditematrix sein.
+eingabe	ut2.pbo_S	%s: S muss gerade und >= 2 sein.
+eingabe	ut2.ps_renditen	%s: x muss ein SimLevParamSearch mit Renditen sein.
+eingabe	ut2.vpw_alter	%s: age muss kleiner als max_age sein.
+eingabe	ut2.inflation_pfade	%s: inflation muss NULL, eine Zahl (Prozent p. a.) oder der Name einer Zusatzreihe sein.
+eingabe	ut2.pfade_x	%s: x muss ein bootstrap_result, eine Liste von SimLevResult oder eine SimLevBootstrapStudy sein.
+eingabe	ut2.pfade_column	%s: column muss bei einem bootstrap_result angegeben werden.
+eingabe	ut2.dates_streng	%s: dates muss streng aufsteigend sein und darf kein NA enthalten.
+eingabe	ut2.base_rate	%s: base_rate muss eine Zahl (Prozent) oder eine Matrix Perioden x Pfade sein.
+eingabe	ut2.income	%s: income muss eine Liste von list(start = Jahr, end = Jahr, amount = Betrag) sein (amount: realer Jahresbetrag).
+eingabe	ut2.start_value	%s: start_value muss ein positiver Geldbetrag (Zahl > 0) oder ein SimLevResult sein.
+eingabe	ut2.wd_x	%s: x muss eine numerische Matrix (Perioden x Pfade) von Brutto-Periodenrenditen sein.
+eingabe	ut2.wd_brutto	%s: x muss Brutto-Periodenrenditen enthalten (z. B. 1.05 für +5 Prozent).
+eingabe	ut2.wd_inflation	%s: inflation muss eine Zahl (Prozent p. a.) oder eine Matrix Perioden x Pfade sein.
+eingabe	ut2.laufzeit_pos	%s: %s muss > 0 sein (Laufzeit in Jahren).
+eingabe	ut2.mode	%s: mode muss zwischen min und max liegen.
+eingabe	ut2.sd	%s: sd muss >= 0 sein.
+eingabe	ut2.indices	%s: indices muss vollständig benannt sein: c(name1 = 'spalte1', ...)
+eingabe	ut2.aux	%s: aux muss benannt sein.
+eingabe	ut2.aux_type	%s: aux_type muss ein benannter Zeichenvektor sein: c(<Name aus aux> = 'level' oder 'rate'), z. B. c(cpi = 'level', zins = 'rate').
+eingabe	ut2.zahl_oder_aux	%s: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein.
+eingabe	ut2.finance_level	%s: %s: Zusatzreihe '%s' ist in aux_type als 'level' gekennzeichnet; der Finanzierungszins muss eine Rate (Prozent p. a.) sein.
+eingabe	ut2.expense	%s: %s muss >= 0 sein.
+eingabe	ut2.boot_data	%s: data muss ein data.frame oder eine Matrix sein.
+eingabe	ut2.param_L	%s: params$L (erwartete Blocklänge) muss eine Zahl >= 1 sein.
+eingabe	ut2.param_block	%s: params$block_length muss eine ganze Zahl von 1 bis %s sein (%s Zeilen Historie%s).
+eingabe	ut2.param_wild	%s: params$wild_type muss 0 (Rademacher), 1 (Mammen) oder 2 (Normal) sein.
+eingabe	ut2.param_p_break	%s: params$p_break muss ein Anteil zwischen 0 und 1 sein.
+eingabe	ut2.n_positiv	%s: n muss eine positive Zahl sein.
+eingabe	ut2.chronologie	%s: path_length muss bei Verfahren '%s' %s sein (das Verfahren erhält die Chronologie).
+eingabe	ut2.keep_aux	%s: keep_aux muss Namen aus config$aux enthalten.
+eingabe	ut2.strategies	%s: strategies muss eine benannte, nicht leere Liste sein.
+eingabe	ut2.benchmark_name	%s: benchmark muss einer der Strategienamen sein.
+eingabe	ut2.keep_paths	%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) sein.
+eingabe	ut3.lag_auto	%s: lag = "auto": keine Korrelation bestimmbar (mindestens 30 gemeinsame Renditen mit Schwankung nötig); lag angeben.
+eingabe	ut3.krise_summe	%s: Summe der Gewichte muss positiv sein.
+eingabe	ut3.datum_fehlt	%s: Datum fehlt in Zeile %s.
+eingabe	ut3.splice_spalte	%s: Quelle '%s' muss genau eine Wertspalte neben der Datumsspalte haben.
+eingabe	rs.target_spalten	%s: target braucht einen Skalar oder einen benannten Eintrag je Spalte aus columns; fehlt für: %s.
+eingabe	rs.preise_doppelt	%s: type = 'prices': date enthält doppelte Daten; Kursniveaus brauchen eine eindeutige Zeitfolge.
+eingabe	rs.weights_namen	%s: Namen von weights (%s) passen nicht zu columns (%s).
+eingabe	rs.land_kurz	%s: Ein Land hat zu wenige Perioden.
+eingabe	rs.ps_ohne_renditen	%s: Suche ohne gespeicherte Renditen (keep_returns = "none").
+eingabe	rs.zwei_punkte	%s: Mindestens zwei Punkte nötig.
+eingabe	rs.pbo_beob	%s: Zu wenige Beobachtungen (%s) für S = %s Blöcke.
+eingabe	rs.id_punkt	%s: id nicht unter den gültigen Punkten (Spalten ohne endliche Werte oder ohne Schwankung zählen nicht).
+eingabe	rs.wf_kurz	%s: Historie zu kurz für ein Trainings- und Testfenster.
+eingabe	rs.benchmark_laenge	%s: benchmark passt nicht zur Länge der Renditen.
+eingabe	rs.ergebnis_zusatz	%s: Bei einem SimLevResult sind nur numerische Inflation und keine Zusatzspalten möglich.
+eingabe	rs.date_kurs	%s: data braucht 'date' und die Kursspalte.
+eingabe	rs.rate_monat	%s: Spalte '%s' (Rate in Prozent p. a.) ergibt nicht endliche oder nicht positive Monatsfaktoren (Rate <= -100 Prozent?).
+eingabe	rs.kohorte_kurz	%s: Zu kurze Historie für die gewählte Kohortenlänge.
+eingabe	rs.infl_typ	%s: inflation_type passt nicht zu aux_type['%s'] = '%s' in bootstrap_config(); inflation_type weglassen oder '%s' angeben.
+eingabe	rs.studie_renditen	%s: Die Studie enthält keine Periodenrenditen; bootstrap_study(..., keep_returns = 'year') verwenden.
+eingabe	rs.strategie	%s: Strategie '%s' nicht gespeichert. Verfügbar: %s
+eingabe	rs.aux_gespeichert	%s: Zusatzreihe '%s' nicht gespeichert (keep_aux).
+eingabe	rs.liste_infl	%s: Bei Ergebnislisten ist 'inflation' ein Prozentsatz p. a.
+eingabe	rs.ergebnisse_kurz	%s: Ergebnisse zu kurz für eine volle Periode.
+eingabe	rs.ergebnisse_laenge	%s: Alle Ergebnisse müssen gleich lang sein.
+eingabe	rs.spalte_pfad	%s: Spalte '%s' nicht im Pfad. Verfügbar: %s
+eingabe	rs.dates_pfade	%s: dates hat Länge %s, die Pfade haben %s Zeilen (path_length + 1); ein Datum je Pfadzeile angeben.
+eingabe	rs.pfade_kurz	%s: Pfade zu kurz für eine volle Periode der gewählten frequency.
+eingabe	rs.aux_pfad	%s: Zusatzreihe '%s' nicht im Pfad. Verfügbar: %s
+eingabe	rs.rate_periode	%s: Zusatzreihe '%s' (Rate in Prozent p. a.) ergibt nicht endliche oder nicht positive Periodenfaktoren (Rate <= -100 Prozent?).
+eingabe	rs.niveau	%s: Zusatzreihe '%s' ist kein positives Niveau (Verhältnisse nicht endlich oder <= 0); für eine Rate inflation_type = 'rate_pa' verwenden.
+eingabe	rs.infl_prozent	%s: Bei einem %s ist 'inflation' ein Prozentsatz p. a.
+eingabe	rs.na	%s: Renditen/Inflation enthalten NA.
+eingabe	rs.infl_dim	%s: inflation als Matrix braucht dieselbe Dimension wie die Renditen (%s x %s), hat aber %s x %s.
+eingabe	rs.keine_renditen	%s: Keine Renditen (leere Matrix bzw. keine Pfade).
+eingabe	rs.infl_passt	%s: Inflation (%s x %s) passt nicht zu den Renditen (%s x %s).
+eingabe	rs.base_dim	%s: base_rate als Matrix braucht dieselbe Dimension wie die Renditen (%s x %s Perioden x Pfade), hat aber %s x %s.
+eingabe	rs.cape	%s: Die CAPE-Regel braucht eine CAPE-Reihe (Argument cape in withdrawal_cohorts/withdrawal_paths).
+eingabe	rs.min_max	%s: min <= max erforderlich.
+eingabe	rs.index_doppelt	%s: Doppelte Index-Namen: %s
+eingabe	rs.aux_type_wert	%s: aux_type['%s']: erlaubt sind nur 'level' (Niveau, z. B. Preisindex) und 'rate' (Rate, z. B. Zins in Prozent).
+eingabe	rs.letf_base	%s: %s: '%s' nicht in indices. Verfügbar: %s
+eingabe	rs.letf_null	%s: %s darf nicht 0 sein.
+eingabe	rs.letf_aux	%s: %s: Zusatzreihe '%s' nicht in aux.
+eingabe	rs.letf_days_level	%s: %s: Zusatzreihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden unverändert gebraucht ('rate').
+eingabe	rs.namen_eindeutig	%s: Namen von Indizes, LETFs und aux müssen eindeutig sein.
+eingabe	rs.regime_index	%s: regime_index '%s' nicht in indices.
+eingabe	rs.data_leer	%s: data darf nicht leer sein.
+eingabe	rs.spalte_fehlt	%s: Spalte '%s' nicht gefunden. Verfügbar: %s
+eingabe	rs.keine_zeile	%s: data enthält keine vollständige Zeile in den verwendeten Spalten.
+eingabe	rs.nicht_endlich	%s: Renditen enthalten nicht endliche Werte (Inf), erste in Spalte '%s', Zeile %s der verwendeten Daten.
+eingabe	rs.rendite_null	%s: Renditen <= 0 gefunden (erwartet: Brutto-Renditen > 0, z. B. 1.002).
+eingabe	rs.keine_pfade	%s: Keine Pfade im Ergebnis vorhanden.
+eingabe	rs.dates_pfad	%s: dates hat Länge %s, Pfad hat %s Zeilen.
+eingabe	rs.dates_studie	%s: dates braucht Länge %s (Pfadlänge + 1).
+eingabe	rs.burn_in	%s: burn_in ist länger als der Pfad.
+eingabe	rs.burn_in_kurz	%s: Pfad nach burn_in zu kurz für eine volle Periode in keep_returns.
+eingabe	rs.raster_leer	%s: Leeres Raster.
+eingabe	rs.sim_args_eigen	%s: sim_args darf %s nicht enthalten (setzt die Funktion selbst; Betrag über amount, Raten über months).
+eingabe	rs.horizont_kurz	%s: Historie zu kurz für den Horizont.
+eingabe	rs.objective	%s: objective '%s' nicht in metrics(): %s
+eingabe	ke.prozent_teilen	; Prozentangaben durch 100 teilen
+eingabe	ke.zahl_bereich_prozent	%s: %s muss eine einzelne endliche Zahl %s sein; Prozentangaben durch 100 teilen.

@@ -22,18 +22,17 @@
 
 # ── Pruefhilfen ───────────────────────────────────────────────────────────────
 
-.blk_show <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
-
+# Meldungen seit 1.6.4 ohne Eingabewert (Entscheidung 8 des Nutzers vom 05.11.2026; bis 1.6.3 ", nicht <Wert>")
 .blk_num <- function(who, x, arg, what, min = 0, null_ok = FALSE) {
   if (is.null(x) && null_ok) return(invisible(NULL))
   if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || (!is.null(min) && x < min))
-    stop(sprintf("%s: '%s' muss %s sein, nicht %s.", who, arg, what, .blk_show(x)), call. = FALSE)
+    stop(sprintf("%s: '%s' muss %s sein.", who, arg, what), call. = FALSE)
   invisible(NULL)
 }
 
 .blk_lgl <- function(who, x, arg) {
   if (!is.logical(x) || length(x) != 1L || is.na(x))
-    stop(sprintf("%s: '%s' muss TRUE oder FALSE sein, nicht %s.", who, arg, .blk_show(x)), call. = FALSE)
+    stop(sprintf("%s: '%s' muss TRUE oder FALSE sein.", who, arg), call. = FALSE)
   invisible(NULL)
 }
 
@@ -45,12 +44,12 @@
   invisible(NULL)
 }
 
-# Tage 1-31; doppelte Tage ergeben nur einen Termin (Warnung, Rueckgabe ohne Doppelte)
+# Tage 1-31; doppelte Tage ergeben nur einen Termin (Warnung, Rueckgabe ohne Doppelte). Seit 1.6.4 nur ein Vektor
+# (keine Matrix, mindestens ein Tag; A-047) und die Meldung ohne Eingabewert.
 .blk_days <- function(who, x) {
   if (is.null(x)) return(NULL)
-  if (!is.numeric(x) || anyNA(x) || any(x < 1 | x > 31 | x != round(x)))
-    stop(sprintf("%s: days muss ganze Zahlen von 1 bis 31 enthalten, nicht %s.", who, paste(format(x), collapse = ", ")),
-         call. = FALSE)
+  if (!is.numeric(x) || !is.null(dim(x)) || !length(x) || anyNA(x) || any(x < 1 | x > 31 | x != round(x)))
+    stop(sprintf("%s: days muss ganze Zahlen von 1 bis 31 enthalten.", who), call. = FALSE)
   if (anyDuplicated(x)) {
     warning(sprintf("%s: days enth\u00e4lt doppelte Tage (%s); jeder Tag ergibt nur einen Termin, verwendet wird days = %s.",
                     who, paste(format(x), collapse = ", "), paste(deparse(unique(x)), collapse = "")), call. = FALSE)
@@ -59,19 +58,24 @@
   x
 }
 
-# Bezugsdatum: Date oder "JJJJ-MM-TT"
+# Bezugsdatum: Date, Datum-Uhrzeit oder Text "JJJJ-MM-TT" (seit 1.6.4 wie asset_config(start): keine Zahl, kein
+# Faktor, Laenge 1 (A-075: bis 1.6.3 bei einem Vektor die Meldung je Element), Meldung ohne Eingabewert)
 .blk_start <- function(who, x) {
   if (is.null(x)) return(invisible(NULL))
-  d <- tryCatch(as.Date(x), error = function(e) NA)
-  if (length(d) != 1L || is.na(d))
-    stop(sprintf("%s: start = '%s' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", who, format(x)), call. = FALSE)
+  d <- if (length(x) == 1L && (inherits(x, c("Date", "POSIXt")) || is.character(x)))
+         tryCatch(as.Date(x), error = function(e) NA) else NA
+  if (length(d) != 1L || !is.finite(unclass(d)))
+    stop(sprintf("%s: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", who), call. = FALSE)
   invisible(NULL)
 }
 
+# Obergrenze des Abstands (A-009): der Schritt in Monaten (span, bei unit = "quarter" 3 * span) muss eine
+# R-Ganzzahl sein; bis 1.6.3 brach R dann mit "'by' is NA" ab, Python und Julia rechneten
+.blk_span_max <- function(unit) if (unit == "quarter") 715827882 else 2147483647
+
 .blk_check <- function(x, cls, arg, ctor) {
   if (!is.null(x) && !inherits(x, cls))
-    stop(sprintf("simulation: %s muss NULL oder ein Objekt aus %s() sein, nicht %s.", arg, ctor,
-                 paste(class(x), collapse = "/")), call. = FALSE)
+    stop(sprintf("simulation: %s muss NULL oder ein Objekt aus %s() sein.", arg, ctor), call. = FALSE)   # seit 1.6.4 ohne Klasse
   invisible(NULL)
 }
 
@@ -119,7 +123,7 @@
 #' @export
 #' @noRd
 sim_costs <- function(order_fee = NULL, dca_fee = NULL) {
-  .fee_spec(order_fee); .fee_spec(dca_fee)
+  .fee_spec(order_fee, "sim_costs", "order_fee"); .fee_spec(dca_fee, "sim_costs", "dca_fee")
   structure(list(order_fee = order_fee, dca_fee = dca_fee), class = "SimLevSimCosts")
 }
 
@@ -144,13 +148,12 @@ dca_plan <- function(value, span, days = NULL, unit = c("month", "quarter", "yea
   if (missing(span)) span <- NULL
   .one <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
   if (!.one(value) || value <= 0)
-    stop(sprintf("%s: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR), nicht %s.",
-                 who, .blk_show(value)), call. = FALSE)
-  if (!.one(span) || span < 1 || span != round(span))
-    stop(sprintf("%s: 'span' muss eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht %s.",
-                 who, .blk_show(span)), call. = FALSE)
+    stop(sprintf("%s: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR).", who),
+         call. = FALSE)
   days <- .blk_days(who, days)
   unit <- match.arg(unit); anchor <- match.arg(anchor)
+  # seit 1.6.4 Obergrenze (A-009); seit K43 T1-R6 eine Meldung (ganz_bis) statt zweier Formen
+  chk_int1(span, who, "span", lo = 1, hi = .blk_span_max(unit))
   .blk_start(who, start)
   .blk_lgl(who, skip, "skip"); .blk_lgl(who, fill_deficits, "fill_deficits")
   structure(list(value = value, span = span, days = days, unit = unit, anchor = anchor, start = start, skip = skip,
@@ -181,6 +184,11 @@ rebalance_plan <- function(span = NULL, days = NULL, unit = c("month", "quarter"
   who <- "rebalance_plan"
   days <- .blk_days(who, days)
   unit <- match.arg(unit); anchor <- match.arg(anchor)
+  # seit 1.6.4 (A-009, mildere Regel bis zur Entscheidung des Nutzers): NULL oder eine einzelne endliche Zahl >= 1 bis
+  # zur Obergrenze; gebrochene Werte wie 1.5 laufen weiter wie bisher (Schritt wie seq(by = "<span> months"))
+  # seit 1.6.4 ganze Zahl (Entscheidungen 19, 32; bis 1.6.3 1.5 wie 1) bis zur Obergrenze (A-009); seit K43 T1-R6 eine
+  # Meldung (ganz_bis) statt zweier Formen
+  chk_int1(span, who, "span", lo = 1, hi = .blk_span_max(unit), null_ok = TRUE)
   .blk_start(who, start)
   .blk_lgl(who, skip, "skip")
   .blk_num(who, thresh, "thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)", null_ok = TRUE)
@@ -189,11 +197,19 @@ rebalance_plan <- function(span = NULL, days = NULL, unit = c("month", "quarter"
   if (is.null(event_col) && !missing(event_mode))
     warning("rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert.", call. = FALSE)
   event_mode <- match.arg(event_mode)
-  if (!is.null(event_col) && (!is.character(event_col) || length(event_col) != 1L || is.na(event_col)))
-    stop(sprintf("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein, nicht %s.",
-                 .blk_show(event_col)), call. = FALSE)
+  if (!is.null(event_col) && (!is.character(event_col) || length(event_col) != 1L || is.na(event_col) || !nzchar(event_col)))
+    stop("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.", call. = FALSE)
   if (is.null(event_col) && !is.null(event_weight))
     warning("rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert.", call. = FALSE)
+  # seit 1.6.4 (A-049): event_weight benannt, je Asset ein Spaltenname (die Spalten prueft simulation())
+  if (!is.null(event_weight)) {
+    ew <- if (is.list(event_weight) && !is.data.frame(event_weight)) event_weight
+          else if (is.character(event_weight) && is.null(dim(event_weight))) as.list(event_weight) else NULL
+    nm <- names(event_weight)
+    if (is.null(ew) || !length(ew) || is.null(nm) || anyNA(nm) || any(!nzchar(nm)) || anyDuplicated(nm) ||
+        !all(vapply(ew, function(v) is.character(v) && length(v) == 1L && !is.na(v) && nzchar(v), TRUE)))
+      chk_stop("e1.event_weight", who)
+  }
   structure(list(span = span, days = days, unit = unit, anchor = anchor, start = start, skip = skip, thresh = thresh,
                  thresh_type = thresh_type, event_col = event_col, event_mode = event_mode, event_weight = event_weight),
             class = "SimLevRebalancePlan")
@@ -230,8 +246,7 @@ split_rule <- function(thresh) {
   if (missing(thresh)) thresh <- NULL
   st <- unlist(thresh)
   if (!is.numeric(st) || length(st) != 2L || anyNA(st))
-    stop(sprintf("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der L\u00e4nge 2 sein, nicht %s.",
-                 if (is.null(st)) "NULL" else paste(format(st), collapse = ", ")), call. = FALSE)
+    stop("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der L\u00e4nge 2 sein.", call. = FALSE)   # seit 1.6.4 ohne Eingabewert
   if (!(st[1] < 100 && 100 < st[2]))
     warning(sprintf(paste0("split_rule: thresh = c(%s, %s) schlie\u00dft den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). ",
                            "Ein Split setzt den Kurs auf 100; liegt 100 au\u00dferhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split ",
@@ -259,8 +274,8 @@ income_rate <- function(marginal_rate, soli_rate = 0) {
   .blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
   .blk_frac_warn(who, marginal_rate, "marginal_rate")
   if (marginal_rate > 50)
-    stop(sprintf("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr 42 %%), nicht %s.",
-                 .blk_show(marginal_rate)), call. = FALSE)
+    stop("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr 42 %).",
+         call. = FALSE)
   .blk_num(who, soli_rate, "soli_rate", "eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5.5; 0 = ohne Soli)")
   structure(list(marginal_rate = marginal_rate, soli_rate = soli_rate), class = "SimLevIncomeRate")
 }
@@ -285,8 +300,12 @@ income_tariff <- function(taxable_income, tariff = NULL) {
 #' @export
 #' @noRd
 harvest_rule <- function(day = "12-15", loss_pot = TRUE) {
-  if (!is.character(day) || length(day) != 1L || is.na(day) || !grepl("^\\d{2}-\\d{2}$", day) || day >= "12-31")
-    stop("harvest_rule: day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').", call. = FALSE)
+  # seit 1.6.4 ausdruecklich nur Ziffern 0-9 (A-012; Python und Julia nahmen fremde Ziffern und ein Zeilenende an)
+  # seit 1.6.4 Monat 01-12 und Tag 01-31 (Entscheidung 35; bis 1.6.3 z. B. "00-15" = ab Jahresbeginn, "13-01" = nie)
+  if (!is.character(day) || length(day) != 1L || is.na(day) ||
+      !grepl("^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", day) || day >= "12-31")
+    stop("harvest_rule: day im Format 'MM-TT' (Monat 01 bis 12, Tag 01 bis 31) und vor dem 31.12. angeben (z. B. '12-15').",
+         call. = FALSE)   # seit 1.6.4 mit den Bereichen (F8)
   .blk_lgl("harvest_rule", loss_pot, "loss_pot")
   structure(list(day = day, loss_pot = loss_pot), class = "SimLevHarvestRule")
 }
@@ -343,13 +362,12 @@ tax_profile <- function(rate = 26.375, church_tax = 0, sparer_pauschbetrag = 100
                         base_rate = NULL, guenstigerpruefung = FALSE, income = NULL, harvest = NULL) {
   who <- "tax_profile"
   if (!is.numeric(rate) || length(rate) != 1L || is.na(rate) || rate < 0 || rate > 100)
-    stop(sprintf("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr 26,375 %%), nicht %s.",
-                 .blk_show(rate)), call. = FALSE)
+    stop("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr 26,375 %).",
+         call. = FALSE)
   .blk_frac_warn(who, rate, "rate")
   if (!is.null(church_tax)) {
     if (!is.numeric(church_tax) || length(church_tax) != 1L || is.na(church_tax) || church_tax < 0 || church_tax > 100)
-      stop(sprintf("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), nicht %s.",
-                   paste(format(church_tax), collapse = ", ")), call. = FALSE)
+      stop("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).", call. = FALSE)
     if (church_tax > 0 && church_tax < 1)
       warning(sprintf("tax_profile: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
                       format(church_tax), format(church_tax), format(church_tax * 100)), call. = FALSE)
@@ -364,21 +382,20 @@ tax_profile <- function(rate = 26.375, church_tax = 0, sparer_pauschbetrag = 100
   .blk_num(who, private_sale_threshold, "private_sale_threshold", "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
   if (is.character(base_rate)) {
     if (length(base_rate) != 1L || is.na(base_rate) || !nzchar(base_rate))
-      stop(sprintf("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein, nicht %s.",
-                   .blk_show(base_rate)), call. = FALSE)
+      stop("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein.",
+           call. = FALSE)
   } else {
     if (!is.null(base_rate) && (!is.numeric(base_rate) || length(base_rate) != 1L || !is.finite(base_rate)))
-      stop(sprintf("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein, nicht %s.",
-                   .blk_show(base_rate)), call. = FALSE)
+      stop("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein.",
+           call. = FALSE)
     .blk_frac_warn(who, base_rate, "base_rate", hi = 0.05)
   }
   .blk_lgl(who, guenstigerpruefung, "guenstigerpruefung")
   if (!is.null(income) && !inherits(income, c("SimLevIncomeRate", "SimLevIncomeTariff")))
-    stop(sprintf("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schlie\u00dfen sich aus), nicht %s.",
-                 paste(class(income), collapse = "/")), call. = FALSE)
+    stop("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schlie\u00dfen sich aus).",
+         call. = FALSE)
   if (!is.null(harvest) && !inherits(harvest, "SimLevHarvestRule"))
-    stop(sprintf("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein, nicht %s.",
-                 paste(class(harvest), collapse = "/")), call. = FALSE)
+    stop("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein.", call. = FALSE)
   structure(list(rate = rate, church_tax = church_tax, sparer_pauschbetrag = sparer_pauschbetrag,
                  private_sale_threshold = private_sale_threshold, base_rate = base_rate,
                  guenstigerpruefung = guenstigerpruefung, income = income, harvest = harvest),
@@ -413,9 +430,8 @@ funds_costs <- function(fee = 0.95, performance_fee = 5) {
   for (a in c("fee", "performance_fee")) {
     x <- get(a)
     if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0 || x > 100)
-      stop(sprintf("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s.",
-                   a, if (a == "fee") "0.95 f\u00fcr 0,95 % p. a." else "5 f\u00fcr 5 %",
-                   if (is.null(x)) "NULL" else paste(format(x), collapse = ", ")), call. = FALSE)
+      stop(sprintf("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s).",
+                   a, if (a == "fee") "0.95 f\u00fcr 0,95 % p. a." else "5 f\u00fcr 5 %"), call. = FALSE)
   }
   structure(list(fee = fee, performance_fee = performance_fee), class = "SimLevFundsCosts")
 }
@@ -623,6 +639,8 @@ print.SimLevFundsCosts <- function(x, ...) {
   nm <- names(over)
   if (is.null(nm)) nm <- rep("", length(over))
   .sim_check_names(nm, who)
+  # seit 1.6.4 (K43 T1-N1, Entscheidung 21): doppelte Namen sind ein Fehler (bis dahin galt still der erste)
+  if (anyDuplicated(nm)) chk_stop("argument_doppelt", who, nm[anyDuplicated(nm)])
   is_path <- grepl(".", nm, fixed = TRUE)
   for (k in nm[!is_path]) args[[k]] <- over[[k]]
   paths <- nm[is_path]

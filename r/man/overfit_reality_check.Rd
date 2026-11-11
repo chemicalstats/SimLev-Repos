@@ -38,13 +38,16 @@ einzelne Zahl oder Zeichenkette = Spaltennummer bzw. -name in \code{x}
 (nach dem Verwerfen leerer Spalten), diese Spalte wird aus den
 Kandidaten entfernt; ein numerischer Vektor (Laenge > 1) =
 Benchmark-Renditen als Anteil mit genau einem Wert je Periode nach
-Aggregation und Entfernen unvollstaendiger Zeilen.}
+Aggregation und Entfernen unvollstaendiger Zeilen.
+Seit 1.6.4 eine Spaltennummer als ganze Zahl, kein Faktor.}
 
-\item{B}{Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 999).}
+\item{B}{Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 999).
+Seit 1.6.4 hoechstens 10^8.}
 
 \item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden
 (geometrisch verteilte Blocklaengen, zyklisch); \code{NULL} (Standard) =
-\code{max(2, round(T^(1/3)))} mit \eqn{T} = Anzahl Perioden.}
+\code{max(2, round(T^(1/3)))} mit \eqn{T} = Anzahl Perioden.
+Seit 1.6.4 eine Zahl >= 1.}
 
 \item{frequency}{Periodenlaenge: \code{"week"} (Standard), \code{"day"}
 oder \code{"month"}. Mit Datum (bei \code{SimLevParamSearch} immer, bei

@@ -46,6 +46,19 @@ class RDist(np.ndarray):
         for k in ("Size", "Labels", "Diag", "Upper", "method"):
             setattr(self, k, getattr(obj, k, None))
 
+    # seit 1.6.4 (C-046): die Attribute gehen beim Pickeln mit (z. B. an Parallelprozesse); bis 1.6.3 fielen sie weg
+    _ATTRS = ("Size", "Labels", "Diag", "Upper", "method")
+
+    def __reduce__(self):
+        f, a, st = super().__reduce__()
+        return f, a, (st, tuple(getattr(self, k, None) for k in self._ATTRS))
+
+    def __setstate__(self, state):
+        st, extra = state
+        super().__setstate__(st)
+        for k, v in zip(self._ATTRS, extra):
+            setattr(self, k, v)
+
 
 _DIST_METHODS = ["euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski"]
 
@@ -115,7 +128,9 @@ def hclust(d, method="complete", members=None):
     ``labels``, ``method``, ``call``, ``dist.method``.
     """
     if method == "ward":
-        print('The "ward" method has been renamed to "ward.D"; note new "ward.D2"')
+        # seit 1.6.4 wie R (message) und Julia auf stderr (C-091; bis 1.6.3 stdout)
+        import sys
+        sys.stderr.write('The "ward" method has been renamed to "ward.D"; note new "ward.D2"\n')
         method = "ward.D"
     hits = [i for i, m in enumerate(_HC_METHODS) if method and m.startswith(method)]
     if method in _HC_METHODS:
@@ -138,6 +153,12 @@ def hclust(d, method="complete", members=None):
     membr = [1.0] * n if members is None else [float(v) for v in members]
     if len(membr) != n:
         raise RError("invalid length of members")
+    # seit 1.6.4 (C-016, Entscheidung 78) wie R .Fortran: nicht endliche Gewichte (Argument 7) bzw. Abstände
+    # (Argument 10) sind ein Fehler; bis 1.6.3 rechnete der Kern still falsch oder schrieb außerhalb des Speichers
+    if not np.isfinite(np.asarray(membr, dtype=np.float64)).all():
+        raise RError("NA/NaN/Inf in foreign function call (arg 7)")
+    if not np.isfinite(np.asarray(d, dtype=np.float64)).all():
+        raise RError("NA/NaN/Inf in foreign function call (arg 10)")
     diss = np.ascontiguousarray(np.asarray(d, dtype=np.float64)[:ln])
     merge = np.empty((n - 1) * 2, dtype=np.int64)
     height = np.empty(n - 1)

@@ -25,12 +25,13 @@ Luecken werden mit dem letzten Wert gefuellt.}
 Prozent p. a. (Spaltenname, Vektor, Skalar, \code{data.frame(date, value)}
 oder benannter Vektor mit Datumsnamen).}
 
-\item{cost}{Sicherungskosten in Prozent p. a. (Standard 0; Tagesbasis 365).}
+\item{cost}{Sicherungskosten in Prozent p. a. (Standard 0; Tagesbasis 365; endlich).}
 
-\item{basis}{Tagesbasis der Zinsdifferenz (Standard 360).}
+\item{basis}{Tagesbasis der Zinsdifferenz (Standard 360; > 0).}
 
 \item{start}{Startwert; \code{NULL} (Standard) = erster Wert der lokalen
-Reihe.}
+Reihe; sonst > 0. \code{local} als Vektor muss die Laenge \code{nrow(data)}
+haben (seit 1.6.4; vorher wiederholte R einen kuerzeren Vektor).}
 }
 \value{
 Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}).

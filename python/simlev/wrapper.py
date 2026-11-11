@@ -42,21 +42,23 @@ import pandas as pd
 from ._dates import fmt_date
 from . import _dependence_core as _dcore
 from ._r.rformat import r_format1, r_sprintf
-from ._r.rlist import RList
+from ._r.rlist import RList, _PrintFormat
 from ._r.rnum import r_sum
 from ._sim_base import _FEE, _Frame, _StudyCache, _fee_spec, _filled_matrix, _isna, _message, _to_frame
-from ._sim_blocks import (SimLevFundsCosts, SimLevRebalancePlan, SimLevSplitRule, _blk_print, _cls, _fee_text,
-                          _fmt, _one_num, _sched_text, _show, funds_costs, sim_costs)
+from ._sim_blocks import (SimLevFundsCosts, SimLevRebalancePlan, SimLevSplitRule, _blk_print, _fee_text,
+                          _fmt, _one_num, _sched_text, funds_costs, sim_costs)
 from .config import (Strategy, _is_wrapper, _strategy_columns, _strategy_wrappers, _wrapper_assets_text,
                      create_strategy, strategy_validate)
 from .data_prep import _days_to_civil, _to_date
+from ._util import _cond_msg
+from ._pruefen import chk_is_factor, chk_msg, chk_scalar, chk_stop
 
 __all__ = ["wrapper_config", "wrapper_nav", "SimLevWrapperConfig", "SimLevWrapperNav"]
 
 
 # ── wrapper_config ───────────────────────────────────────────────────────────
 
-class SimLevWrapperConfig(RList):
+class SimLevWrapperConfig(RList, _PrintFormat):
     """Fonds-Wrapper (R: ``wrapper_config()``): Felder ``strategy``, ``rebalance``, ``costs``, ``order_fee``,
     ``volume``; ``print()`` wie ``print.SimLevWrapperConfig``."""
     r_class = ("SimLevWrapperConfig",)
@@ -79,10 +81,6 @@ class SimLevWrapperConfig(RList):
                            ("Ordergebühr innen", _fee_text(self["order_fee"])),
                            ("Fondsvolumen", "nicht angegeben (Start mit 100)" if vol is None
                             else r_sprintf("%.2f EUR", vol))])
-
-    def print(self) -> "SimLevWrapperConfig":
-        print(self.format())
-        return self
 
 
 class _FundsCostsDefault:
@@ -173,9 +171,9 @@ def wrapper_config(strategy: Any, *, rebalance: Any = None, costs: Any = _FUNDS_
         raise ValueError("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die "
                          "create_strategy() annimmt).")
     if not isinstance(strategy, Strategy):
-        if not isinstance(strategy, (Mapping, list, tuple)):
+        if not isinstance(strategy, (Mapping, list, tuple)):   # seit 1.6.4 ohne Klasse (Entscheidung 8)
             raise ValueError("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von "
-                             "Asset-Konfigurationen sein, nicht %s." % _cls(strategy).split("/")[0])
+                             "Asset-Konfigurationen sein.")
         strategy = create_strategy(assets=strategy)
     strategy_validate(strategy)
     nested = _strategy_wrappers(strategy)
@@ -187,15 +185,16 @@ def wrapper_config(strategy: Any, *, rebalance: Any = None, costs: Any = _FUNDS_
         raise ValueError(r_sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.4f, "
                                    "müssen aber 1 ergeben.", total))
     if rebalance is not None and not isinstance(rebalance, SimLevRebalancePlan):
-        raise ValueError("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein, nicht %s."
-                         % _cls(rebalance))
+        raise ValueError("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.")
     if not isinstance(costs, SimLevFundsCosts):
-        raise ValueError("wrapper_config: costs muss ein Objekt aus funds_costs() sein, nicht %s."
-                         % ("NULL" if costs is None else _cls(costs)))
-    fs = _fee_spec(order_fee)
+        raise ValueError("wrapper_config: costs muss ein Objekt aus funds_costs() sein.")
+    from ._sim_blocks import _fee_norm
+    order_fee = _fee_norm(order_fee)
+    fs = _fee_spec(order_fee, "wrapper_config", "order_fee")
+    volume = chk_scalar(volume)   # Länge 1 wie Einzelwert (Entscheidung 4)
     if volume is not None and (not _one_num(volume) or volume <= 0):
         raise ValueError("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in "
-                         "EUR), nicht %s." % _show(volume))
+                         "EUR).")
     if fs is not None and volume is None and (fs["fixed"] > 0 or fs["min"] > 0 or math.isfinite(fs["max"])):
         raise ValueError("wrapper_config: order_fee enthält feste Beträge in EUR (fixed, min oder max); dafür ist das "
                          "Fondsvolumen 'volume' in EUR nötig (die innere Rechnung startet dann mit diesem Volumen). Ohne "
@@ -372,13 +371,6 @@ def _nav_key(d: _Frame, wrapper, splits, tag: str, who: str):
             tuple(np.copy(d.cols[nm]) for nm in d.names), fk), objs
 
 
-def _cond_msg(e: BaseException) -> str:
-    """``conditionMessage(e)``."""
-    if isinstance(e, KeyError) and e.args:
-        return str(e.args[0])
-    return str(e)
-
-
 def _frame_rows(fr: _Frame, i0: int) -> _Frame:
     """Zeilen ``i0:`` von ``fr`` (ohne Attribut ``filled``)."""
     return _Frame(list(fr.names), {nm: fr.cols[nm][i0:].copy() for nm in fr.names}, dict(fr.kinds), None)
@@ -461,8 +453,21 @@ def _wrapper_nav_calc(data: _Frame, wrapper: SimLevWrapperConfig, splits: Any, t
 
     rdays = np.asarray(res["dates"]).astype("datetime64[D]").astype(np.int64)
     rfilled = np.asarray(res["filled"], dtype=bool)
-    pos = {int(z): i for i, z in enumerate(rdays)}
-    idx = np.array([pos[int(z)] for z in d.get("date")], dtype=np.int64)
+    # Stelle jedes Tags in res["dates"] (aufsteigend, ohne Doppelte): seit 1.6.4 (A-088) über np.searchsorted (gleiche
+    # Stellen wie das Dict int(Tag) -> Stelle); fehlt ein Tag oder ist er keine endliche Zahl, wie bisher über das Dict
+    dd = np.asarray(d.get("date"))
+    idx = None
+    if dd.ndim == 1 and dd.dtype.kind in "fi" and rdays.size and bool(np.all(rdays[1:] > rdays[:-1])):
+        with np.errstate(invalid="ignore"):
+            fin = bool(np.all(np.abs(dd) < 2.0 ** 62)) if dd.dtype.kind == "f" else True
+        if fin:
+            key = np.trunc(dd).astype(np.int64) if dd.dtype.kind == "f" else dd.astype(np.int64)
+            pos_ = np.searchsorted(rdays, key)
+            if bool(np.all(pos_ < rdays.size)) and bool(np.all(rdays[np.minimum(pos_, rdays.size - 1)] == key)):
+                idx = pos_.astype(np.int64)
+    if idx is None:
+        pos = {int(z): i for i, z in enumerate(rdays)}
+        idx = np.array([pos[int(z)] for z in d.get("date")], dtype=np.int64)
     idx = idx[~rfilled[idx]]
     if idx.size == 0:
         raise ValueError("%s: keine Handelstage in der inneren Rechnung (alle Tage aufgefüllt)." % who)
@@ -503,7 +508,7 @@ def wrapper_nav(data: Any, wrapper: Any, *, splits: Any = None) -> SimLevWrapper
     Prüfung.
 
     Args:
-        data: ``data.frame`` mit Spalte ``date`` und den Kursspalten (und ggf. Signal- und Ereignisspalten) der
+        data: ``pandas.DataFrame`` (nur Tabelle) mit Spalte ``date`` und den Kursspalten (und ggf. Signal- und Ereignisspalten) der
             inneren Strategie. ``date`` wird wie in ``simulation()`` als Datum gelesen; unsortierte Zeilen werden
             nach Datum sortiert.
         wrapper: Objekt aus ``wrapper_config``.
@@ -580,15 +585,17 @@ def wrapper_nav(data: Any, wrapper: Any, *, splits: Any = None) -> SimLevWrapper
         nv = simlev.wrapper_nav(d, w)
         print(nv["nav"].iloc[-1] / nv["gross"].iloc[-1] - 1)   # Kosten über die Laufzeit
     """
+    # seit 1.6.4 Meldungen ohne Klasse (Entscheidung 8); data nur als Tabelle, die Meldung nennt die Umwandlung
+    # (Entscheidung 6, wie simulation())
     if not _is_wrapper(wrapper):
-        raise ValueError("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein, nicht %s."
-                         % ("NULL" if wrapper is None else _cls(wrapper)))
+        raise ValueError("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.")
     if splits is not None and not isinstance(splits, SimLevSplitRule):
-        raise ValueError("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein, nicht %s." % _cls(splits))
+        raise ValueError("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.")
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
-        raise ValueError("wrapper_nav: data muss ein data.frame mit Spalte 'date' und den Kursspalten der inneren "
-                         "Strategie sein.")
+        chk_stop("e1.tabelle_spalten", "wrapper_nav", chk_msg("tabelle.formen"))
     fa = data.attrs.get("filled")
+    if chk_is_factor(data["date"]):   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
+        chk_stop("spalte_faktor", "wrapper_nav", "date")
     data = pd.DataFrame(data).copy()
     data["date"] = _to_date(data["date"], "wrapper_nav: data$date")
     days = np.asarray(data["date"]).astype("datetime64[D]")

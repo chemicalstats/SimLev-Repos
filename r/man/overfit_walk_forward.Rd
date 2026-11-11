@@ -37,7 +37,8 @@ Testfenster; in \code{series} und \code{summary} zaehlt jeder Tag dann
 nur einmal, fuer das juengste Fenster, dessen Test schon begonnen hat
 (die Kennzahlen in \code{windows} beziehen sich auf das ganze
 Testfenster). Mit \code{step > test} entstehen Luecken zwischen den
-Testfenstern; sie fehlen in \code{series} und zaehlen nicht als Zeit.}
+Testfenstern; sie fehlen in \code{series} und zaehlen nicht als Zeit.
+Seit 1.6.4 je eine Zahl, die gerundet mindestens einen Monat ergibt (12 * Jahre >= 1), hoechstens 100 Jahre.}
 
 \item{anchored}{Logisch. \code{FALSE} (Standard) = rollierendes
 Trainingsfenster der Laenge \code{train}; \code{TRUE} = Training beginnt

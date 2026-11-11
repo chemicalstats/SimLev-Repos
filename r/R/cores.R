@@ -36,10 +36,6 @@
   .Call(C_quantile_reg_core, y, X, tau, beta0, sc, tol, maxit)
 }
 
-.hmm_forward_backward <- function(B, A, p0) {
-  .Call(C_hmm_forward_backward, B, A, p0)
-}
-
 # Baum-Welch-EM aus einem Startwert (seit 1.5.0): NULL bei Fehler, sonst list(mu, S (d x d x k als Vektor), A, p0, ll,
 # filtered, smoothed, lB, iter)
 .hmm_em_core <- function(X, k, mu, S, A, n_iter, tol, ridge)

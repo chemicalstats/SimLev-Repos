@@ -8,7 +8,8 @@ bootstrap_block_length(x, transform = c("none", "abs", "squared"))
 }
 \arguments{
 \item{x}{Numerischer Vektor oder Matrix (Spalten = Reihen), z. B.
-(Log-)Renditen je Zeile. Nicht-endliche Werte werden je Spalte entfernt.}
+(Log-)Renditen je Zeile. Nicht-endliche Werte werden je Spalte entfernt.
+Seit 1.6.4 nur Zahlen (Text, Wahrheitswerte und Faktoren ergeben einen Fehler).}
 
 \item{transform}{Transformation vor der Schaetzung: \code{"none"}
 (Standard, Reihe selbst), \code{"abs"} (\eqn{|x - \bar x|}) oder

@@ -167,11 +167,10 @@ static SEXP tdist_mt(tmt_fn f, SEXP x, SEXP df, SEXP lower, SEXP nthreads)
     SEXP out;
     int st;
     if (TYPEOF(x) != REALSXP) bad("x muss double sein");
-    if (TYPEOF(lower) != LGLSXP || XLENGTH(lower) != 1 || LOGICAL(lower)[0] == NA_LOGICAL)
-        Rf_errorcall(R_NilValue, "interner Fehler: lower.tail muss TRUE oder FALSE sein");
+    const int lt = lgl1(lower, "lower.tail");   /* seit 1.6.4 die gemeinsame Hilfe (P14-R11; bis 1.6.3 von Hand) */
     ctx_init(&cx);
     out = PROTECT(Rf_allocVector(REALSXP, XLENGTH(x)));
-    st = f(&cx, XLENGTH(x), REAL(x), num1_bad(df, "df"), LOGICAL(lower)[0], REAL(out), int1(nthreads, "nthreads"));
+    st = f(&cx, XLENGTH(x), REAL(x), num1_bad(df, "df"), lt, REAL(out), int1(nthreads, "nthreads"));
     finish(&cx, st, 1);
     UNPROTECT(1);
     return out;
@@ -179,6 +178,39 @@ static SEXP tdist_mt(tmt_fn f, SEXP x, SEXP df, SEXP lower, SEXP nthreads)
 
 SEXP C_sl_pt_mt(SEXP x, SEXP df, SEXP lower, SEXP nt) { return tdist_mt(sl_pt_mt, x, df, lower, nt); }
 SEXP C_sl_qt_mt(SEXP p, SEXP df, SEXP lower, SEXP nt) { return tdist_mt(sl_qt_mt, p, df, lower, nt); }
+
+/* Zahl der Prozessoren, mindestens 1: Hoechstwert fuer cores und Kern-Threads (seit 1.6.4, R .sl_nprocs) */
+SEXP C_sl_nprocs(void) { return Rf_ScalarInteger(sl_nprocs()); }
+
+/* Planer fuer cores = "auto" (seit 1.6.4, R .sl_par_plan, core/slc_prep.h): freier Speicher in Bytes (-1 unbekannt)
+ * und c(Laeufe, Kern-Threads je Lauf) */
+SEXP C_sl_mem_avail(void) { return Rf_ScalarReal(sl_mem_avail()); }
+SEXP C_sl_mem_self(void) { return Rf_ScalarReal(sl_mem_self()); }
+SEXP C_sl_par_probe(SEXP sys, SEXP self)
+{
+    return Rf_ScalarReal(sl_par_probe(int1(sys, "par_probe: sys"), num1_bad(self, "par_probe: self")));
+}
+
+SEXP C_sl_load_running(void) { return Rf_ScalarReal(sl_load_running()); }
+
+/* Kindprozess nach dem Fork schuetzen (seit 1.6.4, K43 T2-B4; R .par_auto_fork): 1 mit Schutz, 0 ohne */
+SEXP C_sl_child_guard(SEXP ppid) { return Rf_ScalarInteger(sl_child_guard((long) Rf_asReal(ppid))); }
+
+SEXP C_sl_par_plan(SEXP sys, SEXP nprocs, SEXP max_runs, SEXP env, SEXP n, SEXP unit_s, SEXP unit_bytes, SEXP mem,
+                   SEXP self, SEXP running)
+{
+    int th = 1, c;
+    SEXP out;
+    c = sl_par_plan(int1(sys, "par_plan: sys"), int1(nprocs, "par_plan: nprocs"), int1(max_runs, "par_plan: max_runs"),
+                    int1(env, "par_plan: env"), (int64_t) num1_bad(n, "par_plan: n"), num1_bad(unit_s, "par_plan: unit_s"),
+                    num1_bad(unit_bytes, "par_plan: unit_bytes"), num1_bad(mem, "par_plan: mem"),
+                    num1_bad(self, "par_plan: self"), num1_bad(running, "par_plan: running"), &th);
+    out = PROTECT(Rf_allocVector(INTSXP, 2));
+    INTEGER(out)[0] = c;
+    INTEGER(out)[1] = th;
+    UNPROTECT(1);
+    return out;
+}
 
 /* ── t-Copula: Ergebnis oder NULL (Merker: der Host rechnet wie bisher) ── */
 SEXP C_sl_tcop_fit(SEXP u, SEXP v, SEXP nthreads)

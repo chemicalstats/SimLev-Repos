@@ -595,17 +595,17 @@ SZ("horizonte", "withdrawal_horizon dreieckig (auch entartet), Stichprobe, norma
     r"(result = withdrawal_horizon(type='triangular', min=30, mode=30, max=30))",
     r"(result = withdrawal_horizon("triangular"; min = 30, mode = 30, max = 30))", druck = TRUE, inp = ein("withdrawal/hz_tri0", c())),
   hz_sample = teil(
-    r"(withdrawal_horizon('sample', years = c(3.7, 12, 30)))",
-    r"(result = withdrawal_horizon(type='sample', years=[3.7, 12, 30]))",
-    r"(result = withdrawal_horizon("sample"; years = [3.7, 12, 30]))", druck = TRUE, inp = ein("withdrawal/hz_sample", c())),
+    r"(withdrawal_horizon('sample', years = c(4, 12, 30)))",
+    r"(result = withdrawal_horizon(type='sample', years=[4, 12, 30]))",
+    r"(result = withdrawal_horizon("sample"; years = [4, 12, 30]))", druck = TRUE, inp = ein("withdrawal/hz_sample", c())),
   hz_small = teil(
-    r"(withdrawal_horizon('normal', mean = 1, sd = 3, min = 0.2, max = 3))",
-    r"(result = withdrawal_horizon(type='normal', mean=1, sd=3, min=0.2, max=3))",
-    r"(result = withdrawal_horizon("normal"; mean = 1, sd = 3, min = 0.2, max = 3))", druck = TRUE, inp = ein("withdrawal/hz_small", c())),
+    r"(withdrawal_horizon('normal', mean = 1, sd = 3, min = 1, max = 3))",
+    r"(result = withdrawal_horizon(type='normal', mean=1, sd=3, min=1, max=3))",
+    r"(result = withdrawal_horizon("normal"; mean = 1, sd = 3, min = 1, max = 3))", druck = TRUE, inp = ein("withdrawal/hz_small", c())),
   hz_draw_walker = teil(
-    r"(SimLev:::.draw_horizon(withdrawal_horizon('discrete', years = 1:250, prob = (1:250)^2), 50))",
-    r"(result = W._draw_horizon(withdrawal_horizon(type='discrete', years=np.arange(1, 251), prob=np.arange(1, 251) ** 2.0), 50))",
-    r"(result = W._draw_horizon(withdrawal_horizon("discrete"; years = 1:250, prob = Float64.(1:250) .* (1:250)), 50))", inp = ein("withdrawal/hz_draw_walker", c()))))
+    r"(SimLev:::.draw_horizon(withdrawal_horizon('discrete', years = 1:100, prob = (1:100)^2), 50))",
+    r"(result = W._draw_horizon(withdrawal_horizon(type='discrete', years=np.arange(1, 101), prob=np.arange(1, 101) ** 2.0), 50))",
+    r"(result = W._draw_horizon(withdrawal_horizon("discrete"; years = 1:100, prob = Float64.(1:100) .* (1:100)), 50))", inp = ein("withdrawal/hz_draw_walker", c()))))
 SZ("simulation_regeln_und_risikoaversion", "withdrawal_simulation mit constant, ratchet, percent (gamma 1, Pfade behalten) und sensible (gamma 0), Grafikdaten mit zwei behaltenen Pfaden", vor = VOR, teile = list(
   ws_constant = teil(
     r"(ws <- withdrawal_simulation(R, withdrawal_rule('constant'), inflation = 2, start_value = 5e5); ws$elapsed <- 0; ws)",
@@ -857,6 +857,26 @@ TB("withdrawal_perfect_rate", "Meldungen und Warnungen von withdrawal_perfect_ra
     r"(result = withdrawal_perfect_rate([1.05, np.inf]))",
     r"(result = withdrawal_perfect_rate([1.05, Inf]))", inp = ein("withdrawal/pwr_err_inf", c()))))
 TB("withdrawal_simulation", "Meldungen und Warnungen von withdrawal_simulation je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("ws_err_wrapper_infl",   # seit 1.6.4 (K43 RS B3, Meldung mit Funktionsnamen, Entscheidung 155)
+    r"(dw <- data.frame(date = seq.Date(as.Date('2019-11-04'), by = 'day', length.out = 400), A = 100 * cumprod(1 + sin(1:400) / 100), B = 50 * cumprod(1 + cos(1:400) / 200))
+inner <- create_strategy(A = asset_config('etf', 'bnh', 0.6), B = asset_config('etf', 'bnh', 0.4))
+x <- wrapper_nav(dw, wrapper_config(inner, costs = funds_costs(0, 0))); withdrawal_simulation(x, inflation = 'x'))",
+    r"(dw = pd.DataFrame({'date': pd.date_range('2019-11-04', periods=400), 'A': 100 * np.cumprod(1 + np.sin(np.arange(1, 401)) / 100), 'B': 50 * np.cumprod(1 + np.cos(np.arange(1, 401)) / 200)})
+inner = simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', share=0.6), B=simlev.asset_config(asset_class='etf', trading='bnh', share=0.4))
+x = simlev.wrapper_nav(dw, simlev.wrapper_config(inner, costs=simlev.funds_costs(fee=0, performance_fee=0)))
+result = withdrawal_simulation(x, inflation='x'))",
+    r"(dw = RFrame("date" => collect(Date(2019, 11, 4):Day(1):(Date(2019, 11, 4) + Day(399))), "A" => 100 .* cumprod(1 .+ sin.(1:400) ./ 100), "B" => 50 .* cumprod(1 .+ cos.(1:400) ./ 200))
+inner = create_strategy("A" => asset_config("etf", "bnh", 0.6), "B" => asset_config("etf", "bnh", 0.4))
+x = wrapper_nav(dw, wrapper_config(inner; costs = funds_costs(0, 0))); result = withdrawal_simulation(x; inflation = "x"))", inp = list()),
+  zeile("ws_err_kohorte_na",   # seit 1.6.4 (K43 RS B3, Meldung mit Funktionsnamen, Entscheidung 155)
+    r"(dc <- data.frame(date = seq.Date(as.Date('2015-01-01'), by = 'month', length.out = 40), p = 100 * cumprod(1 + sin(1:40) / 50))
+x <- withdrawal_cohorts(dc, price = 'p', years = 1, inflation = 2); x$inflation[1, 1] <- NA; withdrawal_simulation(x))",
+    r"(dc = pd.DataFrame({'date': pd.date_range('2015-01-01', periods=40, freq='MS'), 'p': 100 * np.cumprod(1 + np.sin(np.arange(1, 41)) / 50)})
+x = withdrawal_cohorts(dc, price='p', years=1, inflation=2); x['inflation'][0, 0] = simlev._r.base.NA_REAL
+result = withdrawal_simulation(x))",
+    r"(dc = RFrame("date" => [Date(2015, 1, 1) + Month(k) for k in 0:39], "p" => 100 .* cumprod(1 .+ sin.(1:40) ./ 50))
+x = withdrawal_cohorts(dc; price = "p", years = 1, inflation = 2); x["inflation"][1, 1] = SimLev.NA
+result = withdrawal_simulation(x))", inp = list()),
   zeile("ws_quarter_trunc",
     r"(ws <- withdrawal_simulation(Rq, withdrawal_rule('endowment', rate = 4), frequency = 'quarter', inflation = 2); ws$elapsed <- 0; ws)",
     r"(ws = withdrawal_simulation(Rq, rule=withdrawal_rule(type='endowment', rate=4), frequency='quarter', inflation=2); ws['elapsed'] = 0; result = ws)",
@@ -1097,6 +1117,18 @@ TB("withdrawal_max_rate", "Meldungen und Warnungen von withdrawal_max_rate je Ze
     r"(result = withdrawal_max_rate(R, rule=1))",
     r"(result = withdrawal_max_rate(R, 1))", inp = ein("withdrawal/mr_err_rule2", c("R")))))
 TB("withdrawal_horizon", "Meldungen und Warnungen von withdrawal_horizon je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("hz_err_years_max",   # seit 1.6.4 Fehler (Entscheidung 46: höchstens 100 Jahre; bis 1.6.3 Teil hz_draw_walker von horizonte mit 1:250)
+    r"(SimLev:::.draw_horizon(withdrawal_horizon('discrete', years = 1:250, prob = (1:250)^2), 50))",
+    r"(result = W._draw_horizon(withdrawal_horizon(type='discrete', years=np.arange(1, 251), prob=np.arange(1, 251) ** 2.0), 50))",
+    r"(result = W._draw_horizon(withdrawal_horizon("discrete"; years = 1:250, prob = Float64.(1:250) .* (1:250)), 50))", inp = ein("withdrawal/hz_draw_walker", c())),
+  zeile("hz_err_min_frac",   # seit 1.6.4 Fehler (Entscheidungen 19, 47; bis 1.6.3 Teil hz_small von horizonte mit min = 0.2)
+    r"(withdrawal_horizon('normal', mean = 1, sd = 3, min = 0.2, max = 3))",
+    r"(result = withdrawal_horizon(type='normal', mean=1, sd=3, min=0.2, max=3))",
+    r"(result = withdrawal_horizon("normal"; mean = 1, sd = 3, min = 0.2, max = 3))", inp = ein("withdrawal/hz_small", c())),
+  zeile("hz_err_sample_frac",   # seit 1.6.4 Fehler (Entscheidungen 19, 47; bis 1.6.3 Teil hz_sample von horizonte)
+    r"(withdrawal_horizon('sample', years = c(3.7, 12, 30)))",
+    r"(result = withdrawal_horizon(type='sample', years=[3.7, 12, 30]))",
+    r"(result = withdrawal_horizon("sample"; years = [3.7, 12, 30]))", inp = ein("withdrawal/hz_sample", c())),
   zeile("hz_err_miss",
     r"(withdrawal_horizon('uniform', min = 3))",
     r"(result = withdrawal_horizon(type='uniform', min=3))",

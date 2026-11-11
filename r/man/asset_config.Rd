@@ -67,7 +67,8 @@ asset_config(
   \item{start}{
     Date, Character (\code{"JJJJ-MM-TT"}) oder \code{NULL}. Frühestmögliches
     Kaufdatum für dieses Asset (für gestaffelte Asset-Starts); wird als
-    \code{Date} gespeichert, ein ungültiges Datum führt zu einem Fehler. In
+    \code{Date} gespeichert, ein ungültiges Datum führt zu einem Fehler, ebenso
+    jede andere Angabe (z. B. eine Zahl als Tage seit 1970). In
     \code{\link{simulation}} erhält das Asset ab diesem Tag sein volles
     Zielgewicht \code{share}: Am Starttag wird immer auf die
     Zielgewichte umgeschichtet (Verkauf der übrigen Assets, Erstkauf des neuen
@@ -91,12 +92,15 @@ asset_config(
   }
   \item{signal_buy}{
     Character oder \code{NULL}. Name der Spalte in \code{data} mit dem
-    Kaufsignal (logisch, \code{TRUE} = kaufen). Bei
+    Kaufsignal (\code{TRUE}/\code{FALSE} oder \code{0}/\code{1}, \code{NA} erlaubt;
+    \code{TRUE} bzw. \code{1} = kaufen; andere Zahlen führen in \code{\link{simulation}}
+    zu einem Fehler). Bei
     \code{trading = "signal"} Pflicht (sonst Fehler).
   }
   \item{signal_sell}{
     Character oder \code{NULL}. Name der Spalte in \code{data} mit dem
-    Verkaufssignal (logisch, \code{TRUE} = verkaufen). Bei
+    Verkaufssignal (\code{TRUE}/\code{FALSE} oder \code{0}/\code{1}, \code{NA} erlaubt;
+    \code{TRUE} bzw. \code{1} = verkaufen). Bei
     \code{trading = "signal"} Pflicht (sonst Fehler).
   }
   \item{wrapper}{

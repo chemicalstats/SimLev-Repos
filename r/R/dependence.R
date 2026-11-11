@@ -28,6 +28,70 @@
 # =============================================================================
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Eingabepruefung Abhaengigkeit, Regime, Optimierung, Backcast, Szenarien (seit 1.6.4, K42 E4; Hilfen in
+# pruefen.R, Bausteine e4.* der Tabelle eingabe). Gegenstuecke in dependence.py und dependence.jl.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# Vektor nicht leerer Namen (Spalten) ohne NA und ohne doppelte, mindestens einer; mit no_date nicht 'date'
+.e4_names <- function(x, fn, arg, null_ok = FALSE, no_date = TRUE) {
+  if (is.null(x) && null_ok) return(invisible(x))
+  chk_nofactor(x, fn, arg)                                        # Entscheidung 15
+  if (!(is.character(x) && is.null(dim(x)) && length(x) >= 1L && !anyNA(x) && all(nzchar(x)))) chk_stop("e3.namen", fn, arg)
+  if (anyDuplicated(x)) chk_stop("e2.doppelt", fn, arg)           # B-052
+  if (no_date && "date" %in% x) chk_stop("e4.date", fn, arg)      # B-052, B-055
+  invisible(x)
+}
+
+# numerischer Vektor (keine Matrix, Tabelle oder Liste, kein Faktor, keine Wahrheitswerte); NA erlaubt (B-009, B-010)
+.e4_vec <- function(x, fn, arg) {
+  chk_nofactor(x, fn, arg)
+  ok <- is.numeric(x) || (is.logical(x) && length(x) && all(is.na(x)))   # nur NA wie Entscheidung 14
+  if (!(ok && is.null(dim(x)) && length(x) >= 1L)) chk_stop("zahlen", fn, arg)
+  invisible(x)
+}
+
+# Zahlenspalte (kein Faktor, kein Text, keine Wahrheitswerte); eine Spalte nur aus NA gilt als Zahlenspalte
+# (Entscheidung 14)
+.e4_numcol <- function(data, col, fn) {
+  chk_col_nofactor(data, col, fn)                                 # Entscheidung 15, B-009
+  v <- data[[col]]
+  if (!(is.numeric(v) || (is.logical(v) && all(is.na(v))))) chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
+  invisible(data)
+}
+
+# Kursdaten: Tabelle (Entscheidung 6) mit Spalte 'date' (kein Faktor) und den Zahlenspalten cols (B-015, B-040)
+.e4_data <- function(data, cols, fn) {
+  chk_df(data, fn, "data")
+  chk_cols(data, c("date", cols), fn)
+  chk_col_nofactor(data, "date", fn)
+  for (k in cols) .e4_numcol(data, k, fn)
+  invisible(data)
+}
+
+# keine gemeinsame Spalte in a und b (B-013: sonst ueberschreibt der Zustand die Rendite)
+.e4_disjoint <- function(a, b, fn, arg_a, arg_b) {
+  if (length(intersect(a, b))) chk_stop("e4.gemeinsam", fn, arg_a, arg_b)
+  invisible(a)
+}
+
+# Anzahl: ganze Zahl >= lo, hoechstens hi (Entscheidung 16 sinngemaess: Anzahlen <= 10^8)
+.e4_count <- function(x, fn, arg, lo = 1, hi = SL_MAX_N, null_ok = FALSE) {
+  if (is.null(x) && null_ok) return(invisible(x))
+  chk_int1(x, fn, arg, lo = lo)
+  chk_max(x, hi, fn, arg)
+  invisible(x)
+}
+
+# Vektor von Anteilen echt zwischen 0 und 1, ohne doppelte Werte (B-054)
+.e4_probs <- function(x, fn, arg) {
+  chk_nofactor(x, fn, arg)
+  if (!(is.numeric(x) && is.null(dim(x)) && length(x) >= 1L && all(is.finite(x)) && all(x > 0 & x < 1) && !anyDuplicated(x)))
+    chk_stop("e4.anteile", fn, arg)
+  invisible(x)
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Renditen und Pseudo-Beobachtungen
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -57,8 +121,9 @@
 #' @noRd
 .dep_check_prices <- function(v, a, d) {
   bad <- which(!is.na(v) & (!is.finite(v) | v <= 0))
-  if (length(bad)) stop(sprintf("Kursspalte '%s': Kurse m\u00fcssen positiv und endlich sein, gefunden %s am %s%s (fehlende Kurse als NA angeben).",
-                                a, format(v[bad[1]]), format(d[bad[1]]),
+  # seit 1.6.4 ohne den Wert (Entscheidung 8), mit dem Datum als Ort in data
+  if (length(bad)) stop(sprintf("Kursspalte '%s': Kurse m\u00fcssen positiv und endlich sein, gefunden am %s%s (fehlende Kurse als NA angeben).",
+                                a, format(d[bad[1]]),
                                 if (length(bad) > 1) sprintf(" und %d weitere Werte", length(bad) - 1) else ""))
   v
 }
@@ -81,7 +146,7 @@
               numeric(nrow(data)))
   if (!is.matrix(V)) V <- matrix(V, ncol = length(assets))
   V <- V[end, , drop = FALSE]
-  R <- diff(log(V))
+  R <- if (nrow(V) > 1L) diff(log(V)) else log(V)[0L, , drop = FALSE]   # seit 1.6.4: eine Periode = 0 Renditen
   out <- data.frame(date = d[end][-1], R, check.names = FALSE)
   names(out)[-1] <- assets
   for (cn in conditions) {
@@ -101,13 +166,16 @@
 #' @noRd
 .kendall <- function(x, y = NULL) {
   if (is.null(y) && is.matrix(x)) {
-    if (any(!is.finite(x))) return(stats::cor(x, method = "kendall"))
+    # seit 1.6.4 ueber den Kern (C-035, Entscheidung 123): mit NA-Spalte las R (stats::cor) ein nicht gesetztes
+    # Hilfsfeld (NA-Bits und die Warnung "the standard deviation is zero" je nach Speicher); jetzt stilles NA ohne
+    # Warnung wie in Python und Julia
+    if (any(!is.finite(x))) return(.sl_cor(x, method = "kendall"))
     k <- ncol(x); M <- diag(1, k); dimnames(M) <- list(colnames(x), colnames(x))
     if (k > 1) for (i in 1:(k - 1)) for (j in (i + 1):k) M[i, j] <- M[j, i] <- .kendall_tau_core(as.numeric(x[, i]), as.numeric(x[, j]))
     return(M)
   }
   x <- as.numeric(x); y <- as.numeric(y)
-  if (any(!is.finite(x)) || any(!is.finite(y))) return(stats::cor(x, y, method = "kendall"))
+  if (any(!is.finite(x)) || any(!is.finite(y))) return(.sl_cor(x, y, method = "kendall"))
   .kendall_tau_core(x, y)
 }
 
@@ -201,7 +269,7 @@
       B <- (nu + 1) / 2 * (log1p(x2 / nu) + log1p(y2 / nu)); c0 <- .cop_t_c0(nu)
       g <- function(th) { s <- sum(.cop_t_ll(tanh(th), nu, c0, x, y, x2, y2, B)); if (!is.finite(s)) 1e10 else -s }
     }
-    o <- stats::optimize(g, c(-20, 20), tol = 1e-10)
+    o <- .sl_optimize(g, c(-20, 20), tol = 1e-10)
     if (o$objective < best[3]) best <<- c(o$minimum, nu, o$objective)
     o$objective
   }
@@ -209,10 +277,10 @@
   f <- vapply(nus, prof, 0)
   k <- which.min(f)
   if (k >= K - 1L) {
-    stats::optimize(function(s) prof(if (s == 0) Inf else 1 / s), c(0, 1 / nus[K - 2L]), tol = 1e-9)
+    .sl_optimize(function(s) prof(if (s == 0) Inf else 1 / s), c(0, 1 / nus[K - 2L]), tol = 1e-9)
   } else {
     lo <- if (k == 1L) log(nus[1] - 2) - 30 else log(nus[k - 1L] - 2)
-    stats::optimize(function(t2) prof(2 + exp(t2)), c(lo, log(nus[k + 1L] - 2)), tol = 1e-6)
+    .sl_optimize(function(t2) prof(2 + exp(t2)), c(lo, log(nus[k + 1L] - 2)), tol = 1e-6)
   }
   best
 }
@@ -230,6 +298,12 @@
   if (rot == "180") lam <- rev(lam)
   if (rot %in% c("90", "270")) lam <- c(0, 0)
   stats::setNames(lam, c("lower", "upper"))
+}
+
+# Familien von copula_fit: NULL oder Textvektor nicht leerer Namen ohne NA, mindestens einer (seit 1.6.4, B-035)
+.e4_families <- function(families, fn) {
+  if (!is.null(families)) .e4_names(families, fn, "families", no_date = FALSE)
+  invisible(families)
 }
 
 #' Copulas an zwei Reihen anpassen
@@ -258,6 +332,7 @@
 #' @param x,y Numerische Vektoren gleicher Laenge (z. B. Renditen; nur die
 #'   Raenge zaehlen). Paare mit nicht endlichen Werten werden entfernt;
 #'   mindestens 20 Paare noetig.
+#'   Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).
 #' @param families Zeichenvektor der Familien: \code{"gaussian"}, \code{"t"},
 #'   \code{"clayton"}, \code{"gumbel"}, \code{"frank"}, jeweils optional mit
 #'   Rotation \code{"_90"}, \code{"_180"} oder \code{"_270"} (z. B.
@@ -269,6 +344,7 @@
 #'   \code{gumbel_270}. Rotationen gibt es nur fuer \code{clayton} und
 #'   \code{gumbel} (Gauss-, t- und Frank-Copula sind radialsymmetrisch);
 #'   andere Namen sind ein Fehler, ebenso eine konstante Reihe.
+#'   Seit 1.6.4 nicht leer.
 #' @return data.frame mit einer Zeile je Familie, aufsteigend nach AIC
 #'   sortiert (erste Zeile = beste Familie): \code{family}, \code{par1}
 #'   (Korrelation bei Gauss/t, sonst \eqn{\theta}), \code{par2}
@@ -288,6 +364,8 @@
 #' copula_fit(x, y)[, c("family", "par1", "par2", "aic", "lambda_lower")]
 #' @export
 copula_fit <- function(x, y, families = NULL) {
+  .e4_vec(x, "copula_fit", "x"); .e4_vec(y, "copula_fit", "y")                  # seit 1.6.4 (B-009, B-010, B-050)
+  .e4_families(families, "copula_fit")                                           # B-035
   if (length(x) != length(y)) stop(sprintf("copula_fit: x und y m\u00fcssen gleich lang sein (%d bzw. %d Werte).", length(x), length(y)))
   ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]
   n <- length(x)
@@ -310,14 +388,14 @@ copula_fit <- function(x, y, families = NULL) {
     base <- sub("_.*$", "", fam)
     f <- function(p) -.cop_ll(fam, p, u, v)
     res <- switch(base,
-      gaussian = { o <- stats::optimize(function(r) f(r), c(-0.995, 0.995)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) },
+      gaussian = { o <- .sl_optimize(function(r) f(r), c(-0.995, 0.995)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) },
       t = {                                                     # Profil-Likelihood in nu
         o <- .cop_fit_t(u, v)
         list(par = c(tanh(o[1]), min(o[2], 500)), nll = o[3], k = 2)
       },
-      clayton = { o <- stats::optimize(function(lt) f(exp(lt)), c(log(1e-4), log(60))); list(par = c(exp(o$minimum), NA), nll = o$objective, k = 1) },
-      gumbel = { o <- stats::optimize(function(lt) f(1 + exp(lt)), c(log(1e-5), log(60))); list(par = c(1 + exp(o$minimum), NA), nll = o$objective, k = 1) },
-      frank = { o <- stats::optimize(function(th) f(th), c(-60, 60)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) })
+      clayton = { o <- .sl_optimize(function(lt) f(exp(lt)), c(log(1e-4), log(60))); list(par = c(exp(o$minimum), NA), nll = o$objective, k = 1) },
+      gumbel = { o <- .sl_optimize(function(lt) f(1 + exp(lt)), c(log(1e-5), log(60))); list(par = c(1 + exp(o$minimum), NA), nll = o$objective, k = 1) },
+      frank = { o <- .sl_optimize(function(th) f(th), c(-60, 60)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) })
     lam <- .cop_lambda(fam, res$par)
     data.frame(family = fam, par1 = res$par[1], par2 = res$par[2], loglik = -res$nll,
                aic = 2 * res$k + 2 * res$nll, bic = log(n) * res$k + 2 * res$nll,
@@ -346,6 +424,7 @@ copula_fit <- function(x, y, families = NULL) {
 #'
 #' @param x,y Numerische Vektoren gleicher Laenge (z. B. Periodenrenditen).
 #'   Paare mit nicht endlichen Werten werden entfernt.
+#'   Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).
 #' @param q Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil
 #'   echt zwischen 0 und 1 (0.05 = die unteren bzw. oberen 5 % der
 #'   Beobachtungen).
@@ -363,20 +442,43 @@ copula_fit <- function(x, y, families = NULL) {
 #' tail_dependence(x, y, q = c(0.05, 0.10))
 #' @export
 tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
+  .e4_vec(x, "tail_dependence", "x"); .e4_vec(y, "tail_dependence", "y")        # seit 1.6.4 (B-009, B-010, B-050)
   if (length(x) != length(y)) stop(sprintf("tail_dependence: x und y m\u00fcssen gleich lang sein (%d bzw. %d Werte).", length(x), length(y)))
-  if (!is.numeric(q) || !length(q) || any(!is.finite(q) | q <= 0 | q >= 1))
-    stop(sprintf("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen (erhalten: %s).", paste(format(q), collapse = ", ")))
+  chk_nofactor(q, "tail_dependence", "q")
+  if (!is.numeric(q) || !is.null(dim(q)) || !length(q) || any(!is.finite(q) | q <= 0 | q >= 1))   # seit 1.6.4 ohne Wert
+    stop("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen.")
   ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]; n <- length(x)
   if (n < 2) stop("tail_dependence: mindestens zwei Paare mit endlichen Werten n\u00f6tig.")
   u <- .pobs(x); v <- .pobs(y)
-  qx <- function(p) stats::quantile(x, p, names = FALSE); qy <- function(p) stats::quantile(y, p, names = FALSE)
-  ec <- function(s) if (sum(s) >= 8 && stats::sd(x[s]) > 0 && stats::sd(y[s]) > 0) stats::cor(x[s], y[s]) else NA_real_
   do.call(rbind, lapply(q, function(p) {
-    lo <- u <= p & v <= p; hi <- u > 1 - p & v > 1 - p
-    el <- x <= qx(p) & y <= qy(p); eh <- x >= qx(1 - p) & y >= qy(1 - p)
-    data.frame(q = p, lower = sum(lo) / (n * p), upper = sum(hi) / (n * p),
-               exceed_lower = ec(el), exceed_upper = ec(eh), n_lower = sum(lo), n_upper = sum(hi))
+    r <- .tail_dep_core(x, y, u, v, n, p)
+    data.frame(q = p, lower = r[[1L]], upper = r[[2L]], exceed_lower = r[[3L]], exceed_upper = r[[4L]],
+               n_lower = r[[5L]], n_upper = r[[6L]])
   }))
+}
+
+# Kern von tail_dependence fuer ein p auf endlichen Paaren (seit 1.6.4, B-064): je Reihe ein quantile() fuer p und
+# 1 - p (dieselben Ordnungsstatistiken wie zwei Einzelaufrufe; die Quantile gehen nur in Vergleiche ein), ohne
+# data.frame. Liste lower, upper, exceed_lower, exceed_upper, n_lower, n_upper.
+.tail_dep_core <- function(x, y, u, v, n, p) {
+  ec <- function(s) if (sum(s) >= 8 && .sl_sd(x[s]) > 0 && .sl_sd(y[s]) > 0) .sl_cor(x[s], y[s]) else NA_real_
+  lo <- u <= p & v <= p; hi <- u > 1 - p & v > 1 - p
+  qx <- stats::quantile(x, c(p, 1 - p), names = FALSE); qy <- stats::quantile(y, c(p, 1 - p), names = FALSE)
+  el <- x <= qx[1L] & y <= qy[1L]; eh <- x >= qx[2L] & y >= qy[2L]
+  list(sum(lo) / (n * p), sum(hi) / (n * p), ec(el), ec(eh), sum(lo), sum(hi))
+}
+
+# tail_dependence(x, y, p)[, c("lower", "upper", "exceed_lower")] als Liste fuer ein mit chk_num1 geprueftes p in
+# Schleifen (dependence_validate, dependence_analysis; x, y Zahlenvektoren): gleiche Filterung und Meldung ohne
+# data.frame. Ein p mit dim (1 x 1-Matrix) laeuft wie bisher ueber tail_dependence (dortige Meldung).
+.tail_dep_fun <- function(p) {
+  if (!is.null(dim(p))) return(function(x, y) { td <- tail_dependence(x, y, p); list(td$lower, td$upper, td$exceed_lower) })
+  p <- p[[1L]]                                                   # wie lapply(q, ...) in tail_dependence
+  function(x, y) {
+    ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]; n <- length(x)
+    if (n < 2) stop("tail_dependence: mindestens zwei Paare mit endlichen Werten n\u00f6tig.")
+    .tail_dep_core(x, y, .pobs(x), .pobs(y), n, p)
+  }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -409,6 +511,7 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'   (sonst \code{V1}, \code{V2}, ...). Konstante oder (nahezu) perfekt
 #'   korrelierte Reihen (singulaere Korrelationsmatrix der standardisierten
 #'   Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler.
+#'   Seit 1.6.4 geprueft: nur Zahlen, alle endlich.
 #' @return Liste mit \code{a}, \code{b} (DCC-Parameter), \code{loglik}
 #'   (Korrelationsteil der Quasi-Log-Likelihood), \code{correlation} (Matrix
 #'   Zeit x Paare der bedingten Korrelationen \eqn{R_t}; Spaltennamen wie
@@ -430,15 +533,19 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'   20(3), 339-350.
 #' @export
 dependence_dcc <- function(R) {
+  # seit 1.6.4: nur Zahlen (Matrix oder Tabelle mit Zahlenspalten), endlich (Doku: keine fehlenden Werte)
+  if (is.data.frame(R)) for (k in names(R)) .e4_numcol(R, k, "dependence_dcc")
+  else if (!(is.numeric(R) && is.matrix(R))) chk_stop("e4.matrix", "dependence_dcc")
   R <- as.matrix(R)
+  if (!all(is.finite(R))) chk_stop("e3.werte", "dependence_dcc", "R")
   if (ncol(R) < 2 || nrow(R) < 100) stop("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
   nm <- colnames(R) %||% paste0("V", seq_len(ncol(R)))
   g <- lapply(seq_len(ncol(R)), function(j) .fit_garch11(R[, j], quiet = TRUE))
   Z <- vapply(g, `[[`, numeric(nrow(R)), "z")
   if (!is.matrix(Z)) Z <- matrix(Z, ncol = ncol(R))
-  flat <- which(apply(Z, 2, stats::sd) == 0)
+  flat <- which(apply(Z, 2, .sl_sd) == 0)
   if (length(flat)) stop(sprintf("dependence_dcc: Reihe %s ist konstant; keine Korrelation sch\u00e4tzbar.", paste0("'", nm[flat], "'", collapse = ", ")))
-  Qb <- stats::cor(Z)
+  Qb <- .sl_cor(Z)
   # (nahezu) perfekt korrelierte Reihen: Qbar und damit R_t sind singulaer
   ev <- .sl_eigen_sym(Qb, only.values = TRUE)$values
   if (min(ev) < 1e-8) {
@@ -490,6 +597,30 @@ dependence_dcc <- function(R) {
   list(regime = f, breaks = breaks)
 }
 
+# breaks: NULL oder nach Spalten aus conditions benannte Liste streng steigender Zahlengrenzen ohne NA (Laenge >= 2;
+# seit 1.6.4, B-014)
+.e4_breaks <- function(breaks, conditions, fn) {
+  if (is.null(breaks)) return(invisible(breaks))
+  if (!is.list(breaks) || is.data.frame(breaks) || (length(breaks) && (is.null(names(breaks)) || any(!nzchar(names(breaks))) ||
+                                                                       anyDuplicated(names(breaks)))))
+    chk_stop("e4.breaks", fn)
+  for (k in names(breaks)) {
+    if (!k %in% conditions) chk_stop("e4.breaks_name", fn, k)
+    b <- breaks[[k]]
+    if (is.factor(b) || !is.numeric(b) || !is.null(dim(b)) || length(b) < 2L || anyNA(b) || any(diff(b) <= 0)) chk_stop("e4.breaks", fn)
+  }
+  invisible(breaks)
+}
+
+# Auswahl als Name aus nm oder ganze Zahl 1 bis length(nm) (seit 1.6.4, B-007: bis 1.6.3 0 und negative Nummern still
+# anders ausgewertet)
+.e4_pick <- function(v, nm, fn, arg) {
+  if (is.character(v) && length(v) == 1L && !is.na(v)) {
+    if (!v %in% nm) chk_stop("auswahl", fn, arg, paste0("\"", nm, "\"", collapse = ", "))
+  } else chk_int1(v, fn, arg, lo = 1, hi = length(nm))
+  invisible(v)
+}
+
 #' Korrelationen je Regime fuer alle Paare (Pearson, Spearman) als Matrix
 #' @keywords internal
 #' @noRd
@@ -498,7 +629,7 @@ dependence_dcc <- function(R) {
     s <- which(reg == l)
     if (length(s) < 10) return(rep(NA_real_, nrow(pairs)))
     Y <- X[s, , drop = FALSE]; if (rank) Y <- apply(Y, 2, rank)
-    C <- suppressWarnings(stats::cor(Y))
+    C <- suppressWarnings(.sl_cor(Y))
     C[pairs]
   }, numeric(nrow(pairs)))
 }
@@ -533,19 +664,23 @@ dependence_dcc <- function(R) {
 #'   Zustandsspalten (z. B. mit [series_align()] und [series_align_macro()]
 #'   vorbereitet).
 #' @param assets Zeichenvektor der Kursspalten (mindestens zwei).
+#'   Seit 1.6.4 ohne doppelte Namen und ohne 'date'.
 #' @param conditions Zeichenvektor der Zustandsspalten (Drittvariablen, in
 #'   ihrer eigenen Einheit); gehen um eine Periode verzoegert ein.
 #'   \code{NULL} (Standard) = keine bedingte Analyse.
+#'   Seit 1.6.4 ohne doppelte Namen und keine Spalte aus assets.
 #' @param frequency Renditefrequenz: \code{"week"} (Standard; ISO-Woche,
 #'   vermeidet Effekte unterschiedlicher Handelszeiten), \code{"day"} oder
 #'   \code{"month"}.
 #' @param quantiles Numerischer Vektor von Tail-Wahrscheinlichkeiten als
 #'   Anteil (Standard \code{c(0.05, 0.10)}) fuer die Tail-Kennzahlen ueber
 #'   die ganze Stichprobe (siehe [tail_dependence()]).
+#'   Seit 1.6.4 echt zwischen 0 und 1, ohne doppelte Werte.
 #' @param breaks Optional benannte Liste von Grenzen je Zustandsvariable in
 #'   deren Einheit, z. B. \code{list(inflation = c(-Inf, 2, 4, Inf))};
 #'   Intervalle links geschlossen, rechts offen. \code{NULL} (Standard) bzw.
 #'   fehlender Eintrag = \code{n_regimes} gleich besetzte Quantilsgruppen.
+#'   Seit 1.6.4 nur Namen aus conditions, Grenzen streng steigend ohne NA.
 #' @param n_regimes Anzahl Regime ohne \code{breaks} (ganze Zahl, Standard 3:
 #'   niedrig, mittel, hoch). Fallen Quantilsgrenzen zusammen oder bliebe eine
 #'   Quantilsgruppe leer (diskrete Zustaende wie 1/2 aus [regime_states()]),
@@ -554,16 +689,19 @@ dependence_dcc <- function(R) {
 #' @param window Fenster der rollierenden Pearson-Korrelation in Perioden der
 #'   gewaehlten Frequenz. \code{NULL} (Standard) = Anzahl Perioden je Jahr
 #'   (aus den Daten ermittelt, mindestens 10).
+#'   Seit 1.6.4 eine ganze Zahl >= 1.
 #' @param dcc Logisch: DCC(1,1) mit [dependence_dcc()] schaetzen (nur bei
 #'   mindestens 100 Perioden; Fehler werden als Meldung ausgegeben).
 #' @param copulas Logisch: Copula-Fits mit [copula_fit()] je Paar (und je
 #'   Regime ab 40 Perioden).
 #' @param B Anzahl Bootstrap-Wiederholungen fuer die Regime-Vergleiche
 #'   (ganze Zahl, Standard 499; 0 = aus).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
 #'   \code{NULL} (Standard) = Politis-White-Schaetzung auf dem Produkt der
 #'   standardisierten Renditen (Maximum ueber die Paare, begrenzt auf 2 bis
 #'   n / 10).
+#'   Seit 1.6.4 eine Zahl >= 1.
 #' @param tail_q Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) fuer die
 #'   Tail-Kennzahlen je Regime.
 #' @param seed Startwert fuer den Bootstrap. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
@@ -630,13 +768,27 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
                                 quantiles = c(0.05, 0.10), breaks = NULL, n_regimes = 3L, window = NULL,
                                 dcc = TRUE, copulas = TRUE, B = 499L, block = NULL, tail_q = 0.10, seed = NULL) {
   frequency <- match.arg(frequency)
+  fn <- "dependence_analysis"                                     # seit 1.6.4 vor der Rechnung (K42 E4)
+  .e4_names(assets, fn, "assets")
   if (length(assets) < 2) stop("dependence_analysis: mindestens zwei Anlagen.")
+  .e4_names(conditions, fn, "conditions", null_ok = TRUE)
+  .e4_disjoint(assets, conditions, fn, "assets", "conditions")    # B-013
+  .e4_data(data, c(assets, conditions), fn)
+  .e4_probs(quantiles, fn, "quantiles")                           # B-054
+  .e4_breaks(breaks, conditions, fn)                              # B-014
+  .e4_count(n_regimes, fn, "n_regimes")                           # B-032
+  .e4_count(window, fn, "window", null_ok = TRUE)                 # B-012
+  chk_bool1(dcc, fn, "dcc"); chk_bool1(copulas, fn, "copulas")    # B-051
+  .e4_count(B, fn, "B", lo = 0)                                   # B-011, B-032
+  if (!is.null(block)) chk_num1(block, fn, "block", lo = 1)
+  chk_num1(tail_q, fn, "tail_q", lo = 0, hi = 1, lo_open = TRUE, hi_open = TRUE)   # B-011
+  if (nrow(data) < 2L) stop("dependence_analysis: nur 0 Perioden.")   # seit 1.6.4 wie Python/Julia (0 oder 1 Zeile)
   rd <- .dep_returns(data, assets, conditions, frequency)
   X <- as.matrix(rd[, assets, drop = FALSE]); n <- nrow(X)
   if (n < 30) stop(sprintf("dependence_analysis: nur %d Perioden.", n))
   ppy <- (n - 1) / (as.numeric(rd$date[n] - rd$date[1]) / 365.25)
   window <- window %||% max(10L, round(ppy))
-  cors <- list(pearson = stats::cor(X), spearman = stats::cor(X, method = "spearman"),
+  cors <- list(pearson = .sl_cor(X), spearman = .sl_cor(X, method = "spearman"),
                kendall = .kendall(X))
   pidx <- t(utils::combn(length(assets), 2)); pn <- apply(pidx, 1, function(p) paste(assets[p], collapse = " ~ "))
   tails <- lapply(seq_len(nrow(pidx)), function(i) cbind(pair = pn[i], tail_dependence(X[, pidx[i, 1]], X[, pidx[i, 2]], quantiles)))
@@ -674,7 +826,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
         x <- scale(X[, pidx[i, 1]])[, 1]; y <- scale(X[, pidx[i, 2]])[, 1]; .pw_block(x * y)[["stationary"]] }, 0)
       block <- min(max(2, max(bl)), n / 10)
     }
-    cond <- list(); diffs <- list(); regimes <- list()
+    cond <- list(); diffs <- list(); regimes <- list(); td_fun <- .tail_dep_fun(tail_q)
     for (cn in conditions) {
       cv <- rd[[cn]]; keep <- which(is.finite(cv))
       if (length(keep) < 30) { warning(sprintf("Zustand '%s': zu wenige Beobachtungen.", cn)); next }
@@ -685,19 +837,19 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
       rows <- list()
       for (i in seq_len(nrow(pidx))) for (l in lv) {
         s <- which(rk == l); x <- Xk[s, pidx[i, 1]]; y <- Xk[s, pidx[i, 2]]
-        td <- if (length(s) >= 20) tail_dependence(x, y, tail_q) else NULL
+        td <- if (length(s) >= 20) td_fun(x, y) else NULL     # seit 1.6.4 ohne data.frame (B-064)
         fams <- if (length(s) >= 2 && isTRUE(.kendall(x, y) < 0)) c("t", "gaussian", "clayton_90", "clayton_270")
                 else c("t", "gaussian", "clayton", "gumbel")
         tc <- if (copulas && length(s) >= 40) tryCatch(copula_fit(x, y, fams), error = function(e) NULL) else NULL
         tt <- if (!is.null(tc)) tc[tc$family == "t", ] else NULL
         rows[[length(rows) + 1L]] <- data.frame(
           pair = pn[i], regime = l, n = length(s),
-          vol_1 = stats::sd(x) * sqrt(ppy), vol_2 = stats::sd(y) * sqrt(ppy),
-          pearson = if (length(s) >= 10) stats::cor(x, y) else NA_real_,
-          spearman = if (length(s) >= 10) stats::cor(x, y, method = "spearman") else NA_real_,
+          vol_1 = .sl_sd(x) * sqrt(ppy), vol_2 = .sl_sd(y) * sqrt(ppy),
+          pearson = if (length(s) >= 10) .sl_cor(x, y) else NA_real_,
+          spearman = if (length(s) >= 10) .sl_cor(x, y, method = "spearman") else NA_real_,
           kendall = if (length(s) >= 10) .kendall(x, y) else NA_real_,
-          lambda_lower = if (!is.null(td)) td$lower else NA_real_, lambda_upper = if (!is.null(td)) td$upper else NA_real_,
-          exceed_lower = if (!is.null(td)) td$exceed_lower else NA_real_,
+          lambda_lower = if (!is.null(td)) td[[1L]] else NA_real_, lambda_upper = if (!is.null(td)) td[[2L]] else NA_real_,
+          exceed_lower = if (!is.null(td)) td[[3L]] else NA_real_,
           t_rho = if (!is.null(tt) && nrow(tt)) tt$par1 else NA_real_, t_nu = if (!is.null(tt) && nrow(tt)) tt$par2 else NA_real_,
           copula = if (!is.null(tc)) tc$family[1] else NA_character_,
           copula_lambda_lower = if (!is.null(tc)) tc$lambda_lower[1] else NA_real_,
@@ -708,7 +860,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
         nk <- nrow(Xk)
         # seed = NULL -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
         if (is.null(seed)) seed <- .sl_next_seed()
-        S <- .sl_main_stream(seed)
+        S <- .sl_main_stream(seed, "dependence_analysis")
         boot <- lapply(seq_len(B), function(b) {
           idx <- .sl_boot_idx_stationary(nk, nk, block, stream = S)
           list(p = .dep_reg_cor(Xk[idx, , drop = FALSE], rk[idx], lv, pidx),
@@ -805,7 +957,10 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
                                   pair = 1, condition = 1, ...) {
   type <- match.arg(type)
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
-  pn <- x$pairs$pair; i <- if (is.character(pair)) match(pair, pn) else pair
+  pn <- x$pairs$pair
+  .e4_pick(pair, pn, "plot.SimLevDependence", "pair")             # seit 1.6.4 (B-007)
+  if (length(x$conditional)) .e4_pick(condition, names(x$conditional), "plot.SimLevDependence", "condition")
+  i <- if (is.character(pair)) match(pair, pn) else pair
   ab <- strsplit(pn[i], " ~ ")[[1]]
   X <- x$returns
   bp <- function() graphics::par(mar = c(3.8, 4.2, 2.6, 1), mgp = c(2.4, 0.6, 0), las = 1, cex.axis = 0.8)
@@ -916,8 +1071,10 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
 #' @param tol Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich
 #'   kein Koeffizient um mehr als \code{tol * (1 + max|beta|)} aendert (in
 #'   den ersten drei Stufen wird hoechstens 1e-7 verlangt). Standard 1e-10.
+#'   Seit 1.6.4 eine Zahl > 0.
 #' @param maxit Hoechstzahl der Iterationen je MM-Stufe (ganze Zahl,
 #'   Standard 2000).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @return Benannter numerischer Koeffizientenvektor in der Einheit von
 #'   \code{y} je Einheit des Regressors: \code{"(Intercept)"} (falls
 #'   \code{intercept = TRUE}) und je Spalte von \code{X} deren Name (sonst
@@ -933,9 +1090,14 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
 #' quantile_regression(y, x, 0.9)
 #' @export
 quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 1e-10, maxit = 2000L) {
-  if (!is.numeric(tau) || length(tau) != 1 || !is.finite(tau) || tau <= 0 || tau >= 1)
-    stop(sprintf("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: %s).", paste(format(tau), collapse = ", ")))
-  if (!is.numeric(y)) stop("quantile_regression: y muss numerisch sein.")
+  if (!is.numeric(tau) || length(tau) != 1 || !is.finite(tau) || tau <= 0 || tau >= 1)   # seit 1.6.4 ohne Wert
+    stop("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein.")
+  if (is.factor(y) || !is.numeric(y) || !is.null(dim(y))) stop("quantile_regression: y muss numerisch sein.")   # seit 1.6.4 Vektor
+  fn <- "quantile_regression"
+  if (is.factor(X)) chk_stop("faktor", fn, "X")                   # Entscheidung 15
+  chk_bool1(intercept, fn, "intercept")                           # B-051
+  chk_num1(tol, fn, "tol", lo = 0, lo_open = TRUE)                # B-032
+  .e4_count(maxit, fn, "maxit")                                   # B-032
   y <- as.numeric(y)
   if (is.data.frame(X)) {
     nn <- names(X)[!vapply(X, is.numeric, TRUE)]
@@ -946,7 +1108,7 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
   if (!is.numeric(X)) stop("quantile_regression: X muss numerisch sein.")
   if (nrow(X) != length(y)) stop(sprintf("quantile_regression: X hat %d Zeilen, y aber %d Werte.", nrow(X), length(y)))
   nm <- colnames(X) %||% if (ncol(X)) paste0("x", seq_len(ncol(X))) else character(0)
-  if (intercept) { X <- cbind(1, X); nm <- c("(Intercept)", nm) }
+  if (intercept) { X <- cbind(rep(1, nrow(X)), X); nm <- c("(Intercept)", nm) }   # 0 Zeilen ohne Warnung
   ok <- is.finite(y) & rowSums(!is.finite(X)) == 0; y <- y[ok]; X <- X[ok, , drop = FALSE]
   if (!ncol(X)) stop("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
   if (length(y) < ncol(X)) stop(sprintf("quantile_regression: %d vollst\u00e4ndige Beobachtungen f\u00fcr %d Koeffizienten.", length(y), ncol(X)))
@@ -955,7 +1117,7 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
     stop(sprintf("quantile_regression: Regressoren linear abh\u00e4ngig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).",
                  paste0("'", nm[qx$pivot[(qx$rank + 1):ncol(X)]], "'", collapse = ", ")))
   beta <- qx$coefficients
-  sc <- max(stats::sd(y), 1e-12)
+  sc <- max(.sl_sd(y), 1e-12)
   storage.mode(X) <- "double"
   beta <- .quantile_reg_core(y, X, tau, as.numeric(beta), sc, tol, as.integer(maxit))
   if (!isTRUE(attr(beta, "optimal")))
@@ -983,12 +1145,14 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
 #'   (Kursniveaus, keine Renditen) und Zustandsspalten.
 #' @param asset Name der Kursspalte (Zeichenkette).
 #' @param drivers Zeichenvektor der Zustandsspalten (Drittvariablen).
+#'   Seit 1.6.4 mindestens einer, ohne doppelte Namen und nicht asset.
 #' @param quantiles Numerischer Vektor der Quantile als Anteil (Standard
 #'   \code{c(0.05, 0.25, 0.5, 0.75, 0.95)}).
 #' @param frequency Renditefrequenz: \code{"week"} (Standard, ISO-Woche),
 #'   \code{"day"} oder \code{"month"}.
 #' @param B Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 =
 #'   keine Standardfehler und Intervalle).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
 #'   \code{NULL} (Standard) = Politis-White-Schaetzung auf den absoluten
 #'   Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n / 10).
@@ -1023,6 +1187,15 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
 tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95),
                             frequency = c("week", "day", "month"), B = 199L, block = NULL, seed = NULL) {
   frequency <- match.arg(frequency)
+  fn <- "tail_regression"                                         # seit 1.6.4 vor der Rechnung (K42 E4, B-054)
+  chk_name1(asset, fn, "asset")
+  if (asset == "date") chk_stop("e4.date", fn, "asset")
+  .e4_names(drivers, fn, "drivers")
+  .e4_disjoint(asset, drivers, fn, "asset", "drivers")            # B-013
+  .e4_data(data, c(asset, drivers), fn)
+  .e4_probs(quantiles, fn, "quantiles")
+  .e4_count(B, fn, "B", lo = 0)                                   # B-032
+  if (!is.null(block)) chk_num1(block, fn, "block", lo = 1)
   rd <- .dep_returns(data, asset, drivers, frequency)
   rd <- rd[stats::complete.cases(rd[, c(asset, drivers)]), , drop = FALSE]
   y <- 100 * rd[[asset]]; X <- as.matrix(rd[, drivers, drop = FALSE]); n <- length(y)
@@ -1031,13 +1204,13 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   if (!is.matrix(est)) est <- matrix(est, nrow = 1)
   X1 <- cbind(1, X); storage.mode(X1) <- "double"
   qfit <- function(yb, Xb, k)                                   # Bootstrap: Start bei der Punktschaetzung
-    as.numeric(.quantile_reg_core(yb, Xb, quantiles[k], est[, k], max(stats::sd(yb), 1e-12), 1e-10, 2000L))
+    as.numeric(.quantile_reg_core(yb, Xb, quantiles[k], est[, k], max(.sl_sd(yb), 1e-12), 1e-10, 2000L))
   terms <- c("(Intercept)", drivers)
   se <- lo <- hi <- matrix(NA_real_, nrow(est), ncol(est))
   n_failed <- 0L
   if (B > 0) {
     block <- block %||% min(max(2, .pw_block(abs(y - mean(y)))[["stationary"]]), n / 10)
-    S <- .sl_main_stream(seed)                                  # Hauptstrom
+    S <- .sl_main_stream(seed, "tail_regression")                                  # Hauptstrom
     bs <- lapply(seq_len(B), function(b) { idx <- .sl_boot_idx_stationary(n, n, block, stream = S)
       yb <- y[idx]; Xb <- X1[idx, , drop = FALSE]
       # z. B. Treiber in der Stichprobe konstant -> singulaer: Wiederholung als NA
@@ -1048,7 +1221,7 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
     else if (n_failed > 0) warning(sprintf("tail_regression: %d von %d Bootstrap-Stichproben nicht sch\u00e4tzbar (singul\u00e4re Regressoren, z. B. Treiber in der Stichprobe konstant); Standardfehler und Intervalle aus den \u00fcbrigen %d.",
                                            n_failed, B, B - n_failed))
     A <- simplify2array(bs); if (length(dim(A)) == 2) A <- array(A, c(1, dim(A)))
-    se <- apply(A, c(1, 2), stats::sd, na.rm = TRUE)
+    se <- apply(A, c(1, 2), .sl_sd, na.rm = TRUE)
     lo <- apply(A, c(1, 2), stats::quantile, 0.05, na.rm = TRUE); hi <- apply(A, c(1, 2), stats::quantile, 0.95, na.rm = TRUE)
   }
   coefs <- data.frame(quantile = rep(quantiles, each = length(terms)), term = rep(terms, length(quantiles)),
@@ -1115,6 +1288,7 @@ plot.SimLevTailRegression <- function(x, ...) {
 #' @param assets Zeichenvektor der Kursspalten der einzelnen Anlagen.
 #' @param state Optionaler Zeichenvektor der Zustandsspalten (in ihrer
 #'   eigenen Einheit). \code{NULL} (Standard) = zeitkonstante Quantile.
+#'   Seit 1.6.4 keine Spalte aus system oder assets.
 #' @param q Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
 #' @param frequency Renditefrequenz: \code{"week"} (Standard, ISO-Woche),
 #'   \code{"day"} oder \code{"month"}.
@@ -1147,9 +1321,18 @@ plot.SimLevTailRegression <- function(x, ...) {
 #' @export
 tail_covar <- function(data, system, assets, state = NULL, q = 0.05, frequency = c("week", "day", "month")) {
   frequency <- match.arg(frequency)
+  fn <- "tail_covar"                                              # seit 1.6.4 vor der Rechnung (K42 E4)
+  chk_name1(system, fn, "system")
+  if (system == "date") chk_stop("e4.date", fn, "system")
+  .e4_names(assets, fn, "assets")
+  .e4_names(state, fn, "state", null_ok = TRUE)
+  .e4_disjoint(c(system, assets), state, fn, "system/assets", "state")   # B-013
+  .e4_data(data, unique(c(system, assets, state)), fn)
+  chk_num1(q, fn, "q", lo = 0, hi = 1, lo_open = TRUE, hi_open = TRUE)
   rd <- .dep_returns(data, unique(c(system, assets)), state, frequency)
   rd <- rd[stats::complete.cases(rd), , drop = FALSE]
   M <- if (length(state)) as.matrix(rd[, state, drop = FALSE]) else NULL
+  if (!is.null(M)) storage.mode(M) <- "double"                   # Zustand nur NA (Entscheidung 14) wie Python/Julia
   ys <- 100 * rd[[system]]
   res <- lapply(assets, function(a) {
     xi <- 100 * rd[[a]]
@@ -1218,10 +1401,12 @@ plot.SimLevCoVaR <- function(x, ...) {
 #' @param agg Zeilen je Periode fuer die Aggregation (ganze Zahl, Standard 5;
 #'   z. B. 5 Handelstage oder 7 Kalendertage ergibt Wochen; 1 = keine
 #'   Aggregation).
+#'   Seit 1.6.4 eine ganze Zahl >= 1, hoechstens 10^8.
 #' @param q Tail-Wahrscheinlichkeit als Anteil fuer die Tail-Kennzahlen
 #'   (Standard 0.10, siehe [tail_dependence()]).
 #' @param max_paths Hoechstens so viele Pfade auswerten (die ersten
 #'   \code{max_paths} Pfade; Standard 200).
+#'   Seit 1.6.4 eine ganze Zahl >= 1 oder Inf (alle Pfade).
 #' @return data.frame mit einer Zeile je Indexpaar und Kennzahl:
 #'   \code{pair}, \code{metric} (\code{"kendall"}, \code{"pearson"},
 #'   \code{"lambda_lower"}, \code{"lambda_upper"}, \code{"exceed_lower"}),
@@ -1243,17 +1428,24 @@ plot.SimLevCoVaR <- function(x, ...) {
 #' @export
 dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L) {
   if (!inherits(boot, "bootstrap_result")) stop("boot muss ein bootstrap_result sein.")
+  fn <- "dependence_validate"                                     # seit 1.6.4 (B-033, B-053)
+  .e4_count(agg, fn, "agg")
+  chk_num1(q, fn, "q", lo = 0, hi = 1, lo_open = TRUE, hi_open = TRUE)
+  if (!(identical(max_paths, Inf) || (is.numeric(max_paths) && length(max_paths) == 1L && is.finite(max_paths) &&
+                                      max_paths == trunc(max_paths) && max_paths >= 1)))
+    chk_stop("e1.ganz_inf", fn, "max_paths", chk_fmt(1))
   cfg <- boot$config
   if (length(cfg$index_names) < 2) stop("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
   hist <- log(.extract_returns(data, cfg)$ret)
   aggr <- function(L) { k <- nrow(L) %/% agg; if (k < 20) stop("Zu wenige Perioden nach Aggregation.")
     rowsum(L[seq_len(k * agg), , drop = FALSE], rep(seq_len(k), each = agg)) }
+  td_fun <- .tail_dep_fun(q)                                     # seit 1.6.4 ohne data.frame je Paar (B-064)
   stats_of <- function(L) {
     A <- aggr(L); pr <- utils::combn(ncol(A), 2)
     unlist(lapply(seq_len(ncol(pr)), function(j) {
-      x <- A[, pr[1, j]]; y <- A[, pr[2, j]]; td <- tail_dependence(x, y, q)
-      c(kendall = .kendall(x, y), pearson = stats::cor(x, y),
-        lambda_lower = td$lower, lambda_upper = td$upper, exceed_lower = td$exceed_lower)
+      x <- A[, pr[1, j]]; y <- A[, pr[2, j]]; td <- td_fun(x, y)
+      c(kendall = .kendall(x, y), pearson = .sl_cor(x, y),
+        lambda_lower = td[[1L]], lambda_upper = td[[2L]], exceed_lower = td[[3L]])
     }))
   }
   h <- stats_of(hist)
@@ -1266,6 +1458,19 @@ dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L
              p05 = apply(P, 1, stats::quantile, 0.05, na.rm = TRUE), p95 = apply(P, 1, stats::quantile, 0.95, na.rm = TRUE),
              percentile = vapply(seq_along(h), function(i) mean(P[i, ] <= h[i], na.rm = TRUE), 0),
              row.names = NULL, stringsAsFactors = FALSE)
+}
+
+# Bedingung als Wahrheitswerte wie bisher ueber as.logical (Text "TRUE"/"FALSE", Zahlen ungleich 0 = TRUE), NA = FALSE
+# (mildere Regel bis zur Antwort auf Frage F1, B-008); Faktor (Entscheidung 15), Datum, Liste und Matrix sind seit
+# 1.6.4 ein Fehler
+.e4_cond <- function(cond, fn) {
+  ok <- is.null(dim(cond)) && !is.factor(cond) && !inherits(cond, c("Date", "POSIXt")) &&
+    (is.logical(cond) || is.numeric(cond) || is.character(cond))
+  if (!ok) chk_stop("e4.bedingung", fn)
+  lg <- as.logical(cond)
+  if (is.character(cond) && any(!is.na(cond) & is.na(lg))) chk_stop("e4.bedingung_text", fn)   # Entscheidung 68
+  cond <- lg; cond[is.na(cond)] <- FALSE
+  cond
 }
 
 #' Zeilen eines Regimes fuer Stress-Bootstraps
@@ -1285,6 +1490,12 @@ dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L
 #' @param condition Logischer Vektor der Laenge \code{nrow(data)} (NA =
 #'   FALSE) oder Ausdruck als Zeichenkette, der in \code{data} ausgewertet
 #'   wird, z. B. \code{"inflation >= 4"}.
+#'   Seit 1.6.4 in allen Sprachen wie R as.logical gelesen (NA = FALSE);
+#'   nicht lesbarer Text, Faktor, Datum, Liste oder Matrix sind ein Fehler; auch das Ergebnis
+#'   des Ausdrucks.
+#'   Seit 1.6.4 gelten Texte in R, Python und Julia gleich im gemeinsamen Umfang der
+#'   Regeltexte von [tactical_rules()] (bis 1.6.3 in R jeder R-Ausdruck); \code{condition} kann
+#'   auch eine Funktion von \code{data} sein (Ergebnis wie oben).
 #' @param min_run Mindestlaenge einer Episode in Zeilen (ganze Zahl,
 #'   Standard 1); kuerzere zusammenhaengende Abschnitte werden verworfen.
 #' @return Teilmenge von \code{data} (Zeilen der behaltenen Episoden in
@@ -1302,8 +1513,17 @@ dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L
 #' attr(s, "episodes")
 #' @export
 regime_subset <- function(data, condition, min_run = 1L) {
-  cond <- if (is.character(condition)) eval(parse(text = condition), data, parent.frame()) else condition
-  cond <- as.logical(cond); cond[is.na(cond)] <- FALSE
+  fn <- "regime_subset"                                           # seit 1.6.4 (K42 E4, B-008, B-034, B-036)
+  chk_df(data, fn, "data")
+  if (is.character(condition) && length(condition) != 1L) chk_stop("e4.bedingung", fn)
+  .e4_count(min_run, fn, "min_run")
+  # seit 1.6.4 (Entscheidung 143, T3-R3) Text nur im gemeinsamen RExpr-Umfang wie tactical_rules und view_prob (59, 72;
+  # bis 1.6.3 eval(parse()) im vollen Umfang von R); eine Funktion von data ist auch in R erlaubt
+  cond <- if (is.character(condition)) { chk_text1(condition, fn, "condition"); rx <- .e5_rexpr_env(parent.frame())
+                                         eval(.e5_rexpr_parse(condition), .sp_rexpr_data(data, rx), rx) }
+          else if (is.function(condition)) condition(data)
+          else condition
+  cond <- .e4_cond(cond, fn)
   if (length(cond) != nrow(data)) stop("condition muss die L\u00e4nge nrow(data) haben.")
   r <- rle(cond); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
   keep <- r$values & r$lengths >= min_run

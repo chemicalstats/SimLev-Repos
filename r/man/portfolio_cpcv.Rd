@@ -29,14 +29,14 @@ numerischen Spalten ausser \code{date} bzw. alle Spalten der Matrix.}
 fuer \code{\link[=portfolio_optimize]{portfolio_optimize()}} (z. B.
 \code{list(mv = list(method = "min_variance", cov = "ledoit_wolf"))}).}
 
-\item{n_groups}{Anzahl Gruppen insgesamt (ganze Zahl >= 2, Standard 6).}
+\item{n_groups}{Anzahl Gruppen insgesamt (ganze Zahl >= 2, Standard 6). Seit 1.6.4 hoechstens 10^8.}
 
 \item{test_groups}{Anzahl Testgruppen je Aufteilung (ganze Zahl, Standard
 2, kleiner als \code{n_groups}); es gibt choose(n_groups, test_groups)
 Aufteilungen.}
 
 \item{purge, embargo}{Sperrzone und Embargo in Perioden der gewaehlten
-Frequenz (Zeilen der Renditen, ganze Zahlen >= 0, je Standard 2).}
+Frequenz (Zeilen der Renditen, ganze Zahlen >= 0, je Standard 2). Seit 1.6.4 hoechstens 10^8.}
 
 \item{frequency}{Siehe \code{\link[=portfolio_optimize]{portfolio_optimize()}}.}
 }

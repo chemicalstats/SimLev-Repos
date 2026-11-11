@@ -98,7 +98,9 @@ export_dashboard(
     Farbe, die \code{\link[grDevices]{col2rgb}} versteht: R-Farbname (z. B.
     \code{"navy"}, siehe \code{\link[grDevices]{colors}}) oder Hex-Code
     \code{"#RRGGBB"} bzw. \code{"#RRGGBBAA"}. Ungültige Farbwerte sind ein
-    Fehler mit Nennung des Elements. Flächen und Histogramm erhalten ihre
+    Fehler mit Nennung des Elements; eine Farbnummer als Text gilt seit 1.6.4
+    nur aus ASCII-Ziffern (\code{"3"}; \code{"3.0"}, \code{"2e0"},
+    \code{"0x1"} sind ein Fehler). Flächen und Histogramm erhalten ihre
     Transparenz über \code{\link[grDevices]{adjustcolor}}. Nicht angegebene
     Elemente werden aus dem Standard-Farbschema ergänzt (z. B.
     \code{list(primary = "#003366")}); unbekannte Namen sind ein Fehler.
@@ -106,10 +108,12 @@ export_dashboard(
   }
   \item{filename}{Character. Pfad der Ausgabedatei. Standard:
     \code{"dashboard.pdf"}.}
-  \item{width}{Numerisch. Breite in Zoll. Standard: \code{14}.}
-  \item{height}{Numerisch. Höhe in Zoll. Standard: \code{10}.}
+  \item{width}{Numerisch. Breite in Zoll, seit 1.6.4 von 3 bis 100. Standard: \code{14}.}
+  \item{height}{Numerisch. Höhe in Zoll, seit 1.6.4 von 3 bis 100. Standard: \code{10}.}
   \item{...}{
-    Für \code{plot}, \code{print}, \code{summary}: wird ignoriert.
+    Für \code{plot}: seit 1.6.4 ist jedes benannte Argument, das
+    \code{plot.SimLevResult} nicht kennt, ein Fehler (bis 1.6.3 ignoriert).
+    Für \code{print}, \code{summary}: wird ignoriert.
     Für \code{export_dashboard}: wird an \code{plot.SimLevResult}
     weitergeleitet.
   }

@@ -49,10 +49,12 @@
 
 #include "simlev_core.h"
 #include "slc_rbase.h"
+#include "engine_core_impl.h"   // simlev_engine::r_gt (seit 1.6.4)
 
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace simlev_eval {
@@ -155,10 +157,10 @@ struct Result {
   int err_site = 0, err_phase = 0;          // Abbruch: Stelle, Phase (1 .sim_returns, 2 .sim_risk_stats)
 };
 
-static inline double na_real() { return simlev_na_real(); }
 static inline bool is_nan_strict(double x) { return x != x && !simlev_is_na(x); }   // is.nan()
-// R-Wahrheitswerte: 0 FALSE, 1 TRUE, 2 NA
-static inline int gt0(double x) { return x != x ? 2 : (x > 0 ? 1 : 0); }
+// R-Wahrheitswerte (0 FALSE, 1 TRUE, 2 NA): x > 0 ueber simlev_engine::r_gt (engine_core_impl.h; seit 1.6.4 statt
+// eigener Kopie gt0), NA ueber SIMLEV_NA_REAL (statt na_real)
+using simlev_engine::r_gt;
 // R's &, min(a, b), max(a, b): simlev_r_and, simlev_r_min2, simlev_r_max2 (simlev_core.h, seit 1.6.3)
 // difftime(a, b, units = "days") fuer Datumswerte (as.POSIXct.Date: Tage * 86400)
 static inline double days_between(double a, double b) { return (a * 86400.0 - b * 86400.0) / 86400.0; }
@@ -216,7 +218,7 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
       t.push_back(t_in[i]);
       F.a.push_back(amount_in[i]);
     }
-  if (F.a.empty() || !(horizon > 0) || !std::isfinite(end_value)) return na_real();
+  if (F.a.empty() || !(horizon > 0) || !std::isfinite(end_value)) return SIMLEV_NA_REAL;
   if (end_value == 0) {
     bool nonneg = true;
     for (double v : F.a) if (!(v >= 0)) nonneg = false;
@@ -225,17 +227,20 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
   F.e.resize(t.size());
   F.buf.resize(t.size());
   for (std::size_t i = 0; i < t.size(); i++) F.e[i] = simlev_div(simlev_sub(horizon, t[i]), horizon);
+  // Startgitter u = -200, -195, ..., 200; gesucht ist das erste Intervall mit Vorzeichenwechsel. Seit 1.6.4 (A-080)
+  // wird g nur bis zu diesem Intervall ausgewertet (bis 1.6.3 an allen 81 Punkten): g hat keine Seiteneffekte, die
+  // uebrigen Werte las niemand (ohne Treffer nur gv[0]); gleiche Werte
   double grid[81], gv[81];
-  for (int i = 0; i <= 80; i++) {
-    grid[i] = -200.0 + (double) i * 5.0;
-    gv[i] = F.g(grid[i]);
-  }
+  for (int i = 0; i <= 80; i++) grid[i] = -200.0 + (double) i * 5.0;
+  gv[0] = F.g(grid[0]);
   int k = -1;
-  for (int i = 0; i < 80; i++)
+  for (int i = 0; i < 80; i++) {
+    gv[i + 1] = F.g(grid[i + 1]);
     if (gv[i + 1] * gv[i] <= 0) {
       k = i;
       break;
     }
+  }
   double br0, br1, fb0, fb1;
   if (k >= 0) {
     br0 = grid[k]; br1 = grid[k + 1]; fb0 = gv[k]; fb1 = gv[k + 1];
@@ -249,7 +254,7 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
         any_pos = true;
         if (v < emin) emin = v;
       }
-    if (!(gv[0] > 0) || !any_pos) return na_real();
+    if (!(gv[0] > 0) || !any_pos) return SIMLEV_NA_REAL;
     const double lo_lim = -800.0 / emin;
     double hi = grid[0], ghi = gv[0], lo = hi, glo = ghi;
     while (glo > 0 && lo > lo_lim) {
@@ -257,12 +262,12 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
       lo = simlev_r_max2(2 * lo, lo_lim);
       glo = F.g(lo);
     }
-    if (glo > 0) return na_real();
+    if (glo > 0) return SIMLEV_NA_REAL;
     br0 = lo; br1 = hi; fb0 = glo; fb1 = ghi;
   }
   // stats::uniroot(g, br, f.lower = fb[1], f.upper = fb[2], tol = 1e-14, maxiter = 1000): Funktionswerte an den
   // Enden auf [-DBL_MAX, DBL_MAX] begrenzt, dann R_zeroin2
-  if (fb0 != fb0 || fb1 != fb1) return na_real();
+  if (fb0 != fb0 || fb1 != fb1) return SIMLEV_NA_REAL;
   const double fl = std::fmax(std::fmin(fb0, DBL_MAX), -DBL_MAX), fu = std::fmax(std::fmin(fb1, DBL_MAX), -DBL_MAX);
   int iter = 0;
   const double u = sl_r_zeroin2(xirr_fcn2, &F, br0, br1, fl, fu, 1e-14, 1000, &iter);
@@ -272,37 +277,43 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
 
 // ── calculate_skewness/_kurtosis/_partials fuer die Tagesrenditen ─────────────────────────────────────────
 // x: Werte ohne NA/NaN, mean_x = sl_r_mean(x), sd_x = sqrt(sl_r_var(x)) (seit 1.6.3 einmal fuer beide Momente
-// und die Tagesstatistik, mean_sd_narm). Rueckgabe: Wert; *lgl = 1 fuer R's logisches NA (zu wenige Werte bzw.
-// Standardabweichung 0)
-inline double moment(const std::vector<double>& x, double mean_x, double sd_x, int order, int* lgl) {
+// und die Tagesstatistik, mean_sd_narm). Rueckgabe je Moment: Wert; *lgl = 1 fuer R's logisches NA (zu wenige
+// Werte bzw. Standardabweichung 0). Seit 1.6.4 (K43 T1-R11, Entscheidungen 124, 127) beide Momente in einer
+// Schleife ueber d = x - mean, q = d * d, Summanden q * d und q * q statt (x - mean)^3 und ^4 ueber pow (je
+// Auswertung von 30 Jahren rund 0,5 auf 0,07 ms); wie calculate_skewness/_kurtosis in R, Python und Julia
+// (gleiche Rechenfolge, untereinander bitgleich). Gegen den exakten Wert so genau wie pow (Probe K43 T1).
+inline void moments(const std::vector<double>& x, double mean_x, double sd_x, double* skew, int* skew_lgl,
+                    double* kurt, int* kurt_lgl) {
   const int64_t n = (int64_t) x.size();
-  *lgl = 0;
-  if (n < (order == 3 ? 3 : 4)) {
-    *lgl = 1;
-    return na_real();
+  *skew_lgl = n < 3 || sd_x == 0;
+  *kurt_lgl = n < 4 || sd_x == 0;
+  *skew = *kurt = SIMLEV_NA_REAL;
+  if (*skew_lgl && *kurt_lgl) return;
+  std::vector<double> d3((std::size_t) n), d4((std::size_t) n);
+  for (int64_t i = 0; i < n; i++) {
+    const double d = x[i] - mean_x, q = d * d;
+    d3[i] = q * d;
+    d4[i] = q * q;
   }
-  if (sd_x == 0) {
-    *lgl = 1;
-    return na_real();
-  }
-  std::vector<double> d((std::size_t) n);
-  for (int64_t i = 0; i < n; i++) d[i] = sl_r_pow1(x[i] - mean_x, (double) order);
-  const double s = sl_r_sum(n, d.data(), 0);
   const double nf = (double) n;
-  if (order == 3) return (nf / ((nf - 1) * (nf - 2))) * s / sl_r_pow1(sd_x, 3.0);
-  double kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * s / sl_r_pow1(sd_x, 4.0);
-  const double nm1 = nf - 1;
-  kurt = kurt - (3 * (nm1 * nm1)) / ((nf - 2) * (nf - 3));
-  return kurt;
+  if (!*skew_lgl) *skew = (nf / ((nf - 1) * (nf - 2))) * sl_r_sum(n, d3.data(), 0) / sl_r_pow1(sd_x, 3.0);
+  if (!*kurt_lgl) {
+    double k = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * sl_r_sum(n, d4.data(), 0) / sl_r_pow1(sd_x, 4.0);
+    const double nm1 = nf - 1;
+    k = k - (3 * (nm1 * nm1)) / ((nf - 2) * (nf - 3));
+    *kurt = k;
+  }
 }
-// mean(pmax(0, -r)^1, na.rm = TRUE) bzw. mean(pmax(0, r)^1, na.rm = TRUE)
+// mean(pmax(0, -r)^1, na.rm = TRUE) bzw. mean(pmax(0, r)^1, na.rm = TRUE). Seit 1.6.4 (A-081) ohne sl_r_pow1(p, 1):
+// p ist hier nie NaN (NaN faellt vorher heraus) und nie -0 (y > 0 ? y : +0), und R's x^1 ist fuer solche p exakt p
+// (sl_r_pow1: +0 -> +0, sonst pow(p, 1) = p); gleiche Werte. Die Tagesrenditen rr sind ohnehin endlich (evaluate).
 inline double partial(const std::vector<double>& r, bool lower) {
   std::vector<double> v;
+  v.reserve(r.size());
   for (double x : r) {
     const double y = lower ? -x : x;
-    const double p = y != y ? y : (y > 0.0 ? y : 0.0);
-    const double q = sl_r_pow1(p, 1.0);
-    if (q == q) v.push_back(q);
+    if (y != y) continue;
+    v.push_back(y > 0.0 ? y : 0.0);
   }
   return sl_r_mean((int64_t) v.size(), v.data());
 }
@@ -314,7 +325,7 @@ inline int evaluate(const In& I, Result& R) {
       !I.status_money || !I.n_buys || !I.n_sells || (I.n_rf > 0 && !I.rf))
     return 2;
   const int64_t n = I.n, na = I.na;
-  const double NA = na_real();
+  const double NA = SIMLEV_NA_REAL;
   auto abort = [&](int site, int phase) {
     R.err_site = site;
     R.err_phase = phase;
@@ -332,7 +343,7 @@ inline int evaluate(const In& I, Result& R) {
   const double ann = days_between(I.stopp_date, I.start_date) / 365.25;
   // CAGR
   {
-    const int c = simlev_r_and(gt0(start_worth), gt0(ann));
+    const int c = simlev_r_and(r_gt(start_worth, 0), r_gt(ann, 0));
     if (c == 2) return abort(S_CAGR, 1);
     R.cagr = c ? cagr_q(simlev_div(stopp_worth, start_worth), ann) : NA;   // seit 1.6.2 expm1(log(q) / Jahre)
   }
@@ -418,7 +429,7 @@ inline int evaluate(const In& I, Result& R) {
   }
   // offene Steuerschuld; negativer Endwert
   {
-    const int c = gt0(I.tax_unpaid);
+    const int c = r_gt(I.tax_unpaid, 0);
     if (c == 2) return abort(S_TAX_DEBT, 1);
     if (c) {
       std::vector<double> d((std::size_t) na);
@@ -574,7 +585,22 @@ inline int evaluate(const In& I, Result& R) {
   }
   std::vector<double> base(rf_ret.size()), rf_daily(rf_ret.size()), excess(rf_ret.size());
   for (std::size_t i = 0; i < rf_ret.size(); i++) base[i] = 1 + rf_ret[i];
-  sl_r_pow((int64_t) base.size(), base.data(), 1 / dpy, rf_daily.data());
+  // (1 + rf)^(1 / dpy) wie sl_r_pow; seit 1.6.4 (K43 T1-R12) je Folge gleicher Basen (gleiches Bitmuster, auch
+  // NaN) nur einmal potenziert (risk_free als Zahl: eine Potenz statt n); gleiche Werte
+  {
+    const double ey = 1 / dpy;
+    uint64_t pb = 0;
+    for (std::size_t i = 0; i < base.size(); i++) {
+      uint64_t bb;
+      std::memcpy(&bb, &base[i], sizeof bb);
+      if (i > 0 && bb == pb) {
+        rf_daily[i] = rf_daily[i - 1];
+      } else {
+        sl_r_pow(1, &base[i], ey, &rf_daily[i]);
+        pb = bb;
+      }
+    }
+  }
   for (std::size_t i = 0; i < rf_ret.size(); i++) excess[i] = simlev_sub(rr[i], rf_daily[i] - 1);
   S[ST_RF] = rf_ret.empty() ? 0.0 : sl_r_mean((int64_t) rf_ret.size(), rf_ret.data()) * 100;
   double mean_excess, sd_excess;
@@ -654,8 +680,7 @@ inline int evaluate(const In& I, Result& R) {
     }
   }
   R.longest_dd = longest;
-  S[ST_SKEW] = moment(rr_ok, rr_mean, rr_sd, 3, &R.skew_lgl);
-  S[ST_KURT] = moment(rr_ok, rr_mean, rr_sd, 4, &R.kurt_lgl);
+  moments(rr_ok, rr_mean, rr_sd, &S[ST_SKEW], &R.skew_lgl, &S[ST_KURT], &R.kurt_lgl);
   S[ST_LPM] = partial(rr, true);
   S[ST_HPM] = partial(rr, false);
   S[ST_MAXDD] = max_dd;

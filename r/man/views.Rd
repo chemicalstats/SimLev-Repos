@@ -28,7 +28,10 @@ und 1 (sonst Fehler).}
 
 \item{expr}{Ereignis als Zeichenkette, ein R-Ausdruck ueber die
 Spaltennamen der Szenario-Tabelle, der einen logischen Wert je
-Szenario liefert (z. B. \code{"aktien < -5 & inflation > 3"}).}
+Szenario liefert (z. B. \code{"aktien < -5 & inflation > 3"}).
+Seit 1.6.4 in R, Python und Julia gleich im gemeinsamen Ausdrucksumfang wie
+die Regeltexte von \code{\link[=tactical_rules]{tactical_rules()}}; auch eine Funktion der
+Szenario-Tabelle (Ergebnis ein Wert je Szenario).}
 }
 \value{
 Liste mit \code{type} (\code{"mean"}, \code{"prob"} oder

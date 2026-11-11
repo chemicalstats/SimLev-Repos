@@ -23,22 +23,21 @@
 
 # ── Prüfhilfen ────────────────────────────────────────────────────────────────
 
-_blk_show(x) = x === nothing ? "NULL" : r_deparse(x)
 _blk_one(x) = _is_num(x) && isfinite(Float64(x))
-_blk_vec(x) = x isa Union{AbstractVector,Tuple} ? collect(Any, x) : x isa RVector ? collect(Any, x.values) : Any[x]
 
+# Meldungen seit 1.6.4 ohne Eingabewert (Entscheidung 8 des Nutzers vom 05.11.2026; bis 1.6.3 ", nicht <Wert>")
 function _blk_num(who, x, arg, what; mn = 0.0, null_ok = false)
     @nospecialize
     x === nothing && null_ok && return nothing
     if !_blk_one(x) || (mn !== nothing && x < mn)
-        error("$who: '$arg' muss $what sein, nicht $(_blk_show(x)).")
+        error("$who: '$arg' muss $what sein.")
     end
     return nothing
 end
 
 function _blk_lgl(who, x, arg)
     @nospecialize
-    x isa Bool || error("$who: '$arg' muss TRUE oder FALSE sein, nicht $(_blk_show(x)).")
+    x isa Bool || error("$who: '$arg' muss TRUE oder FALSE sein.")
     return nothing
 end
 
@@ -53,9 +52,11 @@ end
 function _blk_days(who, x)
     @nospecialize
     x === nothing && return nothing
-    v = _num_vec(x)
-    if v === nothing || any(isnan, v) || any(d -> d < 1 || d > 31 || d != r_round(d), v)
-        error("$who: days muss ganze Zahlen von 1 bis 31 enthalten, nicht $(join(r_format(_blk_vec(x)), ", ")).")
+    # seit 1.6.4 nur ein Vektor (keine Matrix, mindestens ein Tag; A-047) und die Meldung ohne Eingabewert
+    flat = !(x isa AbstractMatrix || (x isa Union{AbstractVector,Tuple} && any(e -> e isa Union{AbstractArray,Tuple}, x)))
+    v = flat ? _num_vec(x) : nothing
+    if v === nothing || isempty(v) || any(isnan, v) || any(d -> d < 1 || d > 31 || d != r_round(d), v)
+        error("$who: days muss ganze Zahlen von 1 bis 31 enthalten.")
     end
     u = unique(v)
     if length(u) < length(v)
@@ -65,25 +66,119 @@ function _blk_days(who, x)
     return x
 end
 
+"Bezugsdatum: Date, DateTime oder Text \"JJJJ-MM-TT\" (seit 1.6.4 wie asset_config(start): keine Zahl, Länge 1 (A-075),
+Meldung ohne Eingabewert)."
 function _blk_start(who, x)
     @nospecialize
     x === nothing && return nothing
     d = try
-        _as_date(x)
+        _is_date_like(x) ? _as_date(chk_scalar(x)) : nothing
     catch
         nothing
     end
-    d === nothing && error("$who: start = '$(x isa AbstractString ? x : r_format1(x))' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+    d === nothing && error("$who: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
     return nothing
 end
 
-"Klasse wie `paste(class(x), collapse = \"/\")` in R (für Meldungen)."
-const _blk_cls = _cls_all   # config.jl (seit 1.6.3 eine Fassung; Julia-Ganzzahl steht für eine R-Zahl, 42 statt 42L)
+"""zvE prüfen wie `.check_taxable_income` in R (sim_base.R) für `income_tariff()` (seit 1.6.4; Fassung von
+`_check_taxable_income` in engine.jl mit Meldungen ohne Eingabewert (Entscheidung 8), Jahresnamen wie R (nur
+ASCII-Leerraum abschneiden, Ganzzahl im R-Bereich; A-034) und leerer Tabelle als Fehler). Seit K43 T1-N5 die
+einzige Fassung (auch für simulation() und withdrawal_simulation(); die alte in engine.jl ist gestrichen)."""
+function _blk_check_taxable_income(x, years::Vector{Int}, who::String = "simulation"; plan_ok::Bool = false)
+    @nospecialize
+    form = "eine Zahl (zvE in EUR für alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
+    nms = nothing
+    vals = nothing
+    yrname(v) = _is_num(v) ? r_as_character(v) : string(v)
+    if x isa RFrame
+        nm = lowercase.(names(x))
+        yc = something(findfirst(==("year"), nm), findfirst(==("jahr"), nm), Some(nothing))
+        vc = nothing
+        for c in ("taxable_income", "betrag", "amount", "zve")
+            j = findfirst(==(c), nm)
+            j !== nothing && (vc = j; break)
+        end
+        if yc === nothing || vc === nothing
+            ncol(x) != 2 && error("$who: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: $(join(names(x), ", ")).")
+            yc, vc = 1, 2
+        end
+        kind, col = _column(x.cols[vc])
+        kind != :numeric && error("$who: taxable_income: Spalte '$(names(x)[vc])' (Betrag) muss numerisch sein.")
+        vals = collect(Float64, col)
+        nms = [_isna_val(v) ? "NA" : yrname(v) for v in x.cols[yc]]
+    elseif x isa RVector
+        vals = _num_vec(x.values)
+        x.names !== nothing && (nms = copy(x.names))
+    elseif x isa AbstractDict || x isa NamedTuple || x isa AbstractVector{<:Pair}
+        ps = x isa AbstractVector{<:Pair} ? [p.first => p.second for p in x] : collect(pairs(x))
+        if !isempty(ps) && all(p -> _is_num(p.second), ps)
+            vals = Float64[Float64(p.second) for p in ps]
+            nms = [yrname(p.first) for p in ps]
+        end
+    else
+        vals = _num_vec(x)
+    end
+    vals !== nothing && isempty(vals) && (vals = nothing)
+    (vals === nothing || x isa AbstractMatrix) && error("$who: taxable_income muss $form sein.")
+    for (i, v) in enumerate(vals)
+        isfinite(v) || error("$who: taxable_income enthält einen ungültigen Wert" *
+                             (nms !== nothing ? " (für $(nms[i]))" : "") * "; erwartet werden endliche Beträge in EUR.")
+    end
+    length(vals) == 1 && nms === nothing && return (all = vals[1], by_year = nothing)
+    plan_ok && nms === nothing && return (all = nothing, by_year = nothing, plan = vals)
+    if nms === nothing || any(isempty, nms)
+        error("$who: taxable_income mit $(length(vals)) Werten muss nach Kalenderjahren benannt sein; erwartet wird $form" *
+              (nms === nothing ? " (ein Vektor ohne Namen, ein Wert je Planjahr, gilt nur in withdrawal_simulation())" : "") * ".")
+    end
+    yy = Int[]
+    for nm in nms
+        t = strip(nm, (' ', '\t', '\r', '\n'))
+        y = occursin(r"^-?[0-9]+$", t) ? tryparse(Int, t) : nothing
+        y !== nothing && abs(y) > 2147483647 && (y = nothing)
+        (y === nothing || string(y) != t) && error("$who: taxable_income: Name '$nm' ist kein Kalenderjahr (erwartet z. B. \"2024\").")
+        push!(yy, y)
+    end
+    for (i, y) in enumerate(yy)
+        y in yy[1:i-1] && error("$who: taxable_income: Jahr $y kommt mehrfach vor.")
+    end
+    miss = [y for y in years if !(y in yy)]
+    if !isempty(miss)
+        error("$who: taxable_income fehlt für " * (length(miss) == 1 ? "Simulationsjahr" : "Simulationsjahre") * " " *
+              join(miss, ", ") * " (angegeben: " * join(sort(yy), ", ") * "); je Kalenderjahr der Simulation (" *
+              string(minimum(years)) * " bis " * string(maximum(years)) * ") wird ein Betrag benötigt.")
+    end
+    return (all = nothing, by_year = Dict{String,Float64}(string(y) => v for (y, v) in zip(yy, vals)))
+end
+
+"Obergrenze des Abstands (A-009): der Schritt in Monaten muss eine R-Ganzzahl sein."
+_blk_span_max(unit) = unit == "quarter" ? 715827882 : 2147483647
+
+"""Gebührenangabe vorab prüfen (seit 1.6.4, A-046; R und Python in `.fee_spec`/`_fee_spec`): je Feld eine einzelne
+Zahl, nicht NA, endlich (max auch Inf). Unbekannte Felder, negative Werte und min > max meldet `_fee_spec`.
+Gibt die Angabe mit ausgepackten Vektoren der Länge 1 zurück (Entscheidung 4). `fn`, `arg` für Meldungen (seit K43
+T1-R5)."""
+function _blk_fee_check(x, fn, arg)
+    @nospecialize
+    x === nothing && return x
+    x isa Union{AbstractVector,Tuple} && !(x isa AbstractVector{<:Pair}) && _is_num(chk_scalar(x)) && (x = chk_scalar(x))
+    (_is_num(x) || !_is_mapping(x)) && (y = _is_num(x) ? ["fixed" => x] : nothing; y === nothing && return x)
+    ps = _is_num(x) ? ["fixed" => x] : _kvpairs(x)
+    any(p -> !(p.first in ("fixed", "percent", "min", "max")), ps) && return x
+    changed = false
+    for (k, v0) in ps
+        v = chk_scalar(v0)
+        v !== v0 && (changed = true)
+        v === nothing && continue
+        ok = _is_num(v) && !isnan(Float64(v)) && (isfinite(Float64(v)) || (k == "max" && Float64(v) == Inf))
+        ok || chk_stop(k == "max" ? "e1.zahl_inf" : "zahl", fn, "$arg\$$k")
+    end
+    return changed ? Pair{String,Any}[k => chk_scalar(v) for (k, v) in ps] : x
+end
 
 function _blk_check(x, cls, arg, ctor)
     @nospecialize
     if x !== nothing && !inherits(x, cls)
-        error("simulation: $arg muss NULL oder ein Objekt aus $ctor() sein, nicht $(_blk_cls(x)).")
+        error("simulation: $arg muss NULL oder ein Objekt aus $ctor() sein.")   # seit 1.6.4 ohne Klasse
     end
     return nothing
 end
@@ -145,9 +240,9 @@ end
 
 # ── Konstruktoren ─────────────────────────────────────────────────────────────
 
-"""
-    sim_costs(order_fee = nothing, dca_fee = nothing)
-
+# Gemeinsamer Text der neun Baustein-Docstrings (seit 1.6.4 eine Fassung, A-109; bis 1.6.3 neunfach kopiert wie die
+# gemeinsame Rd-Seite ?sim_costs); die Docstrings setzen ihn um ihre Argumente und ihr Beispiel.
+const _BLK_DOC_KOPF = """
 Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
 
 Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
@@ -159,24 +254,8 @@ Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenz
 der Engine ist dieselbe wie mit den früheren Einzelargumenten.
 
 `funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
-
-# Argumente
-- `order_fee`: `sim_costs`: Ordergebühr: `nothing` (keine, Standard), eine Zahl (feste Gebühr in EUR je Order)
-  oder `RList("fixed" => …, "percent" => …, "min" => …, "max" => …)` mit `fixed`, `min`, `max` in EUR und
-  `percent` in Prozent des Ordervolumens, z. B. `(fixed = 4.9, percent = 0.25, max = 59)`. Die Gebühr erhöht
-  beim Kauf den Einstandskurs (Anschaffungsnebenkosten) und mindert beim Verkauf den Erlös
-  (Veräußerungskosten); steuerlich wirkt sie damit gewinnmindernd. Zusätzlich zum Spread je Asset (`spread` in
-  `asset_config`; einen Spread für die ganze Simulation gibt es nicht). Unbekannte Listenfelder (z. B. `fix`
-  statt `fixed`) und negative Gebühren führen zu einem Fehler. Bei Zwangsverkäufen für die Vorabpauschale und
-  die § 23-Steuer wird so viel verkauft, dass Steuer und Gebühr gedeckt sind.
-- `dca_fee`: `sim_costs`: Gebühr für die Sparplankäufe (Format wie `order_fee`): Käufe von Buy-and-Hold-Assets
-  an Sparplantagen. Rebalancing-Verkäufe und -Käufe, Signal-Trades, Steuer-Zwangsverkäufe und die Liquidation
-  am selben Tag kosten `order_fee`. Ist der erste Simulationstag ein Sparplantag, wird das Startkapital mit
-  `order_fee` und nur die Sparrate mit `dca_fee` angelegt (zwei Orders); fällt ein Sparplantermin auf einen
-  Rebalancing-Tag, wird die Rate im Rebalancing mit angelegt. Standard (`nothing`): wie `order_fee`. Viele
-  Broker führen Sparpläne kostenlos aus (`dca_fee = 0`).
-
+`simulation()` nimmt ihn nicht an."""
+const _BLK_DOC_SCHLUSS = """
 # Rückgabe
 Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
 aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
@@ -196,7 +275,31 @@ persönliche Besteuerung.
 = funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
 High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
 frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+für ein unbekanntes Argument."""
+
+"""
+    sim_costs(order_fee = nothing, dca_fee = nothing)
+
+$(_BLK_DOC_KOPF)
+
+# Argumente
+- `order_fee`: `sim_costs`: Ordergebühr: `nothing` (keine, Standard), eine Zahl (feste Gebühr in EUR je Order)
+  oder `RList("fixed" => …, "percent" => …, "min" => …, "max" => …)` mit `fixed`, `min`, `max` in EUR und
+  `percent` in Prozent des Ordervolumens, z. B. `(fixed = 4.9, percent = 0.25, max = 59)`. Die Gebühr erhöht
+  beim Kauf den Einstandskurs (Anschaffungsnebenkosten) und mindert beim Verkauf den Erlös
+  (Veräußerungskosten); steuerlich wirkt sie damit gewinnmindernd. Zusätzlich zum Spread je Asset (`spread` in
+  `asset_config`; einen Spread für die ganze Simulation gibt es nicht). Unbekannte Listenfelder (z. B. `fix`
+  statt `fixed`) und negative Gebühren führen zu einem Fehler; jedes Feld ist eine einzelne endliche Zahl (`max`
+  auch `Inf`), NaN, Text und `true` sind ein Fehler. Bei Zwangsverkäufen für die Vorabpauschale und
+  die § 23-Steuer wird so viel verkauft, dass Steuer und Gebühr gedeckt sind.
+- `dca_fee`: `sim_costs`: Gebühr für die Sparplankäufe (Format wie `order_fee`): Käufe von Buy-and-Hold-Assets
+  an Sparplantagen. Rebalancing-Verkäufe und -Käufe, Signal-Trades, Steuer-Zwangsverkäufe und die Liquidation
+  am selben Tag kosten `order_fee`. Ist der erste Simulationstag ein Sparplantag, wird das Startkapital mit
+  `order_fee` und nur die Sparrate mit `dca_fee` angelegt (zwei Orders); fällt ein Sparplantermin auf einen
+  Rebalancing-Tag, wird die Rate im Rebalancing mit angelegt. Standard (`nothing`): wie `order_fee`. Viele
+  Broker führen Sparpläne kostenlos aus (`dca_fee = 0`).
+
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -206,8 +309,10 @@ println(sim_costs((fixed = 1, percent = 0.25, min = 2, max = 20), 0))
 """
 function sim_costs(order_fee_pos = nothing, dca_fee_pos = nothing; order_fee = order_fee_pos, dca_fee = dca_fee_pos)
     @nospecialize
-    _fee_spec(order_fee)
-    _fee_spec(dca_fee)
+    order_fee = _blk_fee_check(order_fee, "sim_costs", "order_fee")
+    dca_fee = _blk_fee_check(dca_fee, "sim_costs", "dca_fee")
+    _fee_spec(order_fee, "sim_costs", "order_fee")
+    _fee_spec(dca_fee, "sim_costs", "dca_fee")
     return RList("order_fee" => order_fee, "dca_fee" => dca_fee; class = ["SimLevSimCosts"])
 end
 
@@ -215,26 +320,16 @@ end
     dca_plan(value, span; days = nothing, unit = ("month", "quarter", "year"),
              anchor = ("start", "end"), start = nothing, skip = false, fill_deficits = false)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `value`: `dca_plan`: Betrag je Sparplan-Termin in EUR; Pflicht, eine einzelne endliche Zahl `> 0` (Vektor,
   `NA` oder Text: Fehler).
 - `span`: `dca_plan`: Abstand zwischen zwei Terminen in Perioden von `unit` (z. B. `3` mit `"month"` = alle
   drei Monate); Pflicht, eine einzelne ganze Zahl `>= 1` (sonst Fehler). `rebalance_plan`:
-  Rebalancing-Intervall in Perioden von `unit`; `nothing` (Standard) = 1.
-- `days`: Integer-Vektor oder `nothing`. Tag(e) innerhalb jeder Periode (1--31): bei `"month"` Tag des Monats,
+  Rebalancing-Intervall in Perioden von `unit`; `nothing` (Standard) = 1, sonst eine einzelne endliche Zahl `>= 1`
+  (seit 1.6.4 eine ganze Zahl; vorher lief z. B. 1.5 wie 1), höchstens 2147483647 (bei `"quarter"` 715827882).
+- `days`: Integer-Vektor (keine Matrix, mindestens ein Tag) oder `nothing`. Tag(e) innerhalb jeder Periode (1--31): bei `"month"` Tag des Monats,
   bei `"quarter"` Tag im ersten Monat der Periode, bei `"year"` Tag im Januar; mit `anchor = "end"` rückwärts
   vom Periodenende gezählt (1 = letzter Tag). Nicht existierende Tage entfallen (z. B. Tag 31 im April, bei
   `"end"` Tag 31 vom Ende im Februar). Werte außerhalb von 1--31 oder nicht ganzzahlig: Fehler; doppelte Tage
@@ -246,7 +341,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   nicht zwingend Kalenderquartale.
 - `anchor`: Bezugspunkt für `days`: `"start"` (Standard, ab Periodenbeginn) oder `"end"` (ab Periodenende).
   Ohne `days` wirkungslos.
-- `start`: Date (oder `"JJJJ-MM-TT"`) oder `nothing`. Bezugsdatum des Terminplans: Die Perioden beginnen am
+- `start`: Date, DateTime oder `"JJJJ-MM-TT"` (keine Zahl) oder `nothing`. Bezugsdatum des Terminplans: Die Perioden beginnen am
   Monatsersten dieses Datums (bei `"year"` am 1. Januar); Termine vor dem ersten Datentag entfallen. Kein
   Datum: Fehler beim Anlegen; liegt das Datum nach dem letzten Datentag, bricht `simulation()` mit Fehler ab.
   `nothing` (Standard) = erster Tag von `data`.
@@ -260,26 +355,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   `true`: Die Rate wirkt als Mini-Rebalancing — sie füllt zuerst die Wert-Defizite zu den Strategie-Zielen;
   ein Rest wird nach Strategie-Gewichten verteilt.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -297,17 +373,17 @@ function dca_plan(value_pos = _UNSET, span_pos = _UNSET, days_pos = nothing; val
                   skip = false, fill_deficits = false)
     @nospecialize
     who = "dca_plan"
-    value = _val(value, nothing)
-    span = _val(span, nothing)
+    value = chk_scalar(_val(value, nothing))   # Länge 1 wie Einzelwert (Entscheidung 4)
+    span = chk_scalar(_val(span, nothing))
+    unit, anchor, start, skip, fill_deficits = (chk_scalar(v) for v in (unit, anchor, start, skip, fill_deficits))
     if !_blk_one(value) || value <= 0
-        error("$who: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR), nicht $(_blk_show(value)).")
-    end
-    if !_blk_one(span) || span < 1 || span != r_round(Float64(span))
-        error("$who: 'span' muss eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht $(_blk_show(span)).")
+        error("$who: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR).")
     end
     days = _blk_days(who, days)
     unit = _match_arg(unit, ("month", "quarter", "year"))
     anchor = _match_arg(anchor, ("start", "end"))
+    # seit 1.6.4 Obergrenze (A-009); seit K43 T1-R6 eine Meldung (ganz_bis) statt zweier Formen
+    chk_int1(span, who, "span"; lo = 1, hi = _blk_span_max(unit))
     _blk_start(who, start)
     _blk_lgl(who, skip, "skip")
     _blk_lgl(who, fill_deficits, "fill_deficits")
@@ -321,24 +397,14 @@ end
                    thresh_type = ("absolute", "relative"), event_col = nothing,
                    event_mode = ("additional", "replace"), event_weight = nothing)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `span`: `dca_plan`: Abstand zwischen zwei Terminen in Perioden von `unit` (z. B. `3` mit `"month"` = alle
   drei Monate); Pflicht, eine einzelne ganze Zahl `>= 1` (sonst Fehler). `rebalance_plan`:
-  Rebalancing-Intervall in Perioden von `unit`; `nothing` (Standard) = 1.
-- `days`: Integer-Vektor oder `nothing`. Tag(e) innerhalb jeder Periode (1--31): bei `"month"` Tag des Monats,
+  Rebalancing-Intervall in Perioden von `unit`; `nothing` (Standard) = 1, sonst eine einzelne endliche Zahl `>= 1`
+  (seit 1.6.4 eine ganze Zahl; vorher lief z. B. 1.5 wie 1), höchstens 2147483647 (bei `"quarter"` 715827882).
+- `days`: Integer-Vektor (keine Matrix, mindestens ein Tag) oder `nothing`. Tag(e) innerhalb jeder Periode (1--31): bei `"month"` Tag des Monats,
   bei `"quarter"` Tag im ersten Monat der Periode, bei `"year"` Tag im Januar; mit `anchor = "end"` rückwärts
   vom Periodenende gezählt (1 = letzter Tag). Nicht existierende Tage entfallen (z. B. Tag 31 im April, bei
   `"end"` Tag 31 vom Ende im Februar). Werte außerhalb von 1--31 oder nicht ganzzahlig: Fehler; doppelte Tage
@@ -350,7 +416,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   nicht zwingend Kalenderquartale.
 - `anchor`: Bezugspunkt für `days`: `"start"` (Standard, ab Periodenbeginn) oder `"end"` (ab Periodenende).
   Ohne `days` wirkungslos.
-- `start`: Date (oder `"JJJJ-MM-TT"`) oder `nothing`. Bezugsdatum des Terminplans: Die Perioden beginnen am
+- `start`: Date, DateTime oder `"JJJJ-MM-TT"` (keine Zahl) oder `nothing`. Bezugsdatum des Terminplans: Die Perioden beginnen am
   Monatsersten dieses Datums (bei `"year"` am 1. Januar); Termine vor dem ersten Datentag entfallen. Kein
   Datum: Fehler beim Anlegen; liegt das Datum nach dem letzten Datentag, bricht `simulation()` mit Fehler ab.
   `nothing` (Standard) = erster Tag von `data`.
@@ -382,29 +448,11 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   numerischen Spalte in `data` mit dem Zielgewicht. Wirkt nur an Tagen, an denen `event_col` `true` ist; die
   Werte werden auf Summe 1 normiert und nur verwendet, wenn alle aktiven Assets einen endlichen Wert haben und
   die Summe positiv ist (fehlt ein Asset, gelten mit Warnung an Event-Tagen die Strategie-Gewichte).
-  Unbenannte Angaben, unbekannte Asset-Namen, fehlende Spalten und negative Gewichte führen in `simulation()`
+  Unbenannte oder doppelte Namen und Einträge, die kein einzelner Spaltenname sind, sind schon beim Anlegen ein
+  Fehler; unbekannte Asset-Namen, fehlende Spalten und negative Gewichte führen in `simulation()`
   zu einem Fehler. `nothing` = Strategie-Gewichte. Ohne `event_col` wirkungslos (Warnung).
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -425,9 +473,16 @@ function rebalance_plan(span_pos = nothing, days_pos = nothing; span = span_pos,
                         event_mode = _UNSET, event_weight = nothing)
     @nospecialize
     who = "rebalance_plan"
+    span, unit, anchor, start, skip, thresh, thresh_type, event_col = (
+        chk_scalar(v) for v in (span, unit, anchor, start, skip, thresh, thresh_type, event_col))
+    event_mode isa _Unset || (event_mode = chk_scalar(event_mode))
     days = _blk_days(who, days)
     unit = _match_arg(unit, ("month", "quarter", "year"))
     anchor = _match_arg(anchor, ("start", "end"))
+    # seit 1.6.4 (A-009, mildere Regel bis zur Entscheidung des Nutzers): nothing oder eine einzelne endliche Zahl >= 1
+    # bis zur Obergrenze; gebrochene Werte wie 1.5 laufen weiter wie bisher
+    # seit 1.6.4 ganze Zahl (Entscheidungen 19, 32) bis zur Obergrenze (A-009); seit K43 T1-R6 eine Meldung (ganz_bis)
+    chk_int1(span, who, "span"; lo = 1, hi = _blk_span_max(unit), null_ok = true)
     _blk_start(who, start)
     _blk_lgl(who, skip, "skip")
     _blk_num(who, thresh, "thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)"; null_ok = true)
@@ -436,11 +491,22 @@ function rebalance_plan(span_pos = nothing, days_pos = nothing; span = span_pos,
     event_col === nothing && !(event_mode isa _Unset) &&
         @warn "rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert."
     event_mode = _match_arg(_val(event_mode, ("additional", "replace")), ("additional", "replace"))
-    if event_col !== nothing && !(event_col isa AbstractString)
-        error("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein, nicht $(_blk_show(event_col)).")
+    if event_col !== nothing && !(event_col isa AbstractString && !isempty(event_col))
+        error("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.")
     end
     event_col === nothing && event_weight !== nothing &&
         @warn "rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert."
+    # seit 1.6.4 (A-049): event_weight benannt, je Asset ein Spaltenname (die Spalten prüft simulation())
+    if event_weight !== nothing
+        items = _is_mapping(event_weight) ? [String(string(k)) => chk_scalar(v) for (k, v) in _kvpairs(event_weight)] :
+                event_weight isa RVector && event_weight.names !== nothing ?
+                    [String(k) => v for (k, v) in zip(event_weight.names, event_weight.values)] : nothing
+        if items === nothing || isempty(items) || any(p -> isempty(p.first), items) ||
+           any(p -> !(p.second isa AbstractString) || isempty(p.second), items) ||
+           length(unique(first.(items))) != length(items)
+            chk_stop("e1.event_weight", who)
+        end
+    end
     return RList("span" => span, "days" => days, "unit" => unit, "anchor" => anchor, "start" => start, "skip" => skip,
                  "thresh" => thresh, "thresh_type" => thresh_type, "event_col" => event_col,
                  "event_mode" => event_mode, "event_weight" => event_weight; class = ["SimLevRebalancePlan"])
@@ -449,18 +515,7 @@ end
 """
     split_rule(thresh)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `thresh`: `rebalance_plan`: Minimale Gewichtsabweichung **in Prozent** (z. B. `5` = 5 Prozentpunkte, siehe
@@ -476,26 +531,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   an jedem folgenden Tag ein weiterer Split ausgelöst wird. Kein Zahlenvektor der Länge 2: Fehler. Hat ein
   Asset am Split-Tag keinen Bestand, wird seine Kursreihe trotzdem umgerechnet.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -508,8 +544,7 @@ function split_rule(thresh_pos = _UNSET; thresh = thresh_pos)
     thresh = _val(thresh, nothing)
     st = thresh === nothing ? nothing : _num_vec(thresh)
     if st === nothing || length(st) != 2 || any(isnan, st)
-        error("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein, nicht " *
-              (thresh === nothing ? "NULL" : join(r_format(_blk_vec(thresh)), ", ")) * ".")
+        error("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein.")   # seit 1.6.4 ohne Eingabewert
     end
     if !(st[1] < 100 < st[2])
         @warn "split_rule: thresh = c($(r_format1(st[1])), $(r_format1(st[2]))) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)."
@@ -520,18 +555,7 @@ end
 """
     income_rate(marginal_rate, soli_rate = 0)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `marginal_rate`: `income_rate`: Persönlicher Grenzsteuersatz **in Prozent** (z. B. `42`), zulässig 0 bis 50;
@@ -542,26 +566,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   (Standard) heißt ohne Soli (seit 2021 zahlen wegen der Freigrenze die meisten Steuerpflichtigen keinen Soli
   auf die Einkommensteuer). Eine einzelne endliche Zahl `>= 0`.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -573,11 +578,12 @@ function income_rate(marginal_rate_pos = _UNSET, soli_rate_pos = 0; marginal_rat
                      soli_rate = soli_rate_pos)
     @nospecialize
     who = "income_rate"
-    marginal_rate = _val(marginal_rate, nothing)
+    marginal_rate = chk_scalar(_val(marginal_rate, nothing))
+    soli_rate = chk_scalar(soli_rate)
     _blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
     _blk_frac_warn(who, marginal_rate, "marginal_rate")
     if marginal_rate > 50
-        error("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %), nicht $(_blk_show(marginal_rate)).")
+        error("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %).")
     end
     _blk_num(who, soli_rate, "soli_rate", "eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5.5; 0 = ohne Soli)")
     return RList("marginal_rate" => marginal_rate, "soli_rate" => soli_rate; class = ["SimLevIncomeRate"])
@@ -586,18 +592,7 @@ end
 """
     income_tariff(taxable_income, tariff = nothing)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `taxable_income`: `income_tariff`: Zu versteuerndes Einkommen (zvE) in EUR je Kalenderjahr **ohne** die
@@ -614,26 +609,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   "steuertarif.csv", package = "SimLev")`, Rechtslage ab VZ 2026), ein Dateipfad (wird beim Anlegen mit
   `tax_tariff` gelesen) oder ein Objekt aus `tax_tariff`.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -647,7 +623,7 @@ function income_tariff(taxable_income_pos = _UNSET, tariff_pos = nothing; taxabl
     if taxable_income isa _Unset || taxable_income === nothing
         error("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der Simulation) fehlt.")
     end
-    _check_taxable_income(taxable_income, Int[], "income_tariff"; plan_ok = true)   # auch je Planjahr
+    _blk_check_taxable_income(taxable_income, Int[], "income_tariff"; plan_ok = true)   # auch je Planjahr
     if tariff !== nothing && !inherits(tariff, "SimLevTaxTariff")
         tariff isa AbstractString ||
             error("income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.")
@@ -659,44 +635,14 @@ end
 """
     harvest_rule(day = "12-15", loss_pot = true)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `day`: `harvest_rule`: Termin als `"MM-TT"` (Standard `"12-15"`); genutzt wird der erste Handelstag ab
-  diesem Datum, vor dem 31.12. (sonst Fehler).
+  diesem Datum, vor dem 31.12. (sonst Fehler). Nur Ziffern 0--9; seit 1.6.4 Monat 01 bis 12 und Tag 01 bis 31.
 - `loss_pot`: `harvest_rule`: Auch den Verlusttopf durch realisierte Gewinne nutzen? Standard `true`.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -706,8 +652,11 @@ println(tax_profile(; harvest = harvest_rule("12-15")))
 """
 function harvest_rule(day_pos = "12-15", loss_pot_pos = true; day = day_pos, loss_pot = loss_pot_pos)
     @nospecialize
-    if !(day isa AbstractString) || !occursin(r"^\d{2}-\d{2}$", day) || day >= "12-31"
-        error("harvest_rule: day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
+    day, loss_pot = chk_scalar(day), chk_scalar(loss_pot)
+    # wie R: nur ASCII-Ziffern, kein Zeilenende (seit 1.6.4, A-012)
+    # seit 1.6.4 Monat 01-12 und Tag 01-31 (Entscheidung 35)
+    if !(day isa AbstractString) || !occursin(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\z", day) || day >= "12-31"
+        error("harvest_rule: day im Format 'MM-TT' (Monat 01 bis 12, Tag 01 bis 31) und vor dem 31.12. angeben (z. B. '12-15').")   # seit 1.6.4 mit den Bereichen (F8)
     end
     _blk_lgl("harvest_rule", loss_pot, "loss_pot")
     return RList("day" => day, "loss_pot" => loss_pot; class = ["SimLevHarvestRule"])
@@ -718,18 +667,7 @@ end
                 private_sale_threshold = 1000, base_rate = nothing, guenstigerpruefung = false,
                 income = nothing, harvest = nothing)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `rate`: `tax_profile`: Kapitalertragsteuersatz inkl. Solidaritätszuschlag **in Prozent** (z. B. `26.375` =
@@ -752,8 +690,8 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   IX R 27/04), darunter steuerfrei. Eine einzelne endliche Zahl `>= 0` (sonst Fehler). Standard: `1000`.
 - `base_rate`: `tax_profile`: Basiszins für die Vorabpauschale: `nothing` (Standard: keine Vorabpauschale),
   eine Zahl **in Prozent** (z. B. `2.55` = 2,55 %; negativ erlaubt und wie 0 behandelt) oder der Name einer
-  Spalte in `data` mit täglichen Basiszinswerten in Prozent (wie `risk_free`; `NA` wird zu 0, für ein Jahr
-  zählt der Wert vom ersten Handelstag, § 18 Abs. 4 InvStG). Zahlen zwischen 0 und 0,05 (vermutlich Anteil)
+  Spalte in `data` mit täglichen Basiszinswerten in Prozent (wie `risk_free`; seit 1.6.4 Zahlen ohne `NA`, Jahre ohne Basiszins
+  als 0; für ein Jahr zählt der Wert vom ersten Handelstag, § 18 Abs. 4 InvStG). Zahlen zwischen 0 und 0,05 (vermutlich Anteil)
   werden mit Warnung als Prozent gelesen, für eine Spalte gilt dieselbe Schwelle für den Median; fehlt die
   Spalte, bricht `simulation()` mit Fehler ab.
 - `guenstigerpruefung`: `tax_profile`: Günstigerprüfung nach § 32d Abs. 6 EStG anwenden? Mit `income_rate()`
@@ -769,26 +707,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   Verlusttopfs) realisiert und sofort wieder angelegt („Freibetrag ausschöpfen“); Spread und Gebühren fallen
   für Verkauf und Kauf an.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -802,14 +721,16 @@ function tax_profile(rate_pos = _UNSET; rate = rate_pos, church_tax = 0, sparer_
     @nospecialize
     who = "tax_profile"
     rate_given = !(rate isa _Unset)
-    rate = _val(rate, 26.375)
+    rate = chk_scalar(_val(rate, 26.375))
+    church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate, guenstigerpruefung = (
+        chk_scalar(v) for v in (church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate, guenstigerpruefung))
     if !_is_num(rate) || isnan(Float64(rate)) || rate < 0 || rate > 100
-        error("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für 26,375 %), nicht $(_blk_show(rate)).")
+        error("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für 26,375 %).")
     end
     _blk_frac_warn(who, rate, "rate")
     if church_tax !== nothing
         if !_is_num(church_tax) || isnan(Float64(church_tax)) || church_tax < 0 || church_tax > 100
-            error("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), nicht $(join(r_format(_blk_vec(church_tax)), ", ")).")
+            error("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).")
         end
         if 0 < church_tax < 1
             @warn "tax_profile: church_tax = $(r_format1(church_tax)) wird als $(r_format1(church_tax)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(church_tax * 100))."
@@ -822,7 +743,7 @@ function tax_profile(rate_pos = _UNSET; rate = rate_pos, church_tax = 0, sparer_
     end
     _blk_num(who, sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000; 0 = ohne)")
     _blk_num(who, private_sale_threshold, "private_sale_threshold", "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
-    msg = "tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein, nicht $(_blk_show(base_rate))."
+    msg = "tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein."
     if base_rate isa AbstractString
         isempty(base_rate) && error(msg)
     else
@@ -831,10 +752,10 @@ function tax_profile(rate_pos = _UNSET; rate = rate_pos, church_tax = 0, sparer_
     end
     _blk_lgl(who, guenstigerpruefung, "guenstigerpruefung")
     if income !== nothing && !(inherits(income, "SimLevIncomeRate") || inherits(income, "SimLevIncomeTariff"))
-        error("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schließen sich aus), nicht $(_blk_cls(income)).")
+        error("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schließen sich aus).")
     end
     if harvest !== nothing && !inherits(harvest, "SimLevHarvestRule")
-        error("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein, nicht $(_blk_cls(harvest)).")
+        error("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein.")
     end
     return RList("rate" => rate, "church_tax" => church_tax, "sparer_pauschbetrag" => sparer_pauschbetrag,
                  "private_sale_threshold" => private_sale_threshold, "base_rate" => base_rate,
@@ -845,18 +766,7 @@ end
 """
     funds_costs(fee = 0.95, performance_fee = 5)
 
-Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-Die Einstellungen von `simulation` werden als Bausteine übergeben: `costs = sim_costs()`, `dca = dca_plan()`,
-`rebalance = rebalance_plan()`, `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`). `nothing` heißt aus (kein Sparplan, kein Rebalancing,
-keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
-Warnungen) und druckt eine kurze Zusammenfassung. `simulation()` prüft nur noch das Zusammenspiel mit den
-Daten (z. B. ob die Spalte `event_col` in `data` steht oder ob `start` im Datenzeitraum liegt). Die Rechnung
-der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-`funds_costs()` ist der Kostenbaustein des Fonds-Wrappers (`wrapper_config(costs = funds_costs())`);
-`simulation()` nimmt ihn nicht an.
+$(_BLK_DOC_KOPF)
 
 # Argumente
 - `fee`: `funds_costs`: Jährliche Verwaltungsgebühr (Fondskostenquote) **in Prozent** (z. B. `0.95`), im
@@ -866,26 +776,7 @@ der Engine ist dieselbe wie mit den früheren Einzelargumenten.
   dem Höchststand (High-Water-Mark über die ganze Laufzeit); im Wrapper täglich abgegrenzt und am letzten
   Datentag jedes Kalenderjahres festgeschrieben. Zulässig 0 bis 100 (sonst Fehler). Standard: `5`.
 
-# Rückgabe
-Ein Baustein: Liste mit den Argumenten (nach der Prüfung; `unit`, `anchor`, `thresh_type` und `event_mode`
-aufgelöst, `days` ohne doppelte Tage, `tariff` aus einem Dateipfad gelesen) und der Klasse `SimLevSimCosts`,
-`SimLevDcaPlan`, `SimLevRebalancePlan`, `SimLevSplitRule`, `SimLevTaxProfile`, `SimLevIncomeRate`,
-`SimLevIncomeTariff`, `SimLevHarvestRule` bzw. `SimLevFundsCosts`. Die `print`-Methoden geben `x` unsichtbar
-zurück.
-
-# Übersetzung in die Engine
-`simulation()` übersetzt die Bausteine am Anfang in die internen Werte der Engine: `dca_plan()` schaltet den
-Sparplan ein, `rebalance_plan()` das Rebalancing (auch am ersten Simulationstag und am Starttag später
-startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`, `event_mode = "replace"` und
-`skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
-persönliche Besteuerung.
-
-# Fondskosten
-`funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
-= funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
-High-Water-Mark) steht in `wrapper_nav`. `print()` zeigt die Überschrift „Fondskosten (funds_costs)“. Der
-frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulation(funds = )` ergibt den Fehler
-für ein unbekanntes Argument.
+$(_BLK_DOC_SCHLUSS)
 
 # Beispiel
 ```julia
@@ -895,11 +786,11 @@ println(funds_costs(0.5, 10))
 """
 function funds_costs(fee_pos = 0.95, performance_fee_pos = 5; fee = fee_pos, performance_fee = performance_fee_pos)
     @nospecialize
+    fee, performance_fee = chk_scalar(fee), chk_scalar(performance_fee)
     for (a, x) in (("fee", fee), ("performance_fee", performance_fee))
         if !_is_num(x) || isnan(Float64(x)) || x < 0 || x > 100
             error("funds_costs: $a muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. " *
-                  (a == "fee" ? "0.95 für 0,95 % p. a." : "5 für 5 %") * "), nicht " *
-                  (x === nothing ? "NULL" : join(r_format(_blk_vec(x)), ", ")) * ".")
+                  (a == "fee" ? "0.95 für 0,95 % p. a." : "5 für 5 %") * ").")
         end
     end
     return RList("fee" => fee, "performance_fee" => performance_fee; class = ["SimLevFundsCosts"])
@@ -1238,6 +1129,10 @@ function _sim_args_set(args, over, who)
     isempty(ov) && return out
     nm = String[p.first for p in ov]
     _sim_check_names(nm, who)
+    # seit 1.6.4 (K43 T1-N1, Entscheidung 21): doppelte Namen sind ein Fehler (bis dahin galt still der letzte)
+    for (i, k) in enumerate(nm)
+        k in view(nm, 1:i-1) && chk_stop("argument_doppelt", who, k)
+    end
     for (k, v) in ov
         occursin('.', k) && continue
         v === nothing ? (haskey(out, k) && delete!(out, k)) : (out[k] = v)

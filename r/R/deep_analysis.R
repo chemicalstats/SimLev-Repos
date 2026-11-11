@@ -33,10 +33,12 @@
                                             name, num[1], paste(num[-1], collapse = ", ")))
       num[1]
     }
+    if (is.factor(x[[vc]])) chk_stop("spalte_faktor", "result_analysis", vc)   # Entscheidung 15
     if (!is.numeric(x[[vc]])) {
       if (length(.num_text_cols(x[vc]))) .num_text_stop(x, vc, name)
-      stop(sprintf("'%s': Wertspalte '%s' ist nicht numerisch (Klasse %s).", name, vc, class(x[[vc]])[1]))
+      stop(sprintf("'%s': Wertspalte '%s' ist nicht numerisch.", name, vc))   # seit 1.6.4 ohne Klasse
     }
+    if (is.factor(x$date)) chk_stop("spalte_faktor", "result_analysis", "date")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 Text)
     v <- as.numeric(x[[vc]]); d <- .to_date(x$date, sprintf("'%s': Spalte 'date'", name))
     fm <- attr(x, "filled")                                   # gefuellte Tage aus series_align()
     j <- if (is.matrix(fm) && nrow(fm) == length(v)) { if (vc %in% colnames(fm)) vc else if (ncol(fm) == 1L) 1L else NULL } else NULL
@@ -54,8 +56,8 @@
     d <- d[r]; v <- v[r]; fl <- fl[r]
     if (anyNA(v)) { fl <- fl | is.na(v); v <- .fill_na(v, "locf") }   # innere Luecken: LOCF, als gefuellt markiert
     bad <- which(!is.finite(v) | v <= 0)
-    if (length(bad)) stop(sprintf("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexst\u00e4nde, keine Renditen); %d Werte <= 0, z. B. %s am %s.",
-                                  name, vc, length(bad), format(v[bad[1]]), format(d[bad[1]])))
+    if (length(bad)) stop(sprintf("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexst\u00e4nde, keine Renditen); %d Werte <= 0, z. B. am %s.",
+                                  name, vc, length(bad), format(d[bad[1]])))   # seit 1.6.4 ohne den Wert
     if (length(v) < 2L) stop(sprintf("'%s': mindestens zwei Daten mit Wert n\u00f6tig.", name))
     return(list(name = name, date = d, value = v, filled = fl, worth = NULL, flows = NULL, result = NULL))
   }
@@ -162,14 +164,14 @@
 #' Kennzahlen einer Reihe
 #' @keywords internal
 #' @noRd
-.da_metrics <- function(s, rate, ppy, var_levels) {
+.da_metrics <- function(s, rate, ppy, var_levels, dd_memo = NULL) {
   kk <- c(1L, which(!s$filled[-1]) + 1L)                      # Zeilen mit echten Werten (erste als Basis)
   vk <- s$value[kk]
   r <- vk[-1] / vk[-length(vk)] - 1                           # Renditen von echtem zu echtem Wert
   rfl <- .da_rf(s$date, rate, kk, s$defl); rf <- rfl$r
   yrs <- as.numeric(s$date[length(s$date)] - s$date[1]) / 365.25
   cagr <- .cagr_q(s$value[length(s$value)] / s$value[1], yrs)
-  vol <- stats::sd(r) * sqrt(ppy)
+  vol <- .sl_sd(r) * sqrt(ppy)
   ex <- r - rf
   down <- ex[ex < 0]
   peak <- cummax(s$value); dd <- 1 - s$value / peak
@@ -179,17 +181,23 @@
   mr <- c(m$value[1] / m$start_value, m$value[-1] / m$value[-length(m$value)]) - 1
   y <- .da_period_values(s$date, s$value, "year")
   yr <- c(y$value[1] / y$start_value, y$value[-1] / y$value[-length(y$value)]) - 1
-  var_d <- vapply(var_levels, function(a) -stats::quantile(r, a, names = FALSE), 0)
-  cvar_d <- vapply(var_levels, function(a) { q <- stats::quantile(r, a, names = FALSE); -mean(r[r <= q]) }, 0)
-  var_m <- vapply(var_levels, function(a) -stats::quantile(mr, a, names = FALSE), 0)
-  cvar_m <- vapply(var_levels, function(a) { q <- stats::quantile(mr, a, names = FALSE); -mean(mr[mr <= q]) }, 0)
+  # seit 1.6.4 (B-110) ein quantile() je Renditereihe fuer alle Stufen (bis 1.6.3 je Stufe zweimal): dieselben
+  # Ordnungsstatistiken; r und mr sind Quotienten - 1 und enthalten keine -0, die Werte haben also dieselben Bits
+  q_d <- stats::setNames(stats::quantile(r, as.vector(var_levels), names = FALSE), names(var_levels))
+  q_m <- stats::setNames(stats::quantile(mr, as.vector(var_levels), names = FALSE), names(var_levels))
+  var_d <- -q_d
+  cvar_d <- vapply(q_d, function(q) -mean(r[r <= q]), 0)
+  var_m <- -q_m
+  cvar_m <- vapply(q_m, function(q) -mean(mr[mr <= q]), 0)
   ddt <- .da_drawdowns(s$date, s$value, top = 1e6)
+  # seit 1.6.4 fuer die Tabelle drawdowns gemerkt (B-079; dort deren Kopf, gleiche stabile Sortierung)
+  if (!is.null(dd_memo) && nrow(ddt) < 1e6) dd_memo$l[[length(dd_memo$l) + 1L]] <- list(s$date, s$value, ddt)
   rf_ann <- rfl$ann
   out <- c(
     start_value = s$value[1], end_value = s$value[length(s$value)],
     years = yrs, total_return = s$value[length(s$value)] / s$value[1] - 1,
     cagr = cagr, mwrr = .da_mwrr(s), volatility = vol,
-    sharpe = if (isTRUE(stats::sd(ex) > 0)) mean(ex) * ppy / (stats::sd(ex) * sqrt(ppy)) else NA_real_,
+    sharpe = if (isTRUE(.sl_sd(ex) > 0)) mean(ex) * ppy / (.sl_sd(ex) * sqrt(ppy)) else NA_real_,
     sortino = if (length(down)) mean(ex) * ppy / (sqrt(mean(pmin(ex, 0)^2)) * sqrt(ppy)) else NA_real_,
     calmar = if (mdd > 0) cagr / mdd else NA_real_,
     max_drawdown = mdd, avg_drawdown = if (nrow(ddt)) mean(-ddt$depth) else 0,
@@ -226,9 +234,9 @@
   rs <- vs[kk][-1] / vs[kk][-length(kk)] - 1; rb <- vb[kk][-1] / vb[kk][-length(kk)] - 1
   rfl <- .da_rf(common, rate[is], kk, if (!is.null(s$defl)) s$defl[is] else NULL); rf <- rfl$r
   es <- rs - rf; eb <- rb - rf
-  beta <- stats::cov(es, eb) / stats::var(eb)
+  beta <- .sl_cov(es, eb) / .sl_var(eb)
   alpha <- (mean(es) - beta * mean(eb)) * ppy
-  te <- stats::sd(rs - rb) * sqrt(ppy)
+  te <- .sl_sd(rs - rb) * sqrt(ppy)
   ms <- .da_period_values(common, vs, "month"); mb <- .da_period_values(common, vb, "month")
   mrs <- c(ms$value[1] / ms$start_value, ms$value[-1] / ms$value[-length(ms$value)]) - 1
   mrb <- c(mb$value[1] / mb$start_value, mb$value[-1] / mb$value[-length(mb$value)]) - 1
@@ -236,16 +244,17 @@
   up <- mrb > 0; dn <- mrb < 0
   upc <- if (any(up)) gm(mrs[up]) / gm(mrb[up]) else NA_real_
   dnc <- if (any(dn)) gm(mrs[dn]) / gm(mrb[dn]) else NA_real_
-  sharpe_s <- mean(es) * ppy / (stats::sd(es) * sqrt(ppy))
+  sharpe_s <- mean(es) * ppy / (.sl_sd(es) * sqrt(ppy))
   rf_ann <- rfl$ann
-  c(alpha = alpha, beta = beta, correlation = stats::cor(rs, rb), r_squared = stats::cor(rs, rb)^2,
-    correlation_up = if (sum(rb > 0) > 2) stats::cor(rs[rb > 0], rb[rb > 0]) else NA_real_,
-    correlation_down = if (sum(rb < 0) > 2) stats::cor(rs[rb < 0], rb[rb < 0]) else NA_real_,
+  cc <- .sl_cor(rs, rb)                     # seit 1.6.4 einmal (Entscheidung 156; bis 1.6.3 zweimal, doppelte Warnung)
+  c(alpha = alpha, beta = beta, correlation = cc, r_squared = cc^2,
+    correlation_up = if (sum(rb > 0) > 2) .sl_cor(rs[rb > 0], rb[rb > 0]) else NA_real_,
+    correlation_down = if (sum(rb < 0) > 2) .sl_cor(rs[rb < 0], rb[rb < 0]) else NA_real_,
     up_capture = upc, down_capture = dnc, capture_spread = upc - dnc,
     active_return = cagr_s - cagr_b, tracking_error = te,
     information_ratio = if (te > 0) mean(rs - rb) * ppy / te else NA_real_,
-    m2 = sharpe_s * stats::sd(rb) * sqrt(ppy) + rf_ann,
-    treynor = if (beta != 0) (mean(es) * ppy) / beta else NA_real_)
+    m2 = sharpe_s * .sl_sd(rb) * sqrt(ppy) + rf_ann,
+    treynor = if (!is.na(beta) && beta != 0) (mean(es) * ppy) / beta else NA_real_)   # seit 1.6.4 (Entscheidung 146): Beta NaN bei Benchmark ohne Schwankung
 }
 
 #' Monatsrenditen-Tabelle (Jahr x Monat, plus Jahr)
@@ -254,7 +263,10 @@
 .da_monthly_table <- function(s) {
   m <- .da_period_values(s$date, s$value, "month")
   mr <- c(m$value[1] / m$start_value, m$value[-1] / m$value[-length(m$value)]) - 1
-  yy <- as.integer(substr(m$key, 1, 4)); mm <- as.integer(substr(m$key, 6, 7))
+  # Schlüssel "JJJJ-MM": Jahr = alles vor "-MM" (seit 1.6.4, RP; bis 1.6.3 fest die ersten vier Zeichen, damit
+  # Abbruch vor dem Jahr 1000 und falsche Jahre ab 10000)
+  nk <- nchar(m$key)
+  yy <- as.integer(substr(m$key, 1L, nk - 3L)); mm <- as.integer(substr(m$key, nk - 1L, nk))
   years <- sort(unique(yy))
   M <- matrix(NA_real_, length(years), 12, dimnames = list(years, month.abb))
   M[cbind(match(yy, years), mm)] <- mr
@@ -284,12 +296,12 @@
     seg <- v[(k - window_m):k]; r <- seg[-1] / seg[-length(seg)] - 1
     yrs <- (ds[k] - ds[k - window_m]) / 86400 / 365.25
     cg <- .cagr_q(seg[length(seg)] / seg[1], yrs)
-    vo <- stats::sd(r) * sqrt(12)
+    vo <- .sl_sd(r) * sqrt(12)
     mdd <- max(1 - seg / cummax(seg))
     bt <- ex <- NA_real_
     if (!is.null(vb) && !anyNA(vb[(k - window_m):k])) {
       sb <- vb[(k - window_m):k]; rb <- sb[-1] / sb[-length(sb)] - 1
-      bt <- stats::cov(r, rb) / stats::var(rb)
+      bt <- .sl_cov(r, rb) / .sl_var(rb)
       ex <- cg - .cagr_q(sb[length(sb)] / sb[1], yrs)
     }
     rf_w <- expm1((Lk[k] - Lk[k - window_m]) / yrs)           # Zins im Fenster p. a. (geometrisch)
@@ -378,12 +390,14 @@
 #'   deflationiert (real). \code{upi}, rollierende Sharpe und M² verwenden
 #'   den daraus aufgezinsten Zins p. a.
 #' @param rolling_years Fensterlaenge der rollierenden Kennzahlen in Jahren
-#'   (auf ganze Monate gerundet, mindestens 2 Monate; Standard 3).
+#'   (auf ganze Monate gerundet, mindestens 2 Monate, endlich; Standard 3).
 #' @param var_levels Wahrscheinlichkeiten fuer VaR und CVaR als Anteile
 #'   (Standard \code{c(0.01, 0.05, 0.10)}); historisch aus Tages- und
-#'   Monatsrenditen.
+#'   Monatsrenditen. Keine doppelten Werte.
 #' @param top_drawdowns Anzahl Eintraege der Drawdown-Tabelle je Reihe
-#'   (Standard 10, nach Tiefe sortiert).
+#'   (Standard 10, nach Tiefe sortiert); eine ganze Zahl \code{>= 0} oder
+#'   \code{Inf} (alle). \code{risk_free} und \code{inflation} als einzelne
+#'   Zahl muessen endlich sein (\code{inflation > -100}); Faktoren sind ein Fehler.
 #' @param inflation Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 %)
 #'   oder ein Preisindex-Niveau als \code{data.frame(date, value)} bzw.
 #'   benannter Vektor mit Datumsnamen (z. B. mit [series_align_macro()]
@@ -404,7 +418,9 @@
 #'       \code{correlation_up}, \code{correlation_down}, \code{up_capture},
 #'       \code{down_capture}, \code{capture_spread}, \code{active_return},
 #'       \code{tracking_error}, \code{information_ratio}, \code{m2},
-#'       \code{treynor}; \code{NULL} ohne Benchmark.}
+#'       \code{treynor}; \code{NULL} ohne Benchmark.
+#'       Seit 1.6.4 rechnet die Funktion auch mit einem Benchmark ohne Schwankung (Ueberschussrendite konstant):
+#'       \code{alpha} und \code{beta} sind dann NaN, \code{treynor} NA (bis 1.6.3 Abbruch in R und Python).}
 #'     \item{benchmark}{Name der Benchmark-Reihe oder \code{NULL}.}
 #'     \item{annual}{Matrix Jahr x Reihe der Jahresrenditen (Anteile); Zeilen
 #'       = alle Jahre aller Reihen, NA, wo eine Reihe kein Jahr hat.}
@@ -454,10 +470,28 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
   if (inherits(x, "SimLevResult") || is.data.frame(x)) x <- list(Strategie = x)
   if (!is.list(x) || !length(x)) stop("x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.")
   if (is.null(names(x)) || any(names(x) == "")) names(x) <- paste0("S", seq_along(x))
+  fn <- "result_analysis"
   if (!is.numeric(rolling_years) || length(rolling_years) != 1L || is.na(rolling_years) || round(12 * rolling_years) < 2)
-    stop(sprintf("rolling_years muss mindestens 2/12 (zwei Monate) betragen (ist: %s).", format(rolling_years)))
+    stop("rolling_years muss mindestens 2/12 (zwei Monate) betragen.")   # seit 1.6.4 ohne Eingabewert
+  chk_num1(rolling_years, fn, "rolling_years")   # seit 1.6.4 endlich (Inf lief still ohne rollierende Kennzahlen)
   if (!is.numeric(var_levels) || !length(var_levels) || anyNA(var_levels) || any(var_levels <= 0 | var_levels >= 1))
     stop("var_levels: Wahrscheinlichkeiten als Anteile zwischen 0 und 1, z. B. c(0.01, 0.05).")
+  # seit 1.6.4 (B-052, B-045, B-012): var_levels ohne doppelte Werte (doppelte Kennzahlnamen), top_drawdowns eine
+  # ganze Zahl >= 0 oder Inf (alle; bis 1.6.3 schnitt R gebrochene Werte ab und nahm -2 als "alle bis auf zwei"),
+  # risk_free und inflation als einzelne Zahl endlich (inflation > -100)
+  if (anyDuplicated(var_levels)) chk_stop("e1.doppelt", fn, "var_levels")
+  if (!(is.numeric(top_drawdowns) && length(top_drawdowns) == 1L && !is.na(top_drawdowns) &&
+        (identical(as.numeric(top_drawdowns), Inf) || (is.finite(top_drawdowns) && top_drawdowns == trunc(top_drawdowns) &&
+                                                       top_drawdowns >= 0))))
+    chk_stop("e1.ganz_inf", fn, "top_drawdowns", chk_fmt(0))
+  for (a in list(risk_free, inflation)) {   # Entscheidung 15: kein Faktor
+    if (is.factor(a)) chk_stop("faktor", fn, if (identical(a, risk_free)) "risk_free" else "inflation")
+    .no_factor_df(a, fn)
+  }
+  if (is.numeric(risk_free) && length(risk_free) == 1L && is.null(names(risk_free)) && !is.data.frame(risk_free))
+    chk_num1(risk_free, fn, "risk_free")
+  if (is.numeric(inflation) && length(inflation) == 1L && is.null(names(inflation)) && !is.data.frame(inflation))
+    chk_num1(inflation, fn, "inflation", lo = -100, lo_open = TRUE)
   ser <- mapply(.da_series, x, names(x), SIMPLIFY = FALSE)
   bname <- NULL; bser <- NULL
   if (!is.null(benchmark)) {
@@ -477,16 +511,27 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
     ser <- lapply(ser, .da_deflate, inflation = inflation)
     if (!is.null(bname)) bser <- ser[[bname]]
   }
-  rf_of <- function(s) .resolve_series(risk_free, data.frame(date = s$date), "risk_free")   # Prozent p. a. je Zeile
+  # Prozent p. a. je Zeile; seit 1.6.4 je Datumsreihe gemerkt, wenn die Rechnung ohne Meldung blieb (B-110; sonst je
+  # Aufruf neu wie bisher, Meldungen in gleicher Zahl)
+  rf_memo <- list()
+  rf_of <- function(s) {
+    for (e in rf_memo) if (identical(e[[1L]], s$date)) return(e[[2L]])
+    ok <- TRUE
+    v <- withCallingHandlers(.resolve_series(risk_free, data.frame(date = s$date), "risk_free"),
+                             message = function(m) ok <<- FALSE, warning = function(w) ok <<- FALSE)
+    if (ok) rf_memo[[length(rf_memo) + 1L]] <<- list(s$date, v)
+    v
+  }
   ppy_of <- function(s) { k <- sum(!s$filled[-1]); k / (as.numeric(s$date[length(s$date)] - s$date[1]) / 365.25) }
   # Kennzahlen je Reihe; die der ersten Reihe dienen als Vorlage von vapply und werden seit 1.6.3 nicht ein zweites Mal
   # gerechnet, wenn ihre Rechnung ohne Meldung blieb (sonst wie bisher erneut, Meldungen in gleicher Zahl)
   quiet <- TRUE
-  m1 <- withCallingHandlers(.da_metrics(ser[[1]], rf_of(ser[[1]]), ppy_of(ser[[1]]), var_levels),
+  dd_memo <- new.env(parent = emptyenv()); dd_memo$l <- list()
+  m1 <- withCallingHandlers(.da_metrics(ser[[1]], rf_of(ser[[1]]), ppy_of(ser[[1]]), var_levels, dd_memo),
                             message = function(m) quiet <<- FALSE, warning = function(w) quiet <<- FALSE)
-  f_met <- function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels)
+  f_met <- function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels, dd_memo)
   met <- if (quiet) matrix(c(m1, vapply(ser[-1], f_met, m1)), nrow = length(m1), dimnames = list(names(m1), names(ser)))
-         else vapply(ser, function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels), m1)
+         else vapply(ser, function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels, dd_memo), m1)
   bm <- NULL
   if (!is.null(bser)) {
     others <- setdiff(names(ser), bname)
@@ -503,7 +548,10 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
   if (!is.matrix(annual)) annual <- matrix(annual, ncol = length(ser))
   dimnames(annual) <- list(yrs_all, names(ser))
   seasonality <- vapply(monthly, function(M) colMeans(M[, 1:12, drop = FALSE], na.rm = TRUE), numeric(12))
-  dds <- lapply(ser, function(s) .da_drawdowns(s$date, s$value, top_drawdowns))
+  dds <- lapply(ser, function(s) {
+    for (e in dd_memo$l) if (identical(e[[1L]], s$date) && identical(e[[2L]], s$value)) return(utils::head(e[[3L]], top_drawdowns))
+    .da_drawdowns(s$date, s$value, top_drawdowns)
+  })
   rolling <- lapply(ser, function(s) .da_rolling(s, if (!is.null(bser) && !identical(s, bser)) bser else NULL,
                                                  round(12 * rolling_years), .da_rf(s$date, rf_of(s), 1L, s$defl)$cum))
   common <- Reduce(intersect, lapply(ser, function(s) as.numeric(s$date)))
@@ -511,14 +559,14 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
   if (length(ser) > 1 && length(common) > 30) {
     R <- vapply(ser, function(s) { v <- s$value[match(common, as.numeric(s$date))]; v[-1] / v[-length(v)] - 1 },
                 numeric(length(common) - 1))
-    cor_d <- stats::cor(R)
+    cor_d <- .sl_cor(R)
     dts <- as.Date(common, origin = "1970-01-01")
     ymc <- .date_ym(dts)                                       # seit 1.5.1 ganzzahlig statt format() je Tag
     nmon <- length(unique(if (is.null(ymc)) format(dts, "%Y-%m") else ymc$y * 12 + ymc$m))
     Rm <- vapply(ser, function(s) { m <- .da_period_values(dts, s$value[match(common, as.numeric(s$date))], "month")
                                     m$value[-1] / m$value[-length(m$value)] - 1 },
                  numeric(nmon - 1))
-    cor_m <- stats::cor(Rm)
+    cor_m <- .sl_cor(Rm)
   }
   structure(list(metrics = met, benchmark_metrics = bm, benchmark = bname, annual = annual,
                  monthly = monthly, seasonality = seasonality, drawdowns = dds, rolling = rolling,

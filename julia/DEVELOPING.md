@@ -24,7 +24,7 @@ Aus der Repo-Wurzel, immer mit `LC_ALL=C.UTF-8`:
 python3 core/sync.py --check          # Kopien der C-Quellen (auch julia/deps/core) prüfen
 python3 core/sync.py --write          # nach einer Änderung in core/ verteilen
 julia --project=julia -e 'using Pkg; Pkg.build()'   # deps/build.jl: libslc mit C- und C++-Compiler
-julia --project=julia -e 'using SimLev'             # Vorkompilieren (einige Minuten, siehe unten)
+julia --project=julia -e 'using SimLev'             # Vorkompilieren (rund 5 min, Speicherspitze rund 3 GB; siehe unten)
 julia --project=julia tests/run.jl                  # Tests (Gruppen gleichlauf, fehler, ausgabe, schnittstelle)
 tests/werkzeuge/gleichlauf/run.py --quick           # Gleichlauf mit R und Python
 tests/werkzeuge/doku/beispiele.py julia             # Beispiele der READMEs und des Tutorials
@@ -177,26 +177,38 @@ mc.set.seed = FALSE)` (Verhalten in R 4.3.3): unter
 zwei Kernen oder mit höchstens einem Element `lapply`; sonst rechnet jede
 Einheit mit dem Strom, den ihr der Aufrufer mitgibt (seit 1.0.0, Regeln unter [Zufall](#zufall); der globale Zustand
 ist in einer Einheit gesperrt);
-Ergebnisse in Eingangsreihenfolge; Warnungen gehen verloren; Meldungen und
-Ausgaben erscheinen in Einheitenreihenfolge; beim ersten Fehler (in
-Einheitenreihenfolge) erscheinen die Ausgaben davor, dann der Fehler. R
-bündelt die Einheiten seit dem 26.10.2026 in höchstens `4 × cores` Pakete (ein
-Fork je Paket) mit denselben Ergebnissen, demselben Zufallszustand und
-denselben Fehlern.
+Ergebnisse in Eingangsreihenfolge; Meldungen, Ausgaben über `r_stdout()`/`r_stderr()` und Warnungen erscheinen
+in Einheitenreihenfolge wie mit `cores = 1` (seit 1.6.4, Entscheidung 133, auch bei fester Zahl; bis dahin gingen
+Warnungen bei fester Zahl verloren); beim ersten Fehler (in Einheitenreihenfolge) erscheinen die Ausgaben davor, dann
+der Fehler. Eine feste Zahl nimmt in allen drei Sprachen denselben Verteilweg wie `"auto"`, nur ohne Messung (R auf
+Unix `.par_lapply_fixed` → `.par_auto_fork`, höchstens `2 × c` Pakete; bis 1.6.3 `mclapply` mit höchstens
+`4 × cores` Paketen).
 
 Mit `Threads.nthreads() > 1` (`julia -t auto`, `julia -t 2`,
 `JULIA_NUM_THREADS`) startet `par_lapply` `min(cores, nthreads)` Aufgaben
-(`Threads.@spawn`), die sich die Einheiten der Reihe nach holen; mit einem
-Thread rechnet `_sequential` nacheinander. Jede Einheit setzt den Merker `SLib.in_unit` und
+(`Threads.@spawn`, `_threaded`), die sich die Einheiten der Reihe nach holen; mit einem
+Thread rechnet `par_lapply` nacheinander wie mit `cores = 1`. Jede Einheit setzt den Merker `SLib.in_unit` und
 bekommt einen eigenen Ausgabepuffer im task-lokalen Speicher (die frühere Kopie des
-R-Zufallszustands über `RRng.with_state` ist mit 1.0.0 entfallen); Warnungen verwirft ein `NullLogger` je
-Aufgabe. Referenzfälle zusätzlich mit `julia -t 2` prüfen.
+R-Zufallszustands über `RRng.with_state` ist mit 1.0.0 entfallen); Warnungen schneidet `_RecLogger` je Aufgabe mit
+(bis 1.6.3 verwarf sie ein `NullLogger`). Direkte Ausgaben mit `println` auf `stdout`/`stderr` (auch in Funktionen der
+Anwender) erscheinen mit mehreren Aufgaben in Fertigstellungsreihenfolge. Referenzfälle zusätzlich mit `julia -t 2`
+prüfen.
+
+`cores = "auto"` (Standard seit 1.6.4, Entscheidungen 41b/41c, 112): `par_lapply` ruft `_auto` wie die Python-Fassung
+(Messen der ersten Elemente, Planer `SLib.par_plan` im Kern, höchstens `Threads.nthreads()` Aufgaben); bei c > 1
+schneidet `_RecLogger` je Aufgabe die Warnungen mit, die Wiedergabe gibt sie in Elementreihenfolge an den Logger der
+aufrufenden Aufgabe; den Hinweis zu SIMLEV_THREADS stellt `defer_hint` bis zur Wiedergabe zurück. Seit 1.6.4 heißt
+der Ausgabepuffer in `_threaded` `capture` (bis dahin überschrieb er die Thread-Grenze `cap` der Aufgaben). Seit K43 KR
+verteilt `"auto"` auch die Studien (bis dahin `tasks = false`): behoben sind die gemeinsame Variable `res` in
+`bootstrap_study` (T2-R1, Core.Box), die Formatierpuffer je Thread von `r_sprintf` (T2-B3: aus dem Vorkompilieren mit
+einem Platz) und der Dict ohne Sperre in `planning_lumpsum_vs_dca` (T2-B7).
 
 **Regeln für neue Module (Thread-Sicherheit):**
 
 1. Parallel nur über `par_lapply`, nie eigene Tasks oder Threads.
 2. Keine veränderlichen globalen Zustände. Was eine Rechnung sich merken muss,
-   gehört in lokale Variablen oder Argumente; Zustände, die für einen Aufruf gelten (Handler,
+   gehört in lokale Variablen oder Argumente (in inneren Funktionen, die als Einheit laufen, mit `local`, wenn die
+   umgebende Funktion denselben Namen hat: sonst teilen alle Aufgaben eine Variable, Core.Box); Zustände, die für einen Aufruf gelten (Handler,
    Schalter), in den task-lokalen Speicher (`task_local_storage(f, key,
    wert)`, wie `_with_bounds_handler` in `src/optimize.jl`); einmalige
    Einrichtung (Bibliotheken laden, Tabellen) unter einer `ReentrantLock`
@@ -278,7 +290,12 @@ Die Arbeitslast in `src/precompile.jl` deckt die Engine (`simulation()` über
 den C++-Kern mit und ohne `details`, Ausgabe, Dashboard, Fonds-Wrapper,
 `calculate_dates_flags`, `xirr_rate`) und je Erweiterungsmodul die
 öffentlichen Hauptfunktionen mit kleinen Daten ab, Daten wie beim Aufrufer
-(NamedTuple mit `date` und Kursen). Methoden, die die Arbeitslast nur über
+(seit 1.6.4 `RFrame` mit `date` und Kursen; bis dahin NamedTuple, das die
+Hauptfunktionen seit 1.6.4 ablehnen: 13 von 21 Schritten brachen still ab).
+Jeder Schritt verschluckt beim Vorkompilieren seine Fehler; damit das nicht
+unbemerkt bleibt, führt `julia --project=julia tests/werkzeuge/precompile_check.jl`
+die Arbeitslast im laufenden Prozess aus und nennt gescheiterte Schritte
+(Ende 1). Methoden, die die Arbeitslast nur über
 Laufzeit-Dispatch erreicht und deren Signatur nur Typen aus Base, Core,
 Dates oder Printf enthält, übernimmt Julia nicht in den Cache;
 `src/precompile_statements.jl` nennt sie ausdrücklich (aus
@@ -286,7 +303,15 @@ Dates oder Printf enthält, übernimmt Julia nicht in den Cache;
 Aufrufers, ohne Closures). Bis 1.3.0 deckte die Arbeitslast nur Engine,
 `bootstrap`, `bootstrap_study`, `_ms_garch_fit`, Entnahme ohne Steuer,
 Optimierung auf Renditematrizen und `result_analysis` ab.
-Gemessen auf zwei Kernen, Julia 1.13.2, eigenes Depot; erster Aufruf je
+
+Seit 1.6.4 (K43 T1-N7, Entscheidung 154) laufen wieder alle Schritte der Arbeitslast (Daten als `RFrame`). Gemessen
+auf der Entwicklungsmaschine (zwei Kerne, Julia 1.13.2, `Base.compilecache`, größter Speicher des
+Vorkompilierprozesses): Vorkompilieren 208 s → 293 s, Speicherspitze 2,53 GB → 2,97 GB. Der Bau braucht daher rund
+3 GB freien Arbeitsspeicher. Erster Aufruf in einem frischen Prozess (Median aus 5 Prozessen) z. B.
+`dependence_analysis` 4,58 → 0,35 s, `regime_hmm` 2,77 → 0,08 s, `bootstrap` 0,98 → 0,08 s, `tactical_rotation`
+1,77 → 0,31 s, `portfolio_optimize` 0,90 → 0,24 s.
+
+Ältere Messung (1.4.0), gemessen auf zwei Kernen, Julia 1.13.2, eigenes Depot; erster Aufruf je
 Aufgabe in einem frischen Prozess (die Bench-Aufgaben aus `tests/werkzeuge/bench`
 und je Modul eine weitere Hauptfunktion, 30 Aufgaben):
 
@@ -350,13 +375,13 @@ Vorkompilieren.
 | `SIMLEV_SKIP_PRECOMPILE` | `1`: keine Arbeitslast beim Vorkompilieren | Entwicklung |
 | `SIMLEV_SKIP_PRECOMPILE_EXT` | `1`: Arbeitslast ohne die Analysemodule | Entwicklung |
 | `SIMLEV_CXX` | C++-Compiler für `Pkg.build` (gelesen in `deps/build.jl`; bis 1.5.2 `SIMLEV_CC` für den C-Teil) | Bau |
-| `SIMLEV_THREADS` | Threads der elementweisen Kerne (qt, pt; seit 1.6.0): ganze Zahl >= 1, sonst Zahl der Prozessoren (höchstens 8); Ergebnis unabhängig davon | Nutzer |
+| `SIMLEV_THREADS` | Threads der elementweisen Kerne (qt, pt; seit 1.6.0): ganze Zahl >= 1, sonst und höchstens Zahl der Prozessoren, mindestens 1, in jeder parallelen Aufgabe höchstens Prozessoren ÷ Aufgaben (seit 1.6.4; mehr wird einmal je Sitzung mit Hinweis begrenzt; bis 1.6.3 höchstens 8); Ergebnis unabhängig davon | Nutzer |
 
 Seit 1.0.0 entfallen `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
 `tests/lib/faelle.jl` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
 Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/gleichlauf/erzeugen/`
-lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
+lesen eigene Schalter (u. a. `SIMLEV_FAELLE_DIR`, `SIMLEV_GEN_ALLE`, `SIMLEV_GEN_SUBSET`; siehe
 `tests/README.md`).
 
 ## C-Bibliothek (Pflicht)

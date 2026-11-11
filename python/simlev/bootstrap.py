@@ -49,7 +49,10 @@ from . import _lib_models as _slm
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 from ._util import _match_arg
-from .data_prep import _to_date
+from .data_prep import _e5_choice, _to_date
+from ._pruefen import (chk_bool1, chk_cores, chk_date1, chk_int1, chk_max, chk_msg, chk_name1, chk_num1,  # seit 1.6.4
+                       chk_nofactor, chk_scalar, chk_stop)
+from ._pruefen import SL_MAX_N, SL_MAX_TAGE  # seit 1.6.4 (Entscheidung 46)
 from ._util import _stats
 from ._util import _fmt1, _is_strategy, _message, _pow_rec, _unique as _uniq
 from ._r.rformat import _is_num
@@ -90,18 +93,6 @@ def _stop(text):
 def _sp(fmt, *args) -> str:
     """R-``sprintf`` (Skalar)."""
     return _fmt.sprintf(fmt, *args)
-
-
-def _show(x) -> str:
-    """``paste(format(x), collapse = ", ")``."""
-    if x is None:
-        return ""
-    if isinstance(x, (list, tuple)):
-        x = np.asarray(x, dtype=object if any(isinstance(v, str) for v in x) else None)
-    r = _fmt.format(x)
-    if isinstance(r, str):
-        return r
-    return ", ".join(str(s) for s in np.asarray(r, dtype=object).ravel())
 
 
 def _as_char(x) -> str:
@@ -404,18 +395,33 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
                                       aux={"rate": "eu_rate"})
         print(cfg["letf_names"])
     """
+    _e5_choice(cross, ("ratio", "joint"), "bootstrap_config", "cross")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
+    _e5_choice(input, ("returns", "prices"), "bootstrap_config", "input")
     cross = _match_arg(cross, ("ratio", "joint"))
     input = _match_arg(input, ("returns", "prices"))  # noqa: A001
     inames = _names(indices)
     if inames is None or any(n == "" for n in inames):
-        _stop("indices muss vollständig benannt sein: c(name1 = 'spalte1', ...)")
+        chk_stop("ut2.indices", "bootstrap_config")
     index_names = inames
-    icols = [str(v) for v in _values(indices)]
+    ivals = [chk_scalar(v) for v in _values(indices)]   # seit 1.6.4 Länge 1 wie Einzelwert (Entscheidung 4)
+    icols = [str(v) for v in ivals]
     if any(_duplicated(index_names)):
-        _stop("Doppelte Index-Namen: " + ", ".join(n for n, d in zip(index_names, _duplicated(index_names)) if d))
+        chk_stop("rs.index_doppelt", "bootstrap_config", ", ".join(n for n, d in zip(index_names, _duplicated(index_names)) if d))
     if aux is not None and (_names(aux) is None or any(n == "" for n in _names(aux))):
-        _stop("aux muss benannt sein.")
+        chk_stop("ut2.aux", "bootstrap_config")
     aux_names = _names(aux) if aux is not None else []
+    # seit 1.6.4: Spaltenangaben je ein Name (Text); bis 1.6.3 wurde jeder Wert mit str() umgewandelt (FW2-1)
+    for nm, v in zip(index_names, ivals):
+        chk_name1(v, "bootstrap_config", "indices['%s']" % nm)
+    if aux is not None:
+        for nm, v in zip(aux_names, _values(aux)):
+            chk_name1(v, "bootstrap_config", "aux['%s']" % nm)
+    if letfs is not None and not isinstance(letfs, (list, tuple, Mapping)):
+        chk_stop("liste", "bootstrap_config", "letfs")
+    for i, lt in enumerate(list(letfs or []), start=1):
+        if not isinstance(lt, Mapping):
+            chk_stop("liste", "bootstrap_config", "letfs[[%d]]" % i)
+    regime_index = chk_name1(regime_index, "bootstrap_config", "regime_index", null_ok=True)
     if aux_type is not None and not len(_values(aux_type) if not isinstance(aux_type, str) else [aux_type]):
         aux_type = None
     if aux_type is not None:
@@ -423,8 +429,7 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
         at_vals = _values(aux_type) if at_names is not None else None
         if (at_names is None or any(n == "" for n in at_names)
                 or not all(isinstance(v, str) for v in at_vals)):
-            _stop("aux_type muss ein benannter Zeichenvektor sein: c(<Name aus aux> = 'level' oder 'rate'), "
-                  "z. B. c(cpi = 'level', zins = 'rate').")
+            chk_stop("ut2.aux_type", "bootstrap_config")
         bad = _setdiff(at_names, aux_names)
         if bad:
             _stop("aux_type: '%s' ist keine Zusatzreihe aus aux (verfügbar: %s)."
@@ -434,8 +439,7 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
             _stop("aux_type: Name '%s' doppelt angegeben." % dup[0])
         bad = [i for i, v in enumerate(at_vals) if v not in ("level", "rate")]
         if bad:
-            _stop("aux_type['%s'] = '%s': erlaubt sind nur 'level' (Niveau, z. B. Preisindex) und 'rate' "
-                  "(Rate, z. B. Zins in Prozent)." % (at_names[bad[0]], at_vals[bad[0]]))
+            chk_stop("rs.aux_type_wert", "bootstrap_config", at_names[bad[0]])   # seit 1.6.4 ohne Eingabewert
     full = {nm: "rate" for nm in aux_names}
     if aux_type is not None:
         for k, v in zip(_names(aux_type), _values(aux_type)):
@@ -452,50 +456,48 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
 
     def chk_num(i, v, nm):
         if not num1(v):
-            _stop("LETF %d: %s muss eine einzelne endliche Zahl sein" % (i, nm))
+            chk_stop("zahl", "bootstrap_config", "letfs[[%d]]$%s" % (i, nm))
 
     def chk_col(i, v, nm):
         if not num1(v) and not isinstance(v, str):
-            _stop("LETF %d: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein" % (i, nm))
+            chk_stop("ut2.zahl_oder_aux", "bootstrap_config", "letfs[[%d]]$%s" % (i, nm))
 
     letf_list = []
     for i, lt in enumerate(list(letfs or []), start=1):
-        lt = dict(lt) if isinstance(lt, Mapping) else {}
+        lt = {k: chk_scalar(v) for k, v in lt.items()} if isinstance(lt, Mapping) else {}   # Länge 1 (seit 1.6.4)
         base = lt.get("base")
         if base is None:
-            _stop("LETF %d: 'base' muss angegeben werden" % i)
+            chk_stop("fehlt", "bootstrap_config", "letfs[[%d]]$base" % i)
         if not isinstance(base, str):
-            _stop("LETF %d: base muss ein einzelner Name (Text) sein" % i)
+            chk_stop("text", "bootstrap_config", "letfs[[%d]]$base" % i)
         if base not in index_names:
-            _stop("LETF %d: base '%s' nicht in indices. Verfügbar: %s" % (i, base, ", ".join(index_names)))
+            chk_stop("rs.letf_base", "bootstrap_config", "letfs[[%d]]$base" % i, base, ", ".join(index_names))
         lev = lt.get("leverage")
         lev = 2 if lev is None else lev
         chk_num(i, lev, "leverage")
         if lev == 0:
-            _stop("LETF %d: leverage darf nicht 0 sein" % i)
+            chk_stop("rs.letf_null", "bootstrap_config", "letfs[[%d]]$leverage" % i)
         fin = lt.get("finance")
         fin = 3.5 if fin is None else fin
         chk_col(i, fin, "finance")
         if isinstance(fin, str) and fin not in aux_names:
-            _stop("LETF %d: finance-Reihe '%s' nicht in aux." % (i, fin))
+            chk_stop("rs.letf_aux", "bootstrap_config", "letfs[[%d]]$finance" % i, fin)
         if is_level(fin):
-            _stop("LETF %d: finance-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; der Finanzierungszins "
-                  "muss eine Rate (Prozent p. a.) sein." % (i, fin))
+            chk_stop("ut2.finance_level", "bootstrap_config", "letfs[[%d]]$finance" % i, fin)
         if _is_num(fin) and fin < 0:
             _warn("LETF %d: negativer Finanzierungszins." % i)
         exp_ = lt.get("expense")
         exp_ = 0.5 if exp_ is None else exp_
         chk_num(i, exp_, "expense")
         if exp_ < 0:
-            _stop("LETF %d: expense muss >= 0 sein" % i)
+            chk_stop("ut2.expense", "bootstrap_config", "letfs[[%d]]$expense" % i)
         days = lt.get("days")
         days = 1 if days is None else days
         chk_col(i, days, "days")
         if isinstance(days, str) and days not in aux_names:
-            _stop("LETF %d: days-Reihe '%s' nicht in aux." % (i, days))
+            chk_stop("rs.letf_aux", "bootstrap_config", "letfs[[%d]]$days" % i, days)
         if is_level(days):
-            _stop("LETF %d: days-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden "
-                  "unverändert gebraucht ('rate')." % (i, days))
+            chk_stop("rs.letf_days_level", "bootstrap_config", "letfs[[%d]]$days" % i, days)
         sp = lt.get("spread")
         sp = 0 if sp is None else sp
         rb = lt.get("rate_basis")
@@ -505,21 +507,28 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
         chk_num(i, sp, "spread")
         chk_num(i, rb, "rate_basis")
         chk_num(i, tb, "ter_basis")
+        # seit 1.6.4 Tagesbasis > 0, Tage je Zeile > 0, Spread >= 0
+        lw = "LETF %d" % i
+        chk_num1(rb, lw, "rate_basis", lo=0, lo_open=True)
+        chk_num1(tb, lw, "ter_basis", lo=0, lo_open=True)
+        if _is_num(days):
+            chk_num1(days, lw, "days", lo=0, lo_open=True)
+        chk_num1(sp, lw, "spread", lo=0)
         name = lt.get("name")
         if name is not None and not isinstance(name, str):
-            _stop("LETF %d: name muss ein einzelner Name (Text) sein" % i)
+            chk_stop("text", "bootstrap_config", "letfs[[%d]]$name" % i)
         if name is None:
             name = (base + "_l" + _as_char(lev)) if lev > 0 else (base + "_inv" + _as_char(abs(lev)))
         letf_list.append({"name": name, "base": base, "leverage": lev, "finance": fin, "expense": exp_,
                           "spread": sp, "days": days, "rate_basis": rb, "ter_basis": tb})
     letf_names = [lt["name"] for lt in letf_list]
     if any(_duplicated(index_names + letf_names + aux_names)):
-        _stop("Namen von Indizes, LETFs und aux müssen eindeutig sein.")
+        chk_stop("rs.namen_eindeutig", "bootstrap_config")
     if regime_index is None:
         regime_index = index_names[0]
     elif regime_index not in index_names:
-        _stop("regime_index '%s' nicht in indices" % regime_index)
-    aux_out = None if aux is None else _nvec(aux_names, [str(v) for v in _values(aux)])
+        chk_stop("rs.regime_index", "bootstrap_config", regime_index)
+    aux_out = None if aux is None else _nvec(aux_names, [str(chk_scalar(v)) for v in _values(aux)])
     return BootstrapConfig([
         ("indices", [{"name": nm, "col": c} for nm, c in zip(index_names, icols)]),
         ("letfs", letf_list), ("regime_index", regime_index), ("aux", aux_out),
@@ -569,26 +578,35 @@ def _complete_rows(m) -> np.ndarray:
     return ~np.isnan(m).any(axis=1)
 
 
+def _boot_data_check(data, who="bootstrap"):
+    """``data`` als Tabelle oder Matrix, nicht leer (R: ``.boot_data_check``)."""
+    if not isinstance(data, pd.DataFrame) and not (isinstance(data, np.ndarray) and data.ndim == 2):
+        chk_stop("ut2.boot_data", who)
+    if data.shape[0] == 0:
+        chk_stop("rs.data_leer", who)
+
+
 @_quiet
-def _extract_returns(data, config):
+def _extract_returns(data, config, who="bootstrap"):
     """Renditematrix und Zusatzreihen extrahieren (R: ``.extract_returns``).
 
     Returns:
         dict mit ``ret`` (n x k), ``aux`` (n x a oder ``None``), ``aux_ratio``,
         ``aux_start`` (float-Arrays).
     """
-    is_df = isinstance(data, pd.DataFrame)
-    if not is_df and not (isinstance(data, np.ndarray) and data.ndim == 2):
-        _stop("data muss ein data.frame oder eine Matrix sein")
+    _boot_data_check(data, who)
     nrow = data.shape[0]
-    if nrow == 0:
-        _stop("data darf nicht leer sein")
     nms = _data_cols(data)
 
     def get_col(col):
         if col not in nms:
-            _stop("Spalte '%s' nicht gefunden. Verfügbar: %s" % (col, ", ".join(nms)))
-        return _as_numeric_col(data[col].to_numpy())
+            chk_stop("rs.spalte_fehlt", who, col, ", ".join(nms))
+        # seit 1.6.4: bei doppelten Spaltennamen die erste Spalte wie R data[[col]] (vorher ein Gemisch beider)
+        v = data.iloc[:, nms.index(col)] if isinstance(data, pd.DataFrame) else data[col]
+        # seit 1.6.4 (Entscheidung 15): keine Kategoriespalte
+        if isinstance(data, pd.DataFrame) and isinstance(v.dtype, pd.CategoricalDtype):
+            chk_stop("spalte_faktor", who, col)
+        return _as_numeric_col(v.to_numpy())
 
     ret = np.column_stack([get_col(ix["col"]) for ix in config["indices"]]) if config["indices"] else \
         np.zeros((nrow, 0))
@@ -608,13 +626,12 @@ def _extract_returns(data, config):
         if aux is not None:
             aux = aux[ok, :]
     if not ret.shape[0]:
-        _stop("data enthält keine vollständige Zeile in den verwendeten Spalten.")
+        chk_stop("rs.keine_zeile", who)
     bad = ~np.isfinite(ret)
     if bad.any():
         lin = np.flatnonzero(bad.ravel(order="F"))[0]
         r0, c0 = lin % ret.shape[0], lin // ret.shape[0]
-        _stop("Renditen enthalten nicht endliche Werte (Inf), erste in Spalte '%s', Zeile %d der verwendeten Daten."
-              % (config["index_names"][c0], r0 + 1))
+        chk_stop("rs.nicht_endlich", who, config["index_names"][c0], int(r0) + 1)
     if aux is not None:
         okw = np.flatnonzero(ok)
         prev1 = (aux0[okw[0], :] if config["input"] == "prices" else aux[0, :]).copy()
@@ -639,7 +656,7 @@ def _extract_returns(data, config):
         aux_ratio = aux / den
         aux_start = prev1
     if (ret <= 0).any():
-        _stop("Renditen <= 0 gefunden (erwartet: Brutto-Renditen > 0, z. B. 1.002).")
+        chk_stop("rs.rendite_null", who)
     if r_median(np.abs(ret - 1).ravel(order="F")) > 0.5:
         _warn("Renditen sehen nicht wie Brutto-Tagesrenditen aus (Median |R - 1| > 0.5). input = 'prices' vergessen?")
     return {"ret": ret, "aux": aux, "aux_ratio": aux_ratio, "aux_start": aux_start}
@@ -752,7 +769,8 @@ def _pw_block(x):
     if r0 <= 0:
         return one
     nlag = int(math.floor(mmax))
-    rho = np.array([acov(k) for k in range(1, nlag + 1)]) / r0
+    A = np.array([acov(k) for k in range(1, nlag + 1)])   # seit 1.6.4 (A-089) einmal für rho und Rk (M <= nlag)
+    rho = A / r0
     insig = np.abs(rho) < crit
     KNi = int(math.ceil(KN))
     mhat = None
@@ -767,7 +785,7 @@ def _pw_block(x):
     kk = np.arange(1, M + 1, dtype=np.float64)
     t = np.abs(kk / M)
     lam = np.where(t <= 0.5, 1.0, np.where(t <= 1, 2 * (1 - t), 0.0))
-    Rk = np.array([acov(int(k)) for k in kk])
+    Rk = A[:M].copy()
     G = 2 * r_sum(lam * kk * Rk)
     g0 = r0 + 2 * r_sum(lam * Rk)
     if g0 <= 0:
@@ -789,6 +807,7 @@ def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
     Args:
         x: Numerischer Vektor oder Matrix (Spalten = Reihen), z. B. (Log-)Renditen je Zeile. Nicht-endliche Werte
             werden je Spalte entfernt.
+            Seit 1.6.4 nur Zahlen (Text, Wahrheitswerte und Faktoren ergeben einen Fehler).
         transform: Transformation vor der Schätzung: ``"none"`` (Standard, Reihe selbst), ``"abs"`` (|x - bar x|)
             oder ``"squared"`` ((x - bar x)^2).
 
@@ -822,7 +841,26 @@ def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
         for t in range(1, 2000): x[t] = 0.5 * x[t - 1] + e[t]   # AR(1)
         print(simlev.bootstrap_block_length(x))
     """
+    _e5_choice(transform, ("none", "abs", "squared"), "bootstrap_block_length", "transform")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     transform = _match_arg(transform, ("none", "abs", "squared"))
+    # seit 1.6.4: nur Zahlen (vorher Text wie Zahlen, Kategorien als Codes; R: Text still 1); Kategorie mit eigener
+    # Meldung (Entscheidung 15)
+    if (isinstance(x, pd.Categorical) or (isinstance(x, pd.Series) and isinstance(x.dtype, pd.CategoricalDtype))):
+        chk_stop("faktor", "bootstrap_block_length", "x")
+    if isinstance(x, pd.DataFrame):
+        for c in x.columns:
+            if isinstance(x[c].dtype, pd.CategoricalDtype):
+                chk_stop("spalte_faktor", "bootstrap_block_length", str(c))
+    if isinstance(x, pd.DataFrame):
+        ok = x.shape[1] >= 1 and all(x[c].dtype.kind in "iuf" for c in x.columns)
+    elif isinstance(x, pd.Series):
+        ok = x.dtype.kind in "iuf"
+    elif isinstance(x, np.ndarray):
+        ok = x.dtype.kind in "iuf"
+    else:
+        ok = _num_vec(x) is not None
+    if not ok:
+        chk_stop("e2.zahlen_matrix", "bootstrap_block_length", "x")
     if isinstance(x, pd.DataFrame):
         cols = [str(c) for c in x.columns]
         M = x.to_numpy(dtype=np.float64)
@@ -1232,7 +1270,9 @@ def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None, spec=
     if src is not None:   # Zeilen idx der geprüften Quelle (_src_rows_ok): Prüfung gilt schon, Kern liest selbst
         n_out, k = idx.size, src.shape[1]
         ret = src
-    elif not isinstance(ret, np.ndarray) or ret.ndim != 2 or (~np.isfinite(ret)).any() or (ret <= 0).any():
+    elif not isinstance(ret, np.ndarray) or ret.ndim != 2:
+        # seit 1.6.4 (A-058) ohne Vorprüfung auf nicht endliche Werte bzw. Werte <= 0: der Kern (sl_boot_path) prüft
+        # dieselbe Bedingung und liefert dann 0 (None wie bisher)
         return None
     else:
         n_out, k = ret.shape
@@ -1265,7 +1305,7 @@ def _ess_design(method, grid, budget, n_obs):
     if grid is None or not len(grid):
         return None
     ess_params = ("L", "block_length", "n_regimes", "tail_prob", "ms_n_regimes", "ms_ar_n_regimes", "tvtp_n_regimes")
-    non_ess = ("vol_window", "wild_type", "both_tails", "p_break", "garch_order", "ms_garch_model")
+    non_ess = ("vol_window", "wild_type", "both_tails", "p_break", "garch_order")   # seit 1.6.4 ohne Textparameter
     nm = [str(k) for k in grid.keys()]
     vals = [list(np.atleast_1d(np.asarray(v, dtype=object)).ravel()) for v in grid.values()]
     # expand.grid: erster Faktor läuft am schnellsten
@@ -1273,7 +1313,12 @@ def _ess_design(method, grid, budget, n_obs):
     for v in vals:
         rows = [r + [x] for x in v for r in rows]
     design = pd.DataFrame({k: [r[i] for r in rows] for i, k in enumerate(nm)})
-    for k in nm:
+    for k, v in zip(nm, vals):
+        # seit 1.6.4 bleiben Wahrheitswerte logisch wie in R expand.grid (Entscheidung 45; bis 1.6.3 als 1.0/0.0, die
+        # Parameterprüfung lehnte both_tails dann ab)
+        if v and all(isinstance(x, (bool, np.bool_)) for x in v):
+            design[k] = design[k].astype(bool)
+            continue
         try:
             design[k] = design[k].astype(np.float64)
         except (TypeError, ValueError):
@@ -1311,26 +1356,98 @@ def _ess_design(method, grid, budget, n_obs):
     return design
 
 
-def _check_boot_params(method, p, n_obs):
-    """Verfahrensparameter vor dem Ziehen prüfen (R: ``.check_boot_params``)."""
+def _check_boot_params(method, p, n_obs, who="bootstrap"):
+    """Verfahrensparameter vor dem Ziehen prüfen (R: ``.check_boot_params``; seit 1.6.4 vor der Vorberechnung, ohne
+    Eingabewert in den Meldungen, dazu ``n_regimes``, ``vol_window``, ``tail_prob``, ``both_tails`` und höchstens 64
+    MS-GARCH-Regime)."""
     if method == "stationary" and (not _num1(p.get("L")) or float(_num_vec(p.get("L"))[0]) < 1):
-        _stop("params$L (erwartete Blocklänge) muss eine Zahl >= 1 sein (erhalten: %s)." % _show(p.get("L")))
+        chk_stop("ut2.param_L", who)
     if method in ("block", "circular"):
         b = p.get("block_length")
         hi = n_obs - 1 if method == "block" else n_obs
         bv = float(_num_vec(b)[0]) if _num1(b) else None
         if bv is None or bv != _r_round0(bv) or bv < 1 or bv > hi:
-            _stop("params$block_length muss eine ganze Zahl von 1 bis %d sein (%d Zeilen Historie%s; erhalten: %s)."
-                  % (hi, n_obs, ", sonst gäbe es nur einen Blockstart" if method == "block" else "", _show(b)))
+            chk_stop("ut2.param_block", who, int(hi), int(n_obs), ", sonst gäbe es nur einen Blockstart" if method == "block" else "")
     if method == "wild":
         w = p.get("wild_type")
         if not _num1(w) or float(_num_vec(w)[0]) not in (0.0, 1.0, 2.0):
-            _stop("params$wild_type muss 0 (Rademacher), 1 (Mammen) oder 2 (Normal) sein (erhalten: %s)." % _show(w))
+            chk_stop("ut2.param_wild", who)
     if method == "reset":
         pb = p.get("p_break")
         if not _num1(pb) or float(_num_vec(pb)[0]) < 0 or float(_num_vec(pb)[0]) > 1:
-            _stop("params$p_break muss ein Anteil zwischen 0 und 1 sein (erhalten: %s)." % _show(pb))
+            chk_stop("ut2.param_p_break", who)
+    if method == "regime":
+        chk_int1(p.get("n_regimes"), who, "params$n_regimes", lo=1)
+        chk_int1(p.get("vol_window"), who, "params$vol_window", lo=2)
+    if method in ("evt", "tails"):
+        chk_num1(p.get("tail_prob"), who, "params$tail_prob", lo=0, hi=0.5, lo_open=True, hi_open=True)
+    if method == "evt":
+        chk_bool1(p.get("both_tails"), who, "params$both_tails")
+    kn = {"ms_garch": "ms_n_regimes", "ms_ar_garch_m": "ms_ar_n_regimes", "tvtp_ms_garch": "tvtp_n_regimes"}.get(method)
+    # K < 2, nicht ganz usw. meldet _ms_garch_check (Vorberechnung); hier nur die Obergrenze des Kerns
+    if kn is not None and _num1(p.get(kn)) and float(_num_vec(p.get(kn))[0]) > 64:
+        chk_stop("ganz_bis", who, "params$" + kn, "2", "64")
     return True
+
+
+def _atomic1(v) -> bool:
+    """Atomarer Wert (Zahl, Text, Wahrheitswert) wie ein Element eines R-Vektors."""
+    return v is None or isinstance(v, (str, bool, int, float, np.bool_, np.integer, np.floating))
+
+
+def _check_ess_grid(g, who):
+    """ESS-Gitter: ``None`` oder benannte Liste nicht leerer Wertevektoren (R: ``.check_ess_grid``, seit 1.6.4)."""
+    if g is None:
+        return
+    if isinstance(g, Mapping) and any((isinstance(v, pd.Categorical) or (isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype))) for v in g.values()):
+        chk_stop("faktor", who, "ess_grid")   # Entscheidung 15
+    ok = isinstance(g, Mapping) and len(g) > 0 and all(isinstance(k, str) and k != "" for k in g.keys())
+    if ok:
+        for v in g.values():
+            if isinstance(v, (list, tuple)):
+                vals = list(v)
+                ok = ok and len(vals) > 0 and all(_atomic1(z) for z in vals)
+            elif isinstance(v, (np.ndarray, pd.Series)):
+                vals = list(np.asarray(v, dtype=object).ravel())
+                ok = ok and len(vals) > 0 and all(_atomic1(z) for z in vals) and not isinstance(v, pd.Categorical)
+                if isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype):
+                    ok = False
+            else:
+                ok = ok and _atomic1(v) and v is not None
+    if not ok:
+        chk_stop("e2.gitter", who)
+    # seit 1.6.4 nur Zahlen (Entscheidung 31; Wahrheitswerte erlaubt, Entscheidung 45); R: is.numeric/is.logical
+    for v in g.values():
+        vals = list(np.asarray(v, dtype=object).ravel()) if isinstance(v, (list, tuple, np.ndarray, pd.Series)) else [v]
+        if not all(isinstance(z, (int, float, bool, np.integer, np.floating, np.bool_)) for z in vals):
+            chk_stop("gitter_zahlen", who)
+
+
+def _boot_numcols(data, config, who):
+    """Spalten der Konfiguration nur als Zahlen (seit 1.6.4, Entscheidung 39; R ``.boot_numcols``): Kategorie ->
+    ``spalte_faktor``, sonst nicht numerisch -> ``spalte_typ``; eine Spalte nur aus NA zählt als Zahlenspalte
+    (Entscheidung 14). Fehlende Spalten meldet ``_extract_returns``."""
+    nms = _data_cols(data)
+    cols = [ix["col"] for ix in config["indices"]] + ([str(c) for c in _values(config["aux"])] if config["n_aux"] else [])
+    for col in cols:
+        if col not in nms:
+            continue
+        if isinstance(data, pd.DataFrame):
+            v = data.iloc[:, nms.index(col)]
+            if isinstance(v.dtype, pd.CategoricalDtype):
+                chk_stop("spalte_faktor", who, col)
+            ok = v.dtype.kind in "fiu" or (v.dtype.kind != "b" and bool(v.isna().all()))
+        else:
+            ok = data.dtype.kind in "fiu"
+        if not ok:
+            chk_stop("spalte_typ", who, col, chk_msg("typ.numerisch"))
+
+
+def _unwrap_params(params):
+    """Einträge von ``params`` mit Länge 1 wie Einzelwerte (Entscheidung 4); ``garch_order`` bleibt."""
+    if not isinstance(params, Mapping):
+        return params
+    return {k: (v if k == "garch_order" else chk_scalar(v)) for k, v in params.items()}
 
 
 def _modify_list(base, val):
@@ -1341,22 +1458,43 @@ def _modify_list(base, val):
 
 
 @_quiet
-def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores=1):
-    """Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (R: ``.boot_setup``)."""
+def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores=1, max_tries=10, progress=True,
+                who="bootstrap"):
+    """Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (R: ``.boot_setup``; seit 1.6.4 mit der
+    einheitlichen Eingabeprüfung vor der Vorberechnung)."""
     if not _is_config(config):
-        _stop("config muss mit bootstrap_config() erstellt werden")
-    if method not in _BOOT_METHODS:
-        _stop("Unbekannte Methode '" + str(method) + "'. Verfügbar: " + ", ".join(_BOOT_METHODS))
-    if not _is_num(n) or n < 1:
-        _stop("n muss eine positive Zahl sein")
+        chk_stop("klasse", who, "config", "bootstrap_config()")
+    method, n, path_length = chk_scalar(method), chk_scalar(n), chk_scalar(path_length)
+    if not isinstance(method, str) or method not in _BOOT_METHODS:
+        chk_stop("auswahl", who, "method", ", ".join('"%s"' % m for m in _BOOT_METHODS))
+    if not _is_num(n) or math.isnan(float(n)) or n < 1:
+        chk_stop("ut2.n_positiv", who)
     if path_length is not None and (not _num1(path_length) or path_length < 1 or
                                     float(path_length) != _r_round0(float(path_length))):
-        _stop("path_length muss eine ganze Zahl >= 1 sein (erhalten: %s)." % _show(path_length))
-    ex = _extract_returns(data, config)
+        chk_stop("ganz", who, "path_length", "1")
+    _boot_data_check(data, who)
+    chk_int1(n, who, "n")
+    # seit 1.6.4 Obergrenzen (Entscheidungen 16, 36 und 46): n <= 10^8, path_length <= 36 600 Tage (100 Jahre)
+    chk_max(n, SL_MAX_N, who, "n")
+    if path_length is not None:
+        chk_max(path_length, SL_MAX_TAGE, who, "path_length")
+    if params is not None and not isinstance(params, Mapping):
+        chk_stop("liste", who, "params")
+    params = _unwrap_params(params)
+    ess = chk_bool1(ess, who, "ess")
+    _check_ess_grid(ess_grid, who)
+    chk_int1(max_tries, who, "max_tries")
+    cores = chk_cores(cores, who)   # seit 1.6.4 höchstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
+    chk_bool1(progress, who, "progress")
+    _boot_numcols(data, config, who)   # seit 1.6.4 nur Zahlenspalten (Entscheidung 39)
+    ex = _extract_returns(data, config, who)
     n_obs = ex["ret"].shape[0]
+    # seit 1.6.4 (Entscheidung 38): ess = True mit dem Standardgitter braucht für Blocklängen mindestens 4 Renditen
+    if ess and ess_grid is None and method in ("stationary", "block", "circular") and n_obs < 4:
+        chk_stop("ess_kurz", who, 4)
     n_out = _as_int(path_length if path_length is not None else n_obs)
     if method in ("wild", "reset") and n_out != n_obs:
-        _stop("Verfahren '%s' erhält die Chronologie; path_length muss %d sein." % (method, n_obs))
+        chk_stop("ut2.chronologie", who, method, int(n_obs))
     params = _resolve_auto(params, ex["ret"])
     design = _ess_design(method, ess_grid, _as_int(n), n_obs) if ess else None
     if ess and design is None:
@@ -1366,9 +1504,13 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
         combo_of_path = np.ones(int(math.floor(float(n))) if float(n) >= 1 else 0, dtype=np.int64)
     else:
         pn = design.attrs["param_names"]
-        combos = [_modify_list(params, {k: float(design[k].iloc[i]) for k in pn}) for i in range(len(design))]
+        combos = [_modify_list(params, {k: (bool(design[k].iloc[i]) if design[k].dtype == bool else float(design[k].iloc[i]))
+                                        for k in pn}) for i in range(len(design))]   # logisch bleibt logisch (45)
         combo_of_path = np.repeat(np.arange(1, len(design) + 1), design["n_sims"].to_numpy().astype(np.int64))
     n_paths = len(combo_of_path)
+    base_p = [_get_base_params(cp) for cp in combos]
+    for bp in base_p:
+        _check_boot_params(method, bp, n_obs, who)   # seit 1.6.4 vor der Vorberechnung
     infos = []
     for cp in combos:
         try:
@@ -1377,13 +1519,10 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
             raise
         except Exception as err:  # noqa: BLE001
             _stop("Vorberechnung fehlgeschlagen: %s" % err)
-    base_p = [_get_base_params(cp) for cp in combos]
-    for bp in base_p:
-        _check_boot_params(method, bp, n_obs)
     weights = np.ones(n_paths) if design is None else design["weight"].to_numpy()[combo_of_path - 1]
     weights = weights / r_sum(weights) * len(weights)
     return {"ex": ex, "n_obs": n_obs, "n_out": n_out, "design": design, "combos": combos, "base_p": base_p,
-            "infos": infos, "combo_of_path": combo_of_path, "n_paths": n_paths, "weights": weights}
+            "infos": infos, "combo_of_path": combo_of_path, "n_paths": n_paths, "weights": weights, "cores": cores}
 
 
 @_quiet
@@ -1439,7 +1578,7 @@ def _colnames(P):
 
 @_quiet
 def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess_grid=None, path_length=None,
-              max_tries=10, seed=None, cores=1, progress=True):
+              max_tries=10, seed=None, cores="auto", progress=True):
     """Bootstrap-Pfade erzeugen.
 
     Erzeugt ``n`` simulierte Preis-Pfade für alle Indizes der Konfiguration, leitet daraus die Hebelprodukte ab
@@ -1453,6 +1592,8 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
         data: DataFrame oder Matrix mit den in ``config`` genannten Spalten (Index-Spalten als Brutto-Renditen je
             Zeile oder, bei ``input = "prices"``, als Kursniveaus; Zusatzreihen beliebig). Jede Zeile ist ein
             Simulationsschritt ("Tag"); eine Datumsspalte wird nicht ausgewertet.
+            Seit 1.6.4 keine Faktorspalten (Kategorien).
+            Seit 1.6.4 müssen die Spalten aus config Zahlen enthalten (Text, auch Zahlen als Text, ist ein Fehler).
         config: Objekt aus ``bootstrap_config()``.
         method: Verfahren (Standard in ``bootstrap()``: ``"raw"``, in ``bootstrap_study()``: ``"stationary"``). In
             Klammern die Einträge von ``params``, die das Verfahren verwendet:
@@ -1485,8 +1626,11 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
             Bei "wild" und "reset" muss ``path_length`` der Länge der Historie entsprechen.
         n: Anzahl Pfade (Standard 1000); bei ``ess = True`` das Gesamtbudget, das auf die Parameterkombinationen
             verteilt wird. Pfade, die nach ``max_tries`` Versuchen ungültig bleiben, fehlen im Ergebnis.
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
+            Seit 1.6.4 höchstens 10^8.
         params: Benannte Liste von Verfahrensparametern; nicht angegebene Einträge erhalten den Standardwert
             (Standard ``{}`` = alle Standardwerte). Je Verfahren werden nur die oben genannten Einträge verwendet:
+            Seit 1.6.4 geprüft: n_regimes ganze Zahl ≥ 1, vol_window ganze Zahl ≥ 2, tail_prob > 0 und < 0.5, both_tails TRUE oder FALSE, MS-GARCH-Regime höchstens 64.
 
             - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1, Standard 20) oder ``"auto"``
               (``bootstrap_block_length()``, Spalte ``stationary``).
@@ -1517,14 +1661,21 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
             Budget ``n`` wird invers zur effektiven Stichprobengröße (ESS) je Kombination verteilt; die Pfade
             erhalten Gewichte (Mittel 1), mit denen ``bootstrap_probability()`` und ``summary()`` rechnen. Für
             "raw", "garch" und "gjr_garch" gibt es kein Standardgitter (dann normaler Bootstrap).
+            Seit 1.6.4 nur TRUE oder FALSE.
+            Seit 1.6.4 braucht ess = True mit dem Standardgitter bei stationary, block und circular mindestens 4
+            Renditen (sonst Fehler).
         ess_grid: Benannte Liste von Wertevektoren je Hyperparameter (z. B. ``{"L": [20, 50, 100]}``); ``None``
             (Standard) = Standardgitter des Verfahrens (z. B. ``L`` bzw. ``block_length`` 5, 10, 20, 30, 50, 75,
             100 Zeilen, begrenzt auf die halbe Historienlänge). Nur bei ``ess = True`` verwendet.
+            Seit 1.6.4 eine benannte Liste nicht leerer Wertevektoren (kein Faktor).
+            Seit 1.6.4 nur Zahlen (und Wahrheitswerte); Text wie ms_garch_model ist ein Fehler.
         path_length: Pfadlänge in Zeilen (simulierte Schritte, ganze Zahl, mindestens 1); ``None`` (Standard) =
             Anzahl verwendbarer Zeilen der Historie. Damit lassen sich z. B. 50-jährige Pfade aus 30 Jahren
             Historie erzeugen. Jeder Pfad hat ``path_length + 1`` Zeilen (Startzeile plus Schritte).
+            Seit 1.6.4 höchstens 36600 (100 Jahre in Tagen).
         max_tries: Versuche je Pfad (Standard 10), falls ein Pfad ungültig ist (Indexrendite <= 0 oder nicht
             endlich). Ein Totalverlust eines Hebelprodukts macht den Pfad nicht ungültig.
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
         seed: Ganzzahliger Startwert (|seed| < 2^53); ``None`` (Standard) = genau einmal aus dem Zufallszustand
             von SimLev gezogen (siehe ``simlev_seed()``; ganze Zahl von 0 bis 2^31 - 1, im Ergebnis unter ``seed``
             gespeichert, damit reproduzierbar). Jeder Pfad i erhält einen eigenen Strom (Sprung um 2^128 Schritte
@@ -1533,10 +1684,28 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
             ``params``, ``ess`` und ``path_length``) dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der
             Zufallszustand von SimLev unverändert; mit ``seed = None`` liefern wiederholte Aufrufe verschiedene
             Pfade. ``set.seed()`` wirkt nicht.
-        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf Windows). Bei den MS-GARCH-Verfahren
-            (``ms_garch``, ``ms_ar_garch_m``, ``tvtp_ms_garch``) rechnet der Fit seine Startpunkte zudem auf so
-            vielen Threads; das Ergebnis hängt davon nicht ab.
+        cores: Anzahl Prozesse:
+            ``"auto"`` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+            Mit ``"auto"`` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+            die Zahl der Prozesse und der Kern-Threads je Lauf selbst (Planer, gleiche Regel in R, Python
+            und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder höherer Priorität), so viele,
+            wie der freie Speicher trägt, und nur, wenn die
+            Startkosten kleiner sind als der Gewinn (kleine Rechnungen bleiben bei einem Prozess; ohne ``fork``
+            (Windows, macOS) immer einer).
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
+            Einheitenreihenfolge.
+            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
+            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Das Ergebnis hängt nicht von cores
+            ab.
+            Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
+            Bei den MS-GARCH-Verfahren (``ms_garch``, ``ms_ar_garch_m``, ``tvtp_ms_garch``) rechnet der Fit
+            seine Startpunkte zudem auf so vielen Threads (mit ``"auto"`` auf den Kern-Threads: Zahl der Prozessoren
+            bzw. ``SIMLEV_THREADS``); das Ergebnis hängt davon nicht ab.
         progress: Logisch: Fortschritts- und Abschlussmeldung per ``message()`` ausgeben (Standard ``True``).
+            Seit 1.6.4 nur TRUE oder FALSE.
 
     Returns:
         Objekt der Klasse ``bootstrap_result``, eine Liste mit
@@ -1586,11 +1755,14 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
         print(b["paths"][0].shape)
     """
     t0 = time.time()
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
+    method, max_tries, cores, progress = chk_scalar(method), chk_scalar(max_tries), chk_scalar(cores), chk_scalar(progress)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress,
+                        "bootstrap")
+    cores = setup["cores"]   # begrenzt (Entscheidung 41)
     if seed is None:                    # None -> einmal k aus G
         seed = _sl.next_seed()
     else:
-        _sl.check_seed(seed)
+        _sl.check_seed(seed, "bootstrap")
     streams = _sl.streams(seed, setup["n_paths"])                                 # U_i = J^i(S_0)
     res = _par_lapply(
         range(1, setup["n_paths"] + 1),
@@ -1635,7 +1807,9 @@ def bootstrap_validate(result, *, min_rows=None, verbose=True):
     Args:
         result: Objekt der Klasse ``bootstrap_result`` aus ``bootstrap()``.
         min_rows: Mindestzeilenzahl je Pfad; ``None`` (Standard) = keine Mindestlänge.
+            Seit 1.6.4 eine ganze Zahl ≥ 0.
         verbose: Logisch: Anzahl entfernter und gültiger Pfade ausgeben (Standard ``True``).
+            Seit 1.6.4 nur TRUE oder FALSE.
 
     Returns:
         Das bereinigte ``bootstrap_result`` (``paths``, ``weights`` und ``param_values`` gekürzt). Bleibt kein
@@ -1653,10 +1827,12 @@ def bootstrap_validate(result, *, min_rows=None, verbose=True):
         print(len(b["paths"]))
     """
     if not _is_boot_result(result):
-        _stop("result muss ein bootstrap_result-Objekt sein")
+        chk_stop("klasse", "bootstrap_validate", "result", "bootstrap()")
     P = list(result.get("paths") or [])
     if not P:
-        _stop("Keine Pfade im Ergebnis vorhanden")
+        chk_stop("rs.keine_pfade", "bootstrap_validate")
+    min_rows = chk_int1(min_rows, "bootstrap_validate", "min_rows", lo=0, null_ok=True)   # seit 1.6.4
+    verbose = chk_bool1(verbose, "bootstrap_validate", "verbose")
 
     def valid(p):
         if p is None or not isinstance(p, (pd.DataFrame, np.ndarray)) or p.shape[0] == 0:
@@ -1703,10 +1879,14 @@ def bootstrap_data(result, *, i=1, dates=None, start="2000-01-01"):
     Args:
         result: ``bootstrap_result`` aus ``bootstrap()`` oder eine einzelne Pfadmatrix (z. B.
             ``result["paths"][[i]]``).
+            Seit 1.6.4 auch wie beschrieben ein einzelner Pfad: Zahlenmatrix (Spalten ohne Namen heißen V1, V2, …)
+            oder Tabelle aus Zahlenspalten.
         i: Pfadnummer (Standard 1); nur bei ``bootstrap_result`` verwendet.
+            Seit 1.6.4 eine ganze Zahl von 1 bis zur Pfadzahl.
         dates: Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen hat (``path_length + 1``), z. B. ein
             Handelstagskalender; ``None`` (Standard) = aufeinanderfolgende Kalendertage ab ``start``.
         start: Startdatum für ``dates = None`` (Zeichenkette oder Date, Standard "2000-01-01").
+            Seit 1.6.4 ein einzelnes Datum (Date oder "JJJJ-MM-TT"), keine Zahl.
 
     Returns:
         DataFrame mit Spalte ``date`` (Klasse Date) und allen Pfadspalten (Kursniveaus mit Startwert 100;
@@ -1731,15 +1911,26 @@ def bootstrap_data(result, *, i=1, dates=None, start="2000-01-01"):
         print(res["cagr"])
     """
     is_res = _is_boot_result(result)
-    if not is_res:
-        # R: result$config auf einer Pfadmatrix -> Fehler (auch bei einer einzelnen Pfadmatrix)
-        _stop("$ operator is invalid for atomic vectors")
-    P = result["paths"][int(i) - 1]
+    # seit 1.6.4: Pfadnummer als ganze Zahl von 1 bis zur Pfadzahl (vorher zählten 0 und -1 von hinten), start als
+    # Datum
+    if is_res:
+        i = chk_int1(i, "bootstrap_data", "i", lo=1, hi=len(result["paths"]))
+    elif isinstance(result, np.ndarray) and result.ndim == 2 and result.dtype.kind in "fiu" and result.shape[1] >= 1:
+        # seit 1.6.4 (Entscheidung 30) wie dokumentiert auch ein einzelner Pfad: Zahlenmatrix (Spalten V1, V2, … wie
+        # R as.data.frame) oder Tabelle aus Zahlenspalten (bis 1.6.3 Fehler wie R "$ operator is invalid")
+        result = pd.DataFrame(np.asarray(result, dtype=np.float64), columns=["V%d" % (j + 1) for j in range(result.shape[1])])
+    elif not (isinstance(result, pd.DataFrame) and result.shape[1] >= 1
+              and all(result.iloc[:, j].dtype.kind in "fiu" for j in range(result.shape[1]))):
+        chk_stop("pfad", "bootstrap_data")
+    chk_date1(start, "bootstrap_data", "start")
+    start = chk_scalar(start)
+    P = result["paths"][int(i) - 1] if is_res else result
     nr = P.shape[0]
+    chk_nofactor(dates, "bootstrap_data", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     if dates is None:
         dates = _seq_dates(_to_date(start, "start"), nr)
     if len(np.atleast_1d(dates)) != nr:
-        _stop("dates hat Länge %d, Pfad hat %d Zeilen." % (len(np.atleast_1d(dates)), nr))
+        chk_stop("rs.dates_pfad", "bootstrap_data", len(np.atleast_1d(dates)), int(nr))
     d = _to_date(dates, "dates")
     out = pd.DataFrame({"date": d})
     for c in P.columns:
@@ -1809,6 +2000,9 @@ def bootstrap_study_metrics(res):
         res = simlev.simulation(d, simlev.create_strategy(aktien=simlev.asset_config(asset_class="etf")))
         print(simlev.bootstrap_study_metrics(res))
     """
+    from .result import SimLevResult
+    if not (isinstance(res, SimLevResult) or (isinstance(res, RList) and "SimLevResult" in getattr(res, "r_class", ()))):
+        chk_stop("klasse", "bootstrap_study_metrics", "res", "simulation()")   # seit 1.6.4
     s = _res_get(res, "statistics", {})
     dq = _quantile7(np.asarray(_res_get(res, "drawdowns"), dtype=np.float64), [0.5, 0.9])
     worth = np.asarray(_res_get(res, "worth"), dtype=np.float64)
@@ -1893,13 +2087,13 @@ def _keep_count(x, n, who):
     Logisch wird vor der Ganzzahl geprüft (``True`` ist in Python eine Ganzzahl). Fehler bei NA, Text, Vektor,
     negativen oder nicht ganzen Zahlen. Ergebnis: Anzahl in ``0..n`` (float; ``n`` darf ``inf`` sein).
     """
+    x = chk_scalar(x)   # Länge 1 wie Einzelwert (Entscheidung 4)
     if isinstance(x, (bool, np.bool_)):
         return float(n) if x else 0.0
     ok = isinstance(x, (int, float, np.integer, np.floating)) and math.isfinite(float(x)) and float(x) >= 0 and \
         float(x) == _r_round0(float(x))
     if not ok:
-        _stop("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) "
-              "sein, nicht %s." % (who, _show(x)))
+        chk_stop("ut2.keep_paths", who)   # seit 1.6.4 aus der Tabelle (K43 T2-B6)
     return min(float(x), float(n))
 
 
@@ -1936,7 +2130,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
                     ess_grid=None, path_length=None, dates=None, start="2000-01-01", burn_in=0,
                     sim_args=None, metrics=bootstrap_study_metrics, benchmark=None, chunk_dir=None, keep_paths=0,
                     keep_returns=("none", "year", "quarter", "month"), keep_aux=None, max_tries=10, chunk_size=25,
-                    seed=None, cores=1, progress=True):
+                    seed=None, cores="auto", progress=True):
     """Strategien auf Bootstrap-Pfaden auswerten.
 
     Erzeugt Bootstrap-Pfade wie ``bootstrap()``, berechnet je Pfad die Signale, simuliert alle Strategien mit
@@ -1982,6 +2176,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             verteilt wird. Pfade, die nach ``max_tries`` Versuchen ungültig bleiben, fehlen im Ergebnis.
         strategies: Benannte, nicht leere Liste. Jedes Element ist entweder direkt eine Strategie
             (``create_strategy()``) oder eine Liste mit
+            Seit 1.6.4 ohne doppelte Namen.
 
             - strategy: Strategie (Pflicht).
             - signal: Optional Funktion, die den Pfad-DataFrame (alle Zeilen einschließlich ``burn_in``) erhält
@@ -2040,6 +2235,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             ``bootstrap_data()``.
         burn_in: Anzahl Anfangszeilen des Pfads, die nach der Signalberechnung verworfen werden (Signal-Vorlauf,
             z. B. 730 Tage für eine 430-Tage-SMA; Standard 0). Muss kleiner als ``path_length`` sein.
+            Seit 1.6.4 eine ganze Zahl ≥ 0.
         sim_args: Benannte Liste gemeinsamer Argumente für ``simulation()`` (Standard ``{}``), z. B.
             ``{"start_value": 1000, "tax": tax_profile()}``: Argumente von ``simulation()`` außer ``data`` und
             ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100, 1)``, ``tax = tax_profile()``) und
@@ -2047,6 +2243,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``) ergeben einen Fehler, der den Baustein nennt.
         metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
             ``bootstrap_study_metrics()``); die Namen werden zu Spalten von ``results``.
+            Seit 1.6.4 geprüft: eine Funktion.
+            Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen nicht path, weight,
+            combo, tries oder strategy heißen (sonst Fehler nach dem Rechnen).
         benchmark: Name einer Strategie aus ``strategies`` als Vergleich für die gepaarte Auswertung in
             ``summary()``; ``None`` (Standard) = keine.
         chunk_dir: Optional (Standard ``None``) Verzeichnis für Zwischenergebnisse je Chunk (Dateien
@@ -2057,6 +2256,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             Lauf mit gleichem Seed fortgesetzt. Die Dateien werden nur über Chunk-Nummer, Seed, ``keep_returns``
             und ``keep_paths`` zugeordnet: bei geänderten Strategien, Daten oder Parametern ein neues Verzeichnis
             verwenden.
+            Seit 1.6.4 ein einzelner, nicht leerer Text.
+            Seit 1.6.4 werden die Dateien atomar geschrieben (temporärer Name, dann umbenannt); eine unvollständige
+            oder beschädigte Datei bricht bei jedem cores mit derselben Meldung ab.
         keep_paths: Pfadmatrizen zusätzlich zurückgeben (Diagnose): ``True`` = alle Pfade, ``False`` oder 0
             (Standard) = keine, ganze Zahl k >= 1 = die ersten k Pfade (k größer als die Pfadzahl: alle); ``NA``,
             Text, Vektoren, negative oder nicht ganze Zahlen ergeben einen Fehler. Speicherbedarf: Alle behaltenen
@@ -2081,9 +2283,11 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             Inflation in Prozent p. a. Sind gespeicherte Faktoren nicht endlich oder <= 0 (z. B. eine nicht
             gekennzeichnete Zinsreihe mit Vorzeichenwechsel), warnt die Funktion, und ``withdrawal_paths()``
             bricht mit dieser Reihe als Inflation ab. Standard ``None``.
+            Seit 1.6.4 ohne doppelte Namen.
         max_tries: Versuche je Pfad (Standard 10), falls ein Pfad ungültig ist (Indexrendite <= 0 oder nicht
             endlich). Ein Totalverlust eines Hebelprodukts macht den Pfad nicht ungültig.
         chunk_size: Pfade je Arbeitspaket (Standard 25); Einheit der Parallelisierung und der Zwischenspeicherung.
+            Seit 1.6.4 eine ganze Zahl ≥ 1.
         seed: Ganzzahliger Startwert (|seed| < 2^53); ``None`` (Standard) = genau einmal aus dem Zufallszustand
             von SimLev gezogen (siehe ``simlev_seed()``; ganze Zahl von 0 bis 2^31 - 1, im Ergebnis unter ``seed``
             gespeichert, damit reproduzierbar). Jeder Pfad i erhält einen eigenen Strom (Sprung um 2^128 Schritte
@@ -2092,10 +2296,29 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             ``params``, ``ess`` und ``path_length``) dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der
             Zufallszustand von SimLev unverändert; mit ``seed = None`` liefern wiederholte Aufrufe verschiedene
             Pfade. ``set.seed()`` wirkt nicht.
-        cores: Anzahl Prozesse (Standard 1); parallelisiert wird über Chunks. Der MS-GARCH-Fit der Vorberechnung
-            nutzt ebenso viele Threads (Ergebnis unabhängig davon).
-        progress: Logisch: Fortschrittsmeldungen per ``message()`` (Standard ``True``; Meldung je Chunk nur bei
-            ``cores = 1``).
+        cores: Anzahl Prozesse; parallelisiert wird über Chunks:
+            ``"auto"`` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+            Mit ``"auto"`` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+            die Zahl der Prozesse und der Kern-Threads je Lauf selbst (Planer, gleiche Regel in R, Python
+            und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder höherer Priorität), so viele,
+            wie der freie Speicher trägt, und nur, wenn die
+            Startkosten kleiner sind als der Gewinn (kleine Rechnungen bleiben bei einem Prozess; ohne ``fork``
+            (Windows, macOS) immer einer).
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
+            Einheitenreihenfolge.
+            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
+            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
+            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            In Julia erscheinen Ausgaben, die
+            eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
+            Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
+            hängt nicht von cores ab.
+            Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
+            Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele
+            Threads (mit ``"auto"`` die Kern-Threads; Ergebnis unabhängig davon).
+        progress: Logisch: Fortschrittsmeldungen per ``message()`` (Standard ``True``; Meldung je Chunk bei jedem
+            ``cores``, seit 1.6.4; bis dahin nur bei ``cores = 1`` und ``cores = "auto"``).
 
     Returns:
         Objekt der Klasse ``SimLevBootstrapStudy``, eine Liste mit
@@ -2143,15 +2366,25 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
                                                 "letf": simlev.create_strategy(akt_l2=simlev.asset_config(asset_class="etf"))})
         print(st["results"][["strategy", "path", "cagr", "max_drawdown"]].head())
     """
+    _e5_choice(keep_returns, ("none", "year", "quarter", "month"), "bootstrap_study", "keep_returns")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     keep_returns = _match_arg(keep_returns, ("none", "year", "quarter", "month"))
+    fn = "bootstrap_study"
+    # seit 1.6.4: config vor keep_aux, keep_aux nur Text ohne Doppel; einheitliche Eingabeprüfung (R gleich)
+    if not _is_config(config):
+        chk_stop("klasse", "bootstrap_study", "config", "bootstrap_config()")
     if keep_aux is not None:
-        keep_aux = [keep_aux] if isinstance(keep_aux, str) else [str(a) for a in keep_aux]
-        if not all(a in config["aux_names"] for a in keep_aux):
-            _stop("keep_aux muss Namen aus config$aux enthalten.")
+        ka = [keep_aux] if isinstance(keep_aux, str) else (
+            list(np.asarray(keep_aux, dtype=object).ravel()) if isinstance(keep_aux, (list, tuple, np.ndarray, pd.Series))
+            else [keep_aux])
+        if not all(isinstance(a, str) for a in ka) or not all(a in config["aux_names"] for a in ka):
+            chk_stop("ut2.keep_aux", "bootstrap_study")
+        keep_aux = ka
+        if len(set(keep_aux)) != len(keep_aux):
+            chk_stop("e2.doppelt", fn, "keep_aux")
     t0 = time.time()
-    if strategies is None or not len(strategies) or not isinstance(strategies, Mapping) or \
-            any(str(k) == "" for k in strategies.keys()):
-        _stop("'strategies' muss eine benannte, nicht-leere Liste sein.")
+    if strategies is None or not isinstance(strategies, Mapping) or _is_strategy(strategies) or not len(strategies) \
+            or any(str(k) == "" for k in strategies.keys()):
+        chk_stop("ut2.strategies", "bootstrap_study")
     specs = {}
     for k, s in strategies.items():
         if isinstance(s, Mapping) and s.get("strategy") is not None and not _is_strategy(s):
@@ -2159,42 +2392,77 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         else:
             specs[str(k)] = {"strategy": s}
     snames = list(specs.keys())
-    if benchmark is not None and benchmark not in snames:
-        _stop("benchmark muss einer der Strategienamen sein.")
+    from .sensitivity import _e2_check_strategy, _e2_sim_args
+    for sp0 in specs.values():
+        _e2_check_strategy(sp0.get("strategy"))   # wie simulation(), vor dem Ziehen (seit 1.6.4)
+    benchmark = chk_scalar(benchmark)
+    if benchmark is not None and (not isinstance(benchmark, str) or benchmark not in snames):
+        chk_stop("ut2.benchmark_name", "bootstrap_study")
+    sim_args = _e2_sim_args(sim_args, fn)
+    if not callable(metrics):
+        chk_stop("e2.funktion", fn, "metrics")
+    chunk_dir = chk_name1(chunk_dir, fn, "chunk_dir", null_ok=True)
+    if chunk_dir is not None and os.path.exists(chunk_dir) and not os.path.isdir(chunk_dir):
+        chk_stop("e2.verzeichnis", fn, "chunk_dir")
+    burn_in = chk_int1(burn_in, fn, "burn_in", lo=0)
+    chunk_size = chk_int1(chunk_size, fn, "chunk_size")
+    chk_date1(start, fn, "start")
+    start = chk_scalar(start)
+    method, max_tries, cores, progress = chk_scalar(method), chk_scalar(max_tries), chk_scalar(cores), chk_scalar(progress)
     # Argumente für simulation() je Strategie einmal auflösen (Bausteine, Pfade; alte flache Namen: Fehler)
     from ._sim_blocks import _sim_args_set
     sim_args = _sim_args_set({}, sim_args, "bootstrap_study")
     for nm0 in snames:
         specs[nm0]["sim"] = _sim_args_set(sim_args, specs[nm0].get("args"), "bootstrap_study")
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress, fn)
+    cores = setup["cores"]   # begrenzt (Entscheidung 41)
     keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # True = alle Pfade
     n_out = setup["n_out"]
+    chk_nofactor(dates, "bootstrap_study", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     if dates is None:
         dates = _seq_dates(_to_date(start, "start"), n_out + 1)
     if len(np.atleast_1d(dates)) != n_out + 1:
-        _stop("dates braucht Länge %d (Pfadlänge + 1)." % (n_out + 1))
+        chk_stop("rs.dates_studie", fn, int(n_out) + 1)
     dates = _to_date(dates, "dates")
     if burn_in >= n_out:
-        _stop("burn_in ist länger als der Pfad.")
+        chk_stop("rs.burn_in", fn)
     if seed is None:                    # None -> einmal k aus G
         seed = _sl.next_seed()
     else:
-        _sl.check_seed(seed)
+        _sl.check_seed(seed, "bootstrap_study")
     n_paths = setup["n_paths"]
     streams = _sl.streams(seed, n_paths)                                          # U_i = J^i(S_0)
     ids = np.arange(1, n_paths + 1)
     chunk_size = float(chunk_size)
     keys = np.ceil(ids / chunk_size)
-    chunks = [ids[keys == k] for k in sorted(set(keys.tolist()))]
+    # seit 1.6.4 (A-091) über die Wechselstellen der (aufsteigenden) Schlüssel statt eines Vergleichs je Chunk über
+    # alle Pfade; gleiche Chunks in gleicher Reihenfolge
+    cut = np.concatenate([[0], np.flatnonzero(keys[1:] != keys[:-1]) + 1, [keys.size]]) if keys.size else np.zeros(0, int)
+    chunks = [ids[cut[i]:cut[i + 1]].copy() for i in range(len(cut) - 1)]
+    cached = [None] * len(chunks)
     if chunk_dir is not None:
         os.makedirs(chunk_dir, exist_ok=True)
         _chunk_pruefen(chunk_dir, len(chunks), seed, keep_returns, keep_paths, "_py.pkl")
+        # seit 1.6.4 (Entscheidung 29): vorhandene Zwischendateien vor dem Rechnen lesen; eine unvollständige oder
+        # beschädigte Datei bricht bei jedem cores mit derselben Meldung ab (R: gleiche Prüfung)
+        for ci in range(1, len(chunks) + 1):
+            f = os.path.join(chunk_dir, _chunk_stem(ci, seed, keep_returns, keep_paths) + "_py.pkl")
+            if not os.path.exists(f):
+                continue
+            try:
+                with open(f, "rb") as fh:
+                    x = pickle.load(fh)
+            except Exception:  # noqa: BLE001 (jede Lesestörung gilt als beschädigt)
+                x = None
+            if not isinstance(x, list) or len(x) != len(chunks[ci - 1]):
+                chk_stop("chunk_kaputt", fn, ci)
+            cached[ci - 1] = x
     burn_in = int(burn_in)
     sim_rows = np.arange(burn_in + 1, n_out + 2)
     dsim = dates[sim_rows - 1]
     ret_ends = _anniv_ends(dsim, keep_returns) if keep_returns != "none" else None
     if ret_ends is not None and len(ret_ends) < 2:
-        _stop("Pfad nach burn_in zu kurz für eine volle Periode in keep_returns.")
+        chk_stop("rs.burn_in_kurz", fn)
 
     def per_ret(v):
         v = np.asarray(v, dtype=np.float64)[np.asarray(ret_ends) - 1]
@@ -2258,7 +2526,11 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
                         df[k2] = v
             if sp.get("map") is not None:
                 for a2, col in dict(sp["map"]).items():
-                    df[a2] = df[col]
+                    # wie R df[[a]] <- df[[col]]: fehlt col, entfällt a (seit 1.6.4; vorher KeyError)
+                    if col in df.columns:
+                        df[a2] = df[col]
+                    elif a2 in df.columns:
+                        df = df.drop(columns=[a2])
             if burn_in > 0:
                 df = df.iloc[burn_in:].reset_index(drop=True)
             args = sp["sim"]
@@ -2293,22 +2565,36 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         f = None
         if chunk_dir is not None:
             f = os.path.join(chunk_dir, _chunk_stem(ci, seed, keep_returns, keep_paths) + "_py.pkl")
-        if f is not None and os.path.exists(f):
-            with open(f, "rb") as fh:
-                return pickle.load(fh)
+        if cached[ci - 1] is not None:
+            return cached[ci - 1]
         out = [eval_path(int(i)) for i in chunks[ci - 1]]
-        if f is not None:
-            with open(f, "wb") as fh:
+        if f is not None:   # seit 1.6.4 atomar: erst unter einem temporären Namen, dann umbenennen (Entscheidung 29)
+            tmp = "%s.tmp%d" % (f, os.getpid())
+            with open(tmp, "wb") as fh:
                 pickle.dump(out, fh)
-        if progress and cores <= 1:
+            os.replace(tmp, f)
+        if progress:                # seit 1.6.4 bei jedem cores (Entscheidung 135; bis dahin nur cores = 1 und "auto")
             _message("  Chunk %d/%d fertig (%.0f s)" % (ci, len(chunks), time.time() - t0))
         return out
 
     if progress:
-        _message("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %d Kern(e)"
-                 % (method, n_paths, len(specs), len(chunks), int(cores)))
+        _message("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %s Kern(e)"
+                 % (method, n_paths, len(specs), len(chunks), cores if cores == "auto" else "%d" % int(cores)))
     res = _par_lapply(range(1, len(chunks) + 1), run_chunk, cores)
     res = [r for ch in res for r in ch]
+    # seit 1.6.4 (Entscheidung 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte (R: gleiche
+    # Prüfung nach dem Rechnen); ohne Namen (Liste, Array) gelten sie als leer
+    for r in res:
+        if r is None:
+            continue
+        for nm0 in snames:
+            rw = r["rows"][nm0]["row"]
+            if rw is None:
+                continue
+            mn = list(rw.index)[4:]
+            if (any(not isinstance(k, str) or k == "" for k in mn) or len(set(mn)) != len(mn)
+                    or any(k in ("path", "weight", "combo", "tries", "strategy") for k in mn)):
+                chk_stop("kennzahl_namen", fn)
     tab_parts = []
     for nm in snames:
         rws = [r["rows"][nm]["row"] for r in res if r is not None and r["rows"][nm]["row"] is not None]
@@ -2479,7 +2765,7 @@ def _wquantile(x, w, probs):
     w = w[ok]
     if not len(x):
         return np.full(len(probs), _NAN)
-    if len(set(float(v) for v in w)) == 1:
+    if bool((w == w[0]).all()):   # seit 1.6.4 (A-090) auf dem Feld (w endlich; ±0 gleich wie im Set)
         return _quantile7(x, probs)
     sw = r_sum(w)
     if not (sw > 0):
@@ -2539,6 +2825,7 @@ def bootstrap_probability(study, *args, thresholds=None, env=None, **kwargs):
         thresholds: Optional (Standard ``None``) benannte Liste je Strategiename mit einer benannten Liste von
             Ausdrücken (``quote()``), z. B. ``{"sma": {"ziel": quote(cagr >= 0.08)}}``. Für eine hier genannte
             Strategie ersetzen diese Bedingungen die Bedingungen aus ``...`` (strategiespezifische Schwellen).
+            Seit 1.6.4 geprüft: benannte Liste benannter Listen; ohne Bedingung (weder hier noch in ...) bricht die Funktion ab.
         env: Mapping für freie Variablen und Funktionen in Bedingungen.
         **kwargs: Benannte oder unbenannte Bedingungen in Kennzahlnamen, z. B. ``ttwror >= 0.13``, ``joint =
             ttwror >= 0.13 & max_drawdown <= 0.95``. Unbenannte Bedingungen werden nach ihrem Ausdruck benannt.
@@ -2580,7 +2867,14 @@ def bootstrap_probability(study, *args, thresholds=None, env=None, **kwargs):
         print(simlev.bootstrap_probability(st, "cagr > 0", joint="cagr > 0.05 & max_drawdown <= 0.3"))
     """
     if not _is_study(study):
-        _stop("study muss ein SimLevBootstrapStudy-Objekt sein.")
+        chk_stop("klasse", "bootstrap_probability", "study", "bootstrap_study()")
+    # seit 1.6.4: thresholds als benannte Liste (je Strategie eine benannte Liste von Bedingungen)
+    if thresholds is not None and not (
+            isinstance(thresholds, Mapping) and len(thresholds) > 0 and
+            all(isinstance(k, str) and k != "" for k in thresholds.keys()) and
+            all(isinstance(t, Mapping) and len(t) > 0 and all(isinstance(k, str) and k != "" for k in t.keys())
+                for t in thresholds.values())):
+        chk_stop("e2.benannt", "bootstrap_probability", "thresholds")
     with np.errstate(all="ignore"):
         return _bootstrap_probability(study, args, kwargs, thresholds, env)
 
@@ -2591,6 +2885,8 @@ def _bootstrap_probability(study, args, kwargs, thresholds, env):
         conds.append((c if isinstance(c, str) else getattr(c, "__name__", str(c)), c))
     for k, c in kwargs.items():
         conds.append((k, c))
+    if not conds and thresholds is None:   # seit 1.6.4 (vorher leere Tabelle; R NULL)
+        chk_stop("e2.bedingung", "bootstrap_probability")
     tab = study["results"]
     out = []
     for s in _uniq(list(tab["strategy"])):
@@ -2624,7 +2920,8 @@ def _bootstrap_probability(study, args, kwargs, thresholds, env):
 def _summary_study(obj, metrics=("cagr", "ttwror", "max_drawdown", "sharpe", "ulcer_index", "final_value"),
                    probs=(0.05, 0.25, 0.5, 0.75, 0.95)):
     tab = obj["results"]
-    metrics = [m for m in _uniq(list(metrics)) if m in tab.columns]
+    # ein einzelner Name als Text gilt als ein Name (seit 1.6.4, A-006; bis 1.6.3 von list() in Buchstaben zerlegt)
+    metrics = [m for m in _uniq([metrics] if isinstance(metrics, str) else list(metrics)) if m in tab.columns]
     probs = np.atleast_1d(np.asarray(probs, dtype=np.float64))
     qn = [_sp("q%02d", _r_round0(100 * p)) for p in probs]
     rows = []
@@ -2719,7 +3016,7 @@ def _plot_study(x, metric="cagr", width=640, height=420):
         :class:`simlev.SimLevPlot`; ``data``: ``density`` (``strategy``, ``x``, ``density``: die gezeichneten
         Punkte der Kerndichte ``.sl_kde`` je Strategie im Wertebereich der Kennzahl).
     """
-    from .svg import _jl_fmt, _jl_max, _jl_maximum, _jl_minimum, _jl_str as J
+    from .svg import _esc, _jl_fmt, _jl_max, _jl_maximum, _jl_minimum, _jl_str as J
     tab = x["results"]
     strats = [str(v) for v in x["strategies"]]
     mv = tab[metric].to_numpy(dtype=np.float64)
@@ -2751,10 +3048,10 @@ def _plot_study(x, metric="cagr", width=640, height=420):
            "font-family=\"sans-serif\" font-size=\"12\">\n" % (J(width), J(height), J(width), J(height)),
            "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n",
            "<text x=\"%s\" y=\"22\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"bold\">%s</text>\n"
-           % (J(width / 2), "Verteilung %s (%s, %d Pfade)" % (metric, x["method"], int(x["n_paths"]))),
+           % (J(width / 2), _esc("Verteilung %s (%s, %d Pfade)" % (metric, x["method"], int(x["n_paths"])))),
            "<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" fill=\"none\" stroke=\"black\"/>\n"
            % (J(ml), J(mt), J(pw), J(ph)),
-           "<text x=\"%s\" y=\"%s\" text-anchor=\"middle\">%s</text>\n" % (J(ml + pw / 2), J(height - 12), metric),
+           "<text x=\"%s\" y=\"%s\" text-anchor=\"middle\">%s</text>\n" % (J(ml + pw / 2), J(height - 12), _esc(metric)),
            "<text x=\"16\" y=\"%s\" text-anchor=\"middle\" transform=\"rotate(-90 16 %s)\">Dichte</text>\n"
            % (J(mt + ph / 2), J(mt + ph / 2))]
     rs, rx, ry = [], [], []
@@ -2765,7 +3062,7 @@ def _plot_study(x, metric="cagr", width=640, height=420):
         out.append("<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"1.5\" points=\"%s\"/>\n" % (col, pts))
         out.append("<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\" stroke=\"%s\" stroke-width=\"1.5\"/><text x=\"%s\" "
                    "y=\"%s\">%s</text>\n" % (J(width - mr - 120), J(mt + 16 * i), J(width - mr - 100), J(mt + 16 * i), col,
-                                            J(width - mr - 95), J(mt + 16 * i + 4), strats[i - 1]))
+                                            J(width - mr - 95), J(mt + 16 * i + 4), _esc(strats[i - 1])))
         rs += [strats[i - 1]] * len(keep)
         rx += [a for a, _ in keep]
         ry += [b for _, b in keep]

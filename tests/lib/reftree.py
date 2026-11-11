@@ -4,7 +4,10 @@ Die Referenzfälle (gzip-komprimiertes JSON) erzeugt R mit den Generatoren der
 Tests. Jeder Fall enthält die Eingaben, den R-Code,
 den passenden Python-Code und das R-Ergebnis als Baum (siehe dort). Dieses
 Modul dekodiert die Eingaben in Python-Objekte, führt den Python-Code aus
-und vergleicht das Ergebnis Bit für Bit mit dem Baum.
+und vergleicht das Ergebnis Bit für Bit mit dem Baum. Ausnahme (Stufenmodell,
+seit 1.6.4): Teilbäume, die eine Regel in ``tests/lib/toleranz.tsv`` trifft,
+vergleichen Zahlen relativ mit der Toleranz der Regel (NA und NaN getrennt,
++0 = -0); Text und Druck bleiben zeichengleich.
 
 Lesen der Bereichsdateien und Auflösen der Eingaben: ``faelle.py`` (hier nur
 Dekodieren, Ausführen und Vergleichen; bis 1.4.1 als ``simlev._r.reftree`` im Paket).
@@ -36,6 +39,8 @@ import contextlib
 import datetime as _dt
 import io
 import math
+import os
+import re
 import traceback
 import warnings
 from collections.abc import Mapping
@@ -45,7 +50,7 @@ import pandas as pd
 
 from simlev._r import env as _env
 
-__all__ = ["decode", "compare", "run_case"]
+__all__ = ["decode", "compare", "run_case", "toleranz_regeln"]
 
 _EPOCH = np.datetime64("1970-01-01", "D")
 # Die Referenzen entstanden mit R unter LC_ALL=C.UTF-8, d. h. ICU-Kollation "root".
@@ -59,6 +64,46 @@ _STRICT_ZERO = _env.strict_zero()
 _NA_BITS_LO = 1954
 _NA_REAL = __import__("struct").unpack("<d", __import__("struct").pack("<Q", 0x7FF00000000007A2))[0]
 _STRICT_NA = not _env.lax_na()
+
+
+# ── Toleranzstufe (Stufenmodell, seit 1.6.4) ──────────────────────────────
+# Regeln aus tests/lib/toleranz.tsv (Format dort): Fall-Muster, Pfad-Muster, Funktion, relative Toleranz. Ein Fall ohne
+# Regel wird wie bisher bitgleich verglichen.
+
+def _muster(m):
+    """Muster mit ``*`` (beliebige Zeichen) → regulärer Ausdruck für den ganzen Text."""
+    return re.compile(".*".join(re.escape(t) for t in m.split("*")) + r"\Z", re.S)
+
+
+def _lies_toleranz(path):
+    regeln, kopf = [], True
+    with open(path, encoding="utf-8") as fh:
+        for nr, ln in enumerate(fh, 1):
+            ln = ln.rstrip("\n")
+            if not ln.strip() or ln.startswith("#"):
+                continue
+            f = ln.split("\t")
+            if kopf:
+                if f != ["fall", "pfad", "funktion", "toleranz"]:
+                    raise ValueError("%s: Kopfzeile fall, pfad, funktion, toleranz erwartet" % path)
+                kopf = False
+                continue
+            if len(f) != 4:
+                raise ValueError("%s, Zeile %d: vier Spalten erwartet" % (path, nr))
+            tol = float(f[3])
+            if not (0.0 < tol < 1e-6):
+                raise ValueError("%s, Zeile %d: Toleranz %r außerhalb (0, 1e-6)" % (path, nr, f[3]))
+            regeln.append((_muster(f[0]), _muster(f[1]), f[2], tol))
+    return regeln
+
+
+TOLERANZ_DATEI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toleranz.tsv")
+_TOLERANZ = _lies_toleranz(TOLERANZ_DATEI)
+
+
+def toleranz_regeln(kennung):
+    """Pfadregeln ``[(Pfad-Muster, Toleranz), …]`` für den Fall ``<modul>/<id>`` (leer = ganz bitgleich)."""
+    return [(p, tol) for f, p, _fn, tol in _TOLERANZ if f.match(kennung)]
 
 
 def _isna(x):
@@ -120,7 +165,7 @@ def _vec(node):
     if t == "chr":
         return np.array(v, dtype=object)
     if t == "date":
-        return np.array([np.datetime64("NaT") if x is None else _EPOCH + np.timedelta64(int(x), "D")
+        return np.array([np.datetime64("NaT", "D") if x is None else _EPOCH + np.timedelta64(int(x), "D")
                          for x in v], dtype="datetime64[D]")
     raise ValueError(t)
 
@@ -329,8 +374,11 @@ _BAD = object()
 _LO32 = np.uint64(0xFFFFFFFF)
 
 
-def _num_bad(rr, pv):
-    """Stellen i mit ``not _num_eq(rr[i], pv[i])``, über ganze Felder (seit 1.6.3; bis 1.6.2 je Element)."""
+def _num_bad(rr, pv, tol=None):
+    """Stellen i mit ``not _num_eq(rr[i], pv[i])``, über ganze Felder (seit 1.6.3; bis 1.6.2 je Element).
+
+    ``tol`` (Toleranzstufe, seit 1.6.4): endliche Zahlen gleich bei ``|p - r| <= tol * |r|``, NA und NaN immer
+    getrennt, +0 = -0, ±Inf nur gleich sich selbst."""
     r = np.asarray(rr, dtype=np.float64)
     if isinstance(pv, np.ndarray) and pv.dtype == np.float64:
         p, schlecht = pv, None
@@ -338,6 +386,16 @@ def _num_bad(rr, pv):
         schlecht = np.fromiter((x is _BAD for x in pv), dtype=bool, count=len(pv))
         p = np.array([math.nan if x is _BAD else x for x in pv], dtype=np.float64)
     rn, pn = np.isnan(r), np.isnan(p)
+    if tol is not None:
+        na_r = rn & ((r.view(np.uint64) & _LO32) == _NA_BITS_LO)
+        na_p = pn & ((p.view(np.uint64) & _LO32) == _NA_BITS_LO)
+        gleich = rn & pn & (na_r == na_p)
+        with np.errstate(invalid="ignore", over="ignore"):
+            nah = np.isfinite(r) & np.isfinite(p) & (np.abs(p - r) <= tol * np.abs(r))
+        gleich |= ~rn & ~pn & ((r == p) | nah)
+        if schlecht is not None:
+            gleich &= ~schlecht
+        return np.flatnonzero(~gleich).tolist()
     gleich = rn & pn
     if _STRICT_NA:
         na_r = rn & ((r.view(np.uint64) & _LO32) == _NA_BITS_LO)
@@ -368,12 +426,20 @@ def _num_eq(r, p):
 
 # ── Vergleich ─────────────────────────────────────────────────────────────
 
-def compare(ref, py, path="result", errs=None, max_errs=40):
-    """Vergleicht Python-Objekt ``py`` mit R-Baum ``ref``; Fehlerliste."""
+def compare(ref, py, path="result", errs=None, max_errs=40, regeln=(), tol=None):
+    """Vergleicht Python-Objekt ``py`` mit R-Baum ``ref``; Fehlerliste.
+
+    ``regeln`` (aus :func:`toleranz_regeln`): trifft ein Pfad-Muster den Pfad eines Knotens, gilt für ihn und alles
+    darunter die Toleranz der Regel (``tol``); sonst bitgleich."""
     if errs is None:
         errs = []
     if len(errs) >= max_errs:
         return errs
+    if tol is None:
+        for rx, t_ in regeln:
+            if rx.match(path):
+                tol = t_
+                break
     t = ref["t"]
     if t == "skip":
         return errs
@@ -408,7 +474,7 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
             errs.append("%s: Länge R %d, Python %d" % (path, len(rr), len(pv)))
             return errs
         if kind in ("num", "date"):
-            bad = _num_bad(rr, pv)
+            bad = _num_bad(rr, pv, tol if kind == "num" else None)
         elif kind == "lgl":
             bad = [i for i in range(len(rr)) if (None if rr[i] is None else bool(rr[i])) != pv[i]]
         else:
@@ -417,9 +483,9 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
             i = bad[0]
             rx, px = rr[i], pv[i]
             if kind == "num" and px is not _BAD:
-                errs.append("%s: %d/%d abweichend, erste [%d]: R=%s Py=%s" % (
-                    path, len(bad), len(rr), i, float(rx).hex() if not math.isnan(float(rx)) else "NA",
-                    float(px).hex() if not math.isnan(float(px)) else "NaN"))
+                errs.append("%s: %d/%d abweichend%s, erste [%d]: R=%s Py=%s" % (
+                    path, len(bad), len(rr), "" if tol is None else " (Toleranz %g)" % tol, i,
+                    _hexna(float(rx)), _hexna(float(px))))
             else:
                 errs.append("%s: %d/%d abweichend, erste [%d]: R=%r Py=%r" % (path, len(bad), len(rr), i, rx, px))
         names = ref.get("names")
@@ -437,7 +503,7 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
                 errs.append("%s: Zeilen R %d, Python %d" % (path, int(nrow), len(py)))
                 return errs
         for nm, c in zip(names, cols):
-            compare(c, _get(py, nm), "%s$%s" % (path, nm), errs, max_errs)
+            compare(c, _get(py, nm), "%s$%s" % (path, nm), errs, max_errs, regeln, tol)
         rn = ref.get("row_names")
         if rn is not None and isinstance(py, pd.DataFrame) and not isinstance(py.index, pd.RangeIndex):
             if [str(x) for x in py.index] != [str(x) for x in _aslist(rn)]:
@@ -453,7 +519,7 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
         typ = ref.get("type", "double")
         kind = {"double": "num", "integer": "num", "logical": "lgl"}.get(typ, "chr")
         sub = {"t": kind, "v": ref.get("v")}
-        compare(sub, py, path, errs, max_errs)
+        compare(sub, py, path, errs, max_errs, regeln, tol)
         dn = ref.get("dimnames")
         if dn is not None and isinstance(py, pd.DataFrame) and len(dim) == 2:
             dn = list(dn.values()) if isinstance(dn, dict) else (_aslist(dn) if isinstance(dn, list) else [dn])
@@ -471,9 +537,9 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
             for i, (nm, v) in enumerate(zip(names, vals)):
                 if nm == "":
                     el = py[i] if isinstance(py, (list, tuple)) and i < len(py) else _MISSING
-                    compare(v, el, "%s[[%d]]" % (path, i + 1), errs, max_errs)
+                    compare(v, el, "%s[[%d]]" % (path, i + 1), errs, max_errs, regeln, tol)
                 else:
-                    compare(v, _get(py, nm), "%s$%s" % (path, nm), errs, max_errs)
+                    compare(v, _get(py, nm), "%s$%s" % (path, nm), errs, max_errs, regeln, tol)
             return errs
         if isinstance(py, Mapping):
             py = list(py.values())
@@ -486,10 +552,15 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
             errs.append("%s: Listenlänge R %d, Python %d" % (path, len(vals), len(py)))
             return errs
         for i, v in enumerate(vals):
-            compare(v, py[i], "%s[[%d]]" % (path, i + 1), errs, max_errs)
+            compare(v, py[i], "%s[[%d]]" % (path, i + 1), errs, max_errs, regeln, tol)
         return errs
     errs.append("%s: unbekannter Knotentyp %s" % (path, t))
     return errs
+
+
+def _hexna(x):
+    """Zahl für Meldungen: Hex-Text, NA (R_IsNA) bzw. NaN."""
+    return ("NA" if _isna(x) else "NaN") if math.isnan(x) else x.hex()
 
 
 def _flat_ref_dates(ref):
@@ -548,7 +619,7 @@ def _run_case(case, check_print, check_output, check_warnings):
     if "result" not in ns:
         return ["Python-Code setzt `result` nicht"]
     res = ns["result"]
-    compare(case["result"], res, "result", errs)
+    compare(case["result"], res, "result", errs, regeln=toleranz_regeln("%s/%s" % (case.get("module"), case.get("id"))))
     if check_output and case.get("output"):
         got = buf.getvalue()
         if got.endswith("\n"):

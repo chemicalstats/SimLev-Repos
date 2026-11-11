@@ -170,13 +170,13 @@ def test_r8_06_farbnamen_und_pruefung(r500):
     assert 'fill="#000080"' in p.svg
     silent(r, colors={"negative": "darkred", "positive": "forestgreen"})
     silent(r, colors={"primary": "#00336680"})
-    with pytest.raises(ValueError, match='ungültige Farbe\\(n\\) in colors: primary = "navyy"'):
+    with pytest.raises(ValueError, match='ungültige Farbe\\(n\\) in colors: \'primary\''):
         plot_dashboard(r, colors={"primary": "navyy"})
-    with pytest.raises(ValueError, match='primary = "#12345"'):
+    with pytest.raises(ValueError, match="in colors: 'primary'"):   # seit 1.6.4 ohne Wert
         plot_dashboard(r, colors={"primary": "#12345"})
-    with pytest.raises(ValueError, match="grid = NA"):
+    with pytest.raises(ValueError, match="in colors: 'grid'"):   # seit 1.6.4 ohne Wert
         plot_dashboard(r, colors={"grid": None})
-    with pytest.raises(ValueError, match='ungültige Farbe.*c\\("red", "blue"\\)'):
+    with pytest.raises(ValueError, match="ungültige Farbe.*'primary'"):   # seit 1.6.4 ohne Wert
         plot_dashboard(r, colors={"primary": ["red", "blue"]})
     from simlev.svg import _alpha, _col2rgba, _svgcol, _svgop
     for cl in ("#2E86AB", "#D62246"):
@@ -343,8 +343,8 @@ def test_r9_05_korrelation():
     silent(r1)
     with pytest.raises(ValueError, match="compare muss ein SimLevResult über dieselben Tage"):
         plot_dashboard(r1, compare=sim(d.iloc[:400], create_strategy(B=asset_config(asset_class="etf"))))
-    with pytest.raises(ValueError, match="Objekt der Klasse 'list'"):
-        plot_dashboard(r1, compare=[1, 2])
+    with pytest.raises(ValueError, match="compare muss ein SimLevResult über dieselben Tage"):
+        plot_dashboard(r1, compare=[1, 2])  # K42 E5: Meldung ohne Klasse der Eingabe
 
 
 def test_r1_19_r1_22_kurze_reihen_und_export(tmp_path):
@@ -461,11 +461,11 @@ def test_simlevplot_objekt(r500, tmp_path):
 
 def test_plot_methode_datei_und_warnungen(r500, in_tmp):
     r = r500
-    p, ws = caught(lambda: r.plot(style="compact", colour="red"))
-    assert isinstance(p, SimLevPlot)
-    assert ws == ["plot.SimLevResult: unbekanntes Argument 'colour' wird ignoriert (Tippfehler?)."]
-    _, ws = caught(lambda: simlev.plot(r, style="compact", colour="red", widht=3))
-    assert ws == ["plot.SimLevResult: unbekannte Argumente 'colour', 'widht' werden ignoriert (Tippfehler?)."]
+    # seit 1.6.4 (K42 E5, Entscheidung 57) sind unbekannte Argumente wie in R ein Fehler (bis 1.6.3 eine Warnung)
+    with pytest.raises(ValueError, match="plot.SimLevResult: unbekanntes Argument 'colour'."):
+        r.plot(style="compact", colour="red")
+    with pytest.raises(ValueError, match="plot.SimLevResult: unbekanntes Argument 'colour'."):
+        simlev.plot(r, style="compact", colour="red", widht=3)
     assert os.listdir(in_tmp) == []                       # kein stilles Schreiben
     assert isinstance(r.plot(file="a.svg"), SimLevPlot) and os.path.isfile("a.svg")
     with pytest.raises(ValueError, match="plot.SimLevResult: Grafiken werden nur als SVG gespeichert; 'a.png' hat "
@@ -475,8 +475,8 @@ def test_plot_methode_datei_und_warnungen(r500, in_tmp):
     assert isinstance(plot_dashboard(r, file="b.svg"), SimLevPlot) and os.path.isfile("b.svg")
     with pytest.raises(ValueError, match="plot_dashboard: Grafiken werden nur als SVG"):
         plot_dashboard(r, file="b.pdf")
-    _, ws = caught(lambda: plot_dashboard(r, widht=3))
-    assert ws == ["plot_dashboard: unbekanntes Argument 'widht' wird ignoriert (Tippfehler?)."]
+    with pytest.raises(ValueError, match="plot.SimLevResult: unbekanntes Argument 'widht'."):
+        plot_dashboard(r, widht=3)
     # Optionen nur als Schlüsselwort (wie Julia): jedes Positionsargument → Warnung, wird ignoriert
     p, ws = caught(lambda: r.plot(style="compact"))
     assert ws == [] and list(p.data) == ["performance", "drawdown", "distribution", "stats"]
@@ -499,9 +499,9 @@ def test_plot_method_rahmen(in_tmp):
         return "<svg>%s %s</svg>" % (a, width), {"wealth": pd.DataFrame({"year": [1, 2], "q50": [x, x]}),
                                                  "spending": {"year": [1], "value": [2.0]}}
 
-    def f_str(x, file=None, **kw):
+    def f_str(x, file=None, **kw):   # seit 1.6.4 (svg, data): der Übergang „nur SVG-Text“ entfällt
         assert file is None
-        return "<svg/>"
+        return "<svg/>", {}
 
     def f_obj(x):
         return SimLevPlot("<svg>o</svg>", {"a": pd.DataFrame({"v": [1]})})
@@ -574,11 +574,11 @@ def test_trigger_types_match_r_reference():
 
 
 def test_trigger_errors():
-    with pytest.raises(ValueError, match="Unbekannter type"):
+    with pytest.raises(ValueError, match="type muss einer von"):
         rebalance_trigger(_df(), "nope")
-    with pytest.raises(ValueError, match="fehlt"):
+    with pytest.raises(ValueError, match="lev_col muss der Name einer Spalte von df sein"):   # seit 1.6.4 (K43 T1-R5)
         rebalance_trigger(_df(), "abs_leverage", lev_col="xx")
-    with pytest.raises(ValueError, match="nicht-leere"):
+    with pytest.raises(ValueError, match="triggers fehlt"):   # seit 1.6.4 (K43 T1-R5)
         rebalance_trigger(_df(), "combined")
 
 

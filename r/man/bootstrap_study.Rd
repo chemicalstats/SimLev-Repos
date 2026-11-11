@@ -27,7 +27,7 @@ bootstrap_study(
   max_tries = 10L,
   chunk_size = 25L,
   seed = NULL,
-  cores = 1L,
+  cores = "auto",
   progress = TRUE
 )
 }
@@ -86,7 +86,8 @@ die Funktion warnt mit der Anzahl und der haeufigsten Fehlermeldung
 mit dieser Meldung ab. Warnungen aus Signal, Simulation und Kennzahlen
 werden je Pfad gesammelt, dedupliziert und am Ende als eine Warnung
 ausgegeben (mit Anzahl der betroffenen Pfade; alle in \code{warnings});
-bei \code{cores > 1} ebenso.}
+bei \code{cores > 1} ebenso.
+Seit 1.6.4 ohne doppelte Namen.}
 
 \item{params}{Benannte Liste von Verfahrensparametern; nicht angegebene
 Eintraege erhalten den Standardwert (Standard \code{list()} = alle
@@ -153,7 +154,8 @@ aufeinanderfolgende Kalendertage ab \code{start} (Standard
 
 \item{burn_in}{Anzahl Anfangszeilen des Pfads, die nach der
 Signalberechnung verworfen werden (Signal-Vorlauf, z. B. 730 Tage fuer
-eine 430-Tage-SMA; Standard 0). Muss kleiner als \code{path_length} sein.}
+eine 430-Tage-SMA; Standard 0). Muss kleiner als \code{path_length} sein.
+Seit 1.6.4 eine ganze Zahl >= 0.}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
 (Standard \code{list()}), z. B. \code{list(start_value = 1000,
@@ -165,7 +167,10 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
 (Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}); die Namen werden zu Spalten von
-\code{results}.}
+\code{results}.
+Seit 1.6.4 geprueft: eine Funktion.
+Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen nicht path,
+weight, combo, tries oder strategy heissen (sonst Fehler nach dem Rechnen).}
 
 \item{benchmark}{Name einer Strategie aus \code{strategies} als Vergleich
 fuer die gepaarte Auswertung in \code{summary()}; \code{NULL} (Standard)
@@ -181,7 +186,10 @@ bricht die Studie mit einer Meldung ab. Vorhandene Dateien werden
 gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
 Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten
-Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.}
+Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.
+Seit 1.6.4 ein einzelner, nicht leerer Text.
+Seit 1.6.4 werden die Dateien atomar geschrieben (temporaerer Name, dann umbenannt); eine
+unvollstaendige oder beschaedigte Datei bricht bei jedem cores mit derselben Meldung ab.}
 
 \item{keep_paths}{Pfadmatrizen zusaetzlich zurueckgeben (Diagnose):
 \code{TRUE} = alle Pfade, \code{FALSE} oder 0 (Standard) = keine, ganze
@@ -217,14 +225,16 @@ Periode die Inflation der gezogenen Zeilen eines Preisindex enthaelt;
 eine Ratenspalte ergibt so keine Inflation in Prozent p. a. Sind gespeicherte Faktoren nicht
 endlich oder <= 0 (z. B. eine nicht gekennzeichnete Zinsreihe mit
 Vorzeichenwechsel), warnt die Funktion, und \code{\link[=withdrawal_paths]{withdrawal_paths()}} bricht
-mit dieser Reihe als Inflation ab. Standard \code{NULL}.}
+mit dieser Reihe als Inflation ab. Standard \code{NULL}.
+Seit 1.6.4 ohne doppelte Namen.}
 
 \item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
 ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
 Hebelprodukts macht den Pfad nicht ungueltig.}
 
 \item{chunk_size}{Pfade je Arbeitspaket (Standard 25); Einheit der
-Parallelisierung und der Zwischenspeicherung.}
+Parallelisierung und der Zwischenspeicherung.
+Seit 1.6.4 eine ganze Zahl >= 1.}
 
 \item{seed}{Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
 einmal aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}; ganze Zahl von 0
@@ -237,12 +247,31 @@ dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von Sim
 unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
 \code{set.seed()} wirkt nicht.}
 
-\item{cores}{Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.
-Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (Ergebnis
-unabhaengig davon).}
+\item{cores}{Anzahl Prozesse; parallelisiert wird ueber Chunks:
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
+\code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
+der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
+Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (mit \code{"auto"} die Kern-Threads;
+Ergebnis unabhaengig davon).}
 
 \item{progress}{Logisch: Fortschrittsmeldungen per \code{message()}
-(Standard \code{TRUE}; Meldung je Chunk nur bei \code{cores = 1}).}
+(Standard \code{TRUE}; Meldung je Chunk bei jedem \code{cores}, seit 1.6.4; bis dahin nur bei
+\code{cores = 1} und \code{cores = "auto"}).}
 }
 \value{
 Objekt der Klasse \code{SimLevBootstrapStudy}, eine Liste mit

@@ -27,7 +27,8 @@ test_that("verstaendliche Fehler und Umwandlungen", {
   ref <- simulation(d, .bt_st1())
   dc <- d; dc$date <- as.character(dc$date)
   expect_message(r <- simulation(dc, .bt_st1()), "Text"); expect_identical(r$worth, ref$worth)
-  df <- d; df$date <- factor(df$date); expect_identical(suppressMessages(simulation(df, .bt_st1()))$worth, ref$worth)
+  # seit 1.6.4 (Entscheidung 15): Datumsspalte als Faktor ist ein Fehler (bis 1.6.3 still in Text umgewandelt)
+  df <- d; df$date <- factor(df$date); expect_error(simulation(df, .bt_st1()), "Spalte 'date' darf kein Faktor")
   dx <- d; dx$date <- format(dx$date, "%d.%m.%Y"); expect_error(simulation(dx, .bt_st1()), "JJJJ-MM-TT")
   if (requireNamespace("tibble", quietly = TRUE)) expect_identical(simulation(tibble::as_tibble(d), .bt_st1())$worth, ref$worth)
   expect_error(simulation(d, create_strategy(Z = asset_config("etf"))), "Kursspalte 'Z' fehlt")
@@ -187,24 +188,28 @@ test_that("backward compatibility for etn_standard", {
 test_that("share validation", {
   expect_error(
     asset_config(share = 0),
-    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht 0\\."
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein \\(z. B. 0.6 f\u00fcr 60 %\\)\\.$"   # seit 1.6.4 ohne Wert
   )
   
   expect_error(
-    asset_config(share = 1.5),
-    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht 1.5; f\u00fcr 1.5 % share = 0.015 angeben"
+    asset_config(share = 1.5),   # seit 1.6.4 bei 1 < share <= 100 mit Hinweis (Entscheidung 12)
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein \\(z. B. 0.6 f\u00fcr 60 %\\); Prozentangaben durch 100 teilen\\.$"
+  )
+  expect_error(
+    asset_config(share = 150),
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein \\(z. B. 0.6 f\u00fcr 60 %\\)\\.$"
   )
   
   expect_error(
     asset_config(share = -0.1),
-    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht -0.1\\."
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein \\(z. B. 0.6 f\u00fcr 60 %\\)\\.$"
   )
 })
 
 test_that("invalid tax_regime is rejected", {
   expect_error(
     asset_config(tax_regime = "invalid"),
-    "tax_regime = \"invalid\" ist ung\u00fcltig"
+    "tax_regime ist ung\u00fcltig"   # seit 1.6.4 ohne Wert
   )
 })
 })
@@ -342,12 +347,22 @@ test_that("Fehler und Warnungen aus den Phasen tragen den Aufruf von simulation(
   w <- .rf_warnings(simulation(d, s, risk_free = 0.01))                          # call. = FALSE: ohne Aufruf
   expect_length(w, 1L)
   expect_null(conditionCall(w[[1]]))
-  # Abbrueche und Warnungen aus dem Kern (seit 1.4.1) tragen den Aufruf von simulation() (bis 1.3.0 den der Phase)
+  # Abbrueche und Warnungen aus dem Kern (seit 1.4.1) tragen den Aufruf von simulation() (bis 1.3.0 den der Phase).
+  # Seit 1.6.4 (Entscheidung 103) lehnt die Eingabepruefung Kurse ausserhalb von 1e-100 bis 1e100 ab; der bisherige Fall
+  # (Split-Verhaeltnis 0 durch Unterlauf bei Kursen 1e300 und 1e-30) ist damit nicht mehr erreichbar. Geprueft werden
+  # die Pruefung und der neue Kernabbruch bei nicht endlicher Stueckzahl; beide Meldungen nennen simulation im Text
+  # (call. = FALSE wie die uebrigen Meldungen "simulation: ...").
   dz <- data.frame(date = as.Date(c("2020-01-01", "2020-01-02")), A = c(1e300, 1e-30))
   sz <- create_strategy(A = asset_config("etf", "bnh", 1))
   e <- tryCatch(suppressWarnings(simulation(dz, sz, splits = split_rule(thresh = c(-50, -10)))), error = identity)
-  expect_identical(conditionMessage(e), "perform_asset_split: ratio muss > 0 sein (Split-Verhältnis), nicht 0.")
-  expect_identical(conditionCall(e), quote(simulation(dz, sz, splits = split_rule(thresh = c(-50, -10)))))
+  expect_identical(conditionMessage(e), paste0("simulation: Kursspalte 'A' enthält Kurse außerhalb von 1e-100 bis 1e100, erstmals am 2020-01-01; ",
+                                               "Kurse in einer passenden Einheit angeben (z. B. mit einem festen Faktor umrechnen)."))
+  expect_null(conditionCall(e))
+  dz <- data.frame(date = as.Date(c("2020-01-01", "2020-01-02")), A = c(1e-100, 1e-100))
+  e <- tryCatch(suppressWarnings(simulation(dz, sz, start_value = 1e300)), error = identity)
+  expect_identical(conditionMessage(e), paste0("simulation: eine Stückzahl oder ein Depotwert ist nicht mehr endlich (Kurse oder Beträge zu groß ",
+                                               "bzw. zu klein für den Zahlbereich); Kurse und Beträge in einer passenden Einheit angeben."))
+  expect_null(conditionCall(e))
 })
 })
 
@@ -360,10 +375,10 @@ local({
 test_that("C7-01: Listen-Strategien mit ungueltigem Regime/Klasse/Handelsart -> Fehler; Cookbook gueltig", {
   d <- data.frame(date = .r7_days("2020-01-01", "2020-03-31"), A = 100)
   mk <- function(...) list(A = modifyList(list(asset_class = "etf", trading = "bnh", share = 1, spread = 0), list(...)))
-  expect_error(simulation(d, mk(tax_regime = "none"), tax = tax_profile()), "tax_regime \"none\" von Asset 'A' ist ung\u00fcltig")
-  expect_error(simulation(d, mk(tax_regime = "fund")), "tax_regime \"fund\"")
-  expect_error(simulation(d, mk(asset_class = "eft")), "asset_class \"eft\" von Asset 'A' ist ung\u00fcltig")
-  expect_error(simulation(d, mk(trading = "hold")), "trading \"hold\"")
+  expect_error(simulation(d, mk(tax_regime = "none"), tax = tax_profile()), "tax_regime von Asset 'A' ist ung\u00fcltig")   # seit 1.6.4 ohne Wert
+  expect_error(simulation(d, mk(tax_regime = "fund")), "tax_regime von Asset 'A'")
+  expect_error(simulation(d, mk(asset_class = "eft")), "asset_class von Asset 'A' ist ung\u00fcltig")
+  expect_error(simulation(d, mk(trading = "hold")), "trading von Asset 'A'")
   expect_s3_class(simulation(d, mk(tax_regime = "capital_gains"), tax = tax_profile()), "SimLevResult")
   cb <- readLines(system.file("examples", "rebal_trigger_cookbook.R", package = "SimLev"))
   expect_false(any(grepl("tax_regime = \"none\"", cb, fixed = TRUE)))
@@ -411,9 +426,9 @@ test_that("strategy_from_weights und portfolio_template mit wrapper je Asset", {
   expect_error(portfolio_template("60_40", map = c(stocks = "aktien"), wrapper = list(stocks = w)),
                "wrapper: 'stocks' ist kein Asset der Strategie (Assets: aktien, bonds).", fixed = TRUE)
   expect_error(strategy_from_weights(c(x = 0.5, y = 0.5), wrapper = list(x = w, y = "w")),
-               "wrapper: Eintrag 'y' muss ein Objekt aus wrapper_config() sein, nicht character.", fixed = TRUE)
+               "wrapper: Eintrag 'y' muss ein Objekt aus wrapper_config() sein.", fixed = TRUE)   # seit 1.6.4 ohne Klasse
   expect_error(strategy_from_weights(c(x = 0.5, y = 0.5), wrapper = list(w)), "braucht jedes Element einen Namen", fixed = TRUE)
-  expect_error(strategy_from_weights(c(x = 0.5, y = 0.5), wrapper = 1), "nicht numeric.", fixed = TRUE)
+  expect_error(strategy_from_weights(c(x = 0.5, y = 0.5), wrapper = 1), "solcher Objekte sein (Name = Asset).", fixed = TRUE)
   expect_error(strategy_from_weights(c(x = 0.5, y = 0.5), trading = c(y = "signal"), signal_buy = "b", signal_sell = "s",
                                      wrapper = list(y = w)),
                "wrapper: Asset 'y' hat trading = \"signal\"", fixed = TRUE)

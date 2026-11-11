@@ -33,7 +33,9 @@ Julia ≥ 1.10 und ein C++-Compiler (seit 1.6.0 genügt er; bis 1.5.2 auch ein
 C-Compiler): `Pkg.add` bzw. `Pkg.build` führt `deps/build.jl` aus, das die
 Bibliothek von SimLev (Quellen in `deps/core/`) übersetzt; einen anderen
 Compiler wählt `ENV["SIMLEV_CXX"]`. Ohne die Bibliothek bricht `using SimLev` mit einem
-Hinweis auf `Pkg.build` ab.
+Hinweis auf `Pkg.build` ab. Das erste `using SimLev` nach der Installation oder einer Änderung
+kompiliert das Paket vor (auf zwei Kernen rund 5 min, Speicherspitze rund 3 GB); danach
+brauchen die ersten Aufrufe der Hauptfunktionen meist unter 1 s.
 
 <!-- beispiele: nicht ausführen -->
 ``` julia
@@ -58,9 +60,10 @@ using SimLev, Dates, Random
 
 rng = MersenneTwister(42)
 n = 365 * 10
-data = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
-        WORLD = 100 .* cumprod(1 .+ 4e-4 .+ 0.010 .* randn(rng, n)),
-        BONDS =  50 .* cumprod(1 .+ 1e-4 .+ 0.003 .* randn(rng, n)))
+nt = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
+      WORLD = 100 .* cumprod(1 .+ 4e-4 .+ 0.010 .* randn(rng, n)),
+      BONDS =  50 .* cumprod(1 .+ 1e-4 .+ 0.003 .* randn(rng, n)))
+data = RFrame(pairs(nt)...)                 # Tabelle mit benannten Spalten
 strategy = create_strategy(
     WORLD = asset_config("etf", "bnh"; share = 0.7, spread = 0.1, partial_exemption = 30),
     BONDS = asset_config("etf", "bnh"; share = 0.3, spread = 0.1, partial_exemption = 0),
@@ -105,17 +108,17 @@ Argumente auch positionell, etwa `asset_config("etf", "bnh", 0.6, 0.1, 30)`,
 
 Besonderheiten:
 
-- `simulation()` nimmt als Daten ein `RFrame`, ein NamedTuple von
-  Vektoren, ein `Dict` oder jede Tabelle mit `propertynames`/`getproperty`
-  (etwa einen `DataFrame`); `missing` wirkt wie `NA`. Die Erweiterungen
-  erwarten Tabellen als `RFrame` (Spalten mit Namen, Zeilen gleicher Länge).
+- `simulation()` und alle übrigen Funktionen nehmen Tabellen nur als
+  `RFrame` (Spalten mit Namen, Zeilen gleicher Länge); `missing` wirkt wie
+  `NA`. Ein NamedTuple von Vektoren wandelt `RFrame(pairs(nt)...)` um; ein
+  NamedTuple, ein `Dict` oder ein `DataFrame` direkt wird abgelehnt.
 - Ergebnisobjekte sind `RList` bzw. `RFrame` mit gesetzter Klasse; die
   Elemente stehen in derselben Reihenfolge wie in R. `display(x)` liefert die
   Ausgabe der R-`print`-Methode, `println(x)` nur eine Kurzform.
 - Bedingungen als Text werden in **R-Syntax** ausgewertet (derselbe
   Auswerter wie in Python).
-- `result.trades` enthält alle Buchungen je Asset; in R gibt es kein
-  Gegenstück. Mit `details = true` schreibt `simulation()` das
+- `result.trades` enthält je Asset die Käufe, Verkäufe und Steuerbuchungen
+  (`buys`, `sells`, `taxes`); in R gibt es kein Gegenstück. Mit `details = true` schreibt `simulation()` das
   Ereignisprotokoll nach `io` (Standard `stdout`).
 - Hinweise erscheinen auf `stderr`, Warnungen als `@warn`, Fehler als
   `ErrorException`, mit demselben deutschen Wortlaut wie in R und Python.

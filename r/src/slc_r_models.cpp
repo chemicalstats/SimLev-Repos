@@ -43,20 +43,6 @@ static const int32_t *ivec(SEXP x, R_xlen_t n, const char *what)
 
 static double d1(SEXP x, const char *what) { return dvec(x, 1, what)[0]; }
 
-static int i1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != INTSXP || XLENGTH(x) != 1 || INTEGER(x)[0] == NA_INTEGER)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine ganze Zahl (integer, Laenge 1) sein", what);
-    return INTEGER(x)[0];
-}
-
-static int l1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != LGLSXP || XLENGTH(x) != 1 || LOGICAL(x)[0] == NA_LOGICAL)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss TRUE oder FALSE sein", what);
-    return LOGICAL(x)[0];
-}
-
 static int len_int(SEXP x)
 {
     if (XLENGTH(x) > 2147483647) Rf_errorcall(R_NilValue, "interner Fehler: Vektor zu lang");
@@ -72,16 +58,6 @@ static const double *dmat(SEXP x, int *nr, int *nc, const char *what)
     if (d == R_NilValue || XLENGTH(d) != 2) Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine Matrix sein", what);
     *nr = INTEGER(d)[0]; *nc = INTEGER(d)[1];
     return REAL(x);
-}
-
-static SEXP pair(SEXP a, const sl_rng *r)
-{
-    SEXP out = PROTECT(Rf_allocVector(VECSXP, 2)), s = PROTECT(Rf_allocVector(RAWSXP, 32));
-    memcpy(RAW(s), r->s, 32);
-    SET_VECTOR_ELT(out, 0, a);
-    SET_VECTOR_ELT(out, 1, s);
-    UNPROTECT(2);
-    return out;
 }
 
 /* benannte Liste aus nn Elementen (Elemente geschuetzt uebergeben) */
@@ -124,7 +100,7 @@ SEXP C_sl_garch11_nll(SEXP e, SEXP par, SEXP gjr, SEXP s2i)
     double v = 0.0;
     int st;
     ctx_init(&cx);
-    st = sl_garch11_nll(&cx, len_int(e), dvec(e, -1, "e"), l1(gjr, "gjr"), dvec(par, 5, "par"), d1(s2i, "s2_init"), &v);
+    st = sl_garch11_nll(&cx, len_int(e), dvec(e, -1, "e"), lgl1(gjr, "gjr"), dvec(par, 5, "par"), d1(s2i, "s2_init"), &v);
     finish(&cx, st, 0);
     return Rf_ScalarReal(v);
 }
@@ -135,7 +111,7 @@ SEXP C_sl_garch11_grad(SEXP e, SEXP theta, SEXP gjr, SEXP s2i)
     static const char *nm[] = {"value", "gradient"};
     sl_ctx cx;
     double v = 0.0;
-    int st, g = l1(gjr, "gjr"), np = sl_garch11_npar(g);
+    int st, g = lgl1(gjr, "gjr"), np = sl_garch11_npar(g);
     SEXP gr = PROTECT(Rf_allocVector(REALSXP, np)), el[2], out;
     ctx_init(&cx);
     st = sl_garch11_grad(&cx, len_int(e), dvec(e, -1, "e"), g, dvec(theta, np, "theta"), d1(s2i, "s2_init"),
@@ -155,7 +131,7 @@ SEXP C_sl_garch11_fit(SEXP e, SEXP gjr)
     int st, code = 0, i;
     SEXP el[7];
     ctx_init(&cx);
-    st = sl_garch11_fit(&cx, len_int(e), dvec(e, -1, "e"), l1(gjr, "gjr"), NULL, par, &ll, &code);
+    st = sl_garch11_fit(&cx, len_int(e), dvec(e, -1, "e"), lgl1(gjr, "gjr"), NULL, par, &ll, &code);
     finish(&cx, st, 0);
     for (i = 0; i < 5; i++) el[i] = PROTECT(Rf_ScalarReal(par[i]));
     el[5] = PROTECT(Rf_ScalarReal(ll));
@@ -176,7 +152,7 @@ SEXP C_sl_garch11_estimate(SEXP e, SEXP gjr)
     int n = len_int(e), st, code = 0, meth = 0, i;
     SEXP el[12], s2 = PROTECT(Rf_allocVector(REALSXP, n)), z = PROTECT(Rf_allocVector(REALSXP, n));
     ctx_init(&cx);
-    st = sl_garch11_estimate(&cx, n, dvec(e, -1, "e"), l1(gjr, "gjr"), par, &ll, &code, &meth, REAL(s2), REAL(z),
+    st = sl_garch11_estimate(&cx, n, dvec(e, -1, "e"), lgl1(gjr, "gjr"), par, &ll, &code, &meth, REAL(s2), REAL(z),
                              &s2i, &pers);
     finish(&cx, st, 2);
     for (i = 0; i < 5; i++) el[i] = PROTECT(Rf_ScalarReal(par[i]));
@@ -240,7 +216,7 @@ SEXP C_sl_dcc_filter(SEXP Z, SEXP a, SEXP b, SEXP Qbar, SEXP keep)
 {
     static const char *nm[] = {"nll", "R", "ok"};
     sl_ctx cx;
-    int n, k, qr, qc, kp = l1(keep, "keep"), ok = 0, st, np;
+    int n, k, qr, qc, kp = lgl1(keep, "keep"), ok = 0, st, np;
     const double *z = dmat(Z, &n, &k, "Z"), *q = dmat(Qbar, &qr, &qc, "Qbar");
     double nll = 0.0;
     SEXP el[3], R, out;
@@ -305,7 +281,7 @@ SEXP C_sl_backcast_obj(SEXP prob, SEXP par, SEXP fit, SEXP grad)
     static const char *nm[] = {"value", "gradient"};
     sl_ctx cx;
     bc_args a;
-    int st, nf = len_int(fit), wg = l1(grad, "grad");
+    int st, nf = len_int(fit), wg = lgl1(grad, "grad");
     double f = 0.0, g[3] = {0.0, 0.0, 0.0};
     SEXP el[2], out;
     bc_args_get(prob, &a);
@@ -355,7 +331,7 @@ SEXP C_sl_ms_garch_filter(SEXP y, SEXP om, SEXP al, SEXP be, SEXP ga, SEXP P, SE
     h = PROTECT(Rf_allocMatrix(REALSXP, n, K)); pr = PROTECT(Rf_allocMatrix(REALSXP, n, K));
     fl = PROTECT(Rf_allocMatrix(REALSXP, n, K)); lB = PROTECT(Rf_allocMatrix(REALSXP, n, K));
     ctx_init(&cx);
-    st = sl_msgarch_filter(&cx, n, yy, K, REAL(om), dvec(al, K, "alpha"), dvec(be, K, "beta"), dvec(ga, K, "gamma"),
+    st = sl_msgarch_filter(&cx, n, yy, K, dvec(om, K, "omega"), dvec(al, K, "alpha"), dvec(be, K, "beta"), dvec(ga, K, "gamma"),
                            dvec(P, (R_xlen_t) K * K, "P"), dvec(xi0, K, "xi0"), d1(h1, "h1"),
                            REAL(h), REAL(pr), REAL(fl), REAL(lB), &ll);
     finish(&cx, st, 4);
@@ -368,7 +344,7 @@ SEXP C_sl_ms_garch_filter(SEXP y, SEXP om, SEXP al, SEXP be, SEXP ga, SEXP P, SE
 SEXP C_sl_ms_garch_nll(SEXP y, SEXP theta, SEXP K, SEXP gjr, SEXP h1)
 {
     sl_ctx cx;
-    int k = i1(K, "K"), g = l1(gjr, "gjr"), st;
+    int k = int1_strict(K, "K"), g = lgl1(gjr, "gjr"), st;
     double v = 0.0;
     if (k < 1 || k > 1000) Rf_errorcall(R_NilValue, "interner Fehler: K");
     ctx_init(&cx);
@@ -383,7 +359,7 @@ SEXP C_sl_ms_garch_grad(SEXP y, SEXP theta, SEXP K, SEXP gjr, SEXP h1)
 {
     static const char *nm[] = {"value", "gradient"};
     sl_ctx cx;
-    int k = i1(K, "K"), g = l1(gjr, "gjr"), st, np;
+    int k = int1_strict(K, "K"), g = lgl1(gjr, "gjr"), st, np;
     double v = 0.0;
     SEXP gr, el[2], out;
     if (k < 1 || k > 64) Rf_errorcall(R_NilValue, "interner Fehler: K");
@@ -401,13 +377,13 @@ SEXP C_sl_ms_garch_grad(SEXP y, SEXP theta, SEXP K, SEXP gjr, SEXP h1)
 SEXP C_sl_ms_garch_starts(SEXP y, SEXP K, SEXP gjr, SEXP h1, SEXP all)
 {
     sl_ctx cx;
-    int k = i1(K, "K"), g = l1(gjr, "gjr"), st, ns = 0, np;
+    int k = int1_strict(K, "K"), g = lgl1(gjr, "gjr"), st, ns = 0, np;
     SEXP buf, out;
     if (k < 2 || k > 64) Rf_errorcall(R_NilValue, "MS-GARCH: Anzahl Regime muss zwischen 2 und 64 liegen (erhalten: %d)", k);
     np = sl_msgarch_npar(k, g);
     buf = PROTECT(Rf_allocVector(REALSXP, SL_MSGARCH_MAXSTART * (R_xlen_t) np));
     ctx_init(&cx);
-    st = sl_msgarch_starts(&cx, len_int(y), dvec(y, -1, "y"), k, g, d1(h1, "h1"), l1(all, "all"), &ns, REAL(buf));
+    st = sl_msgarch_starts(&cx, len_int(y), dvec(y, -1, "y"), k, g, d1(h1, "h1"), lgl1(all, "all"), &ns, REAL(buf));
     finish(&cx, st, 1);
     out = PROTECT(Rf_allocMatrix(REALSXP, np, ns));
     if (ns) memcpy(REAL(out), REAL(buf), (size_t) np * ns * sizeof(double));
@@ -419,7 +395,7 @@ SEXP C_sl_ms_garch_fitstarts(SEXP y, SEXP K, SEXP gjr, SEXP starts, SEXP h1)
 {
     static const char *nm[] = {"par", "value", "convergence"};
     sl_ctx cx;
-    int k = i1(K, "K"), g = l1(gjr, "gjr"), st, nr, nc, code = 0, np;
+    int k = int1_strict(K, "K"), g = lgl1(gjr, "gjr"), st, nr, nc, code = 0, np;
     const double *s = dmat(starts, &nr, &nc, "starts");
     double v = 0.0;
     SEXP th, el[3], out;
@@ -440,7 +416,7 @@ SEXP C_sl_ms_garch_estimate(SEXP y, SEXP K, SEXP gjr, SEXP threads)
 {
     static const char *nm[] = {"omega", "alpha", "beta", "gamma", "P", "regimes", "s2", "loglik", "convergence"};
     sl_ctx cx;
-    int k = i1(K, "K"), g = l1(gjr, "gjr"), n = len_int(y), st, code = 0;
+    int k = int1_strict(K, "K"), g = lgl1(gjr, "gjr"), n = len_int(y), st, code = 0;
     double ll = 0.0;
     SEXP el[9], out;
     if (k < 2 || k > 64) Rf_errorcall(R_NilValue, "MS-GARCH: Anzahl Regime muss zwischen 2 und 64 liegen (erhalten: %d)", k);
@@ -451,7 +427,7 @@ SEXP C_sl_ms_garch_estimate(SEXP y, SEXP K, SEXP gjr, SEXP threads)
     ctx_init(&cx);
     /* Starts auf bis zu threads Threads (Ergebnis unabhängig davon) */
     st = sl_msgarch_estimate_mt(&cx, n, dvec(y, -1, "y"), k, g, REAL(el[0]), REAL(el[1]), REAL(el[2]), REAL(el[3]),
-                                REAL(el[4]), (int32_t *) INTEGER(el[5]), REAL(el[6]), &ll, &code, i1(threads, "threads"));
+                                REAL(el[4]), (int32_t *) INTEGER(el[5]), REAL(el[6]), &ll, &code, int1_strict(threads, "threads"));
     finish(&cx, st, 7);
     el[7] = PROTECT(Rf_ScalarReal(ll)); el[8] = PROTECT(Rf_ScalarInteger(code));
     out = named(9, nm, el);
@@ -463,14 +439,14 @@ SEXP C_sl_hmm_em_univ(SEXP x, SEXP K, SEXP win, SEXP maxit, SEXP tol)
 {
     static const char *nm[] = {"mu", "S", "A", "ll", "iter"};
     sl_ctx cx;
-    int k = i1(K, "K"), st, it = 0;
+    int k = int1_strict(K, "K"), st, it = 0;
     double ll = 0.0;
     SEXP el[5], out;
     if (k < 2 || k > 64) Rf_errorcall(R_NilValue, "HMM: Anzahl Zustände muss zwischen 2 und 64 liegen (erhalten: %d)", k);
     el[0] = PROTECT(Rf_allocVector(REALSXP, k)); el[1] = PROTECT(Rf_allocVector(REALSXP, k));
     el[2] = PROTECT(Rf_allocMatrix(REALSXP, k, k));
     ctx_init(&cx);
-    st = sl_hmm_em_univ(&cx, len_int(x), dvec(x, -1, "x"), k, i1(win, "win"), i1(maxit, "max_iter"), d1(tol, "tol"),
+    st = sl_hmm_em_univ(&cx, len_int(x), dvec(x, -1, "x"), k, int1_strict(win, "win"), int1_strict(maxit, "max_iter"), d1(tol, "tol"),
                         REAL(el[0]), REAL(el[1]), REAL(el[2]), &ll, &it);
     finish(&cx, st, 3);
     el[3] = PROTECT(Rf_ScalarReal(ll)); el[4] = PROTECT(Rf_ScalarInteger(it));
@@ -500,7 +476,7 @@ SEXP C_sl_hmm_viterbi(SEXP lB, SEXP lA, SEXP lp0)
 
 static int count_out(SEXP n_out)
 {
-    int v = i1(n_out, "n_out");
+    int v = int1_strict(n_out, "n_out");
     if (v < 0) Rf_errorcall(R_NilValue, "n_out muss >= 0 sein");
     return v;
 }
@@ -510,7 +486,7 @@ SEXP C_sl_boot_idx_iid(SEXP state, SEXP n_src, SEXP n_out)
     BOOT_BEGIN(state);
     int no = count_out(n_out);
     SEXP out = PROTECT(Rf_allocVector(INTSXP, no)), res;
-    st = sl_boot_idx_iid(&cx, &r, i1(n_src, "n_src"), no, (int32_t *) INTEGER(out));
+    st = sl_boot_idx_iid(&cx, &r, int1_strict(n_src, "n_src"), no, (int32_t *) INTEGER(out));
     finish(&cx, st, 1);
     res = pair(out, &r);
     UNPROTECT(1);
@@ -522,7 +498,7 @@ SEXP C_sl_boot_idx_block(SEXP state, SEXP n_src, SEXP n_out, SEXP bl, SEXP circ)
     BOOT_BEGIN(state);
     int no = count_out(n_out);
     SEXP out = PROTECT(Rf_allocVector(INTSXP, no)), res;
-    st = sl_boot_idx_block(&cx, &r, i1(n_src, "n_src"), no, i1(bl, "block_length"), l1(circ, "circular"),
+    st = sl_boot_idx_block(&cx, &r, int1_strict(n_src, "n_src"), no, int1_strict(bl, "block_length"), lgl1(circ, "circular"),
                            (int32_t *) INTEGER(out));
     finish(&cx, st, 1);
     res = pair(out, &r);
@@ -535,7 +511,7 @@ SEXP C_sl_boot_idx_stationary(SEXP state, SEXP n_src, SEXP n_out, SEXP L)
     BOOT_BEGIN(state);
     int no = count_out(n_out);
     SEXP out = PROTECT(Rf_allocVector(INTSXP, no)), res;
-    st = sl_boot_idx_stationary(&cx, &r, i1(n_src, "n_src"), no, d1(L, "L"), (int32_t *) INTEGER(out));
+    st = sl_boot_idx_stationary(&cx, &r, int1_strict(n_src, "n_src"), no, d1(L, "L"), (int32_t *) INTEGER(out));
     finish(&cx, st, 1);
     res = pair(out, &r);
     UNPROTECT(1);
@@ -577,7 +553,7 @@ SEXP C_sl_boot_wild(SEXP state, SEXP ret, SEXP type)
     int n, k;
     const double *x = dmat(ret, &n, &k, "returns");
     SEXP out = PROTECT(Rf_allocMatrix(REALSXP, n, k)), res;
-    st = sl_boot_wild(&cx, &r, n, k, x, i1(type, "type"), REAL(out));
+    st = sl_boot_wild(&cx, &r, n, k, x, int1_strict(type, "type"), REAL(out));
     finish(&cx, st, 1);
     res = pair(out, &r);
     UNPROTECT(1);
@@ -613,7 +589,7 @@ SEXP C_sl_boot_evt(SEXP state, SEXP ret, SEXP base, SEXP n_out, SEXP par_l, SEXP
     int n, k, no = count_out(n_out);
     const double *x = dmat(ret, &n, &k, "returns"), *a = dvec(par_l, 4, "par_l"), *b = dvec(par_r, 4, "par_r");
     SEXP out = PROTECT(Rf_allocMatrix(REALSXP, no, k)), idx = PROTECT(Rf_allocVector(INTSXP, no)), res, lst;
-    st = sl_boot_evt(&cx, &r, n, k, x, i1(base, "base"), no, a[0], a[1], a[2], a[3], len_int(pool_l),
+    st = sl_boot_evt(&cx, &r, n, k, x, int1_strict(base, "base"), no, a[0], a[1], a[2], a[3], len_int(pool_l),
                      ivec(pool_l, -1, "pool_l"), b[0], b[1], b[2], b[3], len_int(pool_r), ivec(pool_r, -1, "pool_r"),
                      len_int(bulk), ivec(bulk, -1, "bulk_idx"), REAL(out), (int32_t *) INTEGER(idx));
     finish(&cx, st, 2);
@@ -646,14 +622,14 @@ static void get_cross(SEXP cr, int n_src, cross_args *c)
 SEXP C_sl_boot_garch(SEXP state, SEXP n_out, SEXP base, SEXP k, SEXP g, SEXP z_base, SEXP valid, SEXP cross)
 {
     BOOT_BEGIN(state);
-    int no = count_out(n_out), kk = i1(k, "k"), ns = len_int(z_base);
+    int no = count_out(n_out), kk = int1_strict(k, "k"), ns = len_int(z_base);
     const double *p = dvec(g, 6, "garch");
     cross_args c;
     SEXP out, idx, lst, res;
     get_cross(cross, ns, &c);
     out = PROTECT(Rf_allocMatrix(REALSXP, no, kk));
     idx = PROTECT(Rf_allocVector(INTSXP, no));
-    st = sl_boot_garch(&cx, &r, no, i1(base, "base"), kk, p[0], p[1], p[2], p[3], p[4], p[5], ns, REAL(z_base),
+    st = sl_boot_garch(&cx, &r, no, int1_strict(base, "base"), kk, p[0], p[1], p[2], p[3], p[4], p[5], ns, dvec(z_base, -1, "z_base"),
                        len_int(valid), ivec(valid, -1, "valid"), c.m, c.cols, c.mu, c.om, c.al, c.be, c.ratio, c.s2, c.z,
                        REAL(out), (int32_t *) INTEGER(idx));
     finish(&cx, st, 2);
@@ -669,7 +645,7 @@ SEXP C_sl_boot_ms_garch(SEXP state, SEXP n_out, SEXP base, SEXP k, SEXP m, SEXP 
 {
     static const char *nm[] = {"ret", "idx", "regime"};
     BOOT_BEGIN(state);
-    int no = count_out(n_out), kk = i1(k, "k"), ns = len_int(z_base), K, tr, tc, dr, dc, i;
+    int no = count_out(n_out), kk = int1_strict(k, "k"), ns = len_int(z_base), K, tr, tc, dr, dc, i;
     const double *v[11];
     cross_args c;
     SEXP out, idx, reg, el[3], lst, res;
@@ -682,10 +658,17 @@ SEXP C_sl_boot_ms_garch(SEXP state, SEXP n_out, SEXP base, SEXP k, SEXP m, SEXP 
     v[9] = dvec(VECTOR_ELT(m, 9), K, "unc_var");
     v[10] = dvec(VECTOR_ELT(m, 10), K, "stat_prob");
     get_cross(cross, ns, &c);
+    /* seit 1.6.4 (B-029): pool_idx mindestens pool_off[K] lang, z_base double (bis 1.6.3 las der Kern dahinter) */
+    {
+        const int32_t *po = ivec(pool_off, K + 1, "pool_off");
+        if (po[K] < 0 || (R_xlen_t) po[K] > XLENGTH(pool_idx))
+            Rf_errorcall(R_NilValue, "interner Fehler: pool_idx kuerzer als pool_off[K + 1]");
+        (void) dvec(z_base, -1, "z_base");
+    }
     out = PROTECT(Rf_allocMatrix(REALSXP, no, kk));
     idx = PROTECT(Rf_allocVector(INTSXP, no));
     reg = PROTECT(Rf_allocVector(INTSXP, no));
-    st = sl_boot_ms_garch(&cx, &r, no, i1(base, "base"), kk, K, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8],
+    st = sl_boot_ms_garch(&cx, &r, no, int1_strict(base, "base"), kk, K, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8],
                           v[9], v[10], ivec(pool_off, K + 1, "pool_off"), ivec(pool_idx, -1, "pool_idx"), ns, REAL(z_base),
                           c.m, c.cols, c.mu, c.om, c.al, c.be, c.ratio, c.s2, c.z, REAL(out), (int32_t *) INTEGER(idx),
                           (int32_t *) INTEGER(reg));
@@ -703,7 +686,7 @@ SEXP C_sl_rolling_vol(SEXP x, SEXP window)
     int n = len_int(x), st;
     SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
     ctx_init(&cx);
-    st = sl_rolling_vol(&cx, n, dvec(x, -1, "x"), i1(window, "window"), REAL(out));
+    st = sl_rolling_vol(&cx, n, dvec(x, -1, "x"), int1_strict(window, "window"), REAL(out));
     finish(&cx, st, 1);
     UNPROTECT(1);
     return out;
@@ -725,7 +708,7 @@ SEXP C_sl_assign_regimes(SEXP vol, SEXP thresh)
 SEXP C_sl_estimate_trans_mat(SEXP regimes, SEXP K, SEXP alpha)
 {
     sl_ctx cx;
-    int k = i1(K, "K"), st;
+    int k = int1_strict(K, "K"), st;
     SEXP out;
     if (k < 1) Rf_errorcall(R_NilValue, "K muss >= 1 sein");
     out = PROTECT(Rf_allocMatrix(REALSXP, k, k));

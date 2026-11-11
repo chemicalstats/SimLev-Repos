@@ -37,10 +37,12 @@ und 20).}
 0 <= lower < upper <= 100 gelten.}
 
 \item{...}{weitere Argumente fuer \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} (z. B.
-\code{inflation}, \code{tax_mode}, \code{horizon}). Ein \code{horizon} aus
+\code{inflation}, \code{tax}, \code{horizon}). Ein \code{horizon} aus
 \code{\link[=withdrawal_horizon]{withdrawal_horizon()}} mit \code{seed = NULL} wird einmal zu einem Startwert aufgeloest
 (ein Zug aus dem Zufallszustand von SimLev, \code{\link[=simlev_seed]{simlev_seed()}}); alle Suchschritte vergleichen
-damit dieselben Laufzeiten.}
+damit dieselben Laufzeiten.
+Seit 1.6.4 meldet ein unbekanntes Argument oder keep_paths (setzt die Funktion selbst) einen Fehler
+vor der Suche.}
 }
 \value{
 Rate in Prozent (Zahl; 4 = 4 \%) mit Attribut \code{"success"}

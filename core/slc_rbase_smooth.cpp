@@ -16,7 +16,7 @@
  *                     jeweiligen R-Quelle)
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
  * Änderungen:         C++ im gemeinsamen Teil von C und C++, ohne R-Datenstrukturen, gemeinsamer Kern für Python und
- *                     Julia (nicht Teil des R-Pakets); ties als Funktion rechnet der Host über die Gruppennummern.
+ *                     Julia (seit 1.6.4 filter auch für R, r/R/slc_stats.R); ties als Funktion rechnet der Host über die Gruppennummern.
  * Prüforakel: R 1.5.2 von SimLev (stats::approx, approxfun, filter; Gleichlauf smooth_fuzz.R).
  */
 #include "slc_internal.h"
@@ -49,9 +49,11 @@ static void msort(const double *x, int64_t *a, int64_t *t, int64_t lo, int64_t h
     for (k = lo; k < hi; k++) a[k] = t[k];
 }
 
+/* gleicher x-Wert wie R's unique/match: NA und NaN sind verschieden (seit 1.6.4, C-051; bis 1.6.3 eine Gruppe, und im
+ * Fehlerfall kam vor R's Meldung eine ueberzaehlige Warnung "collapsing to unique 'x' values") */
 static int same_x(double a, double b)
 {
-    return (isnan(a) && isnan(b)) || a == b;
+    return (isnan(a) && isnan(b) && slr_is_na(a) == slr_is_na(b)) || a == b;
 }
 
 int sl_r_regularize(int64_t n, const double *x, const double *y, int narm, int mode, int mean, double *xo, double *yo,
@@ -104,12 +106,13 @@ int sl_r_regularize(int64_t n, const double *x, const double *y, int narm, int m
             }
         }
         if (mono) {
-            int64_t last = -1, gnan = -1;
+            int64_t last = -1, gnan = -1, gna = -1;
             for (i = 0; i < m; i++) {
                 double v = x[idx[i]];
-                if (isnan(v)) {
-                    if (gnan < 0) { gnan = ng; xo[ng++] = v; }
-                    grp[i] = gnan;
+                if (isnan(v)) {   /* NA und NaN je eine eigene Gruppe (seit 1.6.4, C-051) */
+                    int64_t *g = slr_is_na(v) ? &gna : &gnan;
+                    if (*g < 0) { *g = ng; xo[ng++] = v; }
+                    grp[i] = *g;
                 } else {
                     if (last < 0 || !same_x(xo[last], v)) { last = ng; xo[ng++] = v; }
                     grp[i] = last;

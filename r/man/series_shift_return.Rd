@@ -25,7 +25,8 @@ die Zeilenreihenfolge als Zeitfolge). Eine Matrix ist nicht zulaessig.}
 \item{target}{Geometrische Zielrendite in Prozent p. a. (4 = 4 \% p. a.):
 Skalar (gilt fuer alle \code{columns}) oder benannter Vektor mit einem
 Eintrag je Spalte aus \code{columns} (z. B. \code{c(us = 5, eu = 5)});
-fehlt eine Spalte, bricht die Funktion ab.}
+fehlt eine Spalte, bricht die Funktion ab.
+Werte endlich und > -100.}
 
 \item{type}{Art der Spalten: \code{"returns"} (Standard; Brutto-Renditen je
 Zeile, z. B. 1.001 fuer +0,1 \%, wie fuer \code{\link[=bootstrap]{bootstrap()}}) oder
@@ -34,7 +35,8 @@ Trend ueber die Zeilen aufmultipliziert).}
 
 \item{ppy}{Renditen (Zeilen) je Jahr. \code{NULL} (Standard): bei einem
 data.frame mit \code{date} Anzahl der Renditen geteilt durch die Spanne
-von \code{date} in Jahren (Tage / 365.25), sonst 252.}
+von \code{date} in Jahren (Tage / 365.25), sonst 252.
+Angegeben eine Zahl > 0.}
 }
 \value{
 \code{data} mit angepassten Spalten. Attribut \code{shift}:

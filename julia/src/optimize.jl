@@ -46,19 +46,18 @@ const _PO_FORMALS = ["x", "assets", "method", "lower", "upper", "cov", "mu", "ri
 # kleine R-Hilfen
 # ═══════════════════════════════════════════════════════════════════════════
 
-_sqrt(x::Float64) = x < 0 ? NaN : sqrt(x)
-
-_asmat(x::NamedMat) = Matrix{Float64}(x.data)
-_asmat(x::AbstractMatrix) = Matrix{Float64}(x)
-_asmat(x::AbstractVector) = reshape(Float64[Float64(v) for v in x], :, 1)
-_asmat(x::Real) = fill(Float64(x), 1, 1)
+const _sqrt = SimLev.r_sqrt            # r/rnum.jl (seit 1.6.4 statt eigener Kopie)
+const _asmat = SimLev.OptimizeCore._mat   # optimize_core.jl (seit 1.6.4 statt vier gleicher Methoden)
 _asvec(x::NamedMat) = Float64[v for v in vec(x.data)]
 _asvec(x::RVector) = Float64[Float64(v) for v in x.values]
 _asvec(x::AbstractArray) = Float64[Float64(v) for v in vec(x)]
 _asvec(x::Real) = Float64[Float64(x)]
 
 "`x %m% y` (slc-Matrixprodukt)."
-_mp(x, y) = _asmat(SimLev.SLib.matmul(_asmat(x), _asmat(y)))
+# seit 1.6.4 (B-105) ohne die Kopien einer Matrix{Float64} vor und nach dem Produkt: matmul liest die Eingaben nur
+# (eigene Kopie) und liefert eine neue Matrix; Werte wie bisher
+_mp(x, y) = (C = SimLev.SLib.matmul(_mp_in(x), _mp_in(y)); C isa Matrix{Float64} ? C : _asmat(C))
+_mp_in(x) = x isa Matrix{Float64} ? x : _asmat(x)
 "`drop(R %m% w)`."
 _mat_vec(R, w) = vec(_mp(R, reshape(_asvec(w), :, 1)))
 "`drop(t(w) %m% S %m% w)`."
@@ -71,14 +70,14 @@ _cov(R) = _asmat(SimLev.RStats.cov(_asmat(R)))
 _col_means(R) = _colmeans(_asmat(R))
 _cov2cor(S) = _asmat(SimLev.RStats.cov2cor(_asmat(S)))
 
-_getf(o, k::String) = o isa AbstractDict ? o[k] : o isa NamedTuple ? getfield(o, Symbol(k)) : getproperty(o, Symbol(k))
+using ..SimLev: _getel   # util.jl (seit 1.6.4 statt _getf)
 
 "`.sl_eigen_sym(M)` (Householder + QL der C-Bibliothek slc, seit 1.6.2) → (Werte absteigend, Vektoren)."
 function _eigen_sym(M)
     e = SimLev.SLib.eigen_sym(_asmat(M))
-    (_asvec(_getf(e, "values")), _asmat(_getf(e, "vectors")))
+    (_asvec(_getel(e, "values")), _asmat(_getel(e, "vectors")))
 end
-_eigvals_sym(M) = _asvec(_getf(SimLev.SLib.eigen_sym(_asmat(M); only_values = true), "values"))
+_eigvals_sym(M) = _asvec(_getel(SimLev.SLib.eigen_sym(_asmat(M); only_values = true), "values"))
 
 "`stats::quantile(x, p, names = FALSE, type = 7)` (ein Wert)."
 function _quantile(x, p)
@@ -122,11 +121,6 @@ function _named_vec(x)
     (nm, vals, all(_isnum, vals))
 end
 
-function _fmt_vals(vals, isnum)
-    isnum && return _fmt1(Float64[v === missing ? NA : Float64(v) for v in vals])
-    String[_isna(v) ? "NA" : v isa Bool ? (v ? "TRUE" : "FALSE") : string(v) for v in vals]
-end
-
 _q(v) = join(("'" * string(s) * "'" for s in v), ", ")
 
 _warn(msg) = (@warn msg; nothing)
@@ -148,8 +142,35 @@ _with_bounds_handler(f, h) = task_local_storage(f, _BOUNDS_KEY, h)
 # ═══════════════════════════════════════════════════════════════════════════
 
 _has_date(x) = x isa RFrame && haskey(x, "date")
-_df_names(x::RFrame) = names(x)
-_df_names(x) = String[]
+
+"Seit 1.6.4 wie R (Entscheidung 6, B-057): `x` als NamedTuple, Dict oder Paar-Vektor ist keine Tabelle bzw. Matrix."
+function _opt_no_list(@nospecialize(x))
+    (x isa NamedTuple || (x isa AbstractDict && !(x isa RList)) || (x isa AbstractVector && !isempty(x) && all(p -> p isa Pair, x))) &&
+        error("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
+    return x
+end
+
+"""Eingabe `x` und `assets` der Optimierungsfunktionen (seit 1.6.4, K42 E4; R `.opt_check_x`): `assets` `nothing`
+oder Namen ohne NA, doppelte und "date"; bei Kursdaten Datumsspalte kein Faktor und die Anlagen als Zahlenspalten; bei
+einer Renditetabelle nur Zahlenspalten. Ergebnis: `assets` als `Vector{String}` oder `nothing`."""
+function _opt_check_x(@nospecialize(x), assets, fn)
+    D = SimLev.Dependence
+    assets = D._e4_names(assets, fn, "assets"; null_ok = true)
+    if _has_date(x)
+        SimLev.chk_col_nofactor(x, "date", fn)
+        if assets !== nothing
+            SimLev.chk_cols(x, assets, fn)
+            for a in assets
+                D._e4_numcol(x, a, fn)
+            end
+        end
+    elseif x isa RFrame
+        for a in (assets === nothing ? names(x) : assets)
+            a in names(x) && D._e4_numcol(x, a, fn)
+        end
+    end
+    return assets
+end
 
 _isnum_col(c) = eltype(c) <: Union{Missing,Real} && !(nonmissingtype(eltype(c)) <: Bool) && nonmissingtype(eltype(c)) !== Union{}
 
@@ -157,14 +178,6 @@ _isnum_col(c) = eltype(c) <: Union{Missing,Real} && !(nonmissingtype(eltype(c)) 
 _opt_returns_obj(A, cn, ppy) = RList("R" => NamedMat(A; colnames = cn), "ppy" => ppy; class = "SimLevOptReturns")
 
 "`.opt_returns`: Periodenrenditen (einfach) → (R = Matrix, cn, ppy, dates)."
-# Spalte j von L aus c (missing → NA); Funktionsgrenze, die Schleife wird je Spaltentyp übersetzt (seit 1.6.1)
-function _opt_fillcol!(L::Matrix{Float64}, j::Int, c)
-    for i in 1:size(L, 1)
-        L[i, j] = c[i] === missing ? NA : Float64(c[i])
-    end
-    L
-end
-
 function _opt_returns(x, assets = nothing, frequency = "week")
     assets isa AbstractString && (assets = [assets])
     if x isa RList && SimLev.inherits(x, "SimLevOptReturns")
@@ -187,7 +200,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
         nr = SimLev.nrow(rd)
         L = zeros(nr, length(assets))
         for (j, a) in enumerate(assets)
-            _opt_fillcol!(L, j, rd[a])
+            _opt_num_col!(L, j, rd[a], nr)   # Spalte j aus rd[a] (missing → NA)
         end
         A = SimLev.RLibm.expm1(L)
         A = reshape(A, nr, length(assets))
@@ -200,7 +213,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
     if x isa RFrame
         cn = names(x)
         cols = [x[k] for k in cn]
-        isnum = all(c -> _isnum_col(c) || eltype(c) <: Union{Missing,Bool}, cols)
+        isnum = all(_isnum_col, cols)                       # seit 1.6.4 ohne Wahrheitswerte (B-040, wie R)
         Araw = isnum ? _opt_num_cols(cols, SimLev.nrow(x)) : Any[c[i] for i in 1:SimLev.nrow(x), c in cols]
     elseif x isa NamedMat
         cn = x.colnames === nothing ? nothing : copy(x.colnames)
@@ -213,7 +226,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
         error("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
     end
     if !(Araw isa AbstractMatrix{<:Real}) || eltype(Araw) <: Bool
-        isnum = all(v -> _isnum(v) || v isa Bool, Araw) && !all(v -> v isa Bool, Araw)
+        isnum = all(_isnum, Araw)                            # seit 1.6.4 ohne Wahrheitswerte (B-040, wie R)
     end
     cn === nothing && (cn = String["A$j" for j in 1:size(Araw, 2)])
     if assets !== nothing
@@ -268,24 +281,25 @@ function _opt_check_alpha(alpha, fn)
     _, vals, isnum = _named_vec(alpha)
     one = isnum && length(vals) == 1 && !_isna(vals[1]) && isfinite(Float64(vals[1]))
     one && Float64(vals[1]) > 0 && Float64(vals[1]) <= 0.5 && return nothing
+    # seit 1.6.4 ohne den Wert, Hinweise wertfrei (Entscheidung 8, wie 12)
     hint = ""
-    if one
+    if one && !(alpha isa SimLev.RFmt.RFactor)
         a = Float64(vals[1])
         if a >= 1
-            hint = _sprintf(" - als Anteil angeben (z. B. %g statt %g)", a / 100, a)
+            hint = " - als Anteil angeben (Prozentangaben durch 100 teilen)"
         elseif a > 0.5
-            hint = _sprintf(" - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (%g -> alpha = %g)", a, 1 - a)
+            hint = " - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (alpha = 1 - Konfidenzniveau)"
         end
     end
     error("$fn: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste " *
-          "5 % (erhalten: $(join(_fmt_vals(vals, isnum), ", ")))$hint.")
+          "5 %$hint.")
 end
 
 "`.opt_bounds`: Skalar, benannter oder positionsweiser Vektor → Wert je Anlage."
 function _opt_bounds(b, nm, default, what = "upper")
     names_, vals, isnum = _named_vec(b)
-    if !isnum || isempty(vals) || any(_isna, vals)
-        error("$what: numerischer Wert bzw. Vektor ohne NA erwartet (erhalten: $(join(_fmt_vals(vals, isnum), ", "))).")
+    if !isnum || isempty(vals) || any(_isna, vals) || b isa SimLev.RFmt.RFactor || b isa AbstractMatrix
+        error("$what: numerischer Wert bzw. Vektor ohne NA erwartet.")   # seit 1.6.4 ohne Wert
     end
     v = Float64[Float64(x) for x in vals]
     N = length(nm)
@@ -315,7 +329,7 @@ function _opt_check_bounds(lower, upper, nm)
         _warn_bounds("upper: Obergrenze(n) > 1 (" * join(("$(nm[i]) = $s" for (i, s) in zip(big, fb)), ", ") *
                      "); Grenzen sind Anteile (0.26 = 26 %), Werte > 1 wirken wie 1. Prozentangabe? Dann durch 100 teilen.")
     end
-    any(<(0), lo) && error("lower: Untergrenzen müssen >= 0 sein (Long-only; erhalten $(join(_fmt1(lo[lo .< 0]), ", "))).")
+    any(<(0), lo) && error("lower: Untergrenzen müssen >= 0 sein (Long-only).")   # seit 1.6.4 ohne Wert
     slo = _ldsum(lo)
     shi = _ldsum(hi)
     if slo > 1 + 1e-12 || shi < 1 - 1e-12 || any(lo .> hi)
@@ -370,6 +384,7 @@ function _opt_cov_m(R::Matrix{Float64}, type::String)
         end
         b2 = min(d2, _ldsum(acc) / (Float64(Tn) * Float64(Tn)))
         a2 = d2 - b2
+        d2 > 0 || SimLev.chk_stop("e4.lw")                     # Entscheidung 73 (B-039): keine neue Rechnung
         Sh = (b2 / d2) .* dm .+ (a2 / d2) .* S1
         return Sh .* Tn ./ (Tn - 1)
     end
@@ -466,9 +481,10 @@ function _risk_parity(S, b)
         H = S .+ _diagm(b ./ (y .* y), N)
         dx = _asvec(SimLev.SLib.solve_spd(H, g))   # H symmetrisch positiv definit
         step = 1.0
+        fy = all(>(0), y) ? f(y) : nothing          # seit 1.6.4 einmal je Schritt (B-107); y > 0: ohne Meldung
         while true
             yn = y .- step .* dx
-            cond = any(<=(0), yn) ? true : f(yn) > f(y) - 1e-4 * step * _ldsum(g .* dx)
+            cond = any(<=(0), yn) ? true : f(yn) > (fy === nothing ? f(y) : fy) - 1e-4 * step * _ldsum(g .* dx)
             cond || break
             step = step / 2
             step < 1e-12 && break
@@ -481,7 +497,7 @@ end
 
 function _hclust_order(Dm)
     h = SimLev.RStats.hclust(SimLev.RStats.as_dist(Dm), "single")
-    Int[Int(v) for v in _getf(h, "order")]
+    Int[Int(v) for v in _getel(h, "order")]
 end
 
 "`.hrp`: Hierarchical Risk Parity (Lopez de Prado 2016)."
@@ -700,6 +716,7 @@ Ergebnis sind Gewichte, Kennzahlen und Risikobeiträge.
   (ISO-Woche, Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52, 252, 12).
 - `resample`: Anzahl Block-Bootstrap-Stichproben für das Michaud-Resampling (ganze Zahl, Standard 0 = aus);
   die Gewichte sind dann das Mittel der Einzeloptimierungen.
+  Seit 1.6.4 höchstens 10^8.
 - `block`: Mittlere Blocklänge des stationären Bootstraps für das Resampling in Perioden. `nothing` (Standard)
   = T^1/3 gerundet, mindestens 2 (T = Anzahl Perioden).
 - `seed`: Startwert für das Resampling. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
@@ -763,10 +780,17 @@ println(portfolio_optimize(R; method = "risk_parity"))
 function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, upper = 1, cov = nothing, mu = nothing,
                             risk_free = 0, risk_aversion = 4, budget = nothing, alpha = 0.05, frequency = nothing,
                             resample = 0, block = nothing, seed = nothing)
+    _opt_no_list(x)
     x = SimLev.as_rframe(x)
     method = _match_arg(method, _METHODS)
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
+    fn = "portfolio_optimize"                                  # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _opt_check_x(x, assets, fn)
+    risk_free = SimLev.chk_num1(risk_free, fn, "risk_free")    # B-018
+    risk_aversion = SimLev.chk_num1(risk_aversion, fn, "risk_aversion"; lo = 0)
+    resample = SimLev.Dependence._e4_count(resample, fn, "resample"; lo = 0)   # B-018
+    block = SimLev.chk_num1(block, fn, "block"; lo = 1, null_ok = true)
     rr = _opt_returns(x, assets, frequency)
     A = rr.R
     nm = rr.cn
@@ -778,24 +802,25 @@ function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, up
     muv = nothing
     if mu !== nothing
         muv = _opt_bounds(mu, nm, NA, "mu")
-        any(isinf, muv) && error("mu: endliche Werte in Prozent p. a. erwartet (erhalten: $(join(_fmt1(muv), ", "))).")
+        any(isinf, muv) && error("mu: endliche Werte in Prozent p. a. erwartet.")   # seit 1.6.4 ohne Wert
     end
     ppy = rr.ppy
     alpha = Float64(alpha isa AbstractVector ? alpha[1] : alpha)
     scache = Ref{Any}(nothing)
-    core(Rx) = _opt_core(Rx, nm, method, lo, hi, cov, muv, Float64(risk_free), Float64(risk_aversion), budget, alpha, ppy;
-                         scache = scache)
-    w = core(A)
+    core(Rx; sc = nothing) = _opt_core(Rx, nm, method, lo, hi, cov, muv, Float64(risk_free), Float64(risk_aversion), budget,
+                                       alpha, ppy; scache = sc)
+    w = core(A; sc = scache)
     wb = nothing
     if resample > 0
         blk = block === nothing ? max(2.0, Float64(SimLev.RFmt.r_round(SimLev.r_pow(Float64(T), 1 / 3)))) : block
         nres = Int(resample)
-        S = SimLev.SLib.main_stream(seed)               # Hauptstrom
+        S = SimLev.SLib.main_stream(seed, "portfolio_optimize")               # Hauptstrom
         wbm = Matrix{Float64}(undef, nres, N)
         for bb in 1:nres
             idx = Vector{Int}(SimLev.SLib.boot_idx_stationary(T, T, blk; stream = S))
-            wbm[bb, :] = core(A[idx, :])
+            wbm[bb, :] = core(A[idx, :])                      # seit 1.6.4 ohne Kopie von S je Wiederholung (B-107)
         end
+        scache[] = nothing                                    # wie bisher: nach Resampling rechnet _opt_summary neu
         wb = NamedMat(wbm; colnames = nm)
         wv = _colmeans(wbm)
         w = wv ./ _ldsum(wv)
@@ -890,6 +915,7 @@ mit den Einzelanlagen und markiert den Punkt mit der höchsten Sharpe Ratio.
   `date` bzw. alle Spalten der Matrix.
 - `n`: Anzahl der Risikoaversionen (ganze Zahl, Standard 40). Punkte mit (auf 6 Stellen) gleicher Rendite und
   Volatilität werden nur einmal behalten; das Ergebnis kann daher weniger Zeilen haben.
+  Seit 1.6.4 höchstens 10^6.
 - `lower`, `upper`: Unter- und Obergrenzen der Gewichte als Anteil (0.6 = 60 %): Skalar für alle Anlagen,
   benannter Vektor (nicht genannte Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
   unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten; andere Längen sind ein
@@ -924,9 +950,14 @@ println(ef)
 """
 function portfolio_frontier(x; assets = nothing, n = 40, lower = 0, upper = 1, cov = nothing, risk_free = 0,
                             frequency = nothing)
+    _opt_no_list(x)
     x = SimLev.as_rframe(x)
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
+    fn = "portfolio_frontier"                                  # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _opt_check_x(x, assets, fn)
+    n = SimLev.Dependence._e4_count(n, fn, "n"; hi = SimLev.SL_MAX_GITTER)   # B-011, B-038
+    risk_free = SimLev.chk_num1(risk_free, fn, "risk_free")
     rr = _opt_returns(x, assets, frequency)
     A = rr.R
     nm = rr.cn
@@ -1003,6 +1034,7 @@ nutzt nur Daten bis einschließlich des Entscheidungstags (gehandelt wird in `ta
 - `assets`: Zeichenvektor der Kursspalten (Pflicht).
 - `method`: Verfahren wie in `portfolio_optimize()` (Zeichenkette, Standard `"min_variance"`).
 - `window`: Fensterlänge in Jahren (Standard 3).
+  Seit 1.6.4 eine ganze Zahl von 1 bis 100 (Jahre).
 - `every`: Entscheidungsrhythmus: `"month"` (Standard), `"quarter"` oder `"year"`.
 - `frequency`: Renditefrequenz innerhalb des Fensters: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
 - `kwargs...`: Weitere Argumente für `portfolio_optimize()` (`lower`, `upper`, `cov`, `mu`, `risk_free`,
@@ -1037,21 +1069,26 @@ println(w)
 """
 function portfolio_rolling(data, assets; method = "min_variance", window = 3, every = nothing, frequency = nothing,
                               kwargs...)
-    data = SimLev.as_rframe(data)
     every = _match_arg(every, ["month", "quarter", "year"])
     frequency = _match_arg(frequency, _FREQS)
-    if !(method isa AbstractString) || !(method in _METHODS)
-        mv = method isa Union{AbstractVector,Tuple} ? collect(method) : [method]
-        error("portfolio_rolling: unbekanntes Verfahren $(_q(mv)); erlaubt: $(join(_METHODS, ", ")).")
+    fn = "portfolio_rolling"
+    method = SimLev.chk_scalar(method)
+    if !(method isa AbstractString) || !(method in _METHODS)   # seit 1.6.4 ohne Wert
+        error("portfolio_rolling: unbekanntes Verfahren; erlaubt: $(join(_METHODS, ", ")).")
     end
     dots = Dict{String,Any}(String(k) => v for (k, v) in kwargs)
     allowed = [a for a in _PO_FORMALS if !(a in ("x", "assets", "method", "frequency"))]
-    bad = _unique([String(k) for (k, _) in kwargs if !(String(k) in allowed)])
-    isempty(bad) || error("portfolio_rolling: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in ...: $(_q(bad)).")
+    # seit 1.6.4 einheitlich (Entscheidung 21); x und assets setzt portfolio_rolling selbst
+    SimLev.chk_dots([String(k) for (k, _) in kwargs], allowed, fn; taken = ["x", "assets", "method", "frequency"])
+    window = SimLev.chk_jahre(window, fn, "window")             # B-098, Entscheidung 70 (ganze Jahre 1 bis 100)
+    assets = SimLev.Dependence._e4_names(assets, fn, "assets")
     _has_date(data) || error("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
-    assets = assets isa AbstractString ? [String(assets)] : String[String(a) for a in assets]
     miss = _setdiff(assets, names(data))
     isempty(miss) || error("Spalten fehlen: " * join(miss, ", "))
+    SimLev.chk_col_nofactor(data, "date", fn)
+    for a in assets
+        SimLev.Dependence._e4_numcol(data, a, fn)
+    end
     _opt_check_bounds(something(get(dots, "lower", nothing), 0), something(get(dots, "upper", nothing), 1), assets)
     _opt_check_alpha(something(get(dots, "alpha", nothing), 0.05), "portfolio_rolling")
     get(dots, "mu", nothing) === nothing || _opt_bounds(dots["mu"], assets, NA, "mu")
@@ -1145,18 +1182,24 @@ println(portfolio_risk_contributions(R, (aktien = 0.5, reits = 0.2, anleihen = 0
 ```
 """
 function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.05, frequency = nothing, cov = nothing)
+    _opt_no_list(x)
     x = SimLev.as_rframe(x)
     measure = _match_arg(measure, ["volatility", "cvar"])
     frequency = _match_arg(frequency, _FREQS)
     cov = _match_arg(cov, _COVS)
+    fn = "portfolio_risk_contributions"
     _opt_check_alpha(alpha, "portfolio_risk_contributions")
     (weights isa RList && SimLev.inherits(weights, "SimLevOptimization")) && (weights = weights["weights"])
     wn, vals, isnum = _named_vec(weights)
-    if !isnum || wn === nothing || any(==(""), wn) || any(_isna, vals)
+    # seit 1.6.4 auch ohne Inf, Faktor und Matrix
+    if !isnum || wn === nothing || any(==(""), wn) || any(_isna, vals) || !all(v -> isfinite(Float64(v)), vals) ||
+       weights isa SimLev.RFmt.RFactor
         error("weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).")
     end
+    length(unique(wn)) < length(wn) && SimLev.chk_stop("e2.doppelt", fn, "weights")   # B-052
+    "date" in wn && SimLev.chk_stop("e4.date", fn, "weights")
     avail = if _has_date(x)
-        names(x)
+        String[k for k in names(x) if k != "date"]
     elseif x isa RFrame
         names(x)
     elseif x isa NamedMat && x.colnames !== nothing
@@ -1167,6 +1210,7 @@ function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.0
     end
     unk = _setdiff(wn, avail)
     isempty(unk) || error("weights: unbekannte Anlage(n) $(_q(unk)); vorhanden: $(join([a for a in avail if a != "date"], ", ")).")
+    _opt_check_x(x, wn, fn)
     rr = _opt_returns(x, wn, frequency)
     A = rr.R
     cn = rr.cn
@@ -1175,6 +1219,7 @@ function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.0
     if measure == "volatility"
         S = _opt_cov_m(A, cov) .* rr.ppy
         tot = _sqrt(_quad(w, S))
+        abs(tot) > 0 || SimLev.chk_stop("e4.risiko0", fn)      # Entscheidung 73 (B-039)
         mc = _mat_vec(S, w) ./ tot
         rc = w .* mc
     else
@@ -1185,6 +1230,7 @@ function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.0
         mc = _colmeans(.-A[tail, :])
         rc = mc .* w
         tot = _ldsum(rc)
+        abs(tot) > 0 || SimLev.chk_stop("e4.risiko0", fn)      # Entscheidung 73 (B-039)
     end
     sh = rc ./ tot
     out = RFrame("asset" => copy(cn), "weight" => w, "contribution" => rc, "share" => sh, "marginal" => mc)
@@ -1255,10 +1301,12 @@ einzelnen Backtests entsteht so eine Verteilung der Out-of-Sample-Kennzahlen je 
   "min_variance", "risk_parity", "max_sharpe"]`) oder benannte Liste von Argumentlisten für
   `portfolio_optimize()` (z. B. `(mv = (method = "min_variance", cov = "ledoit_wolf"),)`).
 - `n_groups`: Anzahl Gruppen insgesamt (ganze Zahl >= 2, Standard 6).
+  Seit 1.6.4 höchstens 10^8.
 - `test_groups`: Anzahl Testgruppen je Aufteilung (ganze Zahl, Standard 2, kleiner als `n_groups`); es gibt
   choose(n_groups, test_groups) Aufteilungen.
 - `purge`, `embargo`: Sperrzone und Embargo in Perioden der gewählten Frequenz (Zeilen der Renditen, ganze
   Zahlen >= 0, je Standard 2).
+  Seit 1.6.4 höchstens 10^8.
 - `frequency`: Siehe `portfolio_optimize()`.
 
 # Rückgabe
@@ -1298,20 +1346,24 @@ println(portfolio_cpcv(R; methods = ["equal", "inverse_vol", "min_variance"], n_
 """
 function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"],
                         n_groups = 6, test_groups = 2, purge = 2, embargo = 2, frequency = nothing)
+    _opt_no_list(x)
     x = SimLev.as_rframe(x)
     frequency = _match_arg(frequency, _FREQS)
+    fn = "portfolio_cpcv"                                      # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _opt_check_x(x, assets, fn)
+    D = SimLev.Dependence
+    # seit 1.6.4 Bausteine der Tabelle eingabe (ohne Wert); Obergrenze wie Entscheidung 16
+    n_groups = D._e4_count(n_groups, fn, "n_groups"; lo = 2); test_groups = D._e4_count(test_groups, fn, "test_groups")
+    purge = D._e4_count(purge, fn, "purge"; lo = 0); embargo = D._e4_count(embargo, fn, "embargo"; lo = 0)
+    ng = Int(n_groups); tg = Int(test_groups); purge = Int(purge); embargo = Int(embargo)
+    tg >= ng && error("portfolio_cpcv: test_groups muss kleiner als n_groups sein, sonst bleibt keine Trainingsgruppe.")
+    if methods isa AbstractString || (methods isa Union{AbstractVector,Tuple} && all(m -> m isa AbstractString, methods))
+        methods = D._e4_names(methods, fn, "methods"; no_date = false)   # B-052
+    end
     rr = _opt_returns(x, assets, frequency)
     A = rr.R
     cn = rr.cn
     Tn = size(A, 1)
-    for (v, nm, lo) in ((n_groups, "n_groups", 2), (test_groups, "test_groups", 1), (purge, "purge", 0), (embargo, "embargo", 0))
-        _, vals, isnum = _named_vec(v)
-        ok = isnum && length(vals) == 1 && !_isna(vals[1]) &&
-             (f = Float64(vals[1]); isfinite(f) && f == Float64(SimLev.RFmt.r_round(f)) && f >= lo)
-        ok || error("portfolio_cpcv: $nm muss eine ganze Zahl >= $lo sein (erhalten: $(join(_fmt_vals(vals, isnum), ", "))).")
-    end
-    ng = Int(n_groups); tg = Int(test_groups); purge = Int(purge); embargo = Int(embargo)
-    tg >= ng && error("portfolio_cpcv: test_groups ($tg) muss kleiner als n_groups ($ng) sein, sonst bleibt keine Trainingsgruppe.")
     specs = if methods isa AbstractString
         Pair{String,Any}[String(methods) => RList("method" => String(methods))]
     elseif methods isa AbstractVector && !isempty(methods) && all(m -> m isa AbstractString, methods)
@@ -1329,6 +1381,8 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
         (sp_p === nothing || any(q -> q.first == "", sp_p)) &&
             error("portfolio_cpcv: Eintrag '$nm' von methods muss eine benannte Argumentliste sein.")
         mi = findfirst(q -> q.first == "method", sp_p)
+        mi !== nothing && sp_p[mi].second !== nothing && !(SimLev.chk_scalar(sp_p[mi].second) isa AbstractString) &&
+            SimLev.chk_stop("text", fn, "methods\$$nm\$method")   # seit 1.6.4
         if mi !== nothing && sp_p[mi].second !== nothing && !(sp_p[mi].second in _METHODS)
             error("portfolio_cpcv: unbekanntes Verfahren '$(sp_p[mi].second)'; erlaubt: $(join(_METHODS, ", ")).")
         end

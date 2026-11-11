@@ -30,7 +30,9 @@ seinem Datum) bzw. benannter numerischer Vektor mit Datumsnamen. Die
 Werte werden durch den Index relativ zum Startdatum geteilt.}
 
 \item{max_years}{Laengste Haltedauer in Jahren (ganze Zahl, Standard 30);
-hoechstens die Zahl der verfuegbaren Jahre.}
+hoechstens die Zahl der verfuegbaren Jahre.
+Seit 1.6.4 eine ganze Zahl >= 1.
+Seit 1.6.4 hoechstens 100.}
 
 \item{...}{Bei \code{print()} ungenutzt; bei \code{plot()} an
 \code{\link[graphics:image]{graphics::image()}} weitergereicht.}

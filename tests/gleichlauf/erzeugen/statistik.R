@@ -406,7 +406,7 @@ TB("result_analysis", "Meldungen und Warnungen von result_analysis je Zeile (Ein
   zeile("da_err_factor",
     r"(result_analysis(data.frame(date = d$date[1:5], value = factor(c('1,5', '2,5', '3,1', '4', '5')))))",
     r"(result = DA.result_analysis(pd.DataFrame({'date': d['date'][:5], 'value': pd.Categorical(['1,5', '2,5', '3,1', '4', '5'])})))",
-    r"(result = DA.result_analysis(SL.RFrame("date" => d.date[1:5], "value" => ["1,5", "2,5", "3,1", "4", "5"])))", inp = ein("deep_analysis/da_err_factor", c("d"))),
+    r"(result = DA.result_analysis(SL.RFrame("date" => d.date[1:5], "value" => SL.RFmt.RFactor([1, 2, 3, 4, 5], ["1,5", "2,5", "3,1", "4", "5"]))))", inp = ein("deep_analysis/da_err_factor", c("d"))),
   zeile("da_err_novalues",
     r"(result_analysis(data.frame(date = d$date[1:5], value = NA_real_)))",
     r"(result = DA.result_analysis(pd.DataFrame({'date': d['date'][:5], 'value': simlev._r.fmt.NA_REAL})))",

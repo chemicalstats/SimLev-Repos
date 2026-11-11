@@ -561,7 +561,7 @@ static PyObject *slc_hmm_em_univ(PyObject *self, PyObject *args)
     sl_ctx cx;
     (void) self;
     if (!PyArg_ParseTuple(args, "OiiidOOO", &x, &K, &win, &mi, &tol, &mu, &S, &A)) return NULL;
-    if (K < 2 || K > 64) { PyErr_Format(PyExc_ValueError, "HMM: Anzahl Zustände muss zwischen 2 und 64 liegen (erhalten: %d)", K); return NULL; }
+    if (K < 2 || K > 64) { PyErr_Format(PyExc_ValueError, "HMM: Anzahl Zustaende muss zwischen 2 und 64 liegen (erhalten: %d)", K); return NULL; }
     xp = (const double *) buf(&B, x, 0, 'd', -1, &n, "x"); FAIL_IF(!xp);
     o1 = DW(mu, K, "mu"); FAIL_IF(!o1);
     o2 = DW(S, K, "S"); FAIL_IF(!o2);

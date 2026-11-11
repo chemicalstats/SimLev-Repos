@@ -30,7 +30,8 @@ Risikoteil.}
 Werte unter 1 ergeben eine Warnung (vermutlich als Anteil angegeben).}
 
 \item{window}{Fensterlaenge der Volatilitaetsschaetzung in Zeilen mit
-Kursbewegung (Standard 63).}
+Kursbewegung (Standard 63).
+Seit 1.6.4 ganze Zahl >= 2.}
 
 \item{max_exposure}{Hoechster Risikoanteil als Anteil (Standard 1 = ohne
 Hebel; Werte > 1 sind nicht erlaubt, da die Engine keinen Kredit

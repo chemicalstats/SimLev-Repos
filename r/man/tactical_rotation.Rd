@@ -26,7 +26,8 @@ Kursspalten (Niveaus) aller Anlagen aus \code{assets}, \code{safe} und
 \item{assets}{Zeichenvektor der Risikoanlagen fuer die Rotation.}
 
 \item{top}{Anzahl gehaltener Anlagen (Standard 1; 1 bis Anzahl
-\code{assets}).}
+\code{assets}).
+Seit 1.6.4 ganze Zahl ohne Abschneiden.}
 
 \item{safe}{Zeichenvektor der sicheren Anlage(n); bei mehreren wird die
 mit dem besten Score gewaehlt. Pflicht, wenn \code{absolute = TRUE}
@@ -39,7 +40,8 @@ mit dem besten Score gewaehlt. Pflicht, wenn \code{absolute = TRUE}
 \code{NULL} = kein Canary-Schutz).}
 
 \item{breadth}{Schutzschwelle \eqn{B} als Anzahl Anlagen (mindestens 1;
-Standard \code{NULL} = Anzahl Canary-Anlagen).}
+Standard \code{NULL} = Anzahl Canary-Anlagen).
+Seit 1.6.4 ganze Zahl.}
 
 \item{lookbacks, type}{Siehe \code{\link[=momentum_score]{momentum_score()}} (Rueckblicke in Monaten;
 \code{"average"} oder \code{"13612w"}).}
@@ -49,7 +51,10 @@ Standard \code{NULL} = Anzahl Canary-Anlagen).}
 
 \item{weighting}{Gewichtung der gewaehlten Anlagen: \code{"equal"}
 (Standard) oder \code{"inverse_vol"} (umgekehrt proportional zur
-Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).}
+Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
+Seit 1.6.4 liegen die Termine dann erst ab Zeile 63 (volles Fenster; bis
+1.6.3 brach jeder fruehere Termin ab, mit Wochen- und Monatskursen auch mit den
+Standardrueckblicken).}
 }
 \value{
 \code{SimLevWeights} (data.frame mit \code{date} und

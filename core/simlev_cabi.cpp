@@ -33,7 +33,9 @@
  * Entnahme (withdrawal_core_impl.h): simlev_c_wd_simulate, seit 1.5.0 die Auswertung je Pfad simlev_c_wd_metrics,
  * _pwr, _annual_prod, _tariff_count, _tariff_compact.
  * Forschung (research_core_impl.h), seit 1.5.0: simlev_c_hmm_em, simlev_c_goal_dp, simlev_c_pbo_cscv; seit 1.6.3
- * simlev_c_roll_max_core. Tagesengine seit 1.6.3 auch simlev_c_engine_open_lots_n/_open_lots (kompakte Lot-Ausgabe).
+ * simlev_c_roll_max_core. (Die kompakte Lot-Ausgabe simlev_c_engine_open_lots_n/_open_lots von 1.6.3 ohne Aufrufer in
+ * Julia entfaellt seit 1.6.4; Engine::open_lots_* nutzt nur R. Ebenso simlev_c_hmm_forward_backward ohne Aufrufer im
+ * Paket.)
  * Fonds-Wrapper (wrapper_core_impl.h), seit 1.5.1: simlev_c_wrapper_nav.
  *
  * Tagesengine (engine_core_impl.h): eigener Zustand im Kern, flache Eingabe (struct Input); Julia
@@ -282,19 +284,6 @@ SIMLEV_C_EXPORT int simlev_c_quantile_reg_core(const double* y, int64_t ny, cons
     });
 }
 
-SIMLEV_C_EXPORT int simlev_c_hmm_forward_backward(const double* B, int64_t T, int64_t K, const double* A,
-                                                  int64_t anr, int64_t anc, const double* p0, int64_t np0,
-                                                  double* al, double* ga, double* xi, double* cs) {
-    return cabi::run([&] {
-        auto r = simlev::hmm_forward_backward(cabi::mat(B, (int) T, (int) K), cabi::mat(A, (int) anr, (int) anc),
-                                              cabi::vec(p0, np0));
-        cabi::put(al, T * K, std::get<1>(r).ptr, (cabi::idx_t) T * K, "hmm_forward_backward", "filtered");
-        cabi::put(ga, T * K, std::get<3>(r).ptr, (cabi::idx_t) T * K, "hmm_forward_backward", "smoothed");
-        cabi::put(xi, K * K, std::get<5>(r).ptr, (cabi::idx_t) K * K, "hmm_forward_backward", "xi");
-        cabi::put(cs, T, std::get<7>(r).ptr, std::get<7>(r).len, "hmm_forward_backward", "scale");
-    });
-}
-
 SIMLEV_C_EXPORT int simlev_c_roll_mean_core(const double* x, int64_t m, int n, double* out) {
     return cabi::run([&] {
         cabi::Vec r = simlev::roll_mean_core(cabi::vec(x, m), n);
@@ -405,11 +394,11 @@ SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_
         odims[0] = spending.nr; odims[1] = spending.nc; odims[2] = wealth.nr; odims[3] = wealth.nc;
         odims[4] = wealth_end.nr; odims[5] = wealth_end.nc; odims[6] = tariff_years.nr; odims[7] = tariff_years.nc;
         /* Speicher in der Reihenfolge der Anlage: wealth, spending, planned, terminal, terminal_nom, taxes,
-         * depl, fail, wealth_end, taxes_end, st, tariff_years (st ausgelassen) */
+         * depl, fail, wealth_end, taxes_end, tariff_years (seit 1.6.4 ohne den Zustand st, den der Kern lokal haelt) */
         std::deque<std::vector<double>>& st = cabi::alloc().store;
-        if (st.size() < 12) cabi::badcall("wd_simulate: unerwartete Ergebnisse");
+        if (st.size() < 11) cabi::badcall("wd_simulate: unerwartete Ergebnisse");
         for (int k = 0; k < 11; k++) {
-            const std::size_t sk = (std::size_t) (k < 10 ? k : 11);
+            const std::size_t sk = (std::size_t) k;
             cabi::put(out[k], outlen[k], st[sk].data(), (cabi::idx_t) st[sk].size(), "wd_simulate", "Ergebnis");
         }
     });
@@ -521,7 +510,8 @@ SIMLEV_C_EXPORT int simlev_c_dates_flags(int64_t n, const double* dates, const i
 }
 
 /* status[8 na], totals[TT_N]; je Asset nlots, nsells, ntaxes, px_changed; cnt[5] Ereignisse, Ganzzahlen der
- * Ereignisse (Jahre, Assets), Jahreszeilen, KiSt-Salden, Werte der details-Ereignisse; scal[3] fee_paid, tax_unpaid, refund_due;
+ * Ereignisse (Jahre, Assets), Jahreszeilen, KiSt-Salden, Werte der details-Ereignisse; scal[2] fee_paid, tax_unpaid
+ * (seit 1.6.4 ohne refund_due: ohne Leser);
  * *err_code Code, *err_d0 Wert zum Code (ohne Abbruch beide 0; seit 1.6.3 ohne Stelle, Tag, Asset: ohne Leser) */
 SIMLEV_C_EXPORT void simlev_c_engine_counts(void* h, double* status, double* totals, int64_t* nlots, int64_t* nsells,
                                             int64_t* ntaxes, int32_t* px_changed, int64_t* cnt, double* scal,
@@ -537,7 +527,7 @@ SIMLEV_C_EXPORT void simlev_c_engine_counts(void* h, double* status, double* tot
     }
     cnt[0] = (int64_t) E.events.size(); cnt[1] = (int64_t) E.ev_ints.size();
     cnt[2] = (int64_t) E.rows.size(); cnt[3] = (int64_t) E.ks.size(); cnt[4] = (int64_t) E.ev_vals.size();
-    scal[0] = E.fee_paid; scal[1] = E.tax_unpaid; scal[2] = E.refund_due;
+    scal[0] = E.fee_paid; scal[1] = E.tax_unpaid;
     *err_code = E.err.code;   /* seit 1.6.3 ohne site, day, asset (ohne Leser) */
     *err_d0 = E.err.d0;
 }
@@ -545,15 +535,6 @@ SIMLEV_C_EXPORT void simlev_c_engine_counts(void* h, double* status, double* tot
 /* Lots von Asset a (0-basiert): je Lot date, count, price, remaining, original, vp, has_vp */
 SIMLEV_C_EXPORT void simlev_c_engine_lots(void* h, int64_t a, double* out) {
     static_cast<simlev_engine::Engine*>(h)->lots_out((int) a, out);
-}
-/* Kompakte Lot-Ausgabe (seit 1.6.3): Zahl der offenen Lots (remaining > 0) von Asset a bzw. diese Lots spaltenweise
- * in out[4 k]: date, units (= remaining), price, vp (0 ohne Vorabpauschale); Engine::open_lots_out. Mit nlots/nsells/
- * ntaxes aus simlev_c_engine_counts ersetzt das simlev_c_engine_lots/_sells/_taxes, wo nur gezaehlt wird. */
-SIMLEV_C_EXPORT int64_t simlev_c_engine_open_lots_n(void* h, int64_t a) {
-    return static_cast<simlev_engine::Engine*>(h)->open_lots_n((int) a);
-}
-SIMLEV_C_EXPORT void simlev_c_engine_open_lots(void* h, int64_t a, double* out) {
-    static_cast<simlev_engine::Engine*>(h)->open_lots_out((int) a, out);
 }
 /* Verkaeufe von Asset a: je Verkauf date, count, price, gain, taxes, regime, exempt, has_exempt */
 SIMLEV_C_EXPORT void simlev_c_engine_sells(void* h, int64_t a, double* out) {

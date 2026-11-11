@@ -257,7 +257,8 @@ static PyObject *str_list(char *buf, int64_t *off, int64_t n)
     int64_t i;
     if (l)
         for (i = 0; i < n; i++) {
-            PyObject *s = PyUnicode_DecodeUTF8(buf + off[i], (Py_ssize_t) (off[i + 1] - off[i]), "ignore");
+            /* seit 1.6.4 ungültige Bytes (z. B. nach %.1s) wie R erhalten statt still verwerfen (C-054) */
+            PyObject *s = PyUnicode_DecodeUTF8(buf + off[i], (Py_ssize_t) (off[i + 1] - off[i]), "surrogateescape");
             if (!s) { Py_DECREF(l); l = NULL; break; }
             PyList_SET_ITEM(l, (Py_ssize_t) i, s);
         }

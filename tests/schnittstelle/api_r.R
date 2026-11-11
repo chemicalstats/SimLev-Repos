@@ -15,7 +15,7 @@
 #   Datum; sortiert), --stand ist die Überschrift des Eintrags in CHANGES.md.
 # --frozen-check: Auszug mit dem eingefrorenen Stand vergleichen; bei
 #   Abweichung Liste der Unterschiede und Rückgabewert 1
-#   (r/tests/testthat/test-api-frozen.R, run.py --check).
+#   (tests/schnittstelle/test-api.R, run.py --check).
 # Braucht nur Basis-R und jsonlite.
 
 args <- commandArgs(trailingOnly = TRUE)

@@ -74,6 +74,10 @@ function hclust(d, method::AbstractString = "complete"; members = nothing)
     end
     membr = members === nothing ? ones(n) : _v(members)
     length(membr) != n && error("invalid length of members")
+    # seit 1.6.4 (C-016, Entscheidung 78) wie R .Fortran: nicht endliche Gewichte (Argument 7) bzw. Abstände
+    # (Argument 10) sind ein Fehler; bis 1.6.3 rechnete der Kern still falsch oder schrieb außerhalb des Speichers
+    all(t -> t !== missing && isfinite(Float64(t)), membr) || error("NA/NaN/Inf in foreign function call (arg 7)")
+    all(t -> t !== missing && isfinite(Float64(t)), d.values) || error("NA/NaN/Inf in foreign function call (arg 10)")
     diss = collect(Float64, view(d.values, 1:ln))
     merge, crit, order = SimLev._rb_hclust(n, iopt, collect(Float64, membr), diss)   # C-Kern sl_r_hclust (seit 1.6.0)
     return RList("merge" => merge, "height" => _vec_out(crit),

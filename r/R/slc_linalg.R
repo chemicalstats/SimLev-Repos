@@ -160,8 +160,12 @@
   ok <- length(x) > 0L && all(is.finite(x))       # sonst meldet der Kern den Fehler
   if (is.null(from)) from <- if (ok) min(x) - cut * bw else 0
   if (is.null(to)) to <- if (ok) max(x) + cut * bw else 1
-  res <- .Call(C_sl_kde, x, if (is.null(weights)) NULL else .sl_dvec(weights), as.double(bw),
-               as.double(n), as.double(from), as.double(to))
+  if (!is.null(weights)) {
+    weights <- .sl_dvec(weights)
+    # seit 1.6.4 eine Meldung fuer alle drei Sprachen (T4-R7; bis dahin "density: x und weights ungleich lang" aus C)
+    if (length(weights) != length(x)) chk_stop("ut4.kde_weights", "density")
+  }
+  res <- .Call(C_sl_kde, x, weights, as.double(bw), as.double(n), as.double(from), as.double(to))
   res$bw <- bw
   res$n <- length(x)
   res
@@ -175,7 +179,7 @@
 # Stichproben konstant) sind Statistik und p-Wert NA (t.test bricht dort ab).
 .sl_welch_test <- function(x, y) {
   nx <- length(x); ny <- length(y)
-  ax <- stats::var(x) / nx; ay <- stats::var(y) / ny
+  ax <- .sl_var(x) / nx; ay <- .sl_var(y) / ny
   se2 <- ax + ay
   if (!is.finite(se2) || !(se2 > 0)) return(list(statistic = c(t = NA_real_), parameter = c(df = NA_real_), p.value = NA_real_))
   tt <- (mean(x) - mean(y)) / sqrt(se2)
@@ -188,7 +192,7 @@
 # angepasste Werte und r^2 = 1 - RSS/TSS haengen nicht von der Basis ab.
 .sl_poly_fit <- function(x, y, degree) {
   x <- as.double(x); y <- as.double(y); degree <- as.integer(degree)
-  cx <- mean(x); sx <- stats::sd(x)
+  cx <- mean(x); sx <- .sl_sd(x)
   z <- (x - cx) / sx
   X <- matrix(1, length(z), degree + 1L)
   for (j in seq_len(degree)) X[, j + 1L] <- X[, j] * z

@@ -36,6 +36,148 @@ const RVector = SimLev.RVector
 const NamedMat = SimLev.NamedMat
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Eingabeprüfung Abhängigkeit, Regime, Optimierung, Backcast, Szenarien (seit 1.6.4, K42 E4; Hilfen in
+# pruefen.jl, Bausteine e4.* der Tabelle eingabe). Gegenstücke in dependence.R und dependence.py.
+# ═════════════════════════════════════════════════════════════════════════════
+
+using ..SimLev: chk_bool1, chk_cols, chk_col_nofactor, chk_df, chk_fmt, chk_int1, chk_max, chk_msg, chk_name1, chk_nofactor,
+                chk_num1, chk_scalar, chk_stop
+
+
+_e4_isfactor(@nospecialize(x)) = x isa SimLev.RFmt.RFactor
+_e4_isna(@nospecialize(v)) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
+_e4_numscalar(@nospecialize(v)) = v isa Real && !(v isa Bool)
+_e4_col(@nospecialize(data), nm) = data isa RFrame ? data[nm] : error("data")
+
+"""Vektor nicht leerer Namen (Spalten) ohne NA und ohne doppelte, mindestens einer; mit `no_date` nicht `"date"` (R
+`.e4_names`). Ergebnis als `Vector{String}`."""
+function _e4_names(@nospecialize(x), fn, arg; null_ok::Bool = false, no_date::Bool = true)
+    x === nothing && null_ok && return nothing
+    chk_nofactor(x, fn, arg)                                   # Entscheidung 15
+    v = x isa Union{AbstractString,Symbol} ? Any[x] : x isa Union{AbstractVector,Tuple} ? Any[e for e in x] : nothing
+    (v === nothing || isempty(v) || !all(c -> (c isa AbstractString || c isa Symbol) && !isempty(string(c)), v)) &&
+        chk_stop("e3.namen", fn, arg)
+    out = String[string(c) for c in v]
+    length(unique(out)) < length(out) && chk_stop("e2.doppelt", fn, arg)   # B-052
+    no_date && "date" in out && chk_stop("e4.date", fn, arg)   # B-052, B-055
+    return out
+end
+
+"""Numerischer Vektor (keine Matrix, Tabelle, kein Text, keine Wahrheitswerte, kein Faktor); NA erlaubt; eine
+einzelne Zahl zählt als Vektor der Länge 1 (R `.e4_vec`)."""
+function _e4_vec(@nospecialize(x), fn, arg)
+    chk_nofactor(x, fn, arg)
+    xv = x isa RVector ? x.values : x isa Tuple ? collect(Any, x) : x
+    ok = _e4_numscalar(xv) || (xv isa AbstractVector && !(xv isa AbstractMatrix) && !isempty(xv) &&
+                               all(v -> _e4_numscalar(v) || _e4_isna(v), xv) && any(_e4_numscalar, xv))
+    ok || chk_stop("zahlen", fn, arg)
+    return x
+end
+
+"""Zahlenspalte (kein Faktor, kein Text, keine Wahrheitswerte); eine Spalte nur aus NA gilt als Zahlenspalte
+(Entscheidung 14; R `.e4_numcol`)."""
+function _e4_numcol(@nospecialize(data), col, fn)
+    v = _e4_col(data, col)
+    v isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", fn, col)   # Entscheidung 15, B-009
+    k, a = SimLev._column(v)
+    k == :factor && chk_stop("spalte_faktor", fn, col)
+    (k == :numeric || all(_e4_isna, a)) || chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
+    return data
+end
+
+"""Kursdaten: Tabelle (Entscheidung 6) mit Spalte `date` (kein Faktor) und den Zahlenspalten `cols` (R `.e4_data`;
+B-015, B-040)."""
+function _e4_data(@nospecialize(data), cols, fn)
+    chk_df(data, fn, "data")
+    chk_cols(data, vcat(["date"], collect(String, cols)), fn)
+    chk_col_nofactor(data, "date", fn)
+    for k in cols
+        _e4_numcol(data, k, fn)
+    end
+    return data
+end
+
+"Keine gemeinsame Spalte in `a` und `b` (B-013; R `.e4_disjoint`)."
+function _e4_disjoint(a, b, fn, arg_a, arg_b)
+    (a === nothing || b === nothing) && return a
+    isempty(intersect(a, b)) || chk_stop("e4.gemeinsam", fn, arg_a, arg_b)
+    return a
+end
+
+"Anzahl: ganze Zahl ≥ lo, höchstens hi (Entscheidung 16 sinngemäß; R `.e4_count`). Ergebnis: Einzelwert."
+function _e4_count(@nospecialize(x), fn, arg; lo = 1, hi = SimLev.SL_MAX_N, null_ok::Bool = false)
+    x = chk_scalar(x)
+    x === nothing && null_ok && return x
+    chk_int1(x, fn, arg; lo = lo)
+    chk_max(x, hi, fn, arg)
+    return x
+end
+
+"Vektor von Anteilen echt zwischen 0 und 1 ohne doppelte Werte (B-054; R `.e4_probs`). Ergebnis: `Vector{Float64}`."
+function _e4_probs(@nospecialize(x), fn, arg)
+    chk_nofactor(x, fn, arg)
+    xv = x isa RVector ? x.values : x isa Tuple ? collect(Any, x) : x
+    ok = _e4_numscalar(xv) || (xv isa AbstractVector && !(xv isa AbstractMatrix) && !isempty(xv) && all(_e4_numscalar, xv))
+    a = ok ? Float64[Float64(v) for v in (xv isa AbstractVector ? xv : [xv])] : Float64[]
+    (ok && all(isfinite, a) && all(v -> 0 < v < 1, a) && length(unique(a)) == length(a)) || chk_stop("e4.anteile", fn, arg)
+    return a
+end
+
+"""breaks: `nothing` oder nach Spalten aus `conditions` benannte Liste (Dict, NamedTuple, Paare) streng steigender
+Zahlengrenzen ohne NA (Länge ≥ 2; B-014; R `.e4_breaks`)."""
+function _e4_breaks(@nospecialize(breaks), conditions, fn)
+    breaks === nothing && return breaks
+    pr = breaks isa NamedTuple ? [String(k) => v for (k, v) in pairs(breaks)] :
+         breaks isa AbstractDict ? [string(k) => v for (k, v) in breaks] :
+         breaks isa AbstractVector{<:Pair} ? [string(p.first) => p.second for p in breaks] : nothing
+    (pr === nothing || any(p -> isempty(p.first), pr) || length(unique(first.(pr))) < length(pr)) && chk_stop("e4.breaks", fn)
+    for (k, b) in pr
+        (conditions !== nothing && k in conditions) || chk_stop("e4.breaks_name", fn, k)
+        ok = !_e4_isfactor(b) && (b isa AbstractVector && !(b isa AbstractMatrix)) && length(b) >= 2 &&
+             all(_e4_numscalar, b) && all(v -> !isnan(Float64(v)), b) && all(i -> Float64(b[i]) > Float64(b[i-1]), 2:length(b))
+        ok || chk_stop("e4.breaks", fn)
+    end
+    return breaks
+end
+
+"Auswahl als Name aus `nm` oder ganze Zahl 1 bis length(nm) (B-007; R `.e4_pick`). Ergebnis: Einzelwert."
+function _e4_pick(@nospecialize(v), nm, fn, arg)
+    v = chk_scalar(v)
+    if v isa AbstractString
+        v in nm || chk_stop("auswahl", fn, arg, join(("\"$c\"" for c in nm), ", "))
+    else
+        chk_int1(v, fn, arg; lo = 1, hi = length(nm))
+    end
+    return v
+end
+
+"""Bedingung als Wahrheitswerte wie R `as.logical` (Text "TRUE"/"FALSE" usw., Zahlen ungleich 0 = wahr, anderer Text
+NA), NA = false (mildere Regel bis zur Antwort auf Frage F1, B-008); Faktor, Datum, Matrix und andere Objekte sind ein
+Fehler (R `.e4_cond`). Ergebnis: `Vector{Bool}`."""
+function _e4_cond(@nospecialize(cond), fn)
+    _e4_isfactor(cond) && chk_stop("e4.bedingung", fn)
+    cv = cond isa RVector ? cond.values : cond
+    cv isa AbstractMatrix && chk_stop("e4.bedingung", fn)
+    cv = cv isa AbstractVector ? cv : Any[cv]
+    out = falses(length(cv))
+    for (i, v) in enumerate(cv)
+        _e4_isna(v) && continue
+        if v isa Bool
+            out[i] = v
+        elseif _e4_numscalar(v)
+            out[i] = Float64(v) != 0.0
+        elseif v isa AbstractString
+            v in ("T", "TRUE", "true", "True", "F", "FALSE", "false", "False") ||
+                chk_stop("e4.bedingung_text", fn)              # Entscheidung 68: nicht lesbarer Text ist ein Fehler
+            out[i] = v in ("T", "TRUE", "true", "True")
+        else
+            chk_stop("e4.bedingung", fn)
+        end
+    end
+    return Vector{Bool}(out)
+end
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Aufrufe gemeinsamer Bausteine (andere Bearbeiter; erst beim Aufruf aufgelöst)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -50,9 +192,9 @@ end
 _to_date(x, what) = SimLev.DataPrep._to_date(x, String(what))
 _fill_na(x, method; keep_leading = false) =
     _fvec(SimLev.Backcast._fill_na(x, method; keep_leading = keep_leading))
-_roll_var(x, n) = _fvec(SimLev.Signals._roll_var(x, n))
-_roll_cov(x, y, n) = _fvec(SimLev.Signals._roll_cov(x, y, n))
-_roll_mean(x, n) = _fvec(SimLev.Signals._roll_mean(x, n))
+_roll_var(x, n) = _fvec_r(SimLev.Signals._roll_var(x, n))
+_roll_cov(x, y, n) = _fvec_r(SimLev.Signals._roll_cov(x, y, n))
+_roll_mean(x, n) = _fvec_r(SimLev.Signals._roll_mean(x, n))
 "Zufall der C-Bibliothek slc."
 _SL() = SimLev.SLib
 _boot_idx_stationary(n_src, n_out, L, stream) = Vector{Int}(SimLev.SLib.boot_idx_stationary(n_src, n_out, L; stream = stream))
@@ -69,13 +211,13 @@ const _quietly = SimLev.Bootstrap._quiet   # seit 1.6.3 eine Fassung
 # ── Statistik-Bausteine (RStats, RLinalg, RFmt, RLibm, SLib) ──────────────
 
 _quantile(x, probs; na_rm = false) =
-    _fvec(SimLev.RStats.quantile(_fvec(x), _fvec(probs); na_rm = na_rm, names = false))
+    _fvec_r(SimLev.RStats.quantile(_fvec_r(x), _fvec_r(probs); na_rm = na_rm, names = false))
 _q1(x, p; na_rm = false) = _quantile(x, [Float64(p)]; na_rm = na_rm)[1]
 _cor_raw(x, y = nothing; method = "pearson") =
     y === nothing ? SimLev.RStats.cor(x; method = method) : SimLev.RStats.cor(x, y; method = method)
-_cor1(x, y; method = "pearson") = _fvec(_cor_raw(_fvec(x), _fvec(y); method = method))[1]
-_cormat(X; method = "pearson") = _fmat(_cor_raw(_fmat(X); method = method))
-_median(x; na_rm = false) = Float64(SimLev.RStats.median(_fvec(x); na_rm = na_rm))
+_cor1(x, y; method = "pearson") = _fvec_r(_cor_raw(_fvec_r(x), _fvec_r(y); method = method))[1]
+_cormat(X; method = "pearson") = _fmat_r(_cor_raw(_fmat_r(X); method = method))
+_median(x; na_rm = false) = Float64(SimLev.RStats.median(_fvec_r(x); na_rm = na_rm))
 function _optimize(f, lower, upper)
     o = SimLev.RStats.optimize(f, [Float64(lower), Float64(upper)])
     Float64(_el(o, "minimum")), Float64(_el(o, "objective"))
@@ -89,8 +231,8 @@ _lgamma(x) = Float64(SimLev.SLib.lgamma(Float64(x)))
 _log(x::Real) = SimLev.RLibm.log(Float64(x))
 _exp(x::Real) = SimLev.RLibm.exp(Float64(x))
 "`A %m% B` (slc-Matrixprodukt); Vektor B als Spalte."
-_matprod(A, B) = _fmat(SimLev.SLib.matmul(_fmat(A), B isa AbstractVector ? reshape(_fvec(B), :, 1) : _fmat(B)))
-_matvec(A, b) = vec(_matprod(A, reshape(_fvec(b), :, 1)))
+_matprod(A, B) = _fmat_r(SimLev.SLib.matmul(_fmat_r(A), B isa AbstractVector ? reshape(_fvec_r(B), :, 1) : _fmat_r(B)))
+_matvec(A, b) = vec(_matprod(A, reshape(_fvec_r(b), :, 1)))
 
 "`sprintf` für einen Satz Skalare (über RFmt)."
 function _sprintf(fmt::AbstractString, args...)
@@ -134,6 +276,15 @@ _fvec(x::Tuple) = _fvec(collect(x))
 _fvec(x::Real) = [Float64(x)]
 _fvec(::Nothing) = Float64[]
 _fvec(::Missing) = [_NA]
+# seit 1.6.4 (B-105): wie _fvec/_fmat, aber ohne Kopie, wenn die Eingabe schon ein Vector{Float64} bzw. Matrix{Float64}
+# ist. Nur, wo das Ergebnis sicher nur gelesen wird (nicht verändert, nicht zurückgegeben oder gespeichert) oder ein
+# frisch berechnetes Feld ist, auf das sonst niemand verweist; sonst _fvec/_fmat (Kopie). Gleiche Werte.
+_fvec_r(x::Vector{Float64}) = x
+_fvec_r(x) = _fvec(x)
+_fmat_r(X::Matrix{Float64}) = X
+_fmat_r(X::NamedMat) = X.data isa Matrix{Float64} ? X.data : _fmat(X)
+_fmat_r(X::AbstractVector) = reshape(_fvec_r(X), :, 1)
+_fmat_r(X) = _fmat(X)
 _num1(v::Real) = Float64(v)
 _num1(::Missing) = _NA
 _num1(::Nothing) = _NA
@@ -149,14 +300,14 @@ _num(x) = _fvec(x)
 
 "R `min()` (NA vor NaN, sonst NaN pflanzt sich fort; leer = Inf)."
 function _rmin(xs...)
-    vals = Float64[v for x in xs for v in _fvec(x)]
+    vals = Float64[v for x in xs for v in _fvec_r(x)]
     isempty(vals) && return Inf
     _rnan(vals) !== nothing && return _rnan(vals)
     minimum(vals)
 end
 "R `max()`."
 function _rmax(xs...)
-    vals = Float64[v for x in xs for v in _fvec(x)]
+    vals = Float64[v for x in xs for v in _fvec_r(x)]
     isempty(vals) && return -Inf
     _rnan(vals) !== nothing && return _rnan(vals)
     maximum(vals)
@@ -177,34 +328,34 @@ _pmax(a::AbstractVector, b::Real) = Float64[(b > v || isnan(b)) ? Float64(b) : v
 
 "`rank(x, ties.method = \"average\")` (`RStats.r_rank`, -0 und 0 gleichrangig)."
 function _rank_avg(x)
-    r = SimLev.RStats.r_rank(_fvec(x))
+    r = SimLev.RStats.r_rank(_fvec_r(x))
     Float64[Float64(t) for t in (r isa RVector ? r.values : r isa AbstractVector ? r : [r])]
 end
 
 "Pseudo-Beobachtungen (Ränge / (n + 1))."
-_pobs(x) = (v = _fvec(x); _rank_avg(v) ./ (length(v) + 1))
+_pobs(x) = (v = _fvec_r(x); _rank_avg(v) ./ (length(v) + 1))
 
 "`combn(k, 2)` als Liste von (i, j) in R-Reihenfolge."
 _combn2(k::Integer) = [(i, j) for i in 1:k for j in (i+1):k]
 
 "`colMeans` (long-double-Summe / n; C-Kern)."
-_colmeans(X) = (A = _fmat(X); SimLev._ld_colsums(A; mean = true))
+_colmeans(X) = (A = _fmat_r(X); SimLev._ld_colsums(A; mean = true))
 
 "`colSums` (long double)."
 function _colsums(X)
-    X = _fmat(X)
+    X = _fmat_r(X)
     Float64[SimLev.r_sum(view(X, :, j)) for j in 1:size(X, 2)]
 end
 "`rowSums` (long double)."
 function _rowsums(X)
-    X = _fmat(X)
+    X = _fmat_r(X)
     size(X, 2) == 0 && return zeros(size(X, 1))
-    _fvec(SimLev.r_rowsums([X[:, j] for j in 1:size(X, 2)]))
+    _fvec_r(SimLev.r_rowsums([X[:, j] for j in 1:size(X, 2)]))
 end
 
 "`scale(x)[, 1]` für einen Vektor."
 function _scale1(x)
-    x = _fvec(x)
+    x = _fvec_r(x)
     xc = x .- _colmeans(x)[1]
     v = filter(!isnan, xc)
     s = sqrt(SimLev.r_sum(v .* v) / max(1, length(v) - 1))
@@ -212,7 +363,7 @@ function _scale1(x)
 end
 
 "Stabile Reihenfolge wie `order()` (NA/NaN zuletzt, -0 == 0)."
-_order(v) = sortperm(_fvec(v); alg = Base.Sort.DEFAULT_STABLE,
+_order(v) = sortperm(_fvec_r(v); alg = Base.Sort.DEFAULT_STABLE,
                      lt = (a, b) -> isnan(b) ? !isnan(a) : (!isnan(a) && a < b))
 
 const _isna_el = SimLev._isna   # r/rnum.jl (seit 1.6.3)
@@ -256,11 +407,11 @@ end
 
 "`.bincode` (Intervallnummern 1..; 0 = NA; seit 1.6.0 C-Kern sl_r_bincode)."
 _bincode(x, breaks; right = true, include_lowest = false) =
-    SimLev._rb_bincode(collect(Float64, _fvec(x)), collect(Float64, _fvec(breaks)), right, include_lowest)
+    SimLev._rb_bincode(collect(Float64, _fvec_r(x)), collect(Float64, _fvec_r(breaks)), right, include_lowest)
 
 "`cut(x, k, labels = FALSE)` mit einer Intervallanzahl `k`."
 function _cut_n(x, k::Integer)
-    x = _fvec(x)
+    x = _fvec_r(x)
     nb = Int(k + 1)
     fin = filter(!isnan, x)
     rx = (minimum(fin), maximum(fin))
@@ -278,10 +429,11 @@ end
 
 "Matrix und Spaltennamen (`as.matrix`)."
 function _as_matrix(X)
-    X isa NamedMat && return _fmat(X), X.colnames
+    # seit 1.6.4 ohne Kopie (B-105): alle Aufrufer (_kendall, dependence_dcc, quantile_regression) lesen nur
+    X isa NamedMat && return _fmat_r(X), X.colnames
     X isa RFrame && return _fmat(X), names(X)
-    X isa AbstractMatrix && return _fmat(X), nothing
-    return _fmat(X), nothing
+    X isa AbstractMatrix && return _fmat_r(X), nothing
+    return _fmat_r(X), nothing
 end
 
 _as_names(::Nothing) = String[]
@@ -349,7 +501,8 @@ function _dep_check_prices(v, a, d)
     if !isempty(bad)
         dd = d isa AbstractVector ? d[bad[1]] : d
         more = length(bad) > 1 ? " und $(length(bad) - 1) weitere Werte" : ""
-        error("Kursspalte '$a': Kurse müssen positiv und endlich sein, gefunden $(_fmt1(v[bad[1]])) am " *
+        # seit 1.6.4 ohne den Wert (Entscheidung 8), mit dem Datum als Ort in data
+        error("Kursspalte '$a': Kurse müssen positiv und endlich sein, gefunden am " *
               "$(_date_str(dd))$more (fehlende Kurse als NA angeben).")
     end
     v
@@ -464,8 +617,8 @@ end
 "Log-Dichte einer Copula (Summe), Familien inkl. Rotationen (`.cop_ll`)."
 function _cop_ll(family::AbstractString, par, u, v)
     base, rot = _fam_parts(family)
-    u = _fvec(u); v = _fvec(v)
-    par = _fvec(par)
+    u = _fvec_r(u); v = _fvec_r(v)
+    par = _fvec_r(par)
     if rot == "180"
         u = 1 .- u; v = 1 .- v
     elseif rot == "90"
@@ -527,15 +680,15 @@ end
 function _cop_fit_t(u, v)
     # seit 1.6.0 ganz im Kern (sl_tcop_fit, qt auf mehreren Threads); nur bei einer nicht endlichen Auswertung oder
     # einer Warnung von qt wie bisher hier (gleiche Meldungen)
-    r = SimLev.SLib.tcop_fit(Vector{Float64}(_fvec(u)), Vector{Float64}(_fvec(v)))
+    r = SimLev.SLib.tcop_fit(Vector{Float64}(_fvec_r(u)), Vector{Float64}(_fvec_r(v)))
     r === nothing || return r
     best = [0.0, Inf, Inf]
     function prof(nu)
         if isinf(nu)
-            x = _fvec(_qnorm(u)); y = _fvec(_qnorm(v)); x2 = x .* x; y2 = y .* y
+            x = _fvec_r(_qnorm(u)); y = _fvec_r(_qnorm(v)); x2 = x .* x; y2 = y .* y
             g = th -> (s = SimLev.r_sum(_cop_g_ll(SimLev.RLibm.tanh(th), x, y, x2, y2)); isfinite(s) ? -s : 1e10)
         else
-            x = _fvec(_qt(u, nu)); y = _fvec(_qt(v, nu)); x2 = x .* x; y2 = y .* y
+            x = _fvec_r(_qt(u, nu)); y = _fvec_r(_qt(v, nu)); x2 = x .* x; y2 = y .* y
             B = (nu + 1) / 2 .* (SimLev.RLibm.log1p.(x2 ./ nu) .+ SimLev.RLibm.log1p.(y2 ./ nu))
             c0 = _cop_t_c0(nu)
             g = th -> (s = SimLev.r_sum(_cop_t_ll(SimLev.RLibm.tanh(th), nu, c0, x, y, x2, y2, B)); isfinite(s) ? -s : 1e10)
@@ -563,7 +716,7 @@ end
 "Tail-Koeffizienten einer Copula (unten, oben) als benannter Vektor (`.cop_lambda`)."
 function _cop_lambda(family::AbstractString, par)
     base, rot = _fam_parts(family)
-    par = _fvec(par)
+    par = _fvec_r(par)
     lam = if base in ("gaussian", "frank")
         [0.0, 0.0]
     elseif base == "t"
@@ -607,12 +760,14 @@ Varianten verwendet. Kendalls Tau wird intern in O(n log n) berechnet (gleiches 
 # Argumente
 - `x`, `y`: Numerische Vektoren gleicher Länge (z. B. Renditen; nur die Ränge zählen). Paare mit nicht
   endlichen Werten werden entfernt; mindestens 20 Paare nötig.
+  Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).
 - `families`: Zeichenvektor der Familien: `"gaussian"`, `"t"`, `"clayton"`, `"gumbel"`, `"frank"`, jeweils
   optional mit Rotation `"_90"`, `"_180"` oder `"_270"` (z. B. `"clayton_180"`). `nothing` (Standard) =
   Auswahl nach dem Vorzeichen von Kendalls Tau: bei Tau >= 0 `gaussian`, `t`, `clayton`, `gumbel`, `frank`,
   `clayton_180`, `gumbel_180`; sonst `gaussian`, `t`, `frank`, `clayton_90`, `clayton_270`, `gumbel_90`,
   `gumbel_270`. Rotationen gibt es nur für `clayton` und `gumbel` (Gauß-, t- und Frank-Copula sind
   radialsymmetrisch); andere Namen sind ein Fehler, ebenso eine konstante Reihe.
+  Seit 1.6.4 nicht leer.
 
 # Rückgabe
 Tabelle (RFrame) mit einer Zeile je Familie, aufsteigend nach AIC sortiert (erste Zeile = beste Familie):
@@ -641,6 +796,8 @@ println(copula_fit(z[:, 1] ./ w, z[:, 2] ./ w))
 ```
 """
 function copula_fit(x, y, families_pos = nothing; families = families_pos)
+    _e4_vec(x, "copula_fit", "x"); _e4_vec(y, "copula_fit", "y")   # seit 1.6.4 (B-009, B-010, B-050)
+    families === nothing || (families = _e4_names(families, "copula_fit", "families"; no_date = false))   # B-035
     lx, ly = _len(x), _len(y)
     lx != ly && error("copula_fit: x und y müssen gleich lang sein ($lx bzw. $ly Werte).")
     x, y = _finite_pairs(x, y)
@@ -720,6 +877,7 @@ Reihen höchstens auf ihrem empirischen q-Quantil (bzw. mindestens auf ihrem (1 
 # Argumente
 - `x`, `y`: Numerische Vektoren gleicher Länge (z. B. Periodenrenditen). Paare mit nicht endlichen Werten
   werden entfernt.
+  Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).
 - `q`: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil echt zwischen 0 und 1 (0.05 = die unteren
   bzw. oberen 5 % der Beobachtungen).
 
@@ -739,29 +897,57 @@ println(tail_dependence(z .+ randn(rng, 2000), z .+ randn(rng, 2000), [0.05, 0.1
 ```
 """
 function tail_dependence(x, y, q_pos = [0.01, 0.025, 0.05, 0.10, 0.20]; q = q_pos)
+    _e4_vec(x, "tail_dependence", "x"); _e4_vec(y, "tail_dependence", "y")   # seit 1.6.4 (B-009, B-010, B-050)
     lx, ly = _len(x), _len(y)
     lx != ly && error("tail_dependence: x und y müssen gleich lang sein ($lx bzw. $ly Werte).")
+    chk_nofactor(q, "tail_dependence", "q")
     qv = q isa AbstractVector || q isa Tuple ? collect(q) : [q]
-    if !_isnumvec(q) || isempty(qv) || any(v -> !isfinite(Float64(v)) || v <= 0 || v >= 1, qv)
-        error("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen (erhalten: $(_fmt1(q))).")
+    if q isa AbstractMatrix || !_isnumvec(q) || isempty(qv) || any(v -> !isfinite(Float64(v)) || v <= 0 || v >= 1, qv)
+        error("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen.")   # seit 1.6.4 ohne Wert
     end
     qa = Float64.(qv)
     x, y = _finite_pairs(x, y)
     n = length(x)
     n < 2 && error("tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.")
     u = _pobs(x); v = _pobs(y)
-    ec(s) = (count(s) >= 8 && SimLev.r_sd(x[s]) > 0 && SimLev.r_sd(y[s]) > 0) ? _cor1(x[s], y[s]) : _NA
     lower = Float64[]; upper = Float64[]; el_ = Float64[]; eu_ = Float64[]; nl = Int[]; nu = Int[]
     for p in qa
-        lo = (u .<= p) .& (v .<= p)
-        hi = (u .> 1 - p) .& (v .> 1 - p)
-        el = (x .<= _q1(x, p)) .& (y .<= _q1(y, p))
-        eh = (x .>= _q1(x, 1 - p)) .& (y .>= _q1(y, 1 - p))
-        push!(lower, count(lo) / (n * p)); push!(upper, count(hi) / (n * p))
-        push!(el_, ec(el)); push!(eu_, ec(eh)); push!(nl, count(lo)); push!(nu, count(hi))
+        r = _tail_dep_core(x, y, u, v, n, p)
+        push!(lower, r[1]); push!(upper, r[2]); push!(el_, r[3]); push!(eu_, r[4]); push!(nl, r[5]); push!(nu, r[6])
     end
     RFrame("q" => qa, "lower" => lower, "upper" => upper, "exceed_lower" => el_, "exceed_upper" => eu_,
            "n_lower" => nl, "n_upper" => nu)
+end
+
+# Kern von tail_dependence für ein p auf endlichen Paaren (seit 1.6.4, B-064; R `.tail_dep_core`): je Reihe ein
+# Quantilaufruf für p und 1 - p (dieselben Ordnungsstatistiken; die Quantile gehen nur in Vergleiche ein).
+# Ergebnis (lower, upper, exceed_lower, exceed_upper, n_lower, n_upper).
+function _tail_dep_core(x, y, u, v, n, p::Float64)
+    ec(s) = (count(s) >= 8 && SimLev.r_sd(x[s]) > 0 && SimLev.r_sd(y[s]) > 0) ? _cor1(x[s], y[s]) : _NA
+    lo = (u .<= p) .& (v .<= p)
+    hi = (u .> 1 - p) .& (v .> 1 - p)
+    qx = _quantile(x, [p, 1 - p]); qy = _quantile(y, [p, 1 - p])
+    el = (x .<= qx[1]) .& (y .<= qy[1])
+    eh = (x .>= qx[2]) .& (y .>= qy[2])
+    nl = count(lo); nh = count(hi)
+    return (nl / (n * p), nh / (n * p), ec(el), ec(eh), nl, nh)
+end
+
+# tail_dependence(x, y, q)[lower, upper, exceed_lower] für ein mit chk_num1 geprüftes q in Schleifen
+# (dependence_validate, dependence_analysis): gleiche Filterung und Meldung ohne RFrame (seit 1.6.4, B-064; R
+# `.tail_dep_fun`); ein q, das dort nicht als Zahl in (0, 1) durchgeht, läuft wie bisher über tail_dependence.
+function _tail_dep_fun(q)
+    if !(q isa Real) || q isa Bool || !(isfinite(Float64(q)) && 0 < q < 1)
+        return (x, y) -> (td = tail_dependence(x, y, q); (td["lower"][1], td["upper"][1], td["exceed_lower"][1]))
+    end
+    p = Float64(q)
+    return function (x, y)
+        x, y = _finite_pairs(x, y)
+        n = length(x)
+        n < 2 && error("tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.")
+        r = _tail_dep_core(x, y, _pobs(x), _pobs(y), n, p)
+        (r[1], r[2], r[3])
+    end
 end
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -788,6 +974,7 @@ gibt es nicht mehr; die GARCH-Stufe meldet `method = "ml"` statt `"rugarch"`/`"o
   Korrelationen hängen nicht davon ab. Spaltennamen werden übernommen (sonst `V1`, `V2`, ...). Konstante oder
   (nahezu) perfekt korrelierte Reihen (singuläre Korrelationsmatrix der standardisierten Residuen, kleinster
   Eigenwert unter 1e-8) sind ein Fehler.
+  Seit 1.6.4 geprüft: nur Zahlen, alle endlich.
 
 # Rückgabe
 Liste mit `a`, `b` (DCC-Parameter), `loglik` (Korrelationsteil der Quasi-Log-Likelihood), `correlation`
@@ -808,15 +995,24 @@ println(fit["a"], " ", fit["b"])
 ```
 """
 function dependence_dcc(R)
+    # seit 1.6.4: nur Zahlen (Matrix oder Tabelle mit Zahlenspalten), endlich (Doku: keine fehlenden Werte)
+    if R isa RFrame
+        for k in names(R)
+            _e4_numcol(R, k, "dependence_dcc")
+        end
+    elseif !(R isa NamedMat || (R isa AbstractMatrix && all(_e4_numscalar, R)))
+        chk_stop("e4.matrix", "dependence_dcc")
+    end
     Rm, nm = _as_matrix(R)
+    all(isfinite, Rm) || chk_stop("e3.werte", "dependence_dcc", "R")
     (size(Rm, 2) < 2 || size(Rm, 1) < 100) && error("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
     nm === nothing && (nm = ["V$j" for j in 1:size(Rm, 2)])
     g = [SimLev.Bootstrap._fit_garch11(Rm[:, j]; quiet = true) for j in 1:size(Rm, 2)]
-    Z = reduce(hcat, [_fvec(_el(gi, "z")) for gi in g])
+    Z = reduce(hcat, [_fvec_r(_el(gi, "z")) for gi in g])
     flat = [nm[j] for j in 1:size(Z, 2) if SimLev.r_sd(Z[:, j]) == 0]
     isempty(flat) || error("dependence_dcc: Reihe $(join(["'$f'" for f in flat], ", ")) ist konstant; keine Korrelation schätzbar.")
     Qb = _cormat(Z)
-    ev = _fvec(SimLev.SLib.eigen_sym(Qb; only_values = true)["values"])
+    ev = _fvec_r(SimLev.SLib.eigen_sym(Qb; only_values = true)["values"])
     if _rmin(ev) < 1e-8
         C0 = copy(Qb)
         for i in 1:size(C0, 1)
@@ -852,11 +1048,11 @@ Regime aus einer Zustandsvariable (`.dep_regimes`): Kategorien-Codes (1..; 0 = N
 Beschriftungen und Grenzen.
 """
 function _dep_regimes(cv, breaks = nothing, n_regimes = 3)
-    cv = _fvec(cv)
+    cv = _fvec_r(cv)
     if breaks === nothing
         qs = _quantile(cv, _seq_len_out(0.0, 1.0, Int(n_regimes) + 1); na_rm = true)
         inner = qs[2:end-1]
-        u = sort(unique(filter(isfinite, cv)))
+        u = sort(unique(filter(isfinite, cv) .+ 0.0))   # seit 1.6.4 (T3-N3) -0 wie 0 (R unique, numpy unique)
         br = Float64[]
         if length(u) >= 2 && !isempty(inner)
             u1 = u[2:end]
@@ -900,7 +1096,7 @@ end
 Korrelationen je Regime (Codes `reg` = 1..nlev) für alle Paare → Matrix Paare × Regime.
 """
 function _dep_reg_cor(X, reg, nlev::Integer, pairs; rank::Bool = false)
-    X = _fmat(X)
+    X = _fmat_r(X)
     out = fill(_NA, length(pairs), nlev)
     for li in 1:nlev
         s = findall(==(li), reg)
@@ -943,7 +1139,7 @@ end
 _sub1(a) = isempty(a) ? _NA : Float64(a[1])
 
 function _pval(dd)
-    dd = filter(isfinite, _fvec(dd))
+    dd = filter(isfinite, _fvec_r(dd))
     isempty(dd) && return NaN
     a = SimLev.r_mean_int(Int.(dd .<= 0))
     b = SimLev.r_mean_int(Int.(dd .>= 0))
@@ -970,28 +1166,35 @@ Unsicherheit).
 - `data`: Tabelle (RFrame) mit Spalte `date` (Klasse Date oder in Date umwandelbar), Kursspalten (Kursniveaus,
   keine Renditen) und Zustandsspalten (z. B. mit `series_align()` und `series_align_macro()` vorbereitet).
 - `assets`: Zeichenvektor der Kursspalten (mindestens zwei).
+  Seit 1.6.4 ohne doppelte Namen und ohne 'date'.
 - `conditions`: Zeichenvektor der Zustandsspalten (Drittvariablen, in ihrer eigenen Einheit); gehen um eine
   Periode verzögert ein. `nothing` (Standard) = keine bedingte Analyse.
+  Seit 1.6.4 ohne doppelte Namen und keine Spalte aus assets.
 - `frequency`: Renditefrequenz: `"week"` (Standard; ISO-Woche, vermeidet Effekte unterschiedlicher
   Handelszeiten), `"day"` oder `"month"`.
 - `quantiles`: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil (Standard `[0.05, 0.10]`) für die
   Tail-Kennzahlen über die ganze Stichprobe (siehe `tail_dependence()`).
+  Seit 1.6.4 echt zwischen 0 und 1, ohne doppelte Werte.
 - `breaks`: Optional benannte Liste von Grenzen je Zustandsvariable in deren Einheit, z. B. `(inflation =
   [-Inf, 2, 4, Inf],)`; Intervalle links geschlossen, rechts offen. `nothing` (Standard) bzw. fehlender
   Eintrag = `n_regimes` gleich besetzte Quantilsgruppen.
+  Seit 1.6.4 nur Namen aus conditions, Grenzen streng steigend ohne NA.
 - `n_regimes`: Anzahl Regime ohne `breaks` (ganze Zahl, Standard 3: niedrig, mittel, hoch). Fallen
   Quantilsgrenzen zusammen oder bliebe eine Quantilsgruppe leer (diskrete Zustände wie 1/2 aus
   `regime_states()`), entstehen weniger Regime. Leere Regime aus vorgegebenen `breaks` erscheinen mit `n = 0`
   und `NA`-Kennzahlen.
 - `window`: Fenster der rollierenden Pearson-Korrelation in Perioden der gewählten Frequenz. `nothing`
   (Standard) = Anzahl Perioden je Jahr (aus den Daten ermittelt, mindestens 10).
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
 - `dcc`: Logisch: DCC(1,1) mit `dependence_dcc()` schätzen (nur bei mindestens 100 Perioden; Fehler werden als
   Meldung ausgegeben).
 - `copulas`: Logisch: Copula-Fits mit `copula_fit()` je Paar (und je Regime ab 40 Perioden).
 - `B`: Anzahl Bootstrap-Wiederholungen für die Regime-Vergleiche (ganze Zahl, Standard 499; 0 = aus).
+  Seit 1.6.4 höchstens 10^8.
 - `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden. `nothing` (Standard) =
   Politis-White-Schätzung auf dem Produkt der standardisierten Renditen (Maximum über die Paare, begrenzt auf
   2 bis n / 10).
+  Seit 1.6.4 eine Zahl ≥ 1.
 - `tail_q`: Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) für die Tail-Kennzahlen je Regime.
 - `seed`: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
   reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein
@@ -1052,22 +1255,34 @@ println(da["correlation"])
 """
 function dependence_analysis(data, assets; conditions = nothing, frequency = ("week", "day", "month"),
                              quantiles = [0.05, 0.10], breaks = nothing, n_regimes = 3, window = nothing,
-                             dcc::Bool = true, copulas::Bool = true, B = 499, block = nothing, tail_q = 0.10,
+                             dcc = true, copulas = true, B = 499, block = nothing, tail_q = 0.10,
                              seed = nothing)
-    data = SimLev.as_rframe(data)
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    assets = _as_names(assets)
+    fn = "dependence_analysis"                                 # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _e4_names(assets, fn, "assets")
     length(assets) < 2 && error("dependence_analysis: mindestens zwei Anlagen.")
-    conditions = conditions === nothing ? nothing : _as_names(conditions)
+    conditions = _e4_names(conditions, fn, "conditions"; null_ok = true)
+    _e4_disjoint(assets, conditions, fn, "assets", "conditions")   # B-013
+    _e4_data(data, conditions === nothing ? assets : vcat(assets, conditions), fn)
+    data = SimLev.as_rframe(data)
+    quantiles = _e4_probs(quantiles, fn, "quantiles")          # B-054
+    _e4_breaks(breaks, conditions, fn)                         # B-014
+    n_regimes = _e4_count(n_regimes, fn, "n_regimes")          # B-032
+    window = _e4_count(window, fn, "window"; null_ok = true)   # B-012
+    dcc = chk_bool1(dcc, fn, "dcc")::Bool                      # B-051
+    copulas = chk_bool1(copulas, fn, "copulas")::Bool
+    B = _e4_count(B, fn, "B"; lo = 0)                          # B-011, B-032
+    block = chk_num1(block, fn, "block"; lo = 1, null_ok = true)
+    tail_q = chk_num1(tail_q, fn, "tail_q"; lo = 0, hi = 1, lo_open = true, hi_open = true)   # B-011
     rd = _dep_returns(data, assets, conditions, frequency)
-    X = reduce(hcat, [_fvec(rd[a]) for a in assets])
+    X = reduce(hcat, [_fvec_r(rd[a]) for a in assets])
     n = size(X, 1)
     n < 30 && error("dependence_analysis: nur $n Perioden.")
     dd = _days(rd["date"])
     ppy = (n - 1) / ((dd[n] - dd[1]) / 365.25)
     window === nothing && (window = max(10.0, _r_round(ppy)))
     quantiles = _fvec(quantiles)
-    pear = _cormat(X); spear = _cormat(X; method = "spearman"); kend = _fmat(_kendall(X))
+    pear = _cormat(X); spear = _cormat(X; method = "spearman"); kend = _fmat_r(_kendall(X))
     nmat(M) = NamedMat(M; rownames = assets, colnames = assets)
     cors = RList("pearson" => nmat(pear), "spearman" => nmat(spear), "kendall" => nmat(kend))
     pidx = _combn2(length(assets))
@@ -1129,9 +1344,9 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
             end
             block = _rmin(_rmax(2.0, _rmax(bl)), n / 10)
         end
-        cond = RList(); diffs = RFrame[]; regimes = RList()
+        cond = RList(); diffs = RFrame[]; regimes = RList(); td_fun = _tail_dep_fun(tail_q)
         for cn in conditions
-            cv = _fvec(rd[cn])
+            cv = _fvec_r(rd[cn])
             keep = findall(isfinite, cv)
             if length(keep) < 30
                 @warn "Zustand '$cn': zu wenige Beobachtungen."
@@ -1149,7 +1364,7 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
             for (k, (i, j)) in enumerate(pidx), (li, l) in enumerate(lv)
                 s = findall(==(li), code)
                 x = Xk[s, i]; y = Xk[s, j]
-                td = length(s) >= 20 ? tail_dependence(x, y, tail_q) : nothing
+                td = length(s) >= 20 ? td_fun(x, y) : nothing   # seit 1.6.4 ohne RFrame (B-064)
                 kt = length(s) >= 2 ? _kendall(x, y) : _NA
                 fams = (length(s) >= 2 && kt < 0) ? ["t", "gaussian", "clayton_90", "clayton_270"] :
                                                      ["t", "gaussian", "clayton", "gumbel"]
@@ -1169,9 +1384,9 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
                     "pearson" => length(s) >= 10 ? _cor1(x, y) : _NA,
                     "spearman" => length(s) >= 10 ? _cor1(x, y; method = "spearman") : _NA,
                     "kendall" => length(s) >= 10 ? _kendall(x, y) : _NA,
-                    "lambda_lower" => td !== nothing ? td["lower"][1] : _NA,
-                    "lambda_upper" => td !== nothing ? td["upper"][1] : _NA,
-                    "exceed_lower" => td !== nothing ? td["exceed_lower"][1] : _NA,
+                    "lambda_lower" => td !== nothing ? td[1] : _NA,
+                    "lambda_upper" => td !== nothing ? td[2] : _NA,
+                    "exceed_lower" => td !== nothing ? td[3] : _NA,
                     "t_rho" => ti !== nothing ? tc["par1"][ti] : _NA,
                     "t_nu" => ti !== nothing ? tc["par2"][ti] : _NA,
                     "copula" => tc !== nothing ? tc["family"][1] : missing,
@@ -1186,7 +1401,7 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
                 nk = size(Xk, 1)
                 # seed = nothing -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
                 seed === nothing && (seed = _SL().next_seed())
-                S = _SL().main_stream(seed)
+                S = _SL().main_stream(seed, "dependence_analysis")
                 boot = Any[]
                 for _b in 1:Int(B)
                     idx = _boot_idx_stationary(nk, nk, block, S)
@@ -1264,7 +1479,7 @@ function _print_dependence(io::IO, x)
     d = rd["date"]; nr = SimLev.nrow(rd)
     print(io, "SimLev Abhängigkeitsanalyse: $nr Perioden ($(x["frequency"])), $(_date_str(d[1])) bis $(_date_str(d[nr]))\n\n")
     print(io, "Korrelation (Pearson unten links, Kendall oben rechts)\n")
-    P = x["correlation"]["pearson"]; K = _fmat(x["correlation"]["kendall"])
+    P = x["correlation"]["pearson"]; K = _fmat_r(x["correlation"]["kendall"])
     M = _fmat(P)
     for j in 1:size(M, 2), i in 1:(j-1)
         M[i, j] = K[i, j]
@@ -1273,23 +1488,23 @@ function _print_dependence(io::IO, x)
     p = x["pairs"]
     print(io, "\nTail-Abhängigkeit je Paar\n")
     qs = [c for c in names(p) if startswith(c, "lambda_lower_")]
-    y = RFrame("Paar" => collect(p["pair"]), "Kendall" => _sprintf_vec("%.3f", _fvec(p["kendall"])))
+    y = RFrame("Paar" => collect(p["pair"]), "Kendall" => _sprintf_vec("%.3f", _fvec_r(p["kendall"])))
     for k in qs
         q = k[length("lambda_lower_")+1:end]
-        y["lamL $q"] = _sprintf_vec("%.2f", _fvec(p[k]))
-        y["lamU $q"] = _sprintf_vec("%.2f", _fvec(p[replace(k, "lower" => "upper"; count = 1)]))
+        y["lamL $q"] = _sprintf_vec("%.2f", _fvec_r(p[k]))
+        y["lamU $q"] = _sprintf_vec("%.2f", _fvec_r(p[replace(k, "lower" => "upper"; count = 1)]))
     end
     if haskey(p, "copula")
         y["Copula"] = collect(p["copula"])
-        y["Cop. lamL"] = _sprintf_vec("%.2f", _fvec(p["copula_lambda_lower"]))
-        y["Cop. lamU"] = _sprintf_vec("%.2f", _fvec(p["copula_lambda_upper"]))
-        y["t: rho/nu"] = _sprintf_vec("%.2f / %.1f", _fvec(p["t_rho"]), _fvec(p["t_nu"]))
+        y["Cop. lamL"] = _sprintf_vec("%.2f", _fvec_r(p["copula_lambda_lower"]))
+        y["Cop. lamU"] = _sprintf_vec("%.2f", _fvec_r(p["copula_lambda_upper"]))
+        y["t: rho/nu"] = _sprintf_vec("%.2f / %.1f", _fvec_r(p["t_rho"]), _fvec_r(p["t_nu"]))
     end
     _ln(io, _print_df(y))
     print(io, "  (Unabhängigkeit: lam(q) ~ q; Gauß-Abhängigkeit: lam -> 0 für kleine q)\n")
     dc = x["dcc"]
     if dc !== nothing
-        C = _fmat(dc["correlation"])
+        C = _fmat_r(dc["correlation"])
         last = C[size(C, 1), :]
         txt = join(_sprintf_vec("%s %.2f", collect(dc["pairs"]), last), ", ")
         print(io, "\n" * _sprintf("DCC(1,1): a = %.4f, b = %.4f (Persistenz %.4f); Korrelation zuletzt: %s",
@@ -1302,12 +1517,12 @@ function _print_dependence(io::IO, x)
             ct = cnd[cn]
             print(io, "\nBedingt auf '$cn' (Zustand am Ende der Vorperiode)\n")
             z = RFrame("Paar" => collect(ct["pair"]), "Regime" => collect(ct["regime"]), "n" => collect(ct["n"]),
-                       "Pearson" => _sprintf_vec("%.2f", _fvec(ct["pearson"])))
-            z["90%-KI"] = haskey(ct, "pearson_lo") ? _sprintf_vec("[%.2f, %.2f]", _fvec(ct["pearson_lo"]), _fvec(ct["pearson_hi"])) :
+                       "Pearson" => _sprintf_vec("%.2f", _fvec_r(ct["pearson"])))
+            z["90%-KI"] = haskey(ct, "pearson_lo") ? _sprintf_vec("[%.2f, %.2f]", _fvec_r(ct["pearson_lo"]), _fvec_r(ct["pearson_hi"])) :
                                                      fill("", SimLev.nrow(ct))
-            z["Kendall"] = _sprintf_vec("%.2f", _fvec(ct["kendall"]))
-            z["lamL $(_sprintf("%g", x["tail_q"]))"] = _sprintf_vec("%.2f", _fvec(ct["lambda_lower"]))
-            z["t-rho"] = _sprintf_vec("%.2f", _fvec(ct["t_rho"]))
+            z["Kendall"] = _sprintf_vec("%.2f", _fvec_r(ct["kendall"]))
+            z["lamL $(_sprintf("%g", x["tail_q"]))"] = _sprintf_vec("%.2f", _fvec_r(ct["lambda_lower"]))
+            z["t-rho"] = _sprintf_vec("%.2f", _fvec_r(ct["t_rho"]))
             z["Copula"] = collect(ct["copula"])
             _ln(io, _print_df(z; types = Dict("Copula" => "character")))
             if diffs !== nothing
@@ -1333,7 +1548,7 @@ end
 
 "OLS-Start über `.sl_lsfit` (Householder-QR): (Fit, Rang, Pivot)."
 function _qr_rank_pivot_coef(Xm, y)
-    qx = SimLev.SLib.lsfit(_fmat(Xm), _fvec(y))
+    qx = SimLev.SLib.lsfit(_fmat_r(Xm), _fvec_r(y))
     rank = Int(qx["rank"])
     piv = Int.(qx["pivot"])
     qx, rank, piv
@@ -1384,7 +1599,9 @@ eindeutig (z. B. ohne Regressoren, wenn n * tau ganzzahlig ist), wird eine der o
 - `intercept`: Logisch: Konstante aufnehmen (Standard `true`).
 - `tol`: Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich kein Koeffizient um mehr als `tol * (1
   + max|beta|)` ändert (in den ersten drei Stufen wird höchstens 1e-7 verlangt). Standard 1e-10.
+  Seit 1.6.4 eine Zahl > 0.
 - `maxit`: Höchstzahl der Iterationen je MM-Stufe (ganze Zahl, Standard 2000).
+  Seit 1.6.4 höchstens 10^8.
 
 # Rückgabe
 Benannter numerischer Koeffizientenvektor in der Einheit von `y` je Einheit des Regressors: `"(Intercept)"`
@@ -1403,14 +1620,20 @@ x = randn(rng, 500); y = 1 .+ 2 .* x .+ randn(rng, 500) .* (1 .+ abs.(x))
 println(quantile_regression(y, x, 0.9))
 ```
 """
-function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau = tau_pos, intercept::Bool = true, tol = 1e-10, maxit = 2000)
+function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau = tau_pos, intercept = true, tol = 1e-10, maxit = 2000)
     tv = tau isa AbstractVector || tau isa Tuple ? collect(tau) : [tau]
     if length(tv) != 1 || !(tv[1] isa Real) || tv[1] isa Bool || !isfinite(Float64(tv[1])) || tv[1] <= 0 || tv[1] >= 1
-        error("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: $(_fmt1(tau))).")
+        error("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein.")   # seit 1.6.4 ohne Wert
     end
     tau = Float64(tv[1])
-    _is_numeric(y isa RVector ? y.values : y) || error("quantile_regression: y muss numerisch sein.")
-    y = _fvec(y)
+    (!_e4_isfactor(y) && !(y isa AbstractMatrix) && _is_numeric(y isa RVector ? y.values : y)) ||
+        error("quantile_regression: y muss numerisch sein.")   # seit 1.6.4 Vektor
+    fn = "quantile_regression"
+    _e4_isfactor(X) && chk_stop("faktor", fn, "X")             # Entscheidung 15
+    intercept = chk_bool1(intercept, fn, "intercept")::Bool    # B-051
+    tol = chk_num1(tol, fn, "tol"; lo = 0, lo_open = true)     # B-032
+    maxit = _e4_count(maxit, fn, "maxit")                      # B-032
+    y = _fvec_r(y)
     if X isa RFrame
         nn = [k for k in names(X) if !_is_numcol(X[k])]
         isempty(nn) || error("quantile_regression: Spalte(n) $(join(["'$c'" for c in nn], ", ")) von X nicht numerisch " *
@@ -1448,7 +1671,7 @@ function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau =
 end
 
 "`.sl_lsfit(X1, y)\$coefficients` (OLS mit Konstante in `X1`)."
-_lm_coef(y, X1) = _fvec(SimLev.SLib.lsfit(_fmat(X1), _fvec(y))["coefficients"])
+_lm_coef(y, X1) = _fvec_r(SimLev.SLib.lsfit(_fmat_r(X1), _fvec_r(y))["coefficients"])
 
 """
     tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.75, 0.95],
@@ -1467,9 +1690,11 @@ per stationärem Block-Bootstrap der Perioden.
   Zustandsspalten.
 - `asset`: Name der Kursspalte (Zeichenkette).
 - `drivers`: Zeichenvektor der Zustandsspalten (Drittvariablen).
+  Seit 1.6.4 mindestens einer, ohne doppelte Namen und nicht asset.
 - `quantiles`: Numerischer Vektor der Quantile als Anteil (Standard `[0.05, 0.25, 0.5, 0.75, 0.95]`).
 - `frequency`: Renditefrequenz: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
 - `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 = keine Standardfehler und Intervalle).
+  Seit 1.6.4 höchstens 10^8.
 - `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden. `nothing` (Standard) =
   Politis-White-Schätzung auf den absoluten Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n / 10).
 - `seed`: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
@@ -1505,21 +1730,27 @@ println(tr["coefficients"])
 """
 function tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.75, 0.95],
                          frequency = ("week", "day", "month"), B = 199, block = nothing, seed = nothing)
-    data = SimLev.as_rframe(data)
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    asset = String(asset)
-    drivers = _as_names(drivers)
-    quantiles = _fvec(quantiles)
+    fn = "tail_regression"                                     # seit 1.6.4 vor der Rechnung (K42 E4, B-054)
+    asset = String(chk_name1(asset, fn, "asset"))
+    asset == "date" && chk_stop("e4.date", fn, "asset")
+    drivers = _e4_names(drivers, fn, "drivers")
+    _e4_disjoint([asset], drivers, fn, "asset", "drivers")     # B-013
+    _e4_data(data, vcat([asset], drivers), fn)
+    data = SimLev.as_rframe(data)
+    quantiles = _e4_probs(quantiles, fn, "quantiles")
+    B = _e4_count(B, fn, "B"; lo = 0)                          # B-032
+    block = chk_num1(block, fn, "block"; lo = 1, null_ok = true)
     rd = _dep_returns(data, [asset], drivers, frequency)
     ok = _complete_rows((rd[c] for c in vcat([asset], drivers))...)
     all(ok) || (rd = SimLev.rows(rd, findall(ok)))
-    y = 100 .* _fvec(rd[asset])
-    X = isempty(drivers) ? zeros(length(y), 0) : reduce(hcat, [_fvec(rd[c]) for c in drivers])
+    y = 100 .* _fvec_r(rd[asset])
+    X = isempty(drivers) ? zeros(length(y), 0) : reduce(hcat, [_fvec_r(rd[c]) for c in drivers])
     n = length(y)
     n < 30 && error("tail_regression: zu wenige Perioden.")
     p = size(X, 2) + 1
     XN = NamedMat(X; colnames = drivers)
-    est = reduce(hcat, [_fvec(quantile_regression(y, XN, q)) for q in quantiles])
+    est = reduce(hcat, [_fvec_r(quantile_regression(y, XN, q)) for q in quantiles])
     est = reshape(est, p, length(quantiles))
     X1 = hcat(ones(n), X)
     terms = vcat(["(Intercept)"], drivers)
@@ -1528,7 +1759,7 @@ function tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.7
     n_failed = 0
     if B > 0
         block === nothing && (block = _rmin(_rmax(2.0, _pw_block_stationary(abs.(y .- SimLev.r_mean(y)))), n / 10))
-        S = _SL().main_stream(seed)                     # Hauptstrom
+        S = _SL().main_stream(seed, "tail_regression")                     # Hauptstrom
         bs = Matrix{Float64}[]
         for _b in 1:Int(B)
             idx = _boot_idx_stationary(n, n, block, S)
@@ -1580,9 +1811,9 @@ function _print_tail_regression(io::IO, x)
     print(io, "Quantilsregression: Rendite '$(x["asset"])' (% je $fr) auf verzögerte $(join(x["drivers"], ", ")); " *
               "$(Int(x["n"])) Perioden\n\n")
     cf = x["coefficients"]
-    se = _fvec(cf["se"]); lo = _fvec(cf["lower"]); up = _fvec(cf["upper"])
-    y = RFrame("Quantil" => _sprintf_vec("%g %%", 100 .* _fvec(cf["quantile"])), "Term" => collect(cf["term"]),
-               "Koeffizient" => _sprintf_vec("%.4f", _fvec(cf["estimate"])),
+    se = _fvec_r(cf["se"]); lo = _fvec_r(cf["lower"]); up = _fvec_r(cf["upper"])
+    y = RFrame("Quantil" => _sprintf_vec("%g %%", 100 .* _fvec_r(cf["quantile"])), "Term" => collect(cf["term"]),
+               "Koeffizient" => _sprintf_vec("%.4f", _fvec_r(cf["estimate"])),
                "SE" => [isnan(s) ? "" : _sprintf("%.4f", s) for s in se],
                "90%-KI" => [isnan(a) ? "" : _sprintf("[%.4f, %.4f]", a, b) for (a, b) in zip(lo, up)])
     _ln(io, _print_df(y))
@@ -1613,6 +1844,7 @@ Werten entfallen.
 - `assets`: Zeichenvektor der Kursspalten der einzelnen Anlagen.
 - `state`: Optionaler Zeichenvektor der Zustandsspalten (in ihrer eigenen Einheit). `nothing` (Standard) =
   zeitkonstante Quantile.
+  Seit 1.6.4 keine Spalte aus system oder assets.
 - `q`: Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
 - `frequency`: Renditefrequenz: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
 
@@ -1644,27 +1876,32 @@ println(tail_covar(d, "portfolio", ["aktien", "anleihen"]; q = 0.05))
 ```
 """
 function tail_covar(data, system, assets; state = nothing, q = 0.05, frequency = ("week", "day", "month"))
-    data = SimLev.as_rframe(data)
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    system = String(system)
-    assets = _as_names(assets)
-    state = state === nothing ? nothing : _as_names(state)
+    fn = "tail_covar"                                          # seit 1.6.4 vor der Rechnung (K42 E4)
+    system = String(chk_name1(system, fn, "system"))
+    system == "date" && chk_stop("e4.date", fn, "system")
+    assets = _e4_names(assets, fn, "assets")
+    state = _e4_names(state, fn, "state"; null_ok = true)
+    _e4_disjoint(vcat([system], assets), state, fn, "system/assets", "state")   # B-013
+    _e4_data(data, unique(vcat([system], assets, state === nothing ? String[] : state)), fn)
+    data = SimLev.as_rframe(data)
+    q = chk_num1(q, fn, "q"; lo = 0, hi = 1, lo_open = true, hi_open = true)
     cols = unique(vcat([system], assets))
     rd = _dep_returns(data, cols, state, frequency)
     ok = _complete_rows((rd[c] for c in names(rd))...)
     rd = SimLev.rows(rd, findall(ok))
     nr = SimLev.nrow(rd)
-    M = state === nothing || isempty(state) ? nothing : reduce(hcat, [_fvec(rd[c]) for c in state])
+    M = state === nothing || isempty(state) ? nothing : reduce(hcat, [_fvec_r(rd[c]) for c in state])
     MN = M === nothing ? nothing : NamedMat(M; colnames = state)
-    ys = 100 .* _fvec(rd[system])
+    ys = 100 .* _fvec_r(rd[system])
     summ = RFrame[]; series = RFrame[]
     for a in assets
-        xi = 100 .* _fvec(rd[a])
-        bq = _fvec(quantile_regression(xi, MN, q)); bm = _fvec(quantile_regression(xi, MN, 0.5))
+        xi = 100 .* _fvec_r(rd[a])
+        bq = _fvec_r(quantile_regression(xi, MN, q)); bm = _fvec_r(quantile_regression(xi, MN, 0.5))
         Mi = M === nothing ? ones(nr, 1) : hcat(ones(nr), M)
         var_q = _matvec(Mi, bq); var_m = _matvec(Mi, bm)
         Xs = M === nothing ? NamedMat(reshape(xi, :, 1); colnames = ["xi"]) : NamedMat(hcat(xi, M); colnames = vcat(["xi"], state))
-        bs = _fvec(quantile_regression(ys, Xs, q))
+        bs = _fvec_r(quantile_regression(ys, Xs, q))
         covar = M !== nothing ? (bs[1] .+ bs[2] .* var_q) .+ _matvec(M, bs[3:end]) : (bs[1] .+ bs[2] .* var_q) .+ 0.0
         dcv = bs[2] .* (var_q .- var_m)
         push!(summ, RFrame("asset" => [a], "beta" => [bs[2]], "var" => [SimLev.r_mean(var_q)], "covar" => [SimLev.r_mean(covar)],
@@ -1688,10 +1925,10 @@ function _print_covar(io::IO, x)
     print(io, _sprintf("CoVaR (q = %g) für System '%s'%s; %d Perioden (%s), Werte in %% je Periode", x["q"], x["system"],
                        (st !== nothing && !isempty(st)) ? ", Zustand: $(join(st, ", "))" : "", Int(x["n"]), x["frequency"]) * "\n\n")
     s = x["summary"]
-    y = RFrame("Anlage" => collect(s["asset"]), "beta" => _sprintf_vec("%.3f", _fvec(s["beta"])),
-               "VaR Anlage" => _sprintf_vec("%.2f", _fvec(s["var"])), "CoVaR" => _sprintf_vec("%.2f", _fvec(s["covar"])),
-               "Delta-CoVaR" => _sprintf_vec("%.2f", _fvec(s["delta_covar"])),
-               "Delta-CoVaR min" => _sprintf_vec("%.2f", _fvec(s["delta_covar_min"])))
+    y = RFrame("Anlage" => collect(s["asset"]), "beta" => _sprintf_vec("%.3f", _fvec_r(s["beta"])),
+               "VaR Anlage" => _sprintf_vec("%.2f", _fvec_r(s["var"])), "CoVaR" => _sprintf_vec("%.2f", _fvec_r(s["covar"])),
+               "Delta-CoVaR" => _sprintf_vec("%.2f", _fvec_r(s["delta_covar"])),
+               "Delta-CoVaR min" => _sprintf_vec("%.2f", _fvec_r(s["delta_covar_min"])))
     _ln(io, _print_df(y))
     nothing
 end
@@ -1702,7 +1939,7 @@ end
 
 "`rowsum(L[1:(k*agg), ], rep(1:k, each = agg))` (double-Akkumulation)."
 function _rowsum_blocks(L, agg::Int, k::Int)
-    L = _fmat(L)
+    L = _fmat_r(L)
     out = zeros(k, size(L, 2))
     for g in 1:k, j in 1:size(L, 2)
         s = 0.0
@@ -1715,9 +1952,9 @@ function _rowsum_blocks(L, agg::Int, k::Int)
 end
 
 function _path_matrix(pth, idx_names)
-    pth isa RFrame && return reduce(hcat, [_fvec(pth[a]) for a in idx_names])
+    pth isa RFrame && return reduce(hcat, [_fvec_r(pth[a]) for a in idx_names])
     if pth isa NamedMat && pth.colnames !== nothing
-        return reduce(hcat, [_fvec(pth[:, a]) for a in idx_names])
+        return reduce(hcat, [_fvec_r(pth[:, a]) for a in idx_names])
     end
     _fmat(pth)
 end
@@ -1739,8 +1976,10 @@ Tail-Abhängigkeit beim IID-Bootstrap zwar erhalten, Volatilitäts-Clustering ab
   Konfiguration).
 - `agg`: Zeilen je Periode für die Aggregation (ganze Zahl, Standard 5; z. B. 5 Handelstage oder 7
   Kalendertage ergibt Wochen; 1 = keine Aggregation).
+  Seit 1.6.4 eine ganze Zahl ≥ 1, höchstens 10^8.
 - `q`: Tail-Wahrscheinlichkeit als Anteil für die Tail-Kennzahlen (Standard 0.10, siehe `tail_dependence()`).
 - `max_paths`: Höchstens so viele Pfade auswerten (die ersten `max_paths` Pfade; Standard 200).
+  Seit 1.6.4 eine ganze Zahl ≥ 1 oder Inf (alle Pfade).
 
 # Rückgabe
 Tabelle (RFrame) mit einer Zeile je Indexpaar und Kennzahl: `pair`, `metric` (`"kendall"`, `"pearson"`,
@@ -1768,10 +2007,16 @@ println(dependence_validate(b, d; agg = 5, q = 0.10))
 function dependence_validate(boot, data; agg = 5, q = 0.10, max_paths = 200)
     data = SimLev.as_rframe(data)
     SimLev.inherits(boot, "bootstrap_result") || error("boot muss ein bootstrap_result sein.")
+    fn = "dependence_validate"                                 # seit 1.6.4 (B-033, B-053)
+    agg = _e4_count(agg, fn, "agg")
+    q = chk_num1(q, fn, "q"; lo = 0, hi = 1, lo_open = true, hi_open = true)
+    max_paths = chk_scalar(max_paths)
+    (_e4_numscalar(max_paths) && (Float64(max_paths) == Inf || (isfinite(Float64(max_paths)) &&
+        Float64(max_paths) == trunc(Float64(max_paths)) && Float64(max_paths) >= 1))) || chk_stop("e1.ganz_inf", fn, "max_paths", chk_fmt(1))
     cfg = boot["config"]
     idx_names = _as_names(_el(cfg, "index_names"))
     length(idx_names) < 2 && error("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
-    ret = _fmat(_el(SimLev.Bootstrap._extract_returns(data, cfg), "ret"))
+    ret = _fmat_r(_el(SimLev.Bootstrap._extract_returns(data, cfg), "ret"))
     hist = SimLev.RLibm.log.(ret)
     agg = Int(agg)
     function aggr(L)
@@ -1779,19 +2024,20 @@ function dependence_validate(boot, data; agg = 5, q = 0.10, max_paths = 200)
         k < 20 && error("Zu wenige Perioden nach Aggregation.")
         _rowsum_blocks(L, agg, k)
     end
+    td_fun = _tail_dep_fun(q)                                   # seit 1.6.4 ohne RFrame je Paar (B-064)
     function stats_of(L)
         A = aggr(L)
         out = Float64[]
         for (i, j) in _combn2(size(A, 2))
             x = A[:, i]; y = A[:, j]
-            td = tail_dependence(x, y, q)
-            append!(out, [_kendall(x, y), _cor1(x, y), td["lower"][1], td["upper"][1], td["exceed_lower"][1]])
+            td = td_fun(x, y)
+            append!(out, [_kendall(x, y), _cor1(x, y), td[1], td[2], td[3]])
         end
         out
     end
     h = stats_of(hist)
     paths = collect(boot["paths"])
-    paths = paths[1:min(length(paths), Int(max_paths))]
+    Float64(max_paths) == Inf || (paths = paths[1:min(length(paths), Int(max_paths))])   # Inf = alle Pfade
     cols = Vector{Float64}[]
     for pth in paths
         lg = SimLev.RLibm.log.(_path_matrix(pth, idx_names))
@@ -1820,11 +2066,14 @@ end
 Bedingung als Text über den Spalten von `data` auswerten (wie
 `eval(parse(text = expr), data, parent.frame())` in R) mit dem gemeinsamen
 Auswerter `SimLev.RExpr` (R-Syntax, Vorrang und NA-Logik wie in R); freie
-Variablen aus `env`. Eine Julia-Funktion `f` wird als `f(data)` aufgerufen.
+Variablen aus `env` (bei einem Modul seit 1.6.4 nur dessen eigene Namen, `SimLev._UserEnv`). Eine Julia-Funktion
+`f` wird als `f(data)` aufgerufen.
 """
 function _eval_condition(expr, data; env = Main)
     expr isa Function && return expr(data)
-    SimLev.RExpr.eval_r(String(expr), _as_frame(data); env = env)
+    # seit 1.6.4 (Entscheidung 72, T3-R2) nur die eigenen Namen von env wie tactical_rules (bis 1.6.3 auch Base und
+    # Paketfunktionen, z. B. minimum, first, nrow)
+    SimLev.RExpr.eval_r(String(expr), _as_frame(data); env = env isa Module ? SimLev._UserEnv(env) : env)
 end
 
 """
@@ -1843,6 +2092,10 @@ können daher über Episodengrenzen hinwegreichen.
   Brutto-Renditen wie 1.002 und Zusatzreihen). Eine Spalte `date` ist optional.
 - `condition`: Logischer Vektor der Länge `nrow(data)` (NA = false) oder Ausdruck als Zeichenkette, der in
   `data` ausgewertet wird, z. B. `"inflation >= 4"`.
+  Seit 1.6.4 in allen Sprachen wie R as.logical gelesen (NA = FALSE); nicht lesbarer Text, Faktor, Datum, Liste oder Matrix sind ein Fehler; auch das Ergebnis des Ausdrucks.
+  Seit 1.6.4 gelten Texte in R, Python und Julia gleich im gemeinsamen Umfang der Regeltexte von
+  `tactical_rules()` (in Julia nur die eigenen Namen von `env`, bis 1.6.3 auch `Base` und Paketfunktionen);
+  `condition` kann auch eine Funktion von `data` sein (Ergebnis wie oben).
 - `min_run`: Mindestlänge einer Episode in Zeilen (ganze Zahl, Standard 1); kürzere zusammenhängende
   Abschnitte werden verworfen.
 - `env`: Modul, in dem freie Variablen und Funktionen der Bedingungen gesucht werden (Standard `Main`).
@@ -1861,12 +2114,19 @@ println(SimLev.attrs(s)["episodes"])
 ```
 """
 function regime_subset(data, condition; min_run = 1, env = Main)
+    fn = "regime_subset"                                       # seit 1.6.4 (K42 E4, B-008, B-036)
+    chk_df(data, fn, "data")
     data = SimLev.as_rframe(data)
     data = _as_frame(data)
-    cond = condition isa AbstractString ? SimLev.RExpr.as_logical(_eval_condition(condition, data; env = env)) :
+    if condition isa Union{AbstractVector,Tuple} && !isempty(condition) && all(v -> v isa AbstractString, condition)
+        length(condition) == 1 || chk_stop("e4.bedingung", fn)
+        condition = String(first(condition))
+    end
+    min_run = _e4_count(min_run, fn, "min_run")
+    condition isa AbstractString && isempty(strip(condition)) && chk_stop("e4.bedingung", fn)   # leer: in R NULL
+    cond = condition isa AbstractString ? _eval_condition(condition, data; env = env) :
            condition isa Function ? _eval_condition(condition, data; env = env) : condition
-    cv = cond isa AbstractVector ? collect(cond) : [cond]
-    c = Bool[(v === missing || v === nothing || (v isa AbstractFloat && isnan(v))) ? false : Bool(v != 0) for v in cv]
+    c = _e4_cond(cond, fn)
     length(c) != SimLev.nrow(data) && error("condition muss die Länge nrow(data) haben.")
     vals = Bool[]; lens = Int[]
     for v in c
@@ -1908,6 +2168,9 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
                           width = 900, height = 650)
     type = _match_arg(type, ("overview", "rolling", "tail", "conditional", "scatter"))
     pn = collect(x["pairs"]["pair"])
+    pair = _e4_pick(pair, pn, "plot.SimLevDependence", "pair")   # seit 1.6.4 (B-007)
+    (x["conditional"] === nothing || length(x["conditional"]) == 0) ||
+        (condition = _e4_pick(condition, collect(keys(x["conditional"])), "plot.SimLevDependence", "condition"))
     i = pair isa AbstractString ? findfirst(==(pair), pn) : Int(pair)
     ab = split(pn[i], " ~ ")
     X = x["returns"]
@@ -1919,11 +2182,11 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
         end
         rl = x["rolling"]
         series = [(_days(rl["date"]), _fvec(rl[pn[i]]), "#2C6E9B", "rollierend")]
-        d = SimLev.RFrame("date" => collect(Date, rl["date"]), "rolling" => copy(_fvec(rl[pn[i]])))
+        d = SimLev.RFrame("date" => collect(Date, rl["date"]), "rolling" => copy(_fvec_r(rl[pn[i]])))
         if x["dcc"] !== nothing
             C = x["dcc"]["correlation"]
             push!(series, (_days(X["date"]), _fvec(C[:, pn[i]]), "#B5562B", "DCC"))
-            d["dcc"] = copy(_fvec(C[:, pn[i]]))
+            d["dcc"] = copy(_fvec_r(C[:, pn[i]]))
         end
         data["rolling"] = d
         _grid_lines!(c, box, series; ylim = (-1.0, 1.0), hline = [(0.0, "grey")], dates = true,
@@ -1943,7 +2206,7 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
         end
         _grid_lines!(c, box, series; ylim = (0.0, 1.0), hline = hl, points = true, xlabel = "Quantil q (log)",
                      title = "$(pn[i]): Tail-Abhängigkeit", xticks = [(log10(v), _sprintf("%g", v)) for v in (0.01, 0.05, 0.1, 0.5)])
-        data["tail"] = SimLev.RFrame("q" => copy(qg), "lower" => copy(_fvec(td["lower"])), "upper" => copy(_fvec(td["upper"])),
+        data["tail"] = SimLev.RFrame("q" => copy(qg), "lower" => copy(_fvec_r(td["lower"])), "upper" => copy(_fvec_r(td["upper"])),
                                      "independence" => copy(qg))
     end
     function p_cond(c, box)
@@ -1954,14 +2217,14 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
         cn = condition isa AbstractString ? condition : collect(keys(x["conditional"]))[Int(condition)]
         ct = x["conditional"][cn]
         sel = findall(==(pn[i]), ct["pair"])
-        lo = haskey(ct, "pearson_lo") ? _fvec(ct["pearson_lo"])[sel] : nothing
-        hi = haskey(ct, "pearson_hi") ? _fvec(ct["pearson_hi"])[sel] : nothing
-        _grid_bars!(c, box, collect(ct["regime"])[sel], _fvec(ct["pearson"])[sel]; lo = lo, hi = hi,
-                    pts = _fvec(ct["lambda_lower"])[sel], ylim = (-1.0, 1.0), title = "$(pn[i]) nach '$cn'", ylabel = "Korrelation")
-        d = SimLev.RFrame("regime" => String[string(v) for v in collect(ct["regime"])[sel]], "pearson" => _fvec(ct["pearson"])[sel])
+        lo = haskey(ct, "pearson_lo") ? _fvec_r(ct["pearson_lo"])[sel] : nothing
+        hi = haskey(ct, "pearson_hi") ? _fvec_r(ct["pearson_hi"])[sel] : nothing
+        _grid_bars!(c, box, collect(ct["regime"])[sel], _fvec_r(ct["pearson"])[sel]; lo = lo, hi = hi,
+                    pts = _fvec_r(ct["lambda_lower"])[sel], ylim = (-1.0, 1.0), title = "$(pn[i]) nach '$cn'", ylabel = "Korrelation")
+        d = SimLev.RFrame("regime" => String[string(v) for v in collect(ct["regime"])[sel]], "pearson" => _fvec_r(ct["pearson"])[sel])
         lo === nothing || (d["pearson_lo"] = lo)
         hi === nothing || (d["pearson_hi"] = hi)
-        d["lambda_lower"] = _fvec(ct["lambda_lower"])[sel]
+        d["lambda_lower"] = _fvec_r(ct["lambda_lower"])[sel]
         data["conditional"] = d
     end
     function p_scatter(c, box)
@@ -1973,7 +2236,7 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
     end
     fns = Dict("rolling" => p_roll, "tail" => p_tail, "conditional" => p_cond, "scatter" => p_scatter)
     ks = type == "overview" ? ["rolling", "tail", "conditional", "scatter"] : [type]
-    svg = _grid_svg(ks, k -> ((c, box) -> fns[k](c, box)); width = width, height = height).svg
+    svg = _grid_svg(ks, k -> ((c, box) -> fns[k](c, box)); width = width, height = height)
     return (svg, data)
 end
 
@@ -1987,13 +2250,13 @@ function _plot_tail_regression(x; width = 900, height = 400)
     svg = _grid_svg(collect(drv), dv -> function (c, box)
         cf = x["coefficients"]
         sel = findall(==(dv), cf["term"])
-        qv = _fvec(cf["quantile"])[sel]; est = _fvec(cf["estimate"])[sel]
-        lo = _fvec(cf["lower"])[sel]; hi = _fvec(cf["upper"])[sel]
+        qv = _fvec_r(cf["quantile"])[sel]; est = _fvec_r(cf["estimate"])[sel]
+        lo = _fvec_r(cf["lower"])[sel]; hi = _fvec_r(cf["upper"])[sel]
         _grid_lines!(c, box, [(qv, est, "#2C6E9B", "Quantilsregression")]; band = all(isnan, lo) ? nothing : (qv, lo, hi),
                      hline = [(x["ols"][dv], "#B5562B"), (0.0, "grey")], points = true, xlabel = "Quantil",
                      ylabel = "Koeffizient", title = "$(x["asset"]): Effekt von $dv")
         data[String(dv)] = SimLev.RFrame("quantile" => qv, "estimate" => est, "lower" => lo, "upper" => hi)
-    end; ncol = length(drv), width = width, height = height).svg
+    end; ncol = length(drv), width = width, height = height)
     return (svg, data)
 end
 
@@ -2005,16 +2268,16 @@ function _plot_covar(x; width = 800, height = 450)
     s = x["series"]
     cols = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C"]
     a = unique(s["asset"])
-    series = [(_days(s["date"][s["asset"] .== aj]), _fvec(s["delta_covar"])[s["asset"] .== aj], cols[(j-1)%5+1], aj)
+    series = [(_days(s["date"][s["asset"] .== aj]), _fvec_r(s["delta_covar"])[s["asset"] .== aj], cols[(j-1)%5+1], aj)
               for (j, aj) in enumerate(a)]
     svg = _grid_svg(["x"], _ -> ((c, box) -> _grid_lines!(c, box, series; dates = true, ylabel = "Delta-CoVaR (%)",
                                                           title = _sprintf("Delta-CoVaR für '%s' (q = %g)", x["system"], x["q"])));
-                    width = width, height = height).svg
+                    width = width, height = height)
     sa = String[string(v) for v in s["asset"]]
     data = SimLev.RList("delta_covar" => SimLev.RFrame(
         "asset" => vcat([sa[sa .== aj] for aj in a]...),
         "date" => vcat([collect(Date, s["date"])[sa .== aj] for aj in a]...),
-        "delta_covar" => vcat([_fvec(s["delta_covar"])[sa .== aj] for aj in a]...)))
+        "delta_covar" => vcat([_fvec_r(s["delta_covar"])[sa .== aj] for aj in a]...)))
     return (svg, data)
 end
 

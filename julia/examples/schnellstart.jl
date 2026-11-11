@@ -8,9 +8,10 @@ using SimLev, Dates, Random
 #    (synthetisch, damit das Beispiel ohne externe Daten läuft)
 rng = MersenneTwister(42)
 n = 365 * 10
-data = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
-        WORLD = 100 .* cumprod(1 .+ 4e-4 .+ 0.010 .* randn(rng, n)),
-        BONDS =  50 .* cumprod(1 .+ 1e-4 .+ 0.003 .* randn(rng, n)))
+nt = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
+      WORLD = 100 .* cumprod(1 .+ 4e-4 .+ 0.010 .* randn(rng, n)),
+      BONDS =  50 .* cumprod(1 .+ 1e-4 .+ 0.003 .* randn(rng, n)))
+data = RFrame(pairs(nt)...)                 # Tabelle mit benannten Spalten
 
 # 2. Strategie: Gewichte, Kosten und Teilfreistellung
 #    (30 % für Aktien-ETFs, 0 % für Renten-ETFs)

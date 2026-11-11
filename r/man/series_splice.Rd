@@ -23,7 +23,8 @@ Bewegung in der naechsten Reihe geht am folgenden Handelstag der ersten
 Reihe ein.}
 
 \item{dates}{Datumsvektor, wenn Vektoren uebergeben werden (sonst
-ignoriert).}
+ignoriert).
+Seit 1.6.4 muessen alle Vektoren so lang wie dates sein.}
 }
 \value{
 data.frame mit \code{date}, \code{value} (verkettete Reihe) und

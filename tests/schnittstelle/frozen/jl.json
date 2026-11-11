@@ -1,6 +1,6 @@
 {
  "language": "Julia",
- "stand": "2026-11-04 – 1.6.3: WithdrawalPathsPB entfällt",
+ "stand": "2026-11-08 – 1.6.4: Standard cores auto (Planer)",
  "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -69,7 +69,7 @@
    {"name": "path_length", "kind": "keyword", "default": "nothing"},
    {"name": "max_tries", "kind": "keyword", "default": "10"},
    {"name": "seed", "kind": "keyword", "default": "nothing"},
-   {"name": "cores", "kind": "keyword", "default": "1"},
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""},
    {"name": "progress", "kind": "keyword", "default": "true"}
   ],
   "bootstrap_block_length": [
@@ -137,7 +137,7 @@
    {"name": "max_tries", "kind": "keyword", "default": "10"},
    {"name": "chunk_size", "kind": "keyword", "default": "25"},
    {"name": "seed", "kind": "keyword", "default": "nothing"},
-   {"name": "cores", "kind": "keyword", "default": "1"},
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""},
    {"name": "progress", "kind": "keyword", "default": "true"}
   ],
   "bootstrap_study_metrics": [
@@ -360,7 +360,7 @@
    {"name": "maximize", "kind": "keyword", "default": "true"},
    {"name": "keep_returns", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "seed", "kind": "keyword", "default": "nothing"},
-   {"name": "cores", "kind": "keyword", "default": "1"}
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""}
   ],
   "param_space": [
    {"name": "dims...", "kind": "kwargs_rest", "default": null}
@@ -383,7 +383,7 @@
    {"name": "horizon", "kind": "keyword", "default": "10"},
    {"name": "step", "kind": "keyword", "default": "1"},
    {"name": "sim_args", "kind": "keyword", "default": "nothing"},
-   {"name": "cores", "kind": "keyword", "default": "1"}
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""}
   ],
   "plot_dashboard": [
    {"name": "x", "kind": "positional", "default": null},
@@ -591,7 +591,7 @@
    {"name": "sim_args", "kind": "keyword", "default": "nothing"},
    {"name": "metrics", "kind": "keyword", "default": "nothing"},
    {"name": "keep_results", "kind": "keyword", "default": "false"},
-   {"name": "cores", "kind": "keyword", "default": "1"}
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""}
   ],
   "sensitivity_leverage": [
    {"name": "data", "kind": "positional", "default": null},
@@ -603,7 +603,7 @@
    {"name": "strategy", "kind": "keyword", "default": "nothing"},
    {"name": "sim_args", "kind": "keyword", "default": "nothing"},
    {"name": "metrics", "kind": "keyword", "default": "nothing"},
-   {"name": "cores", "kind": "keyword", "default": "1"}
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""}
   ],
   "sensitivity_rebalancing": [
    {"name": "data", "kind": "positional", "default": null},
@@ -615,7 +615,7 @@
    {"name": "include_none", "kind": "keyword", "default": "true"},
    {"name": "sim_args", "kind": "keyword", "default": "nothing"},
    {"name": "metrics", "kind": "keyword", "default": "nothing"},
-   {"name": "cores", "kind": "keyword", "default": "1"}
+   {"name": "cores", "kind": "keyword", "default": "\"auto\""}
   ],
   "series_align": [
    {"name": "args...", "kind": "varargs", "default": null},
@@ -685,7 +685,8 @@
    {"name": "effective", "kind": "keyword", "default": "true"},
    {"name": "frequency", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "dates", "kind": "keyword", "default": "nothing"},
-   {"name": "risk_free", "kind": "keyword", "default": "0"}
+   {"name": "risk_free", "kind": "keyword", "default": "0"},
+   {"name": "rho_method", "kind": "keyword", "default": "nothing", "match_arg": true}
   ],
   "sharpe_haircut": [
    {"name": "x", "kind": "positional", "default": null},

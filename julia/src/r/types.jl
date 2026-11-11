@@ -32,7 +32,8 @@ register_summary!(cls::AbstractString, f::Function) = (_SUMMARIES[String(cls)] =
 "`plot`-Methode für die S3-Klasse `cls` registrieren: `f(x, args...; kw...)`."
 register_plot!(cls::AbstractString, f::Function) = (_PLOTS[String(cls)] = f; nothing)
 
-function _dispatch(tab, x, what)
+# Methode aus tab zur ersten passenden R-Klasse von x (seit 1.6.4 ohne den ungelesenen Parameter what)
+function _dispatch(tab, x)
     for c in r_class(x)
         f = get(tab, c, nothing)
         f === nothing || return f
@@ -132,7 +133,11 @@ end
 RVector(v::AbstractVector{T}; names = nothing, attrs = Dict{String,Any}()) where {T} =
     RVector{T}(collect(v), names === nothing ? nothing : collect(String, names), Dict{String,Any}(attrs))
 "Benannter Vektor aus Paaren: `named(\"a\" => 1.0, \"b\" => 2.0)`."
-named(ps::Pair...) = RVector([p.second for p in ps]; names = [String(p.first) for p in ps])
+named(ps::Pair...) = (_named_check(ps); RVector([p.second for p in ps]; names = [String(p.first) for p in ps]))
+# seit 1.6.4 (K42 E5): nur Paare mit nicht leerem Namen (Text oder Symbol), sonst Meldung statt MethodError
+_named_check(ps) = all(p -> p.first isa Union{AbstractString,Symbol} && !isempty(String(p.first)), ps) ||
+    chk_stop("e5.named", "named")
+named(ps...) = chk_stop("e5.named", "named")
 Base.size(x::RVector) = size(x.values)
 Base.getindex(x::RVector, i::Int) = x.values[i]
 Base.setindex!(x::RVector, v, i::Int) = (x.values[i] = v)
@@ -207,6 +212,9 @@ _as_col(v) = [v]
 _rf(df::RFrame, s::Symbol) = getfield(df, s)
 nrow(df::RFrame) = _rf(df, :nrow)
 ncol(df::RFrame) = length(_rf(df, :names))
+# seit 1.6.4 (K42 E5): andere Typen mit der Meldung tabelle statt MethodError
+nrow(@nospecialize(df)) = chk_stop("tabelle", "nrow", "df", chk_msg("tabelle.formen"))
+ncol(@nospecialize(df)) = chk_stop("tabelle", "ncol", "df", chk_msg("tabelle.formen"))
 Base.names(df::RFrame) = copy(_rf(df, :names))
 Base.size(df::RFrame) = (nrow(df), ncol(df))
 Base.size(df::RFrame, i::Integer) = size(df)[i]
@@ -252,6 +260,12 @@ Zeilen auswählen (Vektor von Indizes oder Bool-Maske), wie `df[rows, , drop = F
 bleiben, außer für Klassen aus `register_plain_rows!` (dann gewöhnliche Tabelle, wie R mit eigener `[`-Methode).
 """
 function rows(df::RFrame, idx)
+    # seit 1.6.4 (K42 E5): Zeilennummern 1 bis nrow (ganze Zahlen) oder logische Auswahl der Länge nrow
+    n = _rf(df, :nrow)
+    okidx = idx isa AbstractVector{Bool} ? length(idx) == n :
+        (idx isa Union{Integer,AbstractVector,AbstractRange,Tuple} && !(idx isa Bool) &&
+         all(i -> i isa Integer && !(i isa Bool) && 1 <= i <= n, idx))
+    okidx || chk_stop("e5.rows", "rows", chk_fmt(n), chk_fmt(n))
     ii = idx isa AbstractVector{Bool} ? findall(idx) : collect(idx)
     cl = _rf(df, :class)
     plain = !isempty(_PLAIN_ROWS) && any(in(_PLAIN_ROWS), cl)
@@ -329,19 +343,21 @@ attrs(x::RVector) = x.attrs
 attrs(x::RList) = getfield(x, :attrs)
 attrs(x::NamedMat) = x.attrs
 attrs(x::RFrame) = getfield(x, :attrs)
+# seit 1.6.4 (K42 E5): andere Typen mit Meldung statt MethodError
+attrs(@nospecialize(x)) = chk_stop("klasse", "attrs", "F", "RList, RFrame, RVector, NamedMat oder approxfun()")
 
-"`inherits(x, cls)`"
+"`inherits(x, cls)`; seit 1.6.4 wie R auch ein Vektor von Klassennamen (wahr, wenn einer passt)."
 inherits(x, cls::AbstractString) = cls in r_class(x)
+inherits(x, cls::Union{AbstractVector,Tuple}) =
+    all(c -> c isa AbstractString, cls) ? any(c -> c in r_class(x), cls) : chk_stop("e3.namen", "inherits", "cls")
+inherits(x, cls) = chk_stop("e3.namen", "inherits", "cls")
 
-function Base.show(io::IO, ::MIME"text/plain", x::RList)
-    f = _dispatch(_PRINTERS, x, "print")
+# Druck über die registrierte Methode der R-Klasse, sonst Standarddruck (seit 1.6.4 eine Methode für RList und RFrame)
+function Base.show(io::IO, ::MIME"text/plain", x::Union{RList,RFrame})
+    f = _dispatch(_PRINTERS, x)
     f === nothing ? _default_print(io, x) : f(io, x)
 end
 Base.show(io::IO, x::RList) = print(io, "RList(", join(_rl_keys(x), ", "), ")")
-function Base.show(io::IO, ::MIME"text/plain", df::RFrame)
-    f = _dispatch(_PRINTERS, df, "print")
-    f === nothing ? _default_print(io, df) : f(io, df)
-end
 Base.show(io::IO, df::RFrame) = print(io, "RFrame(", nrow(df), " × ", ncol(df), ": ", join(_rf(df, :names), ", "), ")")
 
 # display() im Text (Skript, `julia datei.jl`) wie R: Endet die Druckausgabe schon mit einem Zeilenumbruch,
@@ -360,13 +376,13 @@ _default_print(io, x) = _DEFAULT_PRINT[](io, x)
 
 "Generisches `summary(object, ...)` wie in R (Methode nach S3-Klasse; Argumentname `object` wie R)."
 function r_summary(object, args...; kw...)
-    f = _dispatch(_SUMMARIES, object, "summary")
-    f === nothing && error("summary(): keine Methode für $(typeof(object))")
+    f = _dispatch(_SUMMARIES, object)
+    f === nothing && chk_stop("e5.methode", "summary")   # seit 1.6.4 ohne Typ (Entscheidung 8)
     f(object, args...; kw...)
 end
 "Generisches `plot()` wie in R (Methode nach S3-Klasse; erzeugt SVG)."
 function r_plot(x, args...; kw...)
-    f = _dispatch(_PLOTS, x, "plot")
-    f === nothing && error("plot(): keine Methode für $(typeof(x))")
+    f = _dispatch(_PLOTS, x)
+    f === nothing && chk_stop("e5.methode", "plot")   # seit 1.6.4 ohne Typ (Entscheidung 8)
     f(x, args...; kw...)
 end

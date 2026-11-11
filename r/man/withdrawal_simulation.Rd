@@ -80,7 +80,8 @@ einer mit \code{keep_aux} gespeicherten Zusatzreihe (Behandlung wie in
 in Prozent pro Jahr, 2 = 2 \% p. a., nicht je Datenperiode, kein Anteil,
 ueber die Kalendertage aufgezinst; ohne Angabe in \code{aux_type} wie
 bisher die gespeicherte Niveau-Variante). \code{NULL} wie 0.
-Bei \code{withdrawal_paths} ohne Wirkung.}
+Bei \code{withdrawal_paths} ohne Wirkung.
+Eine Inflationsmatrix muss endliche Zahlen > 0 enthalten.}
 
 \item{frequency}{Periodenlaenge der Zeilen bei Matrix-Eingabe bzw. der
 erzeugten Perioden bei Ergebnis- und Ergebnislisten-Eingabe:
@@ -90,8 +91,8 @@ erzeugten Perioden bei Ergebnis- und Ergebnislisten-Eingabe:
 \item{strategy}{Bei \code{SimLevBootstrapStudy}: Name der Strategie
 (\code{NULL} = erste gespeicherte).}
 
-\item{years}{Optional Anzahl Jahre (> 0, \code{years} x Perioden je Jahr
-muss ganzzahlig sein): Kuerzung auf die ersten \code{years}
+\item{years}{Optional Anzahl Jahre (seit 1.6.4 eine ganze Zahl von 1 bis 100,
+auch bei unterjaehriger frequency): Kuerzung auf die ersten \code{years}
 Jahre (\code{years} x Perioden je Jahr Zeilen). Bei einem
 \code{SimLevResult} zugleich die Kohortenlaenge (\code{NULL} = 30).
 \code{NULL} (Standard) = volle Pfadlaenge.}
@@ -107,7 +108,11 @@ einzelnes \code{list(start, end, amount)} wird automatisch verpackt.
 \code{start <= end}; Jahre nach dem Pfadende entfallen), \code{amount} ist ein realer
 Jahresbetrag in Kaufkraft des Startzeitpunkts. Einkommen mindern die
 Depotentnahme (Entnahme = max(0, Regelbetrag - Einkommen)) und zaehlen im
-Konsum (\code{spending}) mit.}
+Konsum (\code{spending}) mit.
+Seit 1.6.4 sind start und end ganze Planjahre (end auch Inf); vorher wurden gebrochene Werte
+gerundet.
+Seit 1.6.4 ist start ein ganzes Planjahr >= 1; wer kein Einkommen hat, laesst den Eintrag weg
+(vorher lief start = Inf als nie und start <= 0 als Planjahr 1).}
 
 \item{tax}{Steuerdaten der Person: \code{NULL} (Standard; keine Steuern)
 oder ein Objekt aus \code{\link[=tax_profile]{tax_profile()}} (vereinfachte deutsche Besteuerung,
@@ -169,7 +174,9 @@ mit Endwert > 1e-12 x Depotwert (Stueckreste ohne Wert zaehlen nicht).}
 (Perioden x Pfade, gleiche Dimension wie die Renditen vor einer Kuerzung
 mit \code{years}), massgeblich ist der Wert der letzten Periode jedes
 Planjahres. Enthaelt \code{x} eine Basiszins-Reihe (Argument
-\code{base_rate} in \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}), wird diese verwendet.}
+\code{base_rate} in \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}), wird diese verwendet.
+Seit 1.6.4 ohne NA (auch in einer Reihe aus withdrawal_cohorts()); Jahre ohne Basiszins als 0
+angeben.}
 
 \item{vorabpauschale}{Logisch: Vorabpauschale beruecksichtigen (Standard
 \code{TRUE}; nur mit \code{tax = tax_profile()} wirksam). Nicht angegeben
@@ -249,7 +256,8 @@ Pfad mit H Jahren und Horizont H auf laengeren Pfaden ergeben dasselbe) (\code{p
 Pfadlaenge in \code{paths$success_full}). Horizonte ueber der Pfadlaenge
 werden mit Warnung gekuerzt. Die Regel selbst rechnet weiter mit den
 Restjahren der vollen Pfadlaenge. Nicht zu verwechseln mit \code{horizon}
-in \code{\link[=planning_goal]{planning_goal()}} (Perioden).}
+in \code{\link[=planning_goal]{planning_goal()}} (Perioden).
+Seit 1.6.4 als Zahl eine ganze Zahl von Jahren von 1 bis 100.}
 }
 \value{
 Objekt der Klasse \code{SimLevWithdrawal} (Liste):

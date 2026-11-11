@@ -34,19 +34,13 @@
   invisible(NULL)
 }
 
-# Text des erhaltenen Werts fuer die Fehlermeldung
-.sl_seed_text <- function(seed) {
-  if (is.numeric(seed) && length(seed) == 1L) return(as.character(seed))
-  txt <- paste(deparse(seed, nlines = 1L), collapse = " ")
-  if (nchar(txt) > 60L) txt <- paste0(substr(txt, 1L, 57L), "...")
-  txt
-}
-
-# Seed pruefen: ganze Zahl mit |seed| < 2^53; liefert double
-.sl_check_seed <- function(seed) {
-  ok <- is.numeric(seed) && length(seed) == 1L && !is.na(seed) && is.finite(seed) &&
+# Seed pruefen: ganze Zahl mit |seed| < 2^53 (kein Faktor); liefert double. Seit 1.6.4 ohne Eingabewert in der
+# Meldung (Entscheidung 8, Befund C-096; bis 1.6.3 "(erhalten: <Wert>)" in der Darstellung der Sprache); seit K43 T1-R5
+# mit dem Namen fn der Funktion (Baustein ut1.seed; bis dahin "seed: ganze Zahl erwartet")
+.sl_check_seed <- function(seed, fn = "simlev_seed") {
+  ok <- is.numeric(seed) && !is.factor(seed) && length(seed) == 1L && !is.na(seed) && is.finite(seed) &&
     seed == trunc(seed) && abs(seed) < 2^53
-  if (!ok) stop(sprintf("seed: ganze Zahl erwartet (erhalten: %s)", .sl_seed_text(seed)), call. = FALSE)
+  if (!ok) chk_stop("ut1.seed", fn)
   as.double(seed)
 }
 
@@ -145,10 +139,10 @@ simlev_seed <- function(seed = NULL) {
 }
 
 # seed = NULL -> .sl_next_seed(), sonst geprueft (G bleibt unberuehrt)
-.sl_resolve_seed <- function(seed) if (is.null(seed)) .sl_next_seed() else .sl_check_seed(seed)
+.sl_resolve_seed <- function(seed, fn = "simlev_seed") if (is.null(seed)) .sl_next_seed() else .sl_check_seed(seed, fn)
 
-# Hauptstrom einer zufaelligen Funktion: S := Seeding(k bzw. s)
-.sl_main_stream <- function(seed) .sl_stream(.sl_resolve_seed(seed))
+# Hauptstrom einer zufaelligen Funktion: S := Seeding(k bzw. s); fn fuer die Meldung eines ungueltigen seed
+.sl_main_stream <- function(seed, fn = "simlev_seed") .sl_stream(.sl_resolve_seed(seed, fn))
 
 # Stroeme je Einheit U_i = J^i(S_0), i = 1 ... n (Liste von Stroemen)
 .sl_streams <- function(stream, n) {
@@ -234,14 +228,73 @@ simlev_seed <- function(seed = NULL) {
 .sl_qt <- function(p, df, lower.tail = TRUE)
   .sl_attr(p, .Call(C_sl_qt_mt, as.double(p), as.double(df), as.logical(lower.tail), .sl_nthreads()))
 
-# Threads der elementweisen Kerne (seit 1.6.0): Umgebungsvariable SIMLEV_THREADS (ganze Zahl >= 1), sonst 0 =
-# Zahl der Prozessoren (hoechstens 8); wie python/simlev/_lib.py und julia/src/slib.jl
+# Hoechstwert fuer Parallelitaet (seit 1.6.4, Entscheidung 41b; cores und Kern-Threads): Zahl der Prozessoren,
+# mindestens 1, aus dem Kern (sl_nprocs, core/slc_prep.cpp; eine Quelle fuer R, Python und Julia)
+.sl_nprocs <- function() .Call(C_sl_nprocs)
+
+# Threads der elementweisen Kerne (seit 1.6.0): Umgebungsvariable SIMLEV_THREADS (ASCII-Ziffern, >= 1), sonst 0 =
+# Hoechstwert (Zahl der Prozessoren; bis 1.6.3 hoechstens 8). Seit 1.6.4 (Entscheidung 41b) wird mehr als der
+# Hoechstwert mit einem Hinweis (einmal je Sitzung) begrenzt; wie python/simlev/_lib.py und julia/src/slib.jl.
+# Seit 1.6.4 (Entscheidung 41c) zusaetzlich je parallele Einheit hoechstens .sl_state$thread_cap Threads (von
+# .par_lapply gesetzt: Zahl der Prozessoren / Zahl der gleichzeitigen Einheiten, mindestens 1), auch bei gesetztem
+# SIMLEV_THREADS (ohne Hinweis).
 .sl_nthreads <- function() {
-  v <- Sys.getenv("SIMLEV_THREADS", "")
-  if (!nzchar(v)) return(0L)
-  v <- suppressWarnings(as.integer(v))
+  v <- .sl_env_threads()
+  if (v >= 1L) {
+    mx <- .sl_nprocs()
+    if (v > mx) {
+      if (!isTRUE(.sl_state$threads_hint)) {
+        assign("threads_hint", TRUE, envir = .sl_state)
+        message(chk_msg("hinweis.prozessoren", "SIMLEV_THREADS", mx))
+      }
+      v <- mx
+    }
+  }
+  cap <- .sl_state$thread_cap
+  if (!is.null(cap)) v <- if (v == 0L) cap else min(v, cap)
+  v
+}
+
+# SIMLEV_THREADS als ganze Zahl >= 1, sonst 0 (ohne Begrenzung und Hinweis; seit 1.6.4 nur ASCII-Ziffern,
+# Entscheidungen 27, 65; "2.7", "0x10", "+3" wie andere Fehlwerte: 0)
+.sl_env_threads <- function() {
+  v <- trimws(Sys.getenv("SIMLEV_THREADS", ""), whitespace = "[ \t\r\n]")
+  v <- if (grepl("^[0-9]+$", v)) suppressWarnings(as.integer(v)) else NA_integer_
   if (is.na(v) || v < 1L) 0L else v
 }
+
+# Kern-Threads ausserhalb paralleler Einheiten als Zahl >= 1 (cores = "auto" fuer die Starts des MS-GARCH-Fits, seit
+# 1.6.4): .sl_nthreads(), 0 = Zahl der Prozessoren
+.sl_auto_threads <- function() {
+  v <- .sl_nthreads()
+  if (v == 0L) .sl_nprocs() else v
+}
+
+# Planer fuer cores = "auto" (seit 1.6.4, Kern sl_par_plan in core/slc_prep.cpp; gleiche Regel in Python und Julia):
+# c(Laeufe, Kern-Threads je Lauf) fuer n weitere Einheiten mit Rechenzeit unit_s (Sekunden) und Ergebnisgroesse
+# unit_bytes je Einheit. sys 0 = R (Fork). nprocs, mem, self, running und env lassen sich fuer Proben der Regel vorgeben
+# (Testschalter fuer andere Rechnergroessen und Fremdlast, nicht oeffentlich); sonst Zahl der Prozessoren, freier
+# Speicher laut System, Speicher des eigenen Prozesses, laufende Prozesse (Entscheidung 112) und SIMLEV_THREADS.
+.sl_par_plan <- function(n, unit_s, unit_bytes = 0, sys = 0L, nprocs = .sl_nprocs(), max_runs = nprocs,
+                         env = .sl_env_threads(), mem = .sl_mem_avail(), self = .sl_mem_self(),
+                         running = .sl_load_running())
+  .Call(C_sl_par_plan, as.integer(sys), as.integer(nprocs), as.integer(max_runs), as.integer(env), as.double(n),
+        as.double(unit_s), as.double(unit_bytes), as.double(mem), as.double(self), as.double(running))
+
+# laufende Prozesse laut System einschliesslich des eigenen (-1 unbekannt; Kern sl_load_running, Entscheidung 112)
+.sl_load_running <- function() .Call(C_sl_load_running)
+
+# freier Arbeitsspeicher bzw. Speicher des eigenen Prozesses in Bytes laut System (-1 unbekannt; Kern sl_mem_avail,
+# sl_mem_self)
+.sl_mem_avail <- function() .Call(C_sl_mem_avail)
+.sl_mem_self <- function() .Call(C_sl_mem_self)
+
+# Messzeit vor dem Plan (Kern sl_par_probe): Start eines weiteren Laufs des Systems sys in Sekunden
+.sl_par_probe <- function(sys = 0L, self = .sl_mem_self()) .Call(C_sl_par_probe, as.integer(sys), as.double(self))
+
+# Threads je Einheit bei w gleichzeitigen Einheiten (seit 1.6.4, Entscheidung 41c): Zahl der Prozessoren %/% w,
+# mindestens 1; die Gesamtzahl der Rechenstraenge bleibt damit hoechstens bei der Zahl der Prozessoren
+.sl_unit_threads <- function(w) max(1L, .sl_nprocs() %/% as.integer(w))
 
 .sl_plogis <- function(q) .sl_attr(q, .Call(C_sl_plogis, as.double(q)))
 

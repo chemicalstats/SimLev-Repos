@@ -16,8 +16,9 @@
 //                     (span, days, harvest_day) bleiben in den Sprachen.
 //
 // GEMEINSAME QUELLE FUER R, PYTHON UND JULIA (wie engine_core_impl.h, das diese Datei einbindet): R ueber
-// r/src/engine_core.cpp (C_sim_prepare, C_sim_dates_flags), Python ueber python/src/_ext_engine.cpp
-// (sim_prepare, sim_dates_flags), Julia ueber core/simlev_cabi.cpp (simlev_c_engine_prepare, simlev_c_dates_flags).
+// r/src/engine_core.cpp (C_sim_engine_run mit der Vorbereitung, C_sim_dates_flags), Python ueber
+// python/src/_ext_engine.cpp (sim_engine_run, sim_dates_flags), Julia ueber core/simlev_cabi.cpp (simlev_c_engine_run,
+// simlev_c_dates_flags); einen eigenen Einsprung nur fuer die Vorbereitung gibt es nicht.
 // Regeln wie engine_core_impl.h: kein globaler Zustand, Rechenfolge wie R, sum() ueber sl_r_sum.
 //
 // Datumsregeln (wie R; Tageszahlen seit 1970-01-01, proleptisch gregorianisch):
@@ -84,7 +85,14 @@ static inline int month_len(int y, int m) {
   const bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
   return m == 2 && leap ? 29 : len[m - 1];
 }
-static inline long fl_day(double z) { return (long) std::floor(z); }
+// Tageszahl abgerundet; seit 1.6.4 (A-008) auf +-1e9 Tage begrenzt und NaN als +1e9, damit (long) nie aus NaN, +-Inf
+// oder einem riesigen Wert umgewandelt wird (bis 1.6.3 undefiniert, danach Ganzzahlueberlauf; long hat unter Windows
+// 32 Bit). Fuer Kalendertage (|z| < 1e9) unveraendert.
+static inline long fl_day(double z) {
+  if (!(z > -1e9)) return z != z ? 1000000000L : -1000000000L;
+  if (!(z < 1e9)) return 1000000000L;
+  return (long) std::floor(z);
+}
 
 // Termine eines Plans (calculate_dates_flags); on = 0: keine Termine
 struct Sched {
@@ -105,26 +113,51 @@ struct Sched {
 // Seit 1.6.3 ein Schnellweg fuer lueckenlose Tage (abgerundet fd[0], fd[0] + 1, ...; so in prepare()): Suche und
 // Treffer ueber den Index fd - fd[0] statt sortierter Tabelle und binary_search (gleiche Ganzzahllogik). Sonst
 // (simlev_c_dates_flags mit ausgewaehlten Tagen) wie bisher.
-static inline void dates_flags(int64_t n, const double* dates, const Sched& S, int liquidate, int32_t* out) {
-  for (int64_t i = 0; i < n; i++) out[i] = 0;
-  if (!S.on || n < 1) return;
+// Vorarbeit auf den Tagen (seit 1.6.4, A-084, aus dates_flags herausgeloest): prepare() ruft dates_flags fuer
+// Rebalancing und Sparplan auf denselben Tagen und rechnet sie nun einmal (bis 1.6.3 je Aufruf); gleiche Werte
+struct DayInfo {
+  bool finite = false;       // alle Tage endlich (|Tag| < 1e9)
+  double dmin = 0.0, dmax = 0.0;
+  bool gapless = true;       // abgerundet fd[0], fd[0] + 1, ...
+  std::vector<long> fd;      // abgerundete Tage
+  std::vector<long> table;   // sortierte fd (nur ohne Lueckenlosigkeit)
+};
+static inline DayInfo day_info(int64_t n, const double* dates) {
+  DayInfo D;
+  if (n < 1) return D;
+  // seit 1.6.4 (A-008): nur endliche Tage (bis 1.6.3 lief die Monatsschleife bei einem Datum Inf endlos)
+  for (int64_t i = 0; i < n; i++)
+    if (!(std::fabs(dates[i]) < 1e9)) return D;
+  D.finite = true;
   double dmin = dates[0], dmax = dates[0];
   for (int64_t i = 1; i < n; i++) {
     if (dates[i] < dmin) dmin = dates[i];
     if (dates[i] > dmax) dmax = dates[i];
   }
-  std::vector<long> fd((std::size_t) n);
-  for (int64_t i = 0; i < n; i++) fd[i] = fl_day(dates[i]);
+  D.dmin = dmin;
+  D.dmax = dmax;
+  D.fd.resize((std::size_t) n);
+  for (int64_t i = 0; i < n; i++) D.fd[i] = fl_day(dates[i]);
   bool gapless = true;
-  for (int64_t i = 1; i < n && gapless; i++) gapless = fd[i] == fd[0] + i;
-  std::vector<long> table;
-  std::vector<char> mark;   // Schnellweg: mark[z - fd[0]] = 1 fuer jeden Termin z
-  if (gapless) {
-    mark.assign((std::size_t) n, 0);
-  } else {
-    table = fd;
-    std::sort(table.begin(), table.end());
+  for (int64_t i = 1; i < n && gapless; i++) gapless = D.fd[i] == D.fd[0] + i;
+  D.gapless = gapless;
+  if (!gapless) {
+    D.table = D.fd;
+    std::sort(D.table.begin(), D.table.end());
   }
+  return D;
+}
+static inline void dates_flags(int64_t n, const DayInfo& D, const Sched& S, int liquidate, int32_t* out) {
+  for (int64_t i = 0; i < n; i++) out[i] = 0;
+  if (!S.on || n < 1) return;
+  if (!(std::fabs(S.start) < 1e9)) return;
+  if (!D.finite) return;
+  const double dmin = D.dmin, dmax = D.dmax;
+  const std::vector<long>& fd = D.fd;
+  const std::vector<long>& table = D.table;
+  const bool gapless = D.gapless;
+  std::vector<char> mark;   // Schnellweg: mark[z - fd[0]] = 1 fuer jeden Termin z
+  if (gapless) mark.assign((std::size_t) n, 0);
   auto in_dates = [&](long z) {
     return gapless ? (z >= fd[0] && z - fd[0] < (long) n) : std::binary_search(table.begin(), table.end(), z);
   };
@@ -172,6 +205,13 @@ static inline void dates_flags(int64_t n, const double* dates, const Sched& S, i
   }
   std::sort(hit.begin(), hit.end());
   for (int64_t i = 0; i < n; i++) out[i] = std::binary_search(hit.begin(), hit.end(), fd[i]) ? 1 : 0;
+}
+static inline void dates_flags(int64_t n, const double* dates, const Sched& S, int liquidate, int32_t* out) {
+  if (!S.on || n < 1) {
+    for (int64_t i = 0; i < n; i++) out[i] = 0;
+    return;
+  }
+  dates_flags(n, day_info(n, dates), S, liquidate, out);
 }
 
 // Tagesflags (Bits wie simlev_engine::DayFlag)
@@ -248,9 +288,10 @@ static inline int prepare(const PrepIn& I, const PrepOut& O) {
       trade((std::size_t) n), split((std::size_t) n, 0);
   std::vector<int32_t> tmp((std::size_t) n);
   for (int64_t i = 0; i < n; i++) liq[i] = I.liquidate && day[i] == I.stopp;
-  dates_flags(n, day, I.bal, I.liquidate, tmp.data());
+  const DayInfo di = day_info(n, day);   // seit 1.6.4 (A-084) einmal fuer beide Terminplaene
+  dates_flags(n, di, I.bal, I.liquidate, tmp.data());
   for (int64_t i = 0; i < n; i++) reb[i] = (char) tmp[i];
-  dates_flags(n, day, I.dca, I.liquidate, tmp.data());
+  dates_flags(n, di, I.dca, I.liquidate, tmp.data());
   for (int64_t i = 0; i < n; i++) dca[i] = (char) tmp[i];
   if (I.event) {   // kein Rebalancing am Einstiegstag und (bei liquidate) am Liquidationstag
     for (int64_t i = 0; i < n; i++) {

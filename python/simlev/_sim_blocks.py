@@ -29,10 +29,11 @@ import pandas as pd
 from ._r.rformat import r_as_character, r_deparse, r_format, r_format1
 from ._r.rlist import RList
 from ._sim_base import (_Default, _as_date, _check_taxable_income, _fee_spec, _is_bool, _is_num, _num_vec,
-                        _r_class_name, _stop, _unwrap, _warn)
-from .config import _match_arg
+                        _stop, _unwrap, _warn)
+from .config import _match_arg, _fmt15 as _fmt   # format(x, digits = 15), R: .blk_fmt (seit 1.6.4 eine Fassung)
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
 from ._util import _MISSING, _Missing
+from ._pruefen import _to_float, chk_int1, chk_scalar, chk_stop
 
 __all__ = ["sim_costs", "dca_plan", "rebalance_plan", "split_rule", "tax_profile", "income_rate", "income_tariff",
            "harvest_rule", "funds_costs", "SimLevSimCosts", "SimLevDcaPlan", "SimLevRebalancePlan", "SimLevSplitRule",
@@ -45,24 +46,21 @@ class _Dflt(float):
 
 # ── Prüfhilfen ────────────────────────────────────────────────────────────────
 
-def _show(x: Any) -> str:
-    return "NULL" if x is None else r_deparse(x)
-
-
 def _one_num(x: Any) -> bool:
-    return _is_num(x) and math.isfinite(float(x))
+    return _is_num(x) and math.isfinite(_to_float(x))   # seit 1.6.4 (K43 T1-R4): 10**400 ohne OverflowError
 
 
+# Meldungen seit 1.6.4 ohne Eingabewert (Entscheidung 8 des Nutzers vom 05.11.2026; bis 1.6.3 ", nicht <Wert>")
 def _blk_num(who: str, x: Any, arg: str, what: str, mn: float | None = 0.0, null_ok: bool = False) -> None:
     if x is None and null_ok:
         return
     if not _one_num(x) or (mn is not None and x < mn):
-        _stop("%s: '%s' muss %s sein, nicht %s." % (who, arg, what, _show(x)))
+        _stop("%s: '%s' muss %s sein." % (who, arg, what))
 
 
 def _blk_lgl(who: str, x: Any, arg: str) -> None:
     if not _is_bool(x):
-        _stop("%s: '%s' muss TRUE oder FALSE sein, nicht %s." % (who, arg, _show(x)))
+        _stop("%s: '%s' muss TRUE oder FALSE sein." % (who, arg))
 
 
 def _blk_frac_warn(who: str, x: Any, arg: str, hi: float = 1.0) -> None:
@@ -71,16 +69,16 @@ def _blk_frac_warn(who: str, x: Any, arg: str, hi: float = 1.0) -> None:
               % (who, arg, r_format1(x), r_format1(x), r_format1(x * 100)))
 
 
-def _vec_of(x: Any) -> list:
-    return list(x) if isinstance(x, (list, tuple, np.ndarray, pd.Series)) else [x]
-
-
 def _blk_days(who: str, x: Any) -> Any:
     if x is None:
         return None
-    v = _num_vec(x)
-    if v is None or any(d is None or math.isnan(d) for d in v) or any(d < 1 or d > 31 or d != round(d) for d in v):
-        _stop("%s: days muss ganze Zahlen von 1 bis 31 enthalten, nicht %s." % (who, ", ".join(r_format(_vec_of(x)))))
+    # seit 1.6.4 nur ein Vektor (keine Matrix, mindestens ein Tag; A-047) und die Meldung ohne Eingabewert
+    flat = not ((isinstance(x, np.ndarray) and x.ndim > 1)
+                or (isinstance(x, (list, tuple)) and any(isinstance(e, (list, tuple, np.ndarray)) for e in x)))
+    v = _num_vec(x) if flat else None
+    if (v is None or not v or any(d is None or math.isnan(d) for d in v)
+            or any(d < 1 or d > 31 or d != round(d) for d in v)):
+        _stop("%s: days muss ganze Zahlen von 1 bis 31 enthalten." % who)
     u: list = []
     for d in v:
         if d not in u:
@@ -93,31 +91,36 @@ def _blk_days(who: str, x: Any) -> Any:
 
 
 def _blk_start(who: str, x: Any) -> None:
+    """Bezugsdatum: Datum, Zeitpunkt oder Text "JJJJ-MM-TT" (seit 1.6.4 wie ``asset_config(start)``: keine Zahl,
+    Länge 1 (A-075), Meldung ohne Eingabewert)."""
     if x is None:
         return
+    from .config import _is_date_like
     try:
-        d = _as_date(x)
+        d = _as_date(x) if _is_date_like(x) else None
     except Exception:  # noqa: BLE001 - as.Date-Fehler: kein Datum
         d = None
     if d is None:
-        _stop("%s: start = '%s' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\")."
-              % (who, x if isinstance(x, str) else r_format1(x)))
+        _stop("%s: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\")." % who)
 
 
-def _cls(x: Any) -> str:
-    rc = getattr(x, "r_class", None)
-    if isinstance(rc, tuple) and rc:
-        return "/".join(rc)
-    if isinstance(x, pd.DataFrame):
-        return "data.frame"
-    if isinstance(x, Mapping):
-        return "list"
-    return _r_class_name(x)
+def _fee_norm(x: Any) -> Any:
+    """Gebührenangabe mit ausgepackten Vektoren der Länge 1 (Entscheidung 4; R: c(2) ist 2)."""
+    if isinstance(x, (list, tuple, np.ndarray, pd.Series)) and _is_num(chk_scalar(x)):
+        return chk_scalar(x)
+    if isinstance(x, dict) and any(isinstance(v, (list, tuple, np.ndarray, pd.Series)) for v in x.values()):
+        return {k: chk_scalar(v) for k, v in x.items()}
+    return x
+
+
+def _blk_span_max(unit: str) -> float:
+    """Obergrenze des Abstands (A-009): der Schritt in Monaten muss eine R-Ganzzahl sein."""
+    return 715827882 if unit == "quarter" else 2147483647
 
 
 def _blk_check(x: Any, cls: type, arg: str, ctor: str) -> None:
     if x is not None and not isinstance(x, cls):
-        _stop("simulation: %s muss NULL oder ein Objekt aus %s() sein, nicht %s." % (arg, ctor, _cls(x)))
+        _stop("simulation: %s muss NULL oder ein Objekt aus %s() sein." % (arg, ctor))   # seit 1.6.4 ohne Klasse
 
 
 # ── Druckhilfen ──────────────────────────────────────────────────────────────
@@ -125,10 +128,6 @@ def _blk_check(x: Any, cls: type, arg: str, ctor: str) -> None:
 def _blk_print(title: str, rows: list) -> str:
     w = max(len(k) for k, _ in rows) + 1
     return "\n".join([title] + ["  %s %s" % ((k + ":").ljust(w), v) for k, v in rows])
-
-
-def _fmt(x: Any) -> str:
-    return r_format1(float(x), digits=15)
 
 
 def _fee_text(x: Any) -> str:
@@ -326,22 +325,27 @@ def _mk(cls: type, items: list) -> RList:
     return x
 
 
+# Gemeinsamer Text der neun Baustein-Docstrings (seit 1.6.4 eine Fassung, A-109; bis 1.6.3 neunfach kopiert wie die
+# gemeinsame Rd-Seite ?sim_costs): _blk_doc setzt ihn um die Argumente und das Beispiel des Bausteins.
+_BLK_DOC_KOPF = 'Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.\n\nDie Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =\ndca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit\n``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus\n(kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim\nAnlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft\nnur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob\n``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.\n\n``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);\n``simulation()`` nimmt ihn nicht an.'
+_BLK_DOC_SCHLUSS = 'Returns:\n    Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und\n    ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der\n    Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,\n    ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.\n    ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.\n\nÜbersetzung in die Engine:\n    ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``\n    schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am\n    Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,\n    ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =\n    tax_profile()`` steht für die persönliche Besteuerung.\n\nFondskosten:\n    ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:\n    ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,\n    Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift\n    „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;\n    ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.'
+
+
+def _blk_doc(f):
+    """Docstring eines Bausteins: gemeinsamer Kopf, eigene Argumente, gemeinsamer Schluss, eigenes Beispiel."""
+    import inspect as _inspect
+    d = _inspect.cleandoc(f.__doc__)
+    a = d.index("\nArgs:")
+    b = d.index("\nBeispiel::")
+    f.__doc__ = _BLK_DOC_KOPF + "\n" + d[a:b] + "\n" + _BLK_DOC_SCHLUSS + "\n" + d[b:]
+    return f
+
+
 # ── Konstruktoren ────────────────────────────────────────────────────────────
 
+@_blk_doc
 def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         order_fee: ``sim_costs``: Ordergebühr: ``None`` (keine, Standard), eine Zahl (feste Gebühr in EUR je
             Order) oder ``{"fixed": ..., "percent": ..., "min": ..., "max": ...}`` mit ``fixed``, ``min``, ``max``
@@ -349,7 +353,8 @@ def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
             59}``. Die Gebühr erhöht beim Kauf den Einstandskurs (Anschaffungsnebenkosten) und mindert beim
             Verkauf den Erlös (Veräußerungskosten); steuerlich wirkt sie damit gewinnmindernd. Zusätzlich zum
             Spread je Asset (``spread`` in ``asset_config``; einen Spread für die ganze Simulation gibt es nicht).
-            Unbekannte Listenfelder (z. B. ``fix`` statt ``fixed``) und negative Gebühren führen zu einem Fehler.
+            Unbekannte Listenfelder (z. B. ``fix`` statt ``fixed``) und negative Gebühren führen zu einem Fehler;
+            jedes Feld ist eine einzelne endliche Zahl (``max`` auch ``inf``), NaN, Text und ``True`` sind ein Fehler.
             Bei Zwangsverkäufen für die Vorabpauschale und die § 23-Steuer wird so viel verkauft, dass Steuer und
             Gebühr gedeckt sind.
         dca_fee: ``sim_costs``: Gebühr für die Sparplankäufe (Format wie ``order_fee``): Käufe von
@@ -360,59 +365,29 @@ def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
             im Rebalancing mit angelegt. Standard (``None``): wie ``order_fee``. Viele Broker führen Sparpläne
             kostenlos aus (``dca_fee = 0``).
 
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
-
     Beispiel::
 
         import simlev
         print(simlev.sim_costs(order_fee={"fixed": 1, "percent": 0.25, "min": 2, "max": 20}, dca_fee=0))
     """
-    _fee_spec(order_fee)
-    _fee_spec(dca_fee)
+    order_fee, dca_fee = _fee_norm(order_fee), _fee_norm(dca_fee)
+    _fee_spec(order_fee, "sim_costs", "order_fee")
+    _fee_spec(dca_fee, "sim_costs", "dca_fee")
     return _mk(SimLevSimCosts, [("order_fee", order_fee), ("dca_fee", dca_fee)])
 
 
+@_blk_doc
 def dca_plan(value: Any = _MISSING, span: Any = _MISSING, *, days: Any = None, unit: Any = ("month", "quarter", "year"),
              anchor: Any = ("start", "end"), start: Any = None, skip: Any = False, fill_deficits: Any = False) -> SimLevDcaPlan:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         value: ``dca_plan``: Betrag je Sparplan-Termin in EUR; Pflicht, eine einzelne endliche Zahl ``> 0``
             (Vektor, ``NA`` oder Text: Fehler).
         span: ``dca_plan``: Abstand zwischen zwei Terminen in Perioden von ``unit`` (z. B. ``3`` mit ``"month"`` =
             alle drei Monate); Pflicht, eine einzelne ganze Zahl ``>= 1`` (sonst Fehler). ``rebalance_plan``:
-            Rebalancing-Intervall in Perioden von ``unit``; ``None`` (Standard) = 1.
-        days: Integer-Vektor oder ``None``. Tag(e) innerhalb jeder Periode (1--31): bei ``"month"`` Tag des
+            Rebalancing-Intervall in Perioden von ``unit``; ``None`` (Standard) = 1, sonst eine einzelne endliche
+            Zahl ``>= 1`` (seit 1.6.4 eine ganze Zahl; vorher lief z. B. 1.5 wie 1), höchstens 2147483647 (bei ``"quarter"`` 715827882).
+        days: Integer-Vektor (keine Matrix, mindestens ein Tag) oder ``None``. Tag(e) innerhalb jeder Periode (1--31): bei ``"month"`` Tag des
             Monats, bei ``"quarter"`` Tag im ersten Monat der Periode, bei ``"year"`` Tag im Januar; mit ``anchor
             = "end"`` rückwärts vom Periodenende gezählt (1 = letzter Tag). Nicht existierende Tage entfallen (z.
             B. Tag 31 im April, bei ``"end"`` Tag 31 vom Ende im Februar). Werte außerhalb von 1--31 oder nicht
@@ -424,7 +399,7 @@ def dca_plan(value: Any = _MISSING, span: Any = _MISSING, *, days: Any = None, u
             sind daher nicht zwingend Kalenderquartale.
         anchor: Bezugspunkt für ``days``: ``"start"`` (Standard, ab Periodenbeginn) oder ``"end"`` (ab
             Periodenende). Ohne ``days`` wirkungslos.
-        start: Date (oder ``"JJJJ-MM-TT"``) oder ``None``. Bezugsdatum des Terminplans: Die Perioden beginnen am
+        start: Date, Zeitpunkt oder ``"JJJJ-MM-TT"`` (keine Zahl) oder ``None``. Bezugsdatum des Terminplans: Die Perioden beginnen am
             Monatsersten dieses Datums (bei ``"year"`` am 1. Januar); Termine vor dem ersten Datentag entfallen.
             Kein Datum: Fehler beim Anlegen; liegt das Datum nach dem letzten Datentag, bricht ``simulation()``
             mit Fehler ab. ``None`` (Standard) = erster Tag von ``data``.
@@ -439,27 +414,6 @@ def dca_plan(value: Any = _MISSING, span: Any = _MISSING, *, days: Any = None, u
             Depot-Drift. ``True``: Die Rate wirkt als Mini-Rebalancing — sie füllt zuerst die Wert-Defizite zu den
             Strategie-Zielen; ein Rest wird nach Strategie-Gewichten verteilt.
 
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
-
     Beispiel::
 
         import numpy as np, pandas as pd, simlev
@@ -472,17 +426,16 @@ def dca_plan(value: Any = _MISSING, span: Any = _MISSING, *, days: Any = None, u
         print(r["worth"][-1], r["invested"][-1])
     """
     who = "dca_plan"
-    value = None if isinstance(value, _Missing) else value
-    span = None if isinstance(span, _Missing) else span
+    value = None if isinstance(value, _Missing) else chk_scalar(value)   # Länge 1 wie Einzelwert (Entscheidung 4)
+    span = None if isinstance(span, _Missing) else chk_scalar(span)
+    unit, anchor, start, skip, fill_deficits = (chk_scalar(v) for v in (unit, anchor, start, skip, fill_deficits))
     if not _one_num(value) or value <= 0:
-        _stop("%s: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR), nicht %s."
-              % (who, _show(value)))
-    if not _one_num(span) or span < 1 or span != round(float(span)):
-        _stop("%s: 'span' muss eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht %s."
-              % (who, _show(span)))
+        _stop("%s: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR)." % who)
     days = _blk_days(who, days)
     unit = _match_arg(unit, ("month", "quarter", "year"), "unit")
     anchor = _match_arg(anchor, ("start", "end"), "anchor")
+    # seit 1.6.4 Obergrenze (A-009); seit K43 T1-R6 eine Meldung (ganz_bis) statt zweier Formen
+    chk_int1(span, who, "span", lo=1, hi=_blk_span_max(unit))
     _blk_start(who, start)
     _blk_lgl(who, skip, "skip")
     _blk_lgl(who, fill_deficits, "fill_deficits")
@@ -490,28 +443,18 @@ def dca_plan(value: Any = _MISSING, span: Any = _MISSING, *, days: Any = None, u
                                ("start", start), ("skip", bool(skip)), ("fill_deficits", bool(fill_deficits))])
 
 
+@_blk_doc
 def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", "quarter", "year"),
                    anchor: Any = ("start", "end"), start: Any = None, skip: Any = False, thresh: Any = None,
                    thresh_type: Any = ("absolute", "relative"), event_col: Any = None,
                    event_mode: Any = _Default(("additional", "replace")), event_weight: Any = None) -> SimLevRebalancePlan:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         span: ``dca_plan``: Abstand zwischen zwei Terminen in Perioden von ``unit`` (z. B. ``3`` mit ``"month"`` =
             alle drei Monate); Pflicht, eine einzelne ganze Zahl ``>= 1`` (sonst Fehler). ``rebalance_plan``:
-            Rebalancing-Intervall in Perioden von ``unit``; ``None`` (Standard) = 1.
-        days: Integer-Vektor oder ``None``. Tag(e) innerhalb jeder Periode (1--31): bei ``"month"`` Tag des
+            Rebalancing-Intervall in Perioden von ``unit``; ``None`` (Standard) = 1, sonst eine einzelne endliche
+            Zahl ``>= 1`` (seit 1.6.4 eine ganze Zahl; vorher lief z. B. 1.5 wie 1), höchstens 2147483647 (bei ``"quarter"`` 715827882).
+        days: Integer-Vektor (keine Matrix, mindestens ein Tag) oder ``None``. Tag(e) innerhalb jeder Periode (1--31): bei ``"month"`` Tag des
             Monats, bei ``"quarter"`` Tag im ersten Monat der Periode, bei ``"year"`` Tag im Januar; mit ``anchor
             = "end"`` rückwärts vom Periodenende gezählt (1 = letzter Tag). Nicht existierende Tage entfallen (z.
             B. Tag 31 im April, bei ``"end"`` Tag 31 vom Ende im Februar). Werte außerhalb von 1--31 oder nicht
@@ -523,7 +466,7 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
             sind daher nicht zwingend Kalenderquartale.
         anchor: Bezugspunkt für ``days``: ``"start"`` (Standard, ab Periodenbeginn) oder ``"end"`` (ab
             Periodenende). Ohne ``days`` wirkungslos.
-        start: Date (oder ``"JJJJ-MM-TT"``) oder ``None``. Bezugsdatum des Terminplans: Die Perioden beginnen am
+        start: Date, Zeitpunkt oder ``"JJJJ-MM-TT"`` (keine Zahl) oder ``None``. Bezugsdatum des Terminplans: Die Perioden beginnen am
             Monatsersten dieses Datums (bei ``"year"`` am 1. Januar); Termine vor dem ersten Datentag entfallen.
             Kein Datum: Fehler beim Anlegen; liegt das Datum nach dem letzten Datentag, bricht ``simulation()``
             mit Fehler ab. ``None`` (Standard) = erster Tag von ``data``.
@@ -559,30 +502,10 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
             numerischen Spalte in ``data`` mit dem Zielgewicht. Wirkt nur an Tagen, an denen ``event_col``
             ``True`` ist; die Werte werden auf Summe 1 normiert und nur verwendet, wenn alle aktiven Assets einen
             endlichen Wert haben und die Summe positiv ist (fehlt ein Asset, gelten mit Warnung an Event-Tagen die
-            Strategie-Gewichte). Unbenannte Angaben, unbekannte Asset-Namen, fehlende Spalten und negative
+            Strategie-Gewichte). Unbenannte oder doppelte Namen und Einträge, die kein einzelner Spaltenname sind, sind schon
+            beim Anlegen ein Fehler; unbekannte Asset-Namen, fehlende Spalten und negative
             Gewichte führen in ``simulation()`` zu einem Fehler. ``None`` = Strategie-Gewichte. Ohne ``event_col``
             wirkungslos (Warnung).
-
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
 
     Beispiel::
 
@@ -597,9 +520,17 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
         print(r["buys"], r["sells"])
     """
     who = "rebalance_plan"
+    span, unit, anchor, start, skip, thresh, thresh_type, event_col = (
+        chk_scalar(v) for v in (span, unit, anchor, start, skip, thresh, thresh_type, event_col))
+    if not isinstance(event_mode, _Default):
+        event_mode = chk_scalar(event_mode)
     days = _blk_days(who, days)
     unit = _match_arg(unit, ("month", "quarter", "year"), "unit")
     anchor = _match_arg(anchor, ("start", "end"), "anchor")
+    # seit 1.6.4 (A-009, mildere Regel bis zur Entscheidung des Nutzers): None oder eine einzelne endliche Zahl >= 1 bis
+    # zur Obergrenze; gebrochene Werte wie 1.5 laufen weiter wie bisher
+    # seit 1.6.4 ganze Zahl (Entscheidungen 19, 32) bis zur Obergrenze (A-009); seit K43 T1-R6 eine Meldung (ganz_bis)
+    chk_int1(span, who, "span", lo=1, hi=_blk_span_max(unit), null_ok=True)
     _blk_start(who, start)
     _blk_lgl(who, skip, "skip")
     _blk_num(who, thresh, "thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)", null_ok=True)
@@ -608,31 +539,31 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
     if event_col is None and not isinstance(event_mode, _Default):
         _warn("rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert.")
     event_mode = _match_arg(_unwrap(event_mode), ("additional", "replace"), "event_mode")
-    if event_col is not None and not isinstance(event_col, str):
-        _stop("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein, nicht %s."
-              % _show(event_col))
+    if event_col is not None and not (isinstance(event_col, str) and event_col != ""):
+        _stop("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.")
     if event_col is None and event_weight is not None:
         _warn("rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert.")
+    # seit 1.6.4 (A-049): event_weight benannt, je Asset ein Spaltenname (die Spalten prüft simulation())
+    if event_weight is not None:
+        if isinstance(event_weight, Mapping):
+            items = [(k, chk_scalar(v)) for k, v in event_weight.items()]
+        elif isinstance(event_weight, pd.Series):
+            items = [(k, v) for k, v in zip(event_weight.index, event_weight.values)]
+        else:
+            items = None
+        if (not items or any(not isinstance(k, str) or k == "" for k, _ in items)
+                or any(not isinstance(v, str) or v == "" for _, v in items)
+                or len({k for k, _ in items}) != len(items)):
+            chk_stop("e1.event_weight", who)
     return _mk(SimLevRebalancePlan, [("span", span), ("days", days), ("unit", unit), ("anchor", anchor),
                                      ("start", start), ("skip", bool(skip)), ("thresh", thresh),
                                      ("thresh_type", thresh_type), ("event_col", event_col),
                                      ("event_mode", event_mode), ("event_weight", event_weight)])
 
 
+@_blk_doc
 def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         thresh: ``rebalance_plan``: Minimale Gewichtsabweichung **in Prozent** (z. B. ``5`` = 5 Prozentpunkte,
             siehe ``thresh_type``) für einen Rebalancing-Trade; geprüft wird die größte Abweichung über alle
@@ -648,27 +579,6 @@ def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
             Tag ein weiterer Split ausgelöst wird. Kein Zahlenvektor der Länge 2: Fehler. Hat ein Asset am
             Split-Tag keinen Bestand, wird seine Kursreihe trotzdem umgerechnet.
 
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
-
     Beispiel::
 
         import simlev
@@ -677,8 +587,7 @@ def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
     thresh = None if isinstance(thresh, _Missing) else thresh
     st = _num_vec(thresh) if thresh is not None else None
     if st is None or len(st) != 2 or any(v is None or math.isnan(v) for v in st):
-        _stop("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein, nicht %s."
-              % ("NULL" if thresh is None else ", ".join(r_format(_vec_of(thresh)))))
+        _stop("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein.")   # seit 1.6.4 ohne Eingabewert
     if not (st[0] < 100 < st[1]):
         _warn("split_rule: thresh = c(%s, %s) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). "
               "Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein "
@@ -686,20 +595,9 @@ def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
     return _mk(SimLevSplitRule, [("thresh", [float(v) for v in st])])
 
 
+@_blk_doc
 def income_rate(marginal_rate: Any = _MISSING, *, soli_rate: Any = 0) -> SimLevIncomeRate:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         marginal_rate: ``income_rate``: Persönlicher Grenzsteuersatz **in Prozent** (z. B. ``42``), zulässig 0 bis
             50; Pflicht. Werte zwischen 0 und 1 (vermutlich Anteil) werden mit Warnung als Prozent gelesen. Die §
@@ -709,57 +607,26 @@ def income_rate(marginal_rate: Any = _MISSING, *, soli_rate: Any = 0) -> SimLevI
             ``0`` (Standard) heißt ohne Soli (seit 2021 zahlen wegen der Freigrenze die meisten Steuerpflichtigen
             keinen Soli auf die Einkommensteuer). Eine einzelne endliche Zahl ``>= 0``.
 
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
-
     Beispiel::
 
         import simlev
         print(simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_rate(42)))
     """
     who = "income_rate"
-    marginal_rate = None if isinstance(marginal_rate, _Missing) else marginal_rate
+    marginal_rate = None if isinstance(marginal_rate, _Missing) else chk_scalar(marginal_rate)
+    soli_rate = chk_scalar(soli_rate)
     _blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
     _blk_frac_warn(who, marginal_rate, "marginal_rate")
     if marginal_rate > 50:
         _stop("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für "
-              "42 %%), nicht %s." % _show(marginal_rate))
+              "42 %).")
     _blk_num(who, soli_rate, "soli_rate", "eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5.5; 0 = ohne Soli)")
     return _mk(SimLevIncomeRate, [("marginal_rate", marginal_rate), ("soli_rate", soli_rate)])
 
 
+@_blk_doc
 def income_tariff(taxable_income: Any = _MISSING, *, tariff: Any = None) -> SimLevIncomeTariff:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         taxable_income: ``income_tariff``: Zu versteuerndes Einkommen (zvE) in EUR je Kalenderjahr **ohne** die
             Kapitalerträge und § 23-Gewinne der Simulation; Pflicht. Eine Zahl (gilt für alle Jahre), ein nach
@@ -775,27 +642,6 @@ def income_tariff(taxable_income: Any = _MISSING, *, tariff: Any = None) -> SimL
         tariff: ``income_tariff``: ``None`` (Standard: mitgelieferte Datei ``system.file("extdata",
             "steuertarif.csv", package = "SimLev")``, Rechtslage ab VZ 2026), ein Dateipfad (wird beim Anlegen mit
             ``tax_tariff`` gelesen) oder ein Objekt aus ``tax_tariff``.
-
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
 
     Beispiel::
 
@@ -815,73 +661,34 @@ def income_tariff(taxable_income: Any = _MISSING, *, tariff: Any = None) -> SimL
     return _mk(SimLevIncomeTariff, [("taxable_income", taxable_income), ("tariff", tariff)])
 
 
+@_blk_doc
 def harvest_rule(*, day: Any = "12-15", loss_pot: Any = True) -> SimLevHarvestRule:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         day: ``harvest_rule``: Termin als ``"MM-TT"`` (Standard ``"12-15"``); genutzt wird der erste Handelstag ab
-            diesem Datum, vor dem 31.12. (sonst Fehler).
+            diesem Datum, vor dem 31.12. (sonst Fehler). Nur Ziffern 0--9; seit 1.6.4 Monat 01 bis 12 und Tag 01 bis 31.
         loss_pot: ``harvest_rule``: Auch den Verlusttopf durch realisierte Gewinne nutzen? Standard ``True``.
-
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
 
     Beispiel::
 
         import simlev
         print(simlev.tax_profile(harvest=simlev.harvest_rule(day="12-15")))
     """
-    if not isinstance(day, str) or not re.match(r"^\d{2}-\d{2}$", day) or day >= "12-31":
-        _stop("harvest_rule: day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
+    day, loss_pot = chk_scalar(day), chk_scalar(loss_pot)
+    # wie R: nur ASCII-Ziffern, kein Zeilenende (seit 1.6.4, A-012)
+    # seit 1.6.4 Monat 01-12 und Tag 01-31 (Entscheidung 35)
+    if not isinstance(day, str) or not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])", day) or day >= "12-31":
+        _stop("harvest_rule: day im Format 'MM-TT' (Monat 01 bis 12, Tag 01 bis 31) und vor dem 31.12. angeben "
+              "(z. B. '12-15').")   # seit 1.6.4 mit den Bereichen (F8)
     _blk_lgl("harvest_rule", loss_pot, "loss_pot")
     return _mk(SimLevHarvestRule, [("day", day), ("loss_pot", bool(loss_pot))])
 
 
+@_blk_doc
 def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pauschbetrag: Any = 1000,
                 private_sale_threshold: Any = 1000, base_rate: Any = None, guenstigerpruefung: Any = False,
                 income: Any = None, harvest: Any = None) -> SimLevTaxProfile:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         rate: ``tax_profile``: Kapitalertragsteuersatz inkl. Solidaritätszuschlag **in Prozent** (z. B. ``26.375``
             = 25 % KapESt + 5,5 % Soli), zulässig 0 bis 100. Werte zwischen 0 und 1 (vermutlich ein Anteil) werden
@@ -906,8 +713,8 @@ def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pausch
             Fehler). Standard: ``1000``.
         base_rate: ``tax_profile``: Basiszins für die Vorabpauschale: ``None`` (Standard: keine Vorabpauschale),
             eine Zahl **in Prozent** (z. B. ``2.55`` = 2,55 %; negativ erlaubt und wie 0 behandelt) oder der Name
-            einer Spalte in ``data`` mit täglichen Basiszinswerten in Prozent (wie ``risk_free``; ``NA`` wird zu
-            0, für ein Jahr zählt der Wert vom ersten Handelstag, § 18 Abs. 4 InvStG). Zahlen zwischen 0 und 0,05
+            einer Spalte in ``data`` mit täglichen Basiszinswerten in Prozent (wie ``risk_free``; seit 1.6.4 Zahlen ohne
+            ``NA``, Jahre ohne Basiszins als 0; für ein Jahr zählt der Wert vom ersten Handelstag, § 18 Abs. 4 InvStG). Zahlen zwischen 0 und 0,05
             (vermutlich Anteil) werden mit Warnung als Prozent gelesen, für eine Spalte gilt dieselbe Schwelle für
             den Median; fehlt die Spalte, bricht ``simulation()`` mit Fehler ab.
         guenstigerpruefung: ``tax_profile``: Günstigerprüfung nach § 32d Abs. 6 EStG anwenden? Mit
@@ -925,43 +732,24 @@ def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pausch
             Verlusttopfs) realisiert und sofort wieder angelegt („Freibetrag ausschöpfen“); Spread und Gebühren
             fallen für Verkauf und Kauf an.
 
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
-
     Beispiel::
 
         import simlev
         print(simlev.tax_profile(church_tax=9, base_rate=2.29, income=simlev.income_rate(42), harvest=simlev.harvest_rule()))
     """
     who = "tax_profile"
+    rate, church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate, guenstigerpruefung = (
+        chk_scalar(v) for v in (rate, church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate,
+                                guenstigerpruefung))
     rate_given = not isinstance(rate, _Dflt)
-    if not _is_num(rate) or math.isnan(float(rate)) or rate < 0 or rate > 100:
+    if not _is_num(rate) or math.isnan(_to_float(rate)) or rate < 0 or rate > 100:
         _stop("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für "
-              "26,375 %%), nicht %s." % _show(rate))
+              "26,375 %).")
     rate = float(rate)
     _blk_frac_warn(who, rate, "rate")
     if church_tax is not None:
-        if not _is_num(church_tax) or math.isnan(float(church_tax)) or church_tax < 0 or church_tax > 100:
-            _stop("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), "
-                  "nicht %s." % ", ".join(r_format(_vec_of(church_tax))))
+        if not _is_num(church_tax) or math.isnan(_to_float(church_tax)) or church_tax < 0 or church_tax > 100:
+            _stop("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).")
         if 0 < church_tax < 1:
             _warn("tax_profile: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
                   % (r_format1(church_tax), r_format1(church_tax), r_format1(church_tax * 100)))
@@ -976,40 +764,29 @@ def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pausch
     _blk_num(who, private_sale_threshold, "private_sale_threshold",
              "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
     msg = ("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ "
-           "erlaubt) oder der Name einer Spalte in data sein, nicht %s.")
+           "erlaubt) oder der Name einer Spalte in data sein.")
     if isinstance(base_rate, str):
         if base_rate == "":
-            _stop(msg % _show(base_rate))
+            _stop(msg)
     else:
         if base_rate is not None and not _one_num(base_rate):
-            _stop(msg % _show(base_rate))
+            _stop(msg)
         _blk_frac_warn(who, base_rate, "base_rate", hi=0.05)
     _blk_lgl(who, guenstigerpruefung, "guenstigerpruefung")
     if income is not None and not isinstance(income, (SimLevIncomeRate, SimLevIncomeTariff)):
         _stop("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide "
-              "schließen sich aus), nicht %s." % _cls(income))
+              "schließen sich aus).")
     if harvest is not None and not isinstance(harvest, SimLevHarvestRule):
-        _stop("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein, nicht %s." % _cls(harvest))
+        _stop("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein.")
     return _mk(SimLevTaxProfile, [("rate", rate), ("church_tax", church_tax), ("sparer_pauschbetrag", sparer_pauschbetrag),
                                   ("private_sale_threshold", private_sale_threshold), ("base_rate", base_rate),
                                   ("guenstigerpruefung", bool(guenstigerpruefung)), ("income", income),
                                   ("harvest", harvest)])
 
 
+@_blk_doc
 def funds_costs(*, fee: Any = 0.95, performance_fee: Any = 5) -> SimLevFundsCosts:
-    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
-
-    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
-    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
-    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
-    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
-    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
-    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
-    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
-
-    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
-    ``simulation()`` nimmt ihn nicht an.
-
+    """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         fee: ``funds_costs``: Jährliche Verwaltungsgebühr (Fondskostenquote) **in Prozent** (z. B. ``0.95``), im
             Wrapper täglich je Kalendertag vom Anteilswert abgezogen. Zulässig 0 bis 100 (sonst Fehler). Standard:
@@ -1019,37 +796,16 @@ def funds_costs(*, fee: Any = 0.95, performance_fee: Any = 5) -> SimLevFundsCost
             letzten Datentag jedes Kalenderjahres festgeschrieben. Zulässig 0 bis 100 (sonst Fehler). Standard:
             ``5``.
 
-    Returns:
-        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
-        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
-        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
-        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
-        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
-
-    Übersetzung in die Engine:
-        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
-        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
-        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
-        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
-        tax_profile()`` steht für die persönliche Besteuerung.
-
-    Fondskosten:
-        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
-        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
-        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
-        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
-        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
-
     Beispiel::
 
         import simlev
         print(simlev.funds_costs(fee=0.5, performance_fee=10))
     """
+    fee, performance_fee = chk_scalar(fee), chk_scalar(performance_fee)
     for a, x in (("fee", fee), ("performance_fee", performance_fee)):
-        if not _is_num(x) or math.isnan(float(x)) or x < 0 or x > 100:
-            _stop("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s."
-                  % (a, "0.95 für 0,95 % p. a." if a == "fee" else "5 für 5 %",
-                     "NULL" if x is None else ", ".join(r_format(_vec_of(x)))))
+        if not _is_num(x) or math.isnan(_to_float(x)) or x < 0 or x > 100:
+            _stop("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s)."
+                  % (a, "0.95 für 0,95 % p. a." if a == "fee" else "5 für 5 %"))
     return _mk(SimLevFundsCosts, [("fee", fee), ("performance_fee", performance_fee)])
 
 
@@ -1231,7 +987,7 @@ def _sim_build(ctor: str, f: dict, set_: list):
     """Baustein aus Feldern neu bauen (R: ``.sim_build``)."""
     if ctor == "tax_profile" and "rate" not in set_:
         ct = f.get("church_tax")
-        if ct is not None and _is_num(ct) and not math.isnan(float(ct)) and ct > 0:
+        if ct is not None and _is_num(ct) and not math.isnan(_to_float(ct)) and ct > 0:
             f.pop("rate", None)
     if ctor == "rebalance_plan" and "event_mode" not in set_ and f.get("event_col") is None:
         f.pop("event_mode", None)

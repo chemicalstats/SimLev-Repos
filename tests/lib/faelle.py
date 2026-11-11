@@ -13,7 +13,9 @@ daneben das Engine-Format:
   (``worth``, ``drawdowns``, ``filled``, ``cagr``, ``ttwror``, ``statistics``, ``tax_report``, ``buys``,
   ``sells``, ``report``, Druckausgabe und ``details``-Ausgabe; Fehlerfälle müssen auch in Python abbrechen).
 
-Strikt: NA und NaN getrennt (``SIMLEV_LAX_NA=1``: NA = NaN), Vorzeichen der Null.
+Strikt: NA und NaN getrennt (``SIMLEV_LAX_NA=1``: NA = NaN), Vorzeichen der Null. Stufenmodell (seit 1.6.4): Teile der
+Modulfälle, die eine Regel in ``tests/lib/toleranz.tsv`` trifft, vergleichen Zahlen mit relativer Toleranz (NA ≠ NaN,
++0 = -0; ``reftree.compare``); Druck, Text und Engine-Format bleiben exakt.
 """
 from __future__ import annotations
 

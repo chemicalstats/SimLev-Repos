@@ -95,11 +95,21 @@ end
 an dieser Stelle gilt als `trim`. `type` erzwingt einen R-Typ (z. B.
 "integer"). Ergebnis: `String` bei Skalaren, sonst Vektor (`RVector` bei
 Namen, Matrix/`NamedMat`/`RFrame` bei solchen Eingaben); NA (bei
-`na_encode = false`) als `missing`.
+`na_encode = false`) als `missing`. Für `RFrame` wie R's `format.data.frame`
+mit `justify = "none"` als Standard (Textspalten ohne Auffüllen).
 """
 function format(x, fmt = nothing; format = fmt, trim = false, digits = nothing, nsmall = 0, justify = "left",
                 width = nothing, na_encode = true, scientific = nothing, big_mark = "", big_interval = 3,
                 small_mark = "", small_interval = 5, decimal_mark = nothing, zero_print = nothing,
+                drop0trailing = false, type = nothing)
+    _format(x, format; trim, digits, nsmall, justify, width, na_encode, scientific, big_mark, big_interval,
+            small_mark, small_interval, decimal_mark, zero_print, drop0trailing, type)
+end
+# seit 1.6.4 (RP) wie R format.data.frame: dort ist justify standardmäßig "none", Textspalten werden nicht aufgefüllt
+# (bis 1.6.3 "left" wie format.default: c("x ", "yy") statt c("x", "yy")); mit justify = "left" wie bisher
+function format(x::SimLev.RFrame, fmt = nothing; format = fmt, trim = false, digits = nothing, nsmall = 0,
+                justify = "none", width = nothing, na_encode = true, scientific = nothing, big_mark = "",
+                big_interval = 3, small_mark = "", small_interval = 5, decimal_mark = nothing, zero_print = nothing,
                 drop0trailing = false, type = nothing)
     _format(x, format; trim, digits, nsmall, justify, width, na_encode, scientific, big_mark, big_interval,
             small_mark, small_interval, decimal_mark, zero_print, drop0trailing, type)
@@ -114,6 +124,20 @@ function _format(x, fmt; trim = false, digits = nothing, nsmall = 0, justify = "
     end
     if x isa SimLev.RFrame
         y = copy(x)
+        if !(fmt === nothing && trim === false && nsmall == 0 && width === nothing && scientific === nothing &&
+             big_mark == "" && big_interval == 3 && small_mark == "" && small_interval == 5 && decimal_mark === nothing &&
+             zero_print === nothing && drop0trailing === false && type === nothing)
+            # seit 1.6.4 wie R format.data.frame (C-041): alle Angaben gehen an format() jeder Spalte (bis 1.6.3 nur
+            # digits, na_encode und justify; width, nsmall usw. fielen still weg)
+            for j in 1:SimLev.ncol(y)
+                r = _format(getfield(x, :cols)[j], fmt; trim, digits, nsmall, justify, width, na_encode, scientific,
+                            big_mark, big_interval, small_mark, small_interval, decimal_mark, zero_print, drop0trailing, type)
+                r isa SimLev.RVector && (r = r.values)
+                getfield(y, :cols)[j] = r isa AbstractVector ? r : [r]
+            end
+            return y
+        end
+        SimLev.ncol(x) > 0 && (digits = _chk_digits(digits))   # seit 1.6.4 wie R je Spalte (C-012)
         for j in 1:SimLev.ncol(y)
             getfield(y, :cols)[j] = _jvec(_fmt_column(getfield(x, :cols)[j]; digits, na_encode, justify))
         end
@@ -126,7 +150,36 @@ function _format(x, fmt; trim = false, digits = nothing, nsmall = 0, justify = "
     end
     v = _as_v(x, type)
     if v.type === :Date
-        return _out(_format_date_list(v.d, _Str[fmt === nothing ? "%Y-%m-%d" : fmt]), v)
+        # seit 1.6.4 (C-057) wie R format.POSIXlt: NA in der Vorlage „missing value where TRUE/FALSE needed“, keine bzw.
+        # keine Textvorlage „invalid 'format' argument“ (bis 1.6.3 MethodError bzw. TypeError)
+        fl = fmt === nothing ? Any["%Y-%m-%d"] : fmt isa AbstractVector || fmt isa Tuple ? collect(Any, fmt) : Any[fmt]
+        any(t -> t === missing || (t isa AbstractFloat && isnan(t)), fl) && error("missing value where TRUE/FALSE needed")
+        (isempty(fl) || !all(t -> t isa AbstractString, fl)) && error("invalid 'format' argument")
+        r = _format_date_list(v.d, _Str[String(t) for t in fl])
+        n = length(v.d)
+        for i in eachindex(r)   # NaN (nicht NA) wie R als "NaN" (seit 1.6.4, C-057)
+            k = mod1(i, n)
+            isnan(v.d[k]) && !v.na[k] && (r[i] = "NaN")
+        end
+        return _out(r, v)
+    end
+    # seit 1.6.4 (C-012, C-056, Entscheidung 77) wie R format.default/do_format: justify über match.arg, dann trim,
+    # digits (1 bis 22), nsmall (0 bis 20), width, na.encode und scientific in dieser Reihenfolge mit R's Meldungen
+    justify = _r_match_arg(justify, ("left", "right", "centre", "none"))
+    trim = _r_lgl_arg(trim, "trim")
+    digits = _chk_digits(digits)
+    nsmall = _chk_nsmall(nsmall)
+    if width !== nothing
+        width = _r_as_int1(width)
+        width === nothing && error("invalid 'width' argument")
+    end
+    na_encode = _r_lgl_arg(na_encode, "na.encode")
+    if scientific !== nothing
+        sa = scientific isa AbstractVector || scientific isa Tuple ? collect(scientific) : [scientific]
+        (length(sa) != 1 || sa[1] isa AbstractString) && error("invalid 'scientific' argument")
+        sv = sa[1]
+        scientific = sv === missing ? nothing : sv isa Bool ? sv :
+                     (si = _r_as_int1(sv); si === nothing ? -2147483648 : si)
     end
     if v.type === :factor
         v = _Vs(_as_character_list(v); names = v.names, scalar = v.scalar)
@@ -310,11 +363,14 @@ function formatC(x; width = nothing, digits = nothing, format = nothing, flag = 
     function format_char(strs, width, flag)
         if width === nothing
             width = 0
+        elseif _isnan_num(width)   # seit 1.6.4 wie R (width < 0L ist NA)
+            error("missing value where TRUE/FALSE needed")
         elseif width < 0
             flag = "-"
             width = -width
         end
         cv = _Vs(collect(_Str, strs))
+        width !== nothing && _r_as_int1(width) === nothing && error("invalid 'width' argument")   # wie R do_format
         return _format_internal(cv; width, justify = flag == "-" ? "left" : "right")
     end
     n = length(v)
@@ -348,10 +404,7 @@ function formatC(x; width = nothing, digits = nothing, format = nothing, flag = 
             error("'format' must be one of {\"f\",\"e\",\"E\",\"g\",\"G\", \"fg\", \"s\"}")
         end
     end
-    if v.type === :logical
-        v = _coerce(v, :integer)
-        mode = "integer"
-    end
+    v.type === :logical && error("unsupported type ")   # seit 1.6.4 wie R (C-049): formatC(<logisch>) ist ein Fehler
     if mode == "integer"
         vals = Float64.(v.i)
         ok = .!v.na
@@ -379,8 +432,15 @@ function formatC(x; width = nothing, digits = nothing, format = nothing, flag = 
         end
     end
     width === nothing && (width = digits + 1)
+    _isnan_num(width) && error("missing value where TRUE/FALSE needed")   # seit 1.6.4 wie R (width == 0L ist NA)
     width == 0 && (width = digits)
-    width = Int(width); digits = Int(digits)
+    # seit 1.6.4 (C-011, FW6-6) wie R: width außerhalb des int-Bereichs wird NA (Warnung bei as.integer in i.strlen und
+    # bei asInteger im Kern), und R kann dann bzw. ab i.strlen >= 2147483645 den Puffer nicht anlegen; bis 1.6.3 Absturz
+    if _r_as_int1(width) === nothing
+        @warn "NAs introduced by coercion to integer range"
+        error("cannot allocate memory block of size 16777216 Tb")
+    end
+    width = Int(trunc(width)); digits = Int(digits)
     istrlen = Int[]
     for xv in vals
         if format == "fg" || format == "f"
@@ -396,6 +456,7 @@ function formatC(x; width = nothing, digits = nothing, format = nothing, flag = 
             push!(istrlen, max(abs(width), digits + 8))
         end
     end
+    !isempty(istrlen) && maximum(istrlen) >= 2147483645 && error("cannot allocate memory block of size 16777216 Tb")
     digits > 0 && '#' in nf && (digits = -digits)
     r = _str_signif(vals, mode, width, digits, format, flag, istrlen)
     if some_special
@@ -489,7 +550,9 @@ function _format_date_list(days::AbstractVector{Float64}, fmts::AbstractVector)
     for i in 1:max(n, nf)
         z = days[mod1(i, n)]
         f = fmts[mod1(i, nf)]
-        if isnan(z) || f === nothing || f === missing || !(abs(z) < 1e14)
+        if isinf(z)   # seit 1.6.4 wie R 4.3.3 (C-057): "Inf", "-Inf" bei jeder Vorlage ("NaN": Aufrufer mit NA-Maske)
+            push!(out, z > 0 ? "Inf" : "-Inf")
+        elseif isnan(z) || f === nothing || f === missing || !(abs(z) < 1e14)
             push!(out, nothing)
         else
             push!(out, SimLev._rb_strftime(floor(Int64, z), String(f), ds, buf))

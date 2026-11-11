@@ -163,16 +163,18 @@ def _sim_evaluate(sim: dict, trades: dict, fl: dict, cfg: dict, fr: _Frame, star
     statistics = {k: float(sv[j]) for j, k in enumerate(_EVAL_STATS)}
     statistics["longest_drawdown"] = int(ints[2])
     why_text = [_eval_detail(w[2], w[3:], None) if w[0] else None for w in why]
-    undefined_metrics = pd.DataFrame({"metric": pd.Series([_EVAL_METRICS[u[0]] for u in um], dtype=object),
-                                      "reason": pd.Series([_EVAL_REASONS[u[1]] for u in um], dtype=object),
-                                      "detail": pd.Series([_eval_detail(u[2], u[3:], why_text) for u in um],
-                                                          dtype=object)})
+    # seit 1.6.4 (K43 T1-R10) ohne Zwischen-Series (je kleinem Lauf rund 0,2 ms weniger); dtype=object ist Pflicht
+    # (pandas 3 macht aus Text sonst StringDtype), gleiche Spalten, Typen und Index wie bis dahin
+    undefined_metrics = pd.DataFrame({"metric": [_EVAL_METRICS[u[0]] for u in um],
+                                      "reason": [_EVAL_REASONS[u[1]] for u in um],
+                                      "detail": [_eval_detail(u[2], u[3:], why_text) for u in um]}, dtype=object)
     r = {"total_worth": np.frombuffer(tw, dtype=np.float64), "twr_index": np.frombuffer(twr, dtype=np.float64),
          "invested": np.frombuffer(inv, dtype=np.float64), "has_ext_flows": bool(has_ext), "cagr": scal[0],
          "ttwror": scal[1], "open_tax_debt": scal[2], "drawdowns": np.frombuffer(dd, dtype=np.float64)}
+    # je ein eigener Index wie index=list(nm) (ein gemeinsamer teilte Attribute wie den Namen)
     um_ = {"undefined_metrics": undefined_metrics,
-           "buys": pd.Series(np.frombuffer(buys, dtype=np.float64).copy(), index=list(nm), dtype=np.float64),
-           "sells": pd.Series(np.frombuffer(sells, dtype=np.float64).copy(), index=list(nm), dtype=np.float64)}
+           "buys": pd.Series(np.frombuffer(buys, dtype=np.float64).copy(), index=pd.Index(list(nm)), copy=False),
+           "sells": pd.Series(np.frombuffer(sells, dtype=np.float64).copy(), index=pd.Index(list(nm)), copy=False)}
     return {"r": r, "rs": {"statistics": statistics}, "um": um_}
 
 
@@ -189,11 +191,12 @@ def _sim_result(sim: dict, trades: dict, fl: dict, cfg: dict, r: dict, rs: dict,
             ol = lv[lv[:, 3] > 0]   # offene Lots (remaining > 0; NaN zählt nicht), FIFO-Reihenfolge
             sp_ = strategy[nm].get("spread")
             open_lots[nm] = {
+                # seit 1.6.4 (A-056) direkt aus den Feldern (bis 1.6.3 über je eine pd.Series; gleiche Tabelle)
                 "lots": pd.DataFrame({
-                    "date": pd.Series(ol[:, 0].astype(np.int64).astype("datetime64[D]")),
-                    "units": pd.Series(ol[:, 3].copy(), dtype=np.float64),
-                    "price": pd.Series(ol[:, 2].copy(), dtype=np.float64),
-                    "vp": pd.Series(np.where(ol[:, 6] != 0, ol[:, 5], 0.0), dtype=np.float64)}),
+                    "date": ol[:, 0].astype(np.int64).astype("datetime64[D]"),
+                    "units": ol[:, 3].astype(np.float64, copy=True),
+                    "price": ol[:, 2].astype(np.float64, copy=True),
+                    "vp": np.where(ol[:, 6] != 0, ol[:, 5], 0.0).astype(np.float64, copy=False)}),
                 "regime": fl["tax_regimes"][nm],
                 "partial_exemption": 100 * sim["assets"][nm]["bonus"],
                 "cash": sim["status"][nm]["money"],

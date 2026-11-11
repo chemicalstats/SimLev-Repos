@@ -16,17 +16,23 @@
   start_date <- head(data[, "date"], 1)
   stopp_date <- tail(data[, "date"], 1)
   
+  # Basiszins-Spalte (seit 1.6.4): kein Faktor (Entscheidung 15; bis 1.6.3 still mit Warnung umgewandelt), nur Zahlen
+  # (wie risk_free, Entscheidungen 2 und F5: Text ist ein Fehler; eine Spalte nur aus NA zaehlt als Zahlenspalte,
+  # Entscheidung 14) und kein NA (Entscheidung 17; bis 1.6.3 zaehlte NA als 0), auch nicht in einer Spalte nur aus NA
+  # (Entscheidung 42)
+  if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
+      !is.na(base_rate_data) && base_rate_data %in% names(data)) {
+    br0 <- data[[base_rate_data]]
+    chk_col_nofactor(data, base_rate_data, "simulation")
+    if (!(is.numeric(br0) || (is.logical(br0) && all(is.na(br0)))))
+      chk_stop("spalte_typ", "simulation", base_rate_data, chk_msg("typ.numerisch"))
+    chk_col_nona(data, base_rate_data, "simulation", chk_msg("hinweis.basiszins"))
+  }
   # Prozent-Konvention auch fuer die Basiszins-Spalte (Median, gleiche Schwelle wie base_rate)
   if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
       !is.na(base_rate_data) && base_rate_data %in% names(data))
     .frac_warn_col(data[[base_rate_data]], "base_rate", base_rate_data, hi = 0.05)
-  # NA in der Basiszins-Spalte = 0 (keine VP), unabhaengig von der Datenform: vor dem
-  # LOCF-Auffuellen ersetzen (sonst fuellte LOCF ein NA an Handelstagsdaten mit dem Vortageswert)
-  if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
-      base_rate_data %in% names(data) && anyNA(data[[base_rate_data]]) &&
-      (is.numeric(data[[base_rate_data]]) || all(is.na(data[[base_rate_data]])))) {
-    br0 <- as.numeric(data[[base_rate_data]]); br0[is.na(br0)] <- 0; data[[base_rate_data]] <- br0
-  }
+  # (bis 1.6.3: NA in der Basiszins-Spalte = 0, keine VP; seit 1.6.4 abgelehnt, siehe oben)
 
   # P-3: Lueckenhafte Handelstag-Daten automatisch auf Kalenderraster auffuellen
   # (LOCF fuer numerische Spalten; logische Signal-Spalten -> FALSE).
@@ -130,6 +136,9 @@
         stop(sprintf("simulation: signal_buy-Spalte '%s' fehlt im Datensatz (Asset '%s').", sb %||% "NULL", name))
       if (is.null(ss) || !ss %in% names(data))
         stop(sprintf("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s').", ss %||% "NULL", name))
+      # seit 1.6.4 nur TRUE/FALSE oder 0/1 mit NA (Entscheidung 1; bis 1.6.3: Faktor-Codes in R, Text in Python als
+      # wahr, jede Zahl ungleich 0 als TRUE)
+      chk_col_signal(data, sb, "simulation"); chk_col_signal(data, ss, "simulation")
     }
 
     #---> Initialisierung des Market-Objekts:
@@ -141,10 +150,10 @@
                       paste(base_rate_data, collapse = ", "), paste(base_rate_data, collapse = ", "), paste(names(data), collapse = ", ")))
   }
   br <- data[[base_rate_data]]
-  br[is.na(br)] <- 0  # NA durch 0 ersetzen
+  br[is.na(br)] <- 0  # seit 1.6.4 ohne NA (.sim_prepare_data lehnt NA ab, Entscheidung 17); bleibt als Schutz
   br
 } else {
-  # BUG-1 FIX: Vektor statt Skalar, damit Index-Zugriff in .calculate_flat_rate() funktioniert
+  # Vektor je Tag (wie die Spalte), den die Tagesengine je Tag liest (Vorabpauschale im Kern, core/engine_core_impl.h)
   rep(base_rate %||% 0, nrow(data))
 },
       asset_price = data[[name]],
@@ -190,10 +199,11 @@
     sd0 <- get(paste0(a, "_start"))
     if (!isTRUE(get(paste0(a, "_mode"))) || is.null(sd0)) next
     sd1 <- tryCatch(as.Date(sd0), error = function(e) NA)
-    if (length(sd1) != 1L || is.na(sd1)) stop(sprintf("simulation: %s_start = '%s' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", a, format(sd0)))
-    if (sd1 > stopp_date) stop(sprintf("simulation: %s (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine.",
+    # seit 1.6.4 ohne Eingabewert (der letzte Datentag bleibt als Ort in den Daten)
+    if (length(sd1) != 1L || is.na(sd1)) stop(sprintf("simulation: %s_start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", a))
+    if (sd1 > stopp_date) stop(sprintf("simulation: %s liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine.",
                                        sprintf("start von %s", if (a == "dca") "dca_plan()" else "rebalance_plan()"),
-                                       format(sd1), format(stopp_date)))
+                                       format(stopp_date)))
   }
   balance <- .sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, NULL, balance_anchor,
                         balance_start, balance_skip)
@@ -233,8 +243,8 @@
   for (k in seq_along(flag_assets)) {
     st_a <- starts[[k]]
     if (length(st_a) == 1L && !is.na(st_a) && st_a > stopp_date)
-      stop(sprintf("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.",
-                   flag_assets[k], format(st_a), format(stopp_date)))
+      stop(sprintf("simulation: start von '%s' liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.",
+                   flag_assets[k], format(stopp_date)))   # seit 1.6.4 ohne Eingabewert
   }
   # bis 1.3.0 .sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
   if (!length(flag_assets[vapply(starts, function(st) (st %||% flag_date[1]) <= flag_date[1], NA)]))

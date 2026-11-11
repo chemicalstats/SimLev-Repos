@@ -39,6 +39,10 @@ from .tactical import (
 from .svg import _alloc_c, _alloc_ticks, _esc, _jl_max, _jl_min, _jl_str
 from ._util import _dates as _as_dates, _match_arg, _which_max, _which_min
 from ._util import _pow_rec, _stats as _st
+from ._util import _fp_quiet
+from ._util import _na as _isna
+from ._pruefen import (chk_cols, chk_col_nofactor, chk_dots, chk_is_factor, chk_num1, chk_scalar,
+                       chk_stop)
 
 __all__ = ["portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "portfolio_risk_contributions",
            "portfolio_cpcv", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
@@ -143,16 +147,6 @@ def _named_vec(x):
     return nm, vals, isnum
 
 
-def _isna(v):
-    return v is None or (isinstance(v, (float, np.floating)) and math.isnan(v))
-
-
-def _fmt_vals(vals, isnum):
-    if isnum:
-        return _fmt1(np.array([_NA if v is None else float(v) for v in vals], dtype=np.float64))
-    return ["NA" if _isna(v) else str(v) for v in vals]
-
-
 def _sprintf(fmt, *args):
     return _fmt.sprintf(fmt, *args)
 
@@ -191,14 +185,16 @@ def _opt_returns(x, assets=None, frequency="week"):
         return {"R": R, "ppy": float(ppy), "dates": rd["date"].to_numpy()}
     if isinstance(x, pd.DataFrame):
         cn = [str(c) for c in x.columns] if not isinstance(x.columns, pd.RangeIndex) else None
-        isnum = all(_is_numeric_col(x[c]) or x[c].dtype == bool for c in x.columns)
+        isnum = all(_is_numeric_col(x[c]) for c in x.columns)   # seit 1.6.4 ohne Wahrheitswerte (B-040, wie R)
         A = x.to_numpy(dtype=np.float64) if isnum else x.to_numpy(dtype=object)
     else:
+        if not isinstance(x, (np.ndarray, pd.Series)):          # seit 1.6.4 wie R: keine Liste (B-057)
+            raise ValueError("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
         A = np.asarray(x)
         if A.ndim == 1:
             A = A.reshape(-1, 1)
         cn = None
-        isnum = A.dtype.kind in "iufb"
+        isnum = A.dtype.kind in "iuf"                           # seit 1.6.4 ohne Wahrheitswerte (B-040, wie R)
         if A.dtype == object:
             isnum = all(isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool) for v in A.ravel())
             if isnum:
@@ -223,6 +219,26 @@ def _opt_returns(x, assets=None, frequency="week"):
     return {"R": pd.DataFrame(A[ok, :], columns=cn), "ppy": ppy, "dates": None}
 
 
+def _opt_check_x(x, assets, fn):
+    """Eingabe ``x`` und ``assets`` der Optimierungsfunktionen (seit 1.6.4, K42 E4; R ``.opt_check_x``): ``assets``
+    ``None`` oder Namen ohne NA, doppelte und ``'date'``; bei Kursdaten Datumsspalte keine Kategorie und die Anlagen
+    als Zahlenspalten; bei einer Renditetabelle nur Zahlenspalten. Ergebnis: ``assets`` als Liste oder ``None``."""
+    from .dependence import _e4_names, _e4_numcol
+    assets = _e4_names(assets, fn, "assets", null_ok=True)
+    if isinstance(x, pd.DataFrame) and "date" in [str(c) for c in x.columns]:
+        chk_col_nofactor(x, "date", fn)
+        if assets is not None:
+            chk_cols(x, assets, fn)
+            for a in assets:
+                _e4_numcol(x, a, fn)
+    elif isinstance(x, pd.DataFrame):
+        cols = [str(c) for c in x.columns]
+        for a in (assets if assets is not None else cols):
+            if a in cols:
+                _e4_numcol(x, a, fn)
+    return assets
+
+
 def _opt_check_finite(A, cn):
     """``.opt_check_finite``: unendliche Renditen mit Spalte und Zeile melden."""
     inf = np.isinf(A)
@@ -243,23 +259,24 @@ def _opt_check_alpha(alpha, fn):
     one = isnum and len(vals) == 1 and vals[0] is not None and math.isfinite(float(vals[0]))
     if one and float(vals[0]) > 0 and float(vals[0]) <= 0.5:
         return
+    # seit 1.6.4 ohne den Wert, Hinweise wertfrei (Entscheidung 8, wie 12)
     hint = ""
-    if one:
+    if one and not chk_is_factor(alpha):
         a = float(vals[0])
         if a >= 1:
-            hint = _sprintf(" - als Anteil angeben (z. B. %g statt %g)", a / 100, a)
+            hint = " - als Anteil angeben (Prozentangaben durch 100 teilen)"
         elif a > 0.5:
-            hint = _sprintf(" - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (%g -> alpha = %g)", a, 1 - a)
+            hint = " - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (alpha = 1 - Konfidenzniveau)"
     raise ValueError("%s: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste "
-                     "5 %% (erhalten: %s)%s." % (fn, ", ".join(_fmt_vals(vals, isnum)), hint))
+                     "5 %%%s." % (fn, hint))
 
 
 def _opt_bounds(b, nm, default, what="upper"):
     """``.opt_bounds``: Skalar, benannter oder positionsweiser Vektor -> Wert je Anlage."""
     names, vals, isnum = _named_vec(b)
-    if not isnum or not len(vals) or any(_isna(v) for v in vals):
-        raise ValueError("%s: numerischer Wert bzw. Vektor ohne NA erwartet (erhalten: %s)."
-                         % (what, ", ".join(_fmt_vals(vals, isnum))))
+    if (not isnum or not len(vals) or any(_isna(v) for v in vals) or chk_is_factor(b)
+            or (isinstance(b, np.ndarray) and b.ndim > 1)):   # seit 1.6.4 ohne Wert, keine Kategorie/Matrix
+        raise ValueError("%s: numerischer Wert bzw. Vektor ohne NA erwartet." % what)
     v = np.array([float(x) for x in vals], dtype=np.float64)
     if names is None:
         if len(v) == 1:
@@ -290,7 +307,7 @@ def _opt_check_bounds(lower, upper, nm):
               "Prozentangabe? Dann durch 100 teilen." % ", ".join("%s = %s" % (nm[i], s) for i, s in zip(big, fb)),
               SimLevBoundsPercent)
     if (lo < 0).any():
-        raise ValueError("lower: Untergrenzen müssen >= 0 sein (Long-only; erhalten %s)." % ", ".join(_fmt1(lo[lo < 0])))
+        raise ValueError("lower: Untergrenzen müssen >= 0 sein (Long-only).")   # seit 1.6.4 ohne Wert
     slo = _sum(lo)
     shi = _sum(hi)
     if slo > 1 + 1e-12 or shi < 1 - 1e-12 or (lo > hi).any():
@@ -342,6 +359,8 @@ def _opt_cov_m(R, type):  # noqa: A002
                 acc[t] = nrm(np.asarray(_lib.tcrossprod(X[t, :]), dtype=np.float64) - S1)
         b2 = min(d2, _sum(acc) / (Tn * Tn))
         a2 = d2 - b2
+        if not d2 > 0:
+            chk_stop("e4.lw")                                     # Entscheidung 73 (B-039): keine neue Rechnung
         Sh = (b2 / d2) * dm + (a2 / d2) * S1
         return Sh * Tn / (Tn - 1)
     if type == "ewma":
@@ -389,6 +408,19 @@ def _opt_cov_m(R, type):  # noqa: A002
     return _psd(G * np.asarray(_la.outer(sd, sd), dtype=np.float64), N)
 
 
+def _opt_cov_once(A, cov_type, ppy, scache):
+    """``_opt_cov_m(A, cov_type) * ppy``; mit ``scache`` (dict) dort zusätzlich eine Kopie unter ``"S"``, wenn die
+    Rechnung keine Meldung geben konnte (seit 1.6.4, B-072: Wiederverwendung in ``_opt_vol`` und
+    ``portfolio_risk_contributions``). ``denoise`` kann über ``cov2cor`` warnen und wird nicht gemerkt."""
+    if scache is None or cov_type == "denoise":
+        return _opt_cov_m(A, cov_type) * ppy
+    S0, q = _fp_quiet(lambda: _opt_cov_m(A, cov_type))
+    S = (S0 if q else _opt_cov_m(A, cov_type)) * ppy
+    if q:
+        scache["S"] = S.copy()
+    return S
+
+
 def _opt_cov(R, type="sample"):  # noqa: A002
     """``.opt_cov``: Kovarianzschätzer (``sample``, ``ledoit_wolf``, ``ewma``, ``denoise``, ``gerber``)."""
     type = _match_arg(type, _COVS)  # noqa: A001
@@ -432,12 +464,24 @@ def _risk_parity(S, b):
         H = S + _la.diag(b / (y * y), N)
         dx = np.asarray(_lib.solve_spd(H, g), dtype=np.float64).ravel()   # H symmetrisch positiv definit
         step = 1.0
+        fyc = []
+
+        def fy():
+            # seit 1.6.4 f(y) einmal je Schritt (B-107), wenn y > 0 und ohne Gleitkomma-Meldung; sonst wie bisher
+            if fyc:
+                return fyc[0]
+            if (y > 0).all():
+                v, q = _fp_quiet(lambda: f(y))
+                if q:
+                    fyc.append(v)
+                    return v
+            return f(y)
         while True:
             yn = y - step * dx
             if (yn <= 0).any():
                 cond = True
             else:
-                cond = f(yn) > f(y) - 1e-4 * step * _sum(g * dx)
+                cond = f(yn) > fy() - 1e-4 * step * _sum(g * dx)
             if not cond:
                 break
             step = step / 2
@@ -531,12 +575,13 @@ def _cvar_hist(r, alpha):
 # Kern
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy):
-    """``.opt_core``: ein Optimierungsschritt auf einer Renditematrix (DataFrame)."""
+def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy, scache=None):
+    """``.opt_core``: ein Optimierungsschritt auf einer Renditematrix (DataFrame); ``scache`` siehe
+    :func:`_opt_cov_once`."""
     nm = [str(c) for c in R.columns]
     A = R.to_numpy(dtype=np.float64)
     N = A.shape[1]
-    S = _opt_cov_m(A, cov_type) * ppy
+    S = _opt_cov_once(A, cov_type, ppy, scache)
     if mu is None:
         m = _colmeans(A) * ppy
     else:
@@ -715,6 +760,7 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
             (ISO-Woche, Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52, 252, 12).
         resample: Anzahl Block-Bootstrap-Stichproben für das Michaud-Resampling (ganze Zahl, Standard 0 = aus);
             die Gewichte sind dann das Mittel der Einzeloptimierungen.
+            Seit 1.6.4 höchstens 10^8.
         block: Mittlere Blocklänge des stationären Bootstraps für das Resampling in Perioden. ``None`` (Standard)
             = T^1/3 gerundet, mindestens 2 (T = Anzahl Perioden).
         seed: Startwert für das Resampling. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
@@ -788,6 +834,13 @@ def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, co
     method = _match_arg(method, _METHODS)
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
+    fn = "portfolio_optimize"                                  # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _opt_check_x(x, assets, fn)
+    risk_free = chk_num1(risk_free, fn, "risk_free")           # B-018
+    risk_aversion = chk_num1(risk_aversion, fn, "risk_aversion", lo=0)
+    from .dependence import _e4_count
+    resample = _e4_count(resample, fn, "resample", lo=0)       # B-018
+    block = chk_num1(block, fn, "block", lo=1, null_ok=True)
     rr = _opt_returns(x, assets, frequency)
     R = rr["R"]
     nm = [str(c) for c in R.columns]
@@ -800,13 +853,14 @@ def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, co
     if mu is not None:
         mu = pd.Series(_opt_bounds(mu, nm, _NA, "mu"), index=nm)
         if np.isinf(mu.to_numpy()).any():
-            raise ValueError("mu: endliche Werte in Prozent p. a. erwartet (erhalten: %s)." % ", ".join(_fmt1(mu.to_numpy())))
+            raise ValueError("mu: endliche Werte in Prozent p. a. erwartet.")   # seit 1.6.4 ohne Wert
     ppy = rr["ppy"]
 
-    def core(Rx):
-        return _opt_core(Rx, method, lo, hi, cov, mu, risk_free, risk_aversion, budget, alpha, ppy)
+    def core(Rx, scache=None):
+        return _opt_core(Rx, method, lo, hi, cov, mu, risk_free, risk_aversion, budget, alpha, ppy, scache)
 
-    w = core(R)
+    sc = {}                                                    # Kovarianz von R für _opt_vol (seit 1.6.4, B-072)
+    w = core(R, sc)
     wb = None
     if resample > 0:
         T = len(R)
@@ -816,7 +870,7 @@ def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, co
         from ._lib_models import boot_idx_stationary
 
         A = R.to_numpy(dtype=np.float64)
-        S = main_stream(seed)                           # Hauptstrom
+        S = main_stream(seed, "portfolio_optimize")                           # Hauptstrom
         wbm = np.empty((int(resample), N))
         for bb in range(int(resample)):
             idx = np.asarray(boot_idx_stationary(T, T, block, stream=S), dtype=np.int64) - 1
@@ -825,9 +879,9 @@ def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, co
         wv = _colmeans(wbm)
         w = pd.Series(wv / _sum(wv), index=nm)
     if weights_only:
-        _opt_vol(w.to_numpy(dtype=np.float64), R.to_numpy(dtype=np.float64), ppy, cov)
+        _opt_vol(w.to_numpy(dtype=np.float64), R.to_numpy(dtype=np.float64), ppy, cov, sc.get("S"))
         return w
-    out = _opt_summary(w, R, ppy, cov, risk_free, alpha)
+    out = _opt_summary(w, R, ppy, cov, risk_free, alpha, sc.get("S"))
     res = SimLevOptimization(out)
     res["method"] = method
     res["bounds"] = pd.DataFrame(np.vstack([lo, hi]), index=["lower", "upper"])
@@ -838,10 +892,12 @@ def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, co
     return res
 
 
-def _opt_vol(wv, A, ppy, cov_type):
+def _opt_vol(wv, A, ppy, cov_type, S=None):
     """Kovarianz (annualisiert) und Volatilität des Portfolios wie in ``.opt_summary`` mit dessen Warnung bei
-    Volatilität 0: ``(S, vol, vq)`` (``vq`` NA bei Volatilität 0)."""
-    S = _opt_cov_m(A, cov_type) * ppy
+    Volatilität 0: ``(S, vol, vq)`` (``vq`` NA bei Volatilität 0). ``S``: schon gerechnete Kovarianz von ``A``
+    (seit 1.6.4, B-072, aus :func:`_opt_cov_once`), sonst neu."""
+    if S is None:
+        S = _opt_cov_m(A, cov_type) * ppy
     q = _quad(wv, S)
     vol = math.sqrt(max(q, 0.0)) if not math.isnan(q) else q
     if vol <= 1e-10:
@@ -851,15 +907,15 @@ def _opt_vol(wv, A, ppy, cov_type):
     return S, vol, vol
 
 
-def _opt_summary(w, R, ppy, cov_type, risk_free, alpha):
-    """``.opt_summary``: Kennzahlen eines Gewichtsvektors."""
+def _opt_summary(w, R, ppy, cov_type, risk_free, alpha, S=None):
+    """``.opt_summary``: Kennzahlen eines Gewichtsvektors (``S`` siehe :func:`_opt_vol`)."""
     A = R.to_numpy(dtype=np.float64)
     nm = list(w.index)
     wv = w.to_numpy(dtype=np.float64)
     m = _colmeans(A) * ppy
     ret = _sum(wv * m)
     rp = _mat_vec(A, wv)
-    S, vol, vq = _opt_vol(wv, A, ppy, cov_type)
+    S, vol, vq = _opt_vol(wv, A, ppy, cov_type, S)
     rc = wv * _mat_vec(S, wv) / vq
     stats = pd.Series({
         "expected_return": ret, "volatility": vol, "sharpe": (ret - risk_free / 100) / vq,
@@ -994,6 +1050,7 @@ def portfolio_frontier(x, *, assets=None, n=40, lower=0, upper=1, cov=_COVS, ris
             ``date`` bzw. alle Spalten der Matrix.
         n: Anzahl der Risikoaversionen (ganze Zahl, Standard 40). Punkte mit (auf 6 Stellen) gleicher Rendite und
             Volatilität werden nur einmal behalten; das Ergebnis kann daher weniger Zeilen haben.
+            Seit 1.6.4 höchstens 10^6.
         lower, upper: Unter- und Obergrenzen der Gewichte als Anteil (0.6 = 60 %): Skalar für alle Anlagen,
             benannter Vektor (nicht genannte Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
             unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten; andere Längen sind
@@ -1026,6 +1083,12 @@ def portfolio_frontier(x, *, assets=None, n=40, lower=0, upper=1, cov=_COVS, ris
     """
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
+    fn = "portfolio_frontier"                                  # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _opt_check_x(x, assets, fn)
+    from .dependence import _e4_count
+    from ._pruefen import SL_MAX_GITTER
+    n = _e4_count(n, fn, "n", hi=SL_MAX_GITTER)                 # B-011, B-038
+    risk_free = chk_num1(risk_free, fn, "risk_free")
     rr = _opt_returns(x, assets, frequency)
     R = rr["R"]
     nm = [str(c) for c in R.columns]
@@ -1173,6 +1236,7 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
         assets: Zeichenvektor der Kursspalten (Pflicht).
         method: Verfahren wie in ``portfolio_optimize()`` (Zeichenkette, Standard ``"min_variance"``).
         window: Fensterlänge in Jahren (Standard 3).
+            Seit 1.6.4 eine ganze Zahl von 1 bis 100 (Jahre).
         every: Entscheidungsrhythmus: ``"month"`` (Standard), ``"quarter"`` oder ``"year"``.
         frequency: Renditefrequenz innerhalb des Fensters: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder
             ``"month"``.
@@ -1208,22 +1272,26 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     """
     every = _match_arg(every, ("month", "quarter", "year"))
     frequency = _match_arg(frequency, _FREQS)
-    if not isinstance(method, str) or method not in _METHODS:
-        mv = [method] if isinstance(method, str) or np.ndim(method) == 0 else list(method)
-        raise ValueError("portfolio_rolling: unbekanntes Verfahren %s; erlaubt: %s."
-                         % (", ".join("'%s'" % m for m in mv), ", ".join(_METHODS)))
+    fn = "portfolio_rolling"
+    method = chk_scalar(method)
+    if not isinstance(method, str) or method not in _METHODS:   # seit 1.6.4 ohne Wert
+        raise ValueError("portfolio_rolling: unbekanntes Verfahren; erlaubt: %s." % ", ".join(_METHODS))
     dots = dict(kwargs)
     allowed = [a for a in _PO_FORMALS if a not in ("x", "assets", "method", "frequency")]
-    bad = [k for k in dots if k not in allowed]
-    if bad:
-        raise ValueError("portfolio_rolling: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in "
-                         "...: %s." % ", ".join("'%s'" % b for b in _unique(bad)))
+    # seit 1.6.4 einheitlich (Entscheidung 21); x und assets setzt portfolio_rolling selbst
+    chk_dots(list(dots), allowed, fn, taken=("x", "assets", "method", "frequency"))
+    from ._pruefen import chk_jahre
+    from .dependence import _e4_names, _e4_numcol
+    window = chk_jahre(window, fn, "window")                     # B-098, Entscheidung 70 (ganze Jahre 1 bis 100)
+    assets = _e4_names(assets, fn, "assets")
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
         raise ValueError("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
-    assets = [assets] if isinstance(assets, str) else [str(a) for a in assets]
     miss = _setdiff(assets, [str(c) for c in data.columns])
     if miss:
         raise ValueError("Spalten fehlen: %s" % ", ".join(miss))
+    chk_col_nofactor(data, "date", fn)
+    for a in assets:
+        _e4_numcol(data, a, fn)
     _opt_check_bounds(0 if dots.get("lower") is None else dots["lower"],
                       1 if dots.get("upper") is None else dots["upper"], assets)
     _opt_check_alpha(0.05 if dots.get("alpha") is None else dots["alpha"], "portfolio_rolling")
@@ -1302,7 +1370,7 @@ def _roll_prep(data, d, assets, frequency):
     """Einmal je ``portfolio_rolling`` (seit 1.5.1; bis 1.5.0 je Fenster in ``_dep_returns``): Kurse je Spalte,
     unzulässige Kurse (kumuliert), letzte vorhandene Zeile je Tag (Fortschreiben), Logarithmen und Periodenwechsel
     (ISO-Woche bzw. Monat). ``None`` bei Spalten, die nicht eindeutig numerisch sind (dann je Fenster wie bisher)."""
-    from .dependence import _num, _period_keys
+    from .dependence import _num, _period_breaks
     cols = [str(c) for c in data.columns]
     if not assets or len(set(assets)) != len(assets) or "date" in assets or any(cols.count(a) != 1 for a in assets):
         return None
@@ -1322,10 +1390,11 @@ def _roll_prep(data, d, assets, frequency):
     dates = _as_dates(d)
     brk = None
     if frequency != "day":
-        key = _period_keys(dates, frequency)
-        brk = np.array([key[i + 1] != key[i] for i in range(n - 1)], dtype=bool)
-    return {"V": V, "nbad": nbad, "idx": idx, "lv": _libm.log(Vf), "lv0": _libm.log(V), "brk": brk, "d": d,
-            "dates": dates}
+        brk = _period_breaks(dates, frequency)                 # seit 1.6.4 ganzzahlig (B-103, B-107)
+    # Logarithmen ohne die Warnung "NaNs produced" (seit 1.6.4, T3-R1): unzulässige Kurse (< 0, -Inf) gehen nur in
+    # Fenster ein, die _dep_check_prices vorher ablehnt; R und Julia warnen dort nicht (gleiche Bits)
+    lg = lambda A: _libm._math1(1, _libm._log, A)                 # noqa: E731
+    return {"V": V, "nbad": nbad, "idx": idx, "lv": lg(Vf), "lv0": lg(V), "brk": brk, "d": d, "dates": dates}
 
 
 def _roll_returns(pre, lo, hi, assets, frequency):
@@ -1399,11 +1468,18 @@ def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), 
     _opt_check_alpha(alpha, "portfolio_risk_contributions")
     if isinstance(weights, SimLevOptimization):
         weights = weights["weights"]
+    fn = "portfolio_risk_contributions"
     names, vals, isnum = _named_vec(weights)
-    if not isnum or names is None or any(k == "" for k in names) or any(_isna(v) for v in vals):
+    # seit 1.6.4 auch ohne Inf, Kategorie und Matrix
+    if (not isnum or names is None or any(k == "" for k in names) or any(_isna(v) for v in vals)
+            or not all(math.isfinite(float(v)) for v in vals) or chk_is_factor(weights)):
         raise ValueError("weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).")
+    if len(set(names)) < len(names):
+        chk_stop("e2.doppelt", fn, "weights")                  # B-052
+    if "date" in names:
+        chk_stop("e4.date", fn, "weights")
     if isinstance(x, pd.DataFrame) and "date" in [str(c) for c in x.columns]:
-        avail = [str(c) for c in x.columns]
+        avail = [str(c) for c in x.columns if str(c) != "date"]
     elif isinstance(x, pd.DataFrame) and not isinstance(x.columns, pd.RangeIndex):
         avail = [str(c) for c in x.columns]
     else:
@@ -1413,6 +1489,7 @@ def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), 
     if unk:
         raise ValueError("weights: unbekannte Anlage(n) %s; vorhanden: %s." % (
             ", ".join("'%s'" % u for u in unk), ", ".join(a for a in avail if a != "date")))
+    _opt_check_x(x, names, fn)
     rr = _opt_returns(x, names, frequency)
     R = rr["R"]
     cn = [str(c) for c in R.columns]
@@ -1421,9 +1498,12 @@ def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), 
         wmap.setdefault(k, float(v))
     w = np.array([wmap[c] for c in cn], dtype=np.float64)
     A = R.to_numpy(dtype=np.float64)
+    sc = {}
     if measure == "volatility":
-        S = _opt_cov_m(A, cov) * rr["ppy"]
+        S = _opt_cov_once(A, cov, rr["ppy"], sc)               # seit 1.6.4 (B-072) auch für das Verhältnis unten
         tot = math.sqrt(_quad(w, S))
+        if not abs(tot) > 0:
+            chk_stop("e4.risiko0", fn)                            # Entscheidung 73 (B-039)
         mc = _mat_vec(S, w) / tot
         rc = w * mc
     else:
@@ -1434,12 +1514,15 @@ def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), 
         mc = _colmeans(-A[tail, :])
         rc = mc * w
         tot = _sum(rc)
+        if not abs(tot) > 0:
+            chk_stop("e4.risiko0", fn)                            # Entscheidung 73 (B-039)
     out = pd.DataFrame({"asset": cn, "weight": w, "contribution": rc, "share": rc / tot, "marginal": mc})
     out.attrs["total"] = tot
     out.attrs["measure"] = measure
     out.attrs["effective_n"] = 1 / _sum((rc / tot) * (rc / tot))
     if measure == "volatility":
-        out.attrs["diversification_ratio"] = _sum(w * np.sqrt(np.diag(_opt_cov_m(A, cov) * rr["ppy"]))) / tot
+        Sd = sc["S"] if "S" in sc else _opt_cov_m(A, cov) * rr["ppy"]
+        out.attrs["diversification_ratio"] = _sum(w * np.sqrt(np.diag(Sd))) / tot
     return out
 
 
@@ -1454,14 +1537,6 @@ class SimLevCPCV(RList):
 
     def format(self):
         return print_SimLevCPCV(self, _return=True)
-
-
-def _int1_ok(v, lo):
-    nm, vals, isnum = _named_vec(v)
-    if not isnum or len(vals) != 1 or vals[0] is None:
-        return False, vals, isnum
-    f = float(vals[0])
-    return (math.isfinite(f) and f == float(_fmt.r_round(f)) and f >= lo), vals, isnum
 
 
 def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"),
@@ -1484,10 +1559,12 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
             "min_variance", "risk_parity", "max_sharpe"]``) oder benannte Liste von Argumentlisten für
             ``portfolio_optimize()`` (z. B. ``{"mv": {"method": "min_variance", "cov": "ledoit_wolf"}}``).
         n_groups: Anzahl Gruppen insgesamt (ganze Zahl >= 2, Standard 6).
+            Seit 1.6.4 höchstens 10^8.
         test_groups: Anzahl Testgruppen je Aufteilung (ganze Zahl, Standard 2, kleiner als ``n_groups``); es gibt
             choose(n_groups, test_groups) Aufteilungen.
         purge, embargo: Sperrzone und Embargo in Perioden der gewählten Frequenz (Zeilen der Renditen, ganze
             Zahlen >= 0, je Standard 2).
+            Seit 1.6.4 höchstens 10^8.
         frequency: Siehe ``portfolio_optimize()``.
 
     Returns:
@@ -1524,23 +1601,27 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
         print(simlev.portfolio_cpcv(R, methods=["equal", "inverse_vol", "min_variance"], n_groups=5, test_groups=2))
     """
     frequency = _match_arg(frequency, _FREQS)
-    rr = _opt_returns(x, assets, frequency)
-    R = rr["R"]
-    Tn = len(R)
-    for v, nm, lo in ((n_groups, "n_groups", 2), (test_groups, "test_groups", 1), (purge, "purge", 0),
-                      (embargo, "embargo", 0)):
-        ok, vals, isnum = _int1_ok(v, lo)
-        if not ok:
-            raise ValueError("portfolio_cpcv: %s muss eine ganze Zahl >= %d sein (erhalten: %s)."
-                             % (nm, lo, ", ".join(_fmt_vals(vals, isnum))))
+    fn = "portfolio_cpcv"                                      # seit 1.6.4 vor der Rechnung (K42 E4)
+    assets = _opt_check_x(x, assets, fn)
+    from .dependence import _e4_count, _e4_names
+    # seit 1.6.4 Bausteine der Tabelle eingabe (ohne Wert); Obergrenze wie Entscheidung 16
+    n_groups = _e4_count(n_groups, fn, "n_groups", lo=2)
+    test_groups = _e4_count(test_groups, fn, "test_groups")
+    purge = _e4_count(purge, fn, "purge", lo=0)
+    embargo = _e4_count(embargo, fn, "embargo", lo=0)
     n_groups_v, test_groups_v = n_groups, test_groups
     ng = int(n_groups)
     tg = int(test_groups)
     purge = int(purge)
     embargo = int(embargo)
     if tg >= ng:
-        raise ValueError("portfolio_cpcv: test_groups (%d) muss kleiner als n_groups (%d) sein, sonst bleibt keine "
-                         "Trainingsgruppe." % (tg, ng))
+        raise ValueError("portfolio_cpcv: test_groups muss kleiner als n_groups sein, sonst bleibt keine Trainingsgruppe.")
+    if isinstance(methods, (str, list, tuple, np.ndarray, pd.Series)) and \
+            all(isinstance(m, str) for m in ([methods] if isinstance(methods, str) else list(methods))):
+        methods = _e4_names(methods, fn, "methods", no_date=False)   # B-052
+    rr = _opt_returns(x, assets, frequency)
+    R = rr["R"]
+    Tn = len(R)
     if isinstance(methods, str):
         methods = [methods]
     if isinstance(methods, (list, tuple, np.ndarray)) and all(isinstance(m, str) for m in methods) and len(methods):
@@ -1553,6 +1634,8 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
     for nm, sp in specs.items():
         if not isinstance(sp, Mapping) or any(str(k) == "" for k in sp.keys()):
             raise ValueError("portfolio_cpcv: Eintrag '%s' von methods muss eine benannte Argumentliste sein." % nm)
+        if sp.get("method") is not None and not isinstance(chk_scalar(sp["method"]), str):
+            chk_stop("text", fn, "methods$%s$method" % nm)       # seit 1.6.4
         if sp.get("method") is not None and sp["method"] not in _METHODS:
             raise ValueError("portfolio_cpcv: unbekanntes Verfahren '%s'; erlaubt: %s." % (sp["method"], ", ".join(_METHODS)))
         bad = [k for k in sp.keys() if k not in allowed_args]

@@ -634,15 +634,19 @@ SZ("text_logik", "signal_state mit NA (pd.NA bzw. missing) und Zahlen, tactical_
     r"(result = T.signal_state({'buy': pd.array([True, pd.NA, False, True], dtype='boolean'), 'sell': pd.array([False, True, pd.NA, False], dtype='boolean')}))",
     r"(result = T.signal_state(SL.RList("buy" => [true, missing, false, true], "sell" => [false, true, missing, false])))", inp = list()),
   ss_num = teil(
-    r"(signal_state(list(buy = c(1, 0, NA, 2), sell = c(0, 1, 0, NaN))))",
-    r"(result = T.signal_state({'buy': [1.0, 0.0, simlev._r.fmt.NA_REAL, 2.0], 'sell': [0.0, 1.0, 0.0, math.nan]}))",
-    r"(result = T.signal_state(SL.RList("buy" => [1.0, 0.0, SL.NA, 2.0], "sell" => [0.0, 1.0, 0.0, NaN])))", inp = list()),
+    r"(signal_state(list(buy = c(1, 0, NA, 1), sell = c(0, 1, 0, NaN))))",
+    r"(result = T.signal_state({'buy': [1.0, 0.0, simlev._r.fmt.NA_REAL, 1.0], 'sell': [0.0, 1.0, 0.0, math.nan]}))",
+    r"(result = T.signal_state(SL.RList("buy" => [1.0, 0.0, SL.NA, 1.0], "sell" => [0.0, 1.0, 0.0, NaN])))", inp = list()),
   tr_txtvec = teil(
     r"(attr(tactical_rules(d, list(list(when = c("A > 105", "B > 100"), weights = c(A = 1))), default = c(C = 1)), 'regime'))",
     r"(result = T.tactical_rules(d, [{'when': ['A > 105', 'B > 100'], 'weights': {'A': 1}}], default={'C': 1}).attrs['regime'])",
     r"(result = SL.attrs(T.tactical_rules(d, [SL.RList("when" => ["A > 105", "B > 100"], "weights" => SL.named("A" => 1))], SL.named("C" => 1); env = @__MODULE__))["regime"])", inp = ein("tactical/tr_rx_08", c("d")))))
 ref_init("tactical", gruppe = "fehler")
 TB("signal_state", "Meldungen von signal_state bei Text statt logischer Werte je Zeile (seit 1.6.3 in Python und Julia wie R: Text in sell scheitert an !, Text in buy an &)", vor = VOR, zeilen = list(
+  zeile("ss_err_num2",   # seit 1.6.4 Fehler (Entscheidung 1: nur 0/1; bis 1.6.3 Teil ss_num von text_logik)
+    r"(signal_state(list(buy = c(1, 0, NA, 2), sell = c(0, 1, 0, NaN))))",
+    r"(result = T.signal_state({'buy': [1.0, 0.0, simlev._r.fmt.NA_REAL, 2.0], 'sell': [0.0, 1.0, 0.0, math.nan]}))",
+    r"(result = T.signal_state(SL.RList("buy" => [1.0, 0.0, SL.NA, 2.0], "sell" => [0.0, 1.0, 0.0, NaN])))", inp = list()),
   zeile("ss_err_buy_text",
     r"(signal_state(list(buy = c("TRUE", "FALSE", NA, "TRUE"), sell = c(FALSE, TRUE, FALSE, NA))))",
     r"(result = T.signal_state({'buy': ['TRUE', 'FALSE', None, 'TRUE'], 'sell': [False, True, False, None]}))",

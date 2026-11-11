@@ -11,7 +11,7 @@ sensitivity_grid(
   sim_args = list(),
   metrics = bootstrap_study_metrics,
   keep_results = FALSE,
-  cores = 1L
+  cores = "auto"
 )
 }
 \arguments{
@@ -35,7 +35,8 @@ gelten zusammen. Ohne Punkt sind es Argumente von \code{simulation()}
 alten Einzelargumente (z. B. \code{balance_unit}) ergeben einen Fehler mit den
 moeglichen Bausteinen und Parametern. Alternativ ein data.frame mit einer Zeile je
 Lauf. Listen-Spalten (z. B. \code{splits.thresh}) sind erlaubt. \code{NA} laesst das
-Argument weg (Standardwert bzw. Wert aus \code{sim_args}).}
+Argument weg (Standardwert bzw. Wert aus \code{sim_args}).
+Seit 1.6.4 geprueft: benannte Liste oder data.frame ohne Faktorspalten.}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
 (Standard \code{list()}); Werte aus \code{grid} haben Vorrang. Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
@@ -45,12 +46,33 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
-(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).}
+(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).
+Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen keiner festen
+Spalte des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).}
 
 \item{keep_results}{Logisch (Standard \code{FALSE}): Ergebnisse der Laeufe
-zusaetzlich als Attribut \code{results} zurueckgeben.}
+zusaetzlich als Attribut \code{results} zurueckgeben.
+Seit 1.6.4 nur TRUE oder FALSE.}
 
-\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Fork auf Unix, PSOCK auf Windows):
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
+\code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
+der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).}
 }
 \value{
 data.frame: Rasterspalten (Listen-Spalten als Text "a/b"), die

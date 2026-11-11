@@ -31,6 +31,14 @@ const _PADJ = ["holm", "hochberg", "hommel", "bonferroni", "BH", "BY", "fdr", "n
 
 const _PADJ_CODE = Dict("holm" => 0, "hochberg" => 1, "hommel" => 2, "bonferroni" => 3, "BH" => 4, "BY" => 5, "none" => 6)
 
+"Meldung von R, wenn ein Vektor von nbytes Bytes nicht angelegt werden kann (memory.c, allocVector)."
+function _r_alloc_msg(nbytes::Float64)
+    kb = nbytes / 1024.0
+    kb > 1024.0 * 1024.0 && return @sprintf("cannot allocate vector of size %0.1f Gb", kb / 1024.0 / 1024.0)
+    kb > 1024.0 && return @sprintf("cannot allocate vector of size %0.1f Mb", kb / 1024.0)
+    return @sprintf("cannot allocate vector of size %0.f Kb", kb)
+end
+
 "`p.adjust(p, method, n)`."
 function p_adjust(p, method::AbstractString = "holm"; n = nothing)
     hits = [m for m in _PADJ if startswith(m, method)]
@@ -46,7 +54,17 @@ function p_adjust(p, method::AbstractString = "holm"; n = nothing)
     n === nothing && (n = lp)
     n >= lp || error("n >= lp is not TRUE")
     n <= 1 && return _vec_out(p0, nm)
-    r = SimLev._rb_p_adjust(Vector{Float64}(pp), Float64(n), _PADJ_CODE[method])   # C-Kern sl_r_p_adjust (seit 1.6.0)
+    # seit 1.6.4 (C-017) wie R: hommel und BY brauchen n Werte (rep.int(1, n - lp) bzw. 1/(1L:n)); n = Inf ist dort
+    # ein Fehler, ohne Speicher die Meldung von R (bis 1.6.3 undefinierte Umwandlung, Absturz bzw. ganzer Speicher)
+    if method in ("hommel", "BY") && !(method == "hommel" && n == 2) && !isfinite(n)
+        error(method == "hommel" ? "invalid 'times' value" : "result would be too long a vector")
+    end
+    r = try
+        SimLev._rb_p_adjust(Vector{Float64}(pp), Float64(n), _PADJ_CODE[method])   # C-Kern sl_r_p_adjust (seit 1.6.0)
+    catch e
+        e isa OutOfMemoryError || rethrow()
+        error(_r_alloc_msg(floor(method == "hommel" ? n - lp : n) * 8.0))
+    end
     p0[nna] = r
     return _vec_out(p0, nm)
 end

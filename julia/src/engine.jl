@@ -11,7 +11,8 @@
 #   3.-5. _sim_engine_run! Termine, Tages-Flags und Startgewichte (core/prepare_core_impl.h; bis 1.3.0
 #      _sim_build_calendar, _sim_init_weights!, _sim_build_schedule!), Tagesschleife und Abschluss des letzten
 #      Jahres im gemeinsamen C++-Kern (core/engine_core_impl.h; bis 1.3.0 _sim_run_days! und _sim_close_years!)
-#   6. _sim_returns, _sim_risk_stats, _sim_undefined_metrics, _sim_result
+#   6. _sim_evaluate (Kennzahlen im gemeinsamen Kern, core/evaluate_core_impl.h; früher _sim_returns,
+#      _sim_risk_stats, _sim_undefined_metrics) und _sim_result (sim_evaluate.jl)
 #
 # Tagesindizes (`time`) sind wie in R 1-basiert. Hier stehen die Terminangaben, der
 # Tarifweg (Prüfung, TariffEnv) und die Kennzahlen aus sim_base.R (Python: _sim_base.py); die
@@ -99,21 +100,22 @@ struct FeeSpec
     max::Float64
 end
 
-function _fee_spec(x)
+# fn, arg: Funktion und Argument für Meldungen (seit 1.6.4, K43 T1-R5; bis dahin "order_fee/dca_fee" bzw. ganz ohne
+# Funktionsnamen); doppelte Felder (Pair-Vektor) seit K43 T1-R7 ein Fehler wie in R (bis dahin galt still das letzte)
+function _fee_spec(x, fn::AbstractString, arg::AbstractString)
     @nospecialize
     x === nothing && return nothing
     _is_num(x) && (x = ["fixed" => x])
-    _is_mapping(x) || error("order_fee/dca_fee: Zahl (EUR je Order) oder list(fixed, percent, min, max).")
+    _is_mapping(x) || chk_stop("ut1.gebuehr", fn, arg)
     ps = _kvpairs(x)
+    !isempty(ps) && any(p -> isempty(p.first), ps) && chk_stop("e2.benannt", fn, arg)
     unk = [p.first for p in ps if !(p.first in ("fixed", "percent", "min", "max"))]
-    if !isempty(ps) && (any(p -> isempty(p.first), ps) || !isempty(unk))
-        error("order_fee/dca_fee: unbekannte oder unbenannte Felder (" * join(isempty(unk) ? ["ohne Namen"] : unk, ", ") *
-              "); erlaubt sind fixed, percent, min, max.")
-    end
+    isempty(unk) || chk_stop("ut1.gebuehr_feld", fn, unk[1], arg)
+    length(unique(p.first for p in ps)) < length(ps) && chk_stop("e2.doppelt", fn, arg)
     d = Dict(ps)
     g(k, dflt) = (v = get(d, k, nothing); v === nothing ? dflt : Float64(v))
     s = FeeSpec(g("fixed", 0.0), g("percent", 0.0) / 100, g("min", 0.0), g("max", Inf))
-    (s.fixed < 0 || s.percent < 0 || s.min < 0 || s.max < s.min) && error("Gebühren müssen nicht negativ sein (min <= max).")
+    (s.fixed < 0 || s.percent < 0 || s.min < 0 || s.max < s.min) && chk_stop("ut1.gebuehr_negativ", fn, arg)
     (s.fixed == 0 && s.percent == 0 && s.min == 0) && return nothing
     return s
 end
@@ -179,19 +181,14 @@ mutable struct TariffEnv
     zve::Union{Nothing,Dict{String,Float64}}
     ks::Dict{String,Float64}
     church_k::Float64
-    kapest_rate::Float64
     use_gp::Bool
     rows::Vector{RList}
-    refund_due::Float64
-    due_info::Vector{NamedTuple{(:year, :D, :p23, :ded, :by_p23),Tuple{Int,Float64,Float64,Float64,Bool}}}
 end
-TariffEnv() = TariffEnv(nothing, nothing, nothing, Dict{String,Float64}(), 0.0, 0.25, false, RList[], 0.0,
-                        NamedTuple{(:year, :D, :p23, :ded, :by_p23),Tuple{Int,Float64,Float64,Float64,Bool}}[])
+TariffEnv() = TariffEnv(nothing, nothing, nothing, Dict{String,Float64}(), 0.0, false, RList[])
 
 mutable struct Cfg
     tax_mode::String
     start_value::Float64
-    tax_rate::Float64
     marginal_tax_rate::Union{Nothing,Float64}
     effective_tax_rate::Float64
     soli_factor_income::Float64
@@ -247,79 +244,7 @@ end
 @inline _cat(R::Run, s::AbstractString) = print(R.io, s)
 _message(s::AbstractString) = println(SimLev.RParallel.r_stderr(), s)
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Tarifweg (taxable_income, tax_tariff)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# plan_ok (income_tariff()): ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist zulässig;
-# Ergebnis dann mit plan (Werte)
-function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation"; plan_ok::Bool = false)
-    @nospecialize
-    form = "eine Zahl (zvE in EUR für alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
-    nms = nothing
-    vals = nothing
-    yrname(v) = _is_num(v) ? r_as_character(v) : string(v)
-    if x isa RFrame
-        nm = lowercase.(names(x))
-        yc = something(findfirst(==("year"), nm), findfirst(==("jahr"), nm), Some(nothing))
-        vc = nothing
-        for c in ("taxable_income", "betrag", "amount", "zve")
-            j = findfirst(==(c), nm)
-            j !== nothing && (vc = j; break)
-        end
-        if yc === nothing || vc === nothing
-            ncol(x) != 2 && error("$who: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: $(join(names(x), ", ")).")
-            yc, vc = 1, 2
-        end
-        kind, col = _column(x.cols[vc])
-        kind != :numeric && error("$who: taxable_income: Spalte '$(names(x)[vc])' (Betrag) muss numerisch sein.")
-        vals = collect(Float64, col)
-        nms = [_isna_val(v) ? "NA" : yrname(v) for v in x.cols[yc]]
-    elseif x isa RVector
-        vals = _num_vec(x.values)
-        x.names !== nothing && (nms = copy(x.names))
-    elseif x isa AbstractDict || x isa NamedTuple || x isa AbstractVector{<:Pair}
-        ps = x isa AbstractVector{<:Pair} ? [p.first => p.second for p in x] : collect(pairs(x))
-        if !isempty(ps) && all(p -> _is_num(p.second), ps)
-            vals = Float64[Float64(p.second) for p in ps]
-            nms = [yrname(p.first) for p in ps]
-        end
-    else
-        vals = _num_vec(x)
-        vals !== nothing && isempty(vals) && (vals = nothing)
-    end
-    if vals === nothing || x isa AbstractMatrix
-        shown = r_format(x isa Union{AbstractVector,Tuple} ? collect(Any, x) : x)
-        error("$who: taxable_income muss $form sein, nicht $(join(first(shown, 3), ", ")).")
-    end
-    for (i, v) in enumerate(vals)
-        isfinite(v) || error("$who: taxable_income enthält einen ungültigen Wert ($(r_format1(v))" *
-                             (nms !== nothing ? " für $(nms[i])" : "") * "); erwartet werden endliche Beträge in EUR.")
-    end
-    length(vals) == 1 && nms === nothing && return (all = vals[1], by_year = nothing)
-    plan_ok && nms === nothing && return (all = nothing, by_year = nothing, plan = vals)
-    if nms === nothing || any(isempty, nms)
-        error("$who: taxable_income mit $(length(vals)) Werten muss nach Kalenderjahren benannt sein; erwartet wird $form" *
-              (nms === nothing ? " (ein Vektor ohne Namen, ein Wert je Planjahr, gilt nur in withdrawal_simulation())" : "") * ".")
-    end
-    yy = Int[]
-    for nm in nms
-        t = strip(nm)
-        y = occursin(r"^[-+]?\d+(\.\d*)?([eE][-+]?\d+)?$", t) ? (v = r_as_numeric(t); isfinite(v) ? Int(trunc(v)) : nothing) : nothing
-        (y === nothing || string(y) != t) && error("$who: taxable_income: Name '$nm' ist kein Kalenderjahr (erwartet z. B. \"2024\").")
-        push!(yy, y)
-    end
-    for (i, y) in enumerate(yy)
-        y in yy[1:i-1] && error("$who: taxable_income: Jahr $y kommt mehrfach vor.")
-    end
-    miss = [y for y in years if !(y in yy)]
-    if !isempty(miss)
-        error("$who: taxable_income fehlt für " * (length(miss) == 1 ? "Simulationsjahr" : "Simulationsjahre") * " " *
-              join(miss, ", ") * " (angegeben: " * join(sort(yy), ", ") * "); je Kalenderjahr der Simulation (" *
-              string(minimum(years)) * " bis " * string(maximum(years)) * ") wird ein Betrag benötigt.")
-    end
-    return (all = nothing, by_year = Dict{String,Float64}(string(y) => v for (y, v) in zip(yy, vals)))
-end
+# Tarifweg: die zvE-Prüfung steht seit 1.6.4 (K43 T1-N5) nur noch in sim_blocks.jl (_blk_check_taxable_income)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Kennzahlen
@@ -353,7 +278,8 @@ function calculate_skewness(x::AbstractVector; na_rm::Bool = true)
     mean_x = r_mean(a)
     sd_x = r_sd(a)
     sd_x == 0 && return NA
-    return (n / ((n - 1.0) * (n - 2.0))) * r_sum(r_pow(v - mean_x, 3.0) for v in a) / r_pow(sd_x, 3.0)
+    # seit 1.6.4 (K43 T1-R11) (d * d) * d statt pow, wie der Kern (simlev_eval::moments)
+    return (n / ((n - 1.0) * (n - 2.0))) * r_sum((let d = v - mean_x; (d * d) * d end) for v in a) / r_pow(sd_x, 3.0)
 end
 
 "Stichproben-Kurtosis wie `calculate_kurtosis(x, na.rm = TRUE, excess = TRUE)`."
@@ -366,7 +292,9 @@ function calculate_kurtosis(x::AbstractVector; na_rm::Bool = true, excess::Bool 
     sd_x = r_sd(a)
     sd_x == 0 && return NA
     nf = Float64(n)
-    kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * r_sum(r_pow(v - mean_x, 4.0) for v in a) / r_pow(sd_x, 4.0)
+    # seit 1.6.4 (K43 T1-R11) (d * d) * (d * d) statt pow, wie der Kern
+    kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) *
+           r_sum((let d = v - mean_x, q = d * d; q * q end) for v in a) / r_pow(sd_x, 4.0)
     excess && (kurt = kurt - (3 * r_pow(nf - 1, 2.0)) / ((nf - 2) * (nf - 3)))
     return kurt
 end

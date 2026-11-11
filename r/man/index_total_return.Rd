@@ -19,11 +19,13 @@ LOCF gefuellt.}
 
 \item{dividends}{Ausschuettung je Anteil in Waehrungseinheiten am Ex-Tag
 (numerischer Vektor gleicher Laenge, 0 oder NA an Tagen ohne
-Ausschuettung). Standard \code{NULL} = keine.}
+Ausschuettung). Standard \code{NULL} = keine.
+Seit 1.6.4 ein Fehler bei anderer Laenge.}
 
 \item{yield}{Dividendenrendite in Prozent p. a. (2 = 2 \%; Skalar oder
 Vektor gleicher Laenge), anteilig je Zeile aufgezinst. Standard
-\code{NULL} = keine.}
+\code{NULL} = keine.
+Seit 1.6.4 endlich, Laenge 1 oder wie price.}
 
 \item{withholding}{Quellensteuer in Prozent (15 = 15 \%), mindert
 \code{dividends} und \code{yield}. Standard 0.}

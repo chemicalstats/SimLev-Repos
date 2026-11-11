@@ -28,10 +28,10 @@ const NA = SimLev.NA
 # Gemeinsame Hilfen aus Bootstrap
 const B = SimLev.Bootstrap
 const _MISSING = B._MISSING
-import ..Bootstrap: _stop, _warn, _message, _sp, _keep_count, _fmt1, _fmtstrs, _show, _round0, _isnum, _numvec, _num1, _f1,
+import ..Bootstrap: _stop, _warn, _message, _sp, _keep_count, _fmt1, _fmtstrs, _round0, _isnum, _numvec, _num1, _f1,
                     _dvec, _ivec, _mat, _get, _names, _len, _rval, _rsum, _rprod, _rpow,
                     _cumprod, _median, _quantile7, _weighted_mean, _wquantile,
-                    _match_arg, _todate, _seq_dates, _days, _is_boot_result, _is_study, _is_result, _deparse,
+                    _todate, _seq_dates, _days, _is_boot_result, _is_study, _is_result, _deparse,
                     _quiet, _no_messages, _aux_type_of, _cfg_list, _as_numeric_col, _pmax, _pmin, _istrue
 
 const _WD_RULES = ["constant" => 1, "percent" => 2, "vanguard" => 3, "guyton_klinger" => 4, "floor_ceiling" => 5,
@@ -58,16 +58,74 @@ const _WD_LABELS = Dict(
 
 _wcore() = SimLev.WithdrawalCore
 
-"R-`show()` (NULL → \"NULL\", TRUE/FALSE, sonst `paste(format(x), collapse = \", \")`)."
-function _rshow(x)
-    x === nothing && return "NULL"
-    x isa Bool && return x ? "TRUE" : "FALSE"
-    x === missing && return "NA"
-    return _show(x)
+# --- Eingabeprüfung Entnahme und Planung (seit 1.6.4, K42 E3; Hilfen in pruefen.jl) ----------------------------
+using ..SimLev: chk_bool1, chk_date1, chk_df, chk_msg, chk_name1, chk_num1, chk_scalar, chk_stop
+
+"""Auswahl wie R `match.arg` (`nothing` oder der ganze Auswahlvektor = erste Wahl, eindeutige Präfixe werden ergänzt;
+Länge 1 wie Einzelwert); alles andere mit der Meldung `auswahl` (R `.e3_choice`)."""
+function _e3_match_arg(@nospecialize(x), choices, fn, arg)
+    ch = String[String(c) for c in choices]
+    x === nothing && return ch[1]
+    SimLev.chk_nofactor(x, fn, arg)
+    if x isa Union{AbstractVector,Tuple} && length(x) == length(ch) && all(v -> v isa AbstractString, x) &&
+       String[String(v) for v in x] == ch
+        return ch[1]
+    end
+    x = chk_scalar(x)
+    if x isa AbstractString
+        v = String(x)
+        i = findfirst(==(v), ch)
+        if i === nothing && !isempty(v)
+            hits = findall(c -> startswith(c, v), ch)
+            length(hits) == 1 && (i = hits[1])
+        end
+        i === nothing || return ch[i]
+    end
+    chk_stop("auswahl", fn, arg, join(("\"$c\"" for c in ch), ", "))
 end
-_wshow(x) = x === nothing ? "" : _rshow(x)
-"`format()` eines Rechenergebnisses."
-_fmt_nan(x; kw...) = _fmt1(Float64(x); kw...)
+
+"Datumsspalte kein Faktor (Entscheidung 15; R `.e3_datecol`)."
+function _e3_datecol(@nospecialize(data), fn)
+    data isa RFrame && "date" in names(data) && data["date"] isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", fn, "date")
+    return data
+end
+
+"""Zahlenspalte (kein Faktor, kein Text, kein Datum); eine Spalte nur aus NA gilt als Zahlenspalte (Entscheidung 14;
+R `.e3_numcol`). `v` ist die Spalte."""
+function _e3_numcol(@nospecialize(v), col, fn)
+    v isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", fn, col)   # Entscheidung 15
+    k, a = SimLev._column(v)
+    (k == :numeric || all(z -> z === missing || (z isa AbstractFloat && isnan(z)), a)) ||
+        chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
+    return nothing
+end
+
+"Vektor nicht leerer Namen (Spalten), mindestens einer; Ergebnis als `Vector{String}` (R `.e3_names`)."
+function _e3_names(@nospecialize(x), fn, arg)
+    SimLev.chk_nofactor(x, fn, arg)
+    v = x isa AbstractString ? Any[x] : x isa Union{AbstractVector,Tuple} ? Any[e for e in x] : nothing
+    (v === nothing || isempty(v) || !all(c -> c isa AbstractString && !isempty(c), v)) && chk_stop("e3.namen", fn, arg)
+    return String[String(c) for c in v]
+end
+
+"Spalte `date` (Tage seit 1970) aufsteigend und ohne NA (R `.e3_dates_sorted`)."
+function _e3_dates_sorted(d, fn, land = nothing)
+    bad = any(isnan, d) || any(i -> d[i] < d[i-1], 2:length(d))
+    if bad
+        land === nothing && chk_stop("e3.datum", fn)
+        chk_stop("e3.datum_land", fn, land)
+    end
+    return d
+end
+
+"""Zahlen wie R `is.numeric` (kein Text, keine Wahrheitswerte): Feld aus Zahlen (`missing`/NaN als NA erlaubt);
+`RFrame` mit Zahlenspalten."""
+function _e3_numarray(@nospecialize(x))
+    x isa RFrame && return all(c -> SimLev._column(c)[1] == :numeric, x.cols)
+    x isa Real && return !(x isa Bool)
+    x isa Union{AbstractArray,Tuple} || return false
+    return all(v -> v === missing || (v isa Real && !(v isa Bool)), x)
+end
 
 _is_rule(x) = x isa RList && SimLev.inherits(x, "withdrawal_rule")
 _is_wp(x) = x isa RList && SimLev.inherits(x, "withdrawal_paths")
@@ -144,7 +202,7 @@ Meldung ab. Schranken zwischen 0 und 0,2 lösen eine Warnung aus (vermutlich Ant
 - `cut`, `raise`: Kürzung bzw. Erhöhung der Entnahme in Prozent (>= 0, Standard 10 / 10): `cut` für
   `guyton_klinger`, `raise` für `guyton_klinger` und `ratchet`.
 - `cpr_years`: Guyton-Klinger: Anzahl Jahre (Standard 15). Die Capital-Preservation-Rule greift nur, solange
-  mehr als `cpr_years` Restjahre (einschließlich des aktuellen) bleiben.
+  mehr als `cpr_years` Restjahre (einschließlich des aktuellen) bleiben. Seit 1.6.4 höchstens 100.
 - `inflation_cap`: Guyton-Klinger: maximaler Inflationsausgleich je Jahr in Prozent (Standard `Inf` =
   unbegrenzt, wie in der Fassung von 2006).
 - `skip_inflation`: Logisch, Guyton-Klinger: Withdrawal-Rule aktiv (Standard `true`; siehe `type`).
@@ -160,7 +218,7 @@ Meldung ab. Schranken zwischen 0 und 0,2 lösen eine Warnung aus (vermutlich Ant
 - `cape_a`, `cape_b`: CAPE-Regel: Konstante in Prozent (Standard 1.75 = 1,75 %) und Faktor auf 1 / CAPE als
   Anteil (Standard 0.5; bei CAPE 25 also 0.5 / 25 = 0.02 = 2 %).
 - `ratchet_threshold`: `ratchet`: Faktor auf das reale Startdepot (Standard 1.5 = 150 %), ab dem erhöht wird.
-- `ratchet_gap`: `ratchet`: Mindestabstand zwischen Erhöhungen in Jahren (Standard 3).
+- `ratchet_gap`: `ratchet`: Mindestabstand zwischen Erhöhungen in Jahren (Standard 3). Seit 1.6.4 höchstens 100.
 - `extra`: `sensible`: Anteil des realen Depotzuwachses in Prozent (Standard 10).
 - `floor95`: `clyatt`: Mindestanteil der Vorjahresentnahme in Prozent (Standard 95).
 - `min_real`, `max_real`: Absolute Unter- bzw. Obergrenze der Jahresentnahme als Geldbetrag in Kaufkraft des
@@ -259,17 +317,23 @@ function withdrawal_rule(type_pos = nothing; type = type_pos, type_ = type, rate
         k, v = first(kwargs)
         _stop(string("unused argument (", k, " = ", _deparse(v), ")"))
     end
-    t = _match_arg(type_, _WD_RULE_NAMES)
+    t = _e3_match_arg(type_, _WD_RULE_NAMES, "withdrawal_rule", "type")
+    # Länge 1 wie Einzelwert (Entscheidung 4)
+    (rate, ceiling, floor, cut, raise, cpr_years, inflation_cap, skip_inflation, smoothing, exp_return, stock_share,
+     age, max_age, fv, cape_a, cape_b, ratchet_threshold, ratchet_gap, extra, floor95, min_real, max_real, max_rate) =
+        map(chk_scalar, (rate, ceiling, floor, cut, raise, cpr_years, inflation_cap, skip_inflation, smoothing,
+                         exp_return, stock_share, age, max_age, fv, cape_a, cape_b, ratchet_threshold, ratchet_gap,
+                         extra, floor95, min_real, max_real, max_rate))
     function chk(x, arg; lo = -Inf, hi = Inf, what = "", inf_ok = false, null_ok = false)
         x === nothing && null_ok && return
         v = _numvec(x)
         if v === nothing || length(v) != 1 || isnan(v[1]) || (!inf_ok && !isfinite(v[1])) || v[1] < lo || v[1] > hi
-            _stop(@sprintf("withdrawal_rule: %s muss %s sein (erhalten: %s).", arg, what, _rshow(x)))
+            _stop(@sprintf("withdrawal_rule: %s muss %s sein.", arg, what))
         end
     end
     v = _numvec(rate)
     if v === nothing || length(v) != 1 || !isfinite(v[1]) || v[1] < 0 || v[1] > 100
-        _stop(@sprintf("rate muss zwischen 0 und 100 Prozent liegen (z. B. 4; erhalten: %s).", _rshow(rate)))
+        _stop("withdrawal_rule: rate muss zwischen 0 und 100 Prozent liegen (z. B. 4).")
     end
     0 < rate < 0.2 && t in ("constant", "percent", "vanguard", "guyton_klinger") &&
         _warn("rate wirkt wie eine Dezimalzahl. PROZENT-KONVENTION: 4 bedeutet 4 %.")
@@ -278,9 +342,10 @@ function withdrawal_rule(type_pos = nothing; type = type_pos, type_ = type, rate
     chk(cut, "cut"; lo = 0, hi = 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 10)")
     chk(raise, "raise"; lo = 0, what = "eine Zahl >= 0 in Prozent (z. B. 10)")
     chk(cpr_years, "cpr_years"; lo = 0, what = "eine Zahl von Jahren >= 0 (z. B. 15)")
+    SimLev.chk_max(cpr_years, SimLev.SL_MAX_JAHRE, "withdrawal_rule", "cpr_years")   # seit 1.6.4 (K43 T2-N2; Entscheidung 46 sinngemäß)
     chk(inflation_cap, "inflation_cap"; lo = 0, what = "eine Zahl >= 0 in Prozent oder Inf (unbegrenzt)", inf_ok = true)
     if !(skip_inflation isa Bool)
-        _stop(@sprintf("withdrawal_rule: skip_inflation muss TRUE oder FALSE sein (erhalten: %s).", _rshow(skip_inflation)))
+        _stop("withdrawal_rule: skip_inflation muss TRUE oder FALSE sein.")
     end
     chk(smoothing, "smoothing"; lo = 0, hi = 100, what = "NULL oder eine Zahl von 0 bis 100 in Prozent (z. B. 70)", null_ok = true)
     chk(exp_return, "exp_return"; lo = -99.99, what = "NULL oder eine Zahl in Prozent p. a. über -100 (z. B. 3.5)", null_ok = true)
@@ -288,19 +353,20 @@ function withdrawal_rule(type_pos = nothing; type = type_pos, type_ = type, rate
     chk(age, "age"; lo = 0, what = "ein Alter in Jahren >= 0 (z. B. 65)")
     chk(max_age, "max_age"; lo = 0, what = "ein Alter in Jahren >= 0 (z. B. 100)")
     if t == "vpw" && age >= max_age
-        _stop(@sprintf("withdrawal_rule('vpw'): age (%s) muss kleiner als max_age (%s) sein.", _fmt1(_num(age)), _fmt1(_num(max_age))))
+        SimLev.chk_stop("ut2.vpw_alter", "withdrawal_rule('vpw')")
     end
     chk(fv, "fv"; lo = 0, what = "ein Geldbetrag >= 0 (reales Zielvermögen)")
     chk(cape_a, "cape_a"; lo = 0, hi = 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 1.75)")
     chk(cape_b, "cape_b"; lo = 0, what = "eine Zahl >= 0 (Faktor auf 1 / CAPE, z. B. 0.5)")
     chk(ratchet_threshold, "ratchet_threshold"; lo = 0, what = "ein Faktor > 0 (z. B. 1.5 = 150 %)")
     chk(ratchet_gap, "ratchet_gap"; lo = 0, what = "eine Zahl von Jahren >= 0 (z. B. 3)")
+    SimLev.chk_max(ratchet_gap, SimLev.SL_MAX_JAHRE, "withdrawal_rule", "ratchet_gap")   # seit 1.6.4 (K43 T2-N2)
     chk(extra, "extra"; lo = 0, hi = 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 10)")
     chk(floor95, "floor95"; lo = 0, hi = 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 95)")
     chk(min_real, "min_real"; lo = 0, what = "ein Geldbetrag >= 0")
     chk(max_real, "max_real"; lo = 0, what = "ein Geldbetrag >= 0 oder Inf", inf_ok = true)
     if min_real > max_real
-        _stop(@sprintf("withdrawal_rule: min_real (%s) darf nicht größer als max_real (%s) sein.", _fmt1(_num(min_real)), _fmt1(_num(max_real))))
+        _stop("withdrawal_rule: min_real darf nicht größer als max_real sein.")
     end
     chk(max_rate, "max_rate"; lo = 0, hi = 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 100)")
     if t == "vpw" && max_rate == 0
@@ -333,7 +399,17 @@ function withdrawal_rule(type_pos = nothing; type = type_pos, type_ = type, rate
                  "max_real" => _num(max_real), "max_rate" => _num(max_rate); class = ["withdrawal_rule", "list"])
 end
 
-_as_integer(x) = Int(trunc(Float64(x)))
+"`as.integer(x)` einer Zahl für den Druck wie R (seit 1.6.4, K43 T2-N2): außerhalb des int-Bereichs NA mit der Warnung
+von R (bis dahin Abbruch „invalid format '%d'“)."
+function _as_integer(x)
+    f = Float64(x)
+    isnan(f) && return missing
+    if !(-2147483648.0 < f < 2147483648.0)
+        @warn "NAs introduced by coercion to integer range"
+        return missing
+    end
+    return Int(trunc(f))
+end
 
 function _print_rule(io::IO, x)
     print(io, "Entnahmeregel\n-------------\n")
@@ -457,8 +533,8 @@ Jahresdaten, bricht die Funktion ab. Das Ergebnis geht direkt an `withdrawal_sim
 - `inflation`: `nothing` (Standard; keine Inflation), Zahl = konstante Inflation in Prozent p. a. (2 = 2 % p.
   a., tagesgenau über 365.25 Tage je Jahr umgerechnet) oder Zeichenkette = Name einer Preisindex-Spalte
   (CPI-Niveau, z. B. HVPI) bzw. einer Ratenspalte (siehe `inflation_type`).
-- `years`: Länge jeder Kohorte in Jahren (Standard 30; intern 12 x `years` Monate). Muss ganze Perioden der
-  `frequency` ergeben (bei `"year"` ganze Jahre, bei `"quarter"` z. B. auch 2.5).
+- `years`: Länge jeder Kohorte in Jahren (Standard 30; intern 12 x `years` Monate). Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei `"quarter"` und `"month"` (vorher
+  jede Zahl, die ganze Perioden ergab, z. B. 2.5).
 - `frequency`: Periodenlänge der Entnahme-Simulation: `"year"` (Standard), `"quarter"` oder `"month"`.
 - `step`: Abstand der Kohortenstarts: `"month"` (Standard; jede Kohorte beginnt einen Monat später) oder
   `"year"` (alle 12 Monate).
@@ -467,8 +543,10 @@ Jahresdaten, bricht die Funktion ab. Das Ergebnis geht direkt an `withdrawal_sim
   ergibt; `false`: nur Kohorten, die vollständig in den Daten liegen.
 - `cape`: Optional Name einer Spalte mit CAPE-Werten (für die Regel `"cape"` in `withdrawal_rule()`);
   verwendet wird der Wert zu Beginn jeder Periode.
+  Seit 1.6.4 ohne NA: CAPE für jeden Tag angeben (vorher fortgeschrieben bzw. als fehlend gerechnet).
 - `base_rate`: Optional Name einer Spalte mit dem Basiszins in Prozent (2.5 = 2,5 %) für die Vorabpauschale
   (Wert zu Beginn jeder Periode); sonst gilt `base_rate` aus `withdrawal_simulation()`.
+  Seit 1.6.4 ohne NA: Basiszins für jeden Tag angeben, Jahre ohne Basiszins als 0.
 - `inflation_type`: Behandlung einer Spalte in `inflation`: `"level"` (Reihe ist ein Preisindex-Niveau;
   Inflation = Verhältnis der Monatsendwerte) oder `"rate_pa"` (Reihe ist eine Inflationsrate in Prozent pro
   Jahr, 2 = 2 % p. a., nicht je Datenperiode, kein Anteil; je Zeile über die Kalendertage seit der Vorzeile
@@ -478,6 +556,11 @@ Jahresdaten, bricht die Funktion ab. Das Ergebnis geht direkt an `withdrawal_sim
   dazu passen (sonst Fehler). Ohne Attribut gilt `inflation_type` (Standard `"level"`, bisheriges Verhalten).
   Das Attribut geht bei Umformungen wie `transform()`, `merge()`, `cbind()` oder Speichern als CSV verloren;
   dann `inflation_type = "rate_pa"` angeben. Bei Zahl oder `nothing` in `inflation` ohne Wirkung.
+
+# Eingaben
+Seit 1.6.4 geprüft: `data` nur als Tabelle; `inflation` als Zahl endlich und > -100; genannte Spalten
+(`price`, `inflation`, `cape`, `base_rate`) müssen in `data` stehen und Zahlen enthalten (kein Text, keine
+Kategorie; eine Spalte nur aus NA gilt als Zahlenspalte); `wrap` nur TRUE oder FALSE.
 
 # Rückgabe
 Objekt der Klasse `withdrawal_paths` (Liste) mit `returns` (Matrix Perioden x Kohorten der
@@ -497,28 +580,59 @@ println(size(coh["returns"]))
 """
 function withdrawal_cohorts(data; price = "value", inflation = nothing, years = 30, frequency = nothing, step = nothing,
                             wrap = false, cape = nothing, base_rate = nothing, inflation_type = _MISSING)
-    data = SimLev.as_rframe(data)
+    fn = "withdrawal_cohorts"
     it_given = inflation_type !== _MISSING
-    frequency = _match_arg(frequency, ("year", "quarter", "month"))
-    step = _match_arg(step, ("month", "year"))
-    inflation_type = _match_arg(it_given ? inflation_type : nothing, ("level", "rate_pa"))
+    frequency = _e3_match_arg(frequency, ("year", "quarter", "month"), fn, "frequency")
+    step = _e3_match_arg(step, ("month", "year"), fn, "step")
+    inflation_type = _e3_match_arg(it_given ? inflation_type : nothing, ("level", "rate_pa"), fn, "inflation_type")
+    wrap = chk_bool1(wrap, fn, "wrap")
+    # Länge 1 wie Einzelwert (Entscheidung 4); ein Faktor bleibt Faktor (Meldung e3.faktor unten, Entscheidung 15)
+    inflation = inflation isa SimLev.RFmt.RFactor ? inflation : chk_scalar(inflation)
+    years = chk_scalar(years)
     if _is_result(data)
         if inflation isa AbstractString || cape !== nothing || base_rate !== nothing
-            _stop("Bei einem SimLevResult sind nur numerische Inflation und keine Zusatzspalten möglich.")
+            SimLev.chk_stop("rs.ergebnis_zusatz", fn)
         end
         data = result_index(data)
         price = "value"
     end
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): Tabelle, Namen, Inflation als Zahl > -100 oder Spaltenname,
+    # genannte Spalten vorhanden und numerisch
+    chk_df(data, fn, "data")
+    data = SimLev.as_rframe(data)
+    for (a, v) in (("price", price), ("inflation", inflation), ("cape", cape), ("base_rate", base_rate))
+        SimLev.chk_nofactor(v, fn, a)                         # Entscheidung 15
+    end
+    price = chk_name1(price, fn, "price")
+    if inflation isa AbstractString || (inflation isa AbstractVector && !isempty(inflation) && all(v -> v isa AbstractString, inflation))
+        chk_name1(inflation, fn, "inflation")
+    elseif inflation !== nothing && _numvec(inflation) !== nothing
+        chk_num1(inflation, fn, "inflation"; lo = -100, lo_open = true)
+    elseif inflation !== nothing
+        chk_stop("zahl_oder_spalte", fn, "inflation")
+    end
+    cape = chk_name1(cape, fn, "cape"; null_ok = true)
+    base_rate = chk_name1(base_rate, fn, "base_rate"; null_ok = true)
     nms = _dfnames(data)
-    ("date" in nms && price in nms) || _stop("data braucht 'date' und die Kursspalte.")
+    ("date" in nms && price in nms) || SimLev.chk_stop("rs.date_kurs", fn)
+    xcols = String[c for c in (inflation isa AbstractString ? inflation : nothing, cape, base_rate) if c !== nothing]
+    SimLev.chk_cols(data, xcols, fn)
+    _e3_datecol(data, fn)
+    for k in vcat(String(price), xcols)
+        _e3_numcol(_dfcol(data, k), k, fn)
+    end
+    # seit 1.6.4 CAPE und Basiszins ohne NA (Entscheidung 17)
+    cape === nothing || SimLev.chk_col_nona(data, cape, fn, chk_msg("hinweis.cape"))
+    base_rate === nothing || SimLev.chk_col_nona(data, base_rate, fn, chk_msg("hinweis.basiszins"))
     at = data isa RFrame ? get(SimLev.attrs(data), "aux_type", nothing) : nothing
     attr_rate = inflation isa AbstractString && at !== nothing && _aux_type_of(at, inflation) == "rate"
     if attr_rate && it_given && inflation_type != "rate_pa"
-        _stop(@sprintf("inflation_type = '%s' passt nicht zu aux_type['%s'] = 'rate' (Attribut aus bootstrap_data()); inflation_type weglassen oder 'rate_pa' angeben.",
-                       inflation_type, inflation))
+        _stop(@sprintf("inflation_type passt nicht zu aux_type['%s'] = 'rate' (Attribut aus bootstrap_data()); inflation_type weglassen oder 'rate_pa' angeben.",
+                       inflation))
     end
     infl_rate = inflation isa AbstractString && (attr_rate || inflation_type == "rate_pa")
     dd = _todate(_dfcol(data, "date"), "withdrawal_cohorts: data\$date")
+    any(d -> d === missing, dd) && chk_stop("spalte_na", fn, "date", "")   # seit 1.6.4 (R bisher Rohfehler)
     o = sortperm(_days.(dd); alg = MergeSort)
     dates = dd[o]
     col(name) = _as_numeric_col(_dfcol(data, name))[o]
@@ -544,8 +658,7 @@ function withdrawal_cohorts(data; price = "value", inflation = nothing, years = 
         f = lv[2:end] ./ lv[1:end-1]
         bad = .!isfinite.(f) .| (f .<= 0)
         if any(bad)
-            _stop(@sprintf("Spalte '%s' (Rate in Prozent p. a.) ergibt nicht endliche oder nicht positive Monatsfaktoren (z. B. %s; Rate <= -100 %%?).",
-                           inflation, _fmt_nan(f[bad][1]; digits = 4)))
+            SimLev.chk_stop("rs.rate_monat", fn, inflation)
         end
         lv
     elseif inflation isa AbstractString
@@ -560,23 +673,24 @@ function withdrawal_cohorts(data; price = "value", inflation = nothing, years = 
     nm = length(mret)
     ppy = _wd_ppy(frequency)
     mpp = 12 ÷ ppy
-    yv = _numvec(years)
-    if yv === nothing || length(yv) != 1 || !isfinite(yv[1]) || yv[1] <= 0 ||
-       abs(yv[1] * 12 - _round0(yv[1] * 12)) > 1e-8 || rem(_round0(yv[1] * 12), mpp) != 0
-        _stop(@sprintf("years muss eine positive Zahl sein, die ganze Perioden der frequency '%s' ergibt (bei 'year' ganze Jahre; erhalten: %s).",
-                       frequency, _show(years)))
-    end
-    len_m = Int(_round0(yv[1] * 12))
+    # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; bis 1.6.3
+    # jede Zahl > 0, die ganze Perioden ergab, z. B. 2.5 bei Monaten)
+    years = SimLev.chk_jahre(years, fn, "years")
+    len_m = Int(_round0(Float64(years) * 12))
     starts = if step == "month"
         collect(1:nm)
     else
-        nm < 1 && _stop("wrong sign in 'by' argument")
+        # seit 1.6.4 (K43 T2-N4) ohne volle Monatsrendite die Meldung unten (bis dahin "wrong sign in 'by' argument")
         collect(1:12:nm)
     end
     wrap || (starts = starts[starts .+ len_m .- 1 .<= nm])
-    isempty(starts) && _stop("Zu kurze Historie für die gewählte Kohortenlänge.")
+    isempty(starts) && SimLev.chk_stop("rs.kohorte_kurz", fn)
     take(v, s) = v[((s - 1) .+ (1:len_m) .- 1) .% nm .+ 1]
-    agg(M) = mpp == 1 ? M : _apply_cols(M, c -> _agg_prod(c, mpp))
+    # seit 1.6.4 (A-060) Produkt je Periode im Kern wd_annual_prod (sl_r_prod wie _rprod, gleiche Werte; Form Perioden
+    # × Kohorten wie über to_mat); ein Rest kürzer als mpp (heute nicht erreichbar, years ganz) wie bisher
+    agg(M) = mpp == 1 ? M :
+             (M isa AbstractMatrix && size(M, 2) >= 1 && size(M, 1) >= mpp && size(M, 1) % mpp == 0) ? _wcore().wd_annual_prod(M, mpp) :
+             _apply_cols(M, c -> _agg_prod(c, mpp))
     ns = length(starts)
     Rm = agg(reduce(hcat, [take(mret, s) for s in starts]))
     Im = agg(reduce(hcat, [take(minf, s) for s in starts]))
@@ -606,7 +720,10 @@ als 1 gesetzt.
 
 # Argumente
 - `x`: Objekt der Klasse `SimLevResult` (Ergebnis von `simulation()`).
-- `base`: Startwert des Index (Zahl, Standard 100).
+- `base`: Startwert des Index (einzelne endliche Zahl > 0, Standard 100).
+
+# Eingaben
+Seit 1.6.4 geprüft: `base` ist eine einzelne endliche Zahl > 0.
 
 # Rückgabe
 Tabelle (RFrame) mit einer Zeile je Simulationstag und den Spalten `date` (Date), `value` (Index, beginnt bei
@@ -625,7 +742,8 @@ println(result_index(res))
 """
 function result_index(x; base = 100)
     x = SimLev.as_rframe(x)
-    _is_result(x) || _stop("x muss ein SimLevResult (Ergebnis von simulation()) sein.")
+    _is_result(x) || SimLev.chk_stop("klasse", "result_index", "x", "simulation()")
+    base = chk_num1(base, "result_index", "base"; lo = 0, lo_open = true)   # Startwert des Index (seit 1.6.4 geprüft)
     w = _dvec(_get(x, "worth"))
     fls = Vector{Float64}[_dvec(_get(a, "flows")) for a in _report_items(_get(x, "report"))]
     fl = if !isempty(fls) && length(w) > 1
@@ -688,8 +806,7 @@ function _aux_kind(cfg, inflation, it_given, inflation_type)
     k = _aux_type_of(_get(cfg, "aux_type"), inflation)
     it = k == "level" ? "level" : "rate_pa"
     if it_given && inflation_type != it
-        _stop(@sprintf("inflation_type = '%s' passt nicht zu aux_type['%s'] = '%s' in bootstrap_config(); inflation_type weglassen oder '%s' angeben.",
-                       inflation_type, inflation, k, it))
+        SimLev.chk_stop("rs.infl_typ", "withdrawal_paths", inflation, k, it)
     end
     return k
 end
@@ -701,7 +818,9 @@ function _is_result_list(x)
     return !isempty(vals) && all(_is_result, vals)
 end
 
-_vapply_mat(vecs, L) = L == 1 ? reshape(Float64[v[1] for v in vecs], :, 1) :
+# `vapply(X, f, numeric(L))` als Matrix L x length(X) (R: `vmat` in `withdrawal_paths`); seit 1.6.4 auch bei L = 1
+# eine Zeile (A-002; bis 1.6.3 wie `as.matrix` eine Spalte, Pfade und Perioden vertauscht)
+_vapply_mat(vecs, L) = L == 1 ? reshape(Float64[v[1] for v in vecs], 1, :) :
                        (isempty(vecs) ? zeros(L, 0) : reduce(hcat, [_dvec(v) for v in vecs]))
 
 """
@@ -749,6 +868,10 @@ begrenzt (Start 31.01.: 29.02., 31.03., 30.04. ...); eine unvollständige letzte
 - `cape`: Nur bei `bootstrap_result`: optional Name einer Pfadspalte mit CAPE-Werten (Wert zu Periodenbeginn)
   für die Regel `"cape"`.
 
+# Eingaben
+Seit 1.6.4 geprüft: `start` ist ein einzelnes Datum (Datum oder Text `"JJJJ-MM-TT"`, keine Zahl); `inflation`
+als Zahl > -100; `cape` muss eine Spalte der Pfade sein; Namen sind einzelne, nicht leere Texte.
+
 # Rückgabe
 Objekt der Klasse `withdrawal_paths` (Liste) mit `returns` (Matrix Perioden x Pfade der
 Brutto-Periodenrenditen), `inflation` (gleiche Form, Brutto-Inflation je Periode), `cape` (Matrix oder
@@ -788,12 +911,25 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
                           frequency = nothing, dates = nothing, start = "2000-01-01", cape = nothing)
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
+    fn = "withdrawal_paths"
     it_given = inflation_type !== _MISSING
-    frequency = _match_arg(frequency, ("year", "quarter", "month"))
-    inflation_type = _match_arg(it_given ? inflation_type : nothing, ("level", "rate_pa"))
+    frequency = _e3_match_arg(frequency, ("year", "quarter", "month"), fn, "frequency")
+    inflation_type = _e3_match_arg(it_given ? inflation_type : nothing, ("level", "rate_pa"), fn, "inflation_type")
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): Namen, Startdatum (Date oder "JJJJ-MM-TT"); Länge 1 wie
+    # Einzelwert (Entscheidung 4)
+    for (a, v) in (("column", column), ("strategy", strategy), ("cape", cape), ("inflation", inflation), ("start", start),
+                   ("dates", dates))
+        SimLev.chk_nofactor(v, fn, a)                         # Entscheidung 15
+    end
+    column = chk_name1(column, fn, "column"; null_ok = true)
+    strategy = chk_name1(strategy, fn, "strategy"; null_ok = true)
+    cape = chk_name1(cape, fn, "cape"; null_ok = true)
+    start = chk_date1(start, fn, "start")
+    inflation = chk_scalar(inflation)
     if inflation !== nothing
-        okv = inflation isa AbstractString || (_isnum(inflation) && isfinite(Float64(inflation)))
-        okv || _stop("inflation muss NULL, eine Zahl (Prozent p. a.) oder der Name einer Zusatzreihe sein.")
+        okv = (inflation isa AbstractString && !isempty(inflation)) || (_isnum(inflation) && isfinite(Float64(inflation)))
+        okv || SimLev.chk_stop("ut2.inflation_pfade", "withdrawal_paths")
+        inflation isa AbstractString || chk_num1(inflation, fn, "inflation"; lo = -100, lo_open = true)
     end
     function infl_from(n_per, n_paths, ends_dates)
         inflation === nothing && return ones(n_per, n_paths)
@@ -808,16 +944,16 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
     # 1) Gespeicherte Bootstrap-Studie
     if _is_study(x)
         rets = _get(x, "returns")
-        rets === nothing && _stop("Die Studie enthält keine Periodenrenditen; bootstrap_study(..., keep_returns = 'year') verwenden.")
+        rets === nothing && SimLev.chk_stop("rs.studie_renditen", fn)
         rn = collect(String, keys(rets))
         strategy = strategy === nothing ? rn[1] : strategy
-        strategy in rn || _stop(@sprintf("Strategie '%s' nicht gespeichert. Verfügbar: %s", strategy, join(rn, ", ")))
+        strategy in rn || SimLev.chk_stop("rs.strategie", fn, strategy, join(rn, ", "))
         freq = x["returns_frequency"]
         R = _mat(rets[strategy])
         ok = Bool[!any(isnan, view(R, :, j)) for j in 1:size(R, 2)]
         if inflation isa AbstractString
             ar = _get(x, "aux_returns")
-            (ar === nothing || _get(ar, inflation) === nothing) && _stop(@sprintf("Zusatzreihe '%s' nicht gespeichert (keep_aux).", inflation))
+            (ar === nothing || _get(ar, inflation) === nothing) && SimLev.chk_stop("rs.aux_gespeichert", fn, inflation)
             kind = _aux_kind(x["config"], inflation, it_given, inflation_type)
             if kind === nothing && it_given && inflation_type == "rate_pa"
                 _stop(@sprintf("inflation_type = 'rate_pa': die mit keep_aux gespeicherten Faktoren der Zusatzreihe '%s' sind die Niveau-Variante (Reihe nicht in aux_type genannt). Für eine Rate in Prozent p. a. aux_type = c(%s = 'rate') in bootstrap_config() angeben und die Studie neu rechnen.",
@@ -827,9 +963,9 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
             r = vec(I0[:, ok])
             bad = .!isfinite.(r) .| (r .<= 0)
             if any(bad)
-                msg = kind == "rate" ? "Zusatzreihe '%s' (aux_type 'rate') ergibt nicht endliche oder nicht positive Periodenfaktoren (z. B. %s)." :
-                      "Zusatzreihe '%s' ist kein positives Niveau (gespeicherte Periodenverhältnisse nicht endlich oder <= 0, z. B. %s); für eine Rate in Prozent p. a. aux_type = c(<Name> = 'rate') in bootstrap_config() angeben."
-                _stop(_sp(msg, inflation, _fmt_nan(r[bad][1]; digits = 4)))
+                msg = kind == "rate" ? "Zusatzreihe '%s' (aux_type 'rate') ergibt nicht endliche oder nicht positive Periodenfaktoren." :
+                      "Zusatzreihe '%s' ist kein positives Niveau (gespeicherte Periodenverhältnisse nicht endlich oder <= 0); für eine Rate in Prozent p. a. aux_type = c(<Name> = 'rate') in bootstrap_config() angeben."
+                _stop(_sp(msg, inflation))
             end
             I = I0
         else
@@ -840,14 +976,14 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
     end
     # 2) Liste von simulation()-Ergebnissen
     if !_is_boot_result(x) && _is_result_list(x)
-        inflation isa AbstractString && _stop("Bei Ergebnislisten ist 'inflation' ein Prozentsatz p. a.")
+        inflation isa AbstractString && SimLev.chk_stop("rs.liste_infl", fn)
         lst = x isa AbstractDict || x isa NamedTuple ? collect(values(x)) : collect(x)
         idx = [result_index(r) for r in lst]
         ends = _anniv_ends(idx[1]["date"], frequency)
-        length(ends) < 2 && _stop("Ergebnisse zu kurz für eine volle Periode.")
+        length(ends) < 2 && SimLev.chk_stop("rs.ergebnisse_kurz", fn)
         vecs = Vector{Float64}[]
         for d in idx
-            SimLev.nrow(d) != SimLev.nrow(idx[1]) && _stop("Alle Ergebnisse müssen gleich lang sein.")
+            SimLev.nrow(d) != SimLev.nrow(idx[1]) && SimLev.chk_stop("rs.ergebnisse_laenge", fn)
             v = d["value"][ends]
             push!(vecs, v[2:end] ./ v[1:end-1])
         end
@@ -855,22 +991,24 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
         return mk(R, infl_from(size(R, 1), size(R, 2), idx[1]["date"][ends]), nothing, nothing, "results", frequency)
     end
     # 3) bootstrap()-Pfade
-    _is_boot_result(x) || _stop("x muss ein bootstrap_result, eine Liste von SimLevResult oder eine SimLevBootstrapStudy sein.")
-    column === nothing && _stop("Bei bootstrap_result muss 'column' angegeben werden.")
+    _is_boot_result(x) || SimLev.chk_stop("ut2.pfade_x", "withdrawal_paths")
+    column === nothing && SimLev.chk_stop("ut2.pfade_column", "withdrawal_paths")
     P1 = x["paths"][1]
     cn = something(B._colnames(P1), String[])
-    column in cn || _stop(@sprintf("Spalte '%s' nicht im Pfad. Verfügbar: %s", column, join(cn, ", ")))
+    column in cn || SimLev.chk_stop("rs.spalte_pfad", fn, column, join(cn, ", "))
+    cape === nothing || cape in cn || chk_stop("e3.pfadspalte", fn, cape, "cape", join(cn, ", "))
     nr = B._nrow(P1)
     if dates === nothing
-        dates = _seq_dates(_todate(start, "start")[1], nr)
+        dates = _seq_dates(start, nr)
     else
         dates = _todate(dates, "dates")
-        length(dates) != nr && _stop(@sprintf("dates hat Länge %d, die Pfade haben %d Zeilen (path_length + 1); ein Datum je Pfadzeile angeben.", length(dates), nr))
+        any(d -> d === missing, dates) && SimLev.chk_stop("ut2.dates_streng", "withdrawal_paths")   # bisher MethodError
+        length(dates) != nr && SimLev.chk_stop("rs.dates_pfade", fn, length(dates), nr)
         dv = _days.(dates)
-        any(diff(dv) .<= 0) && _stop("dates muss streng aufsteigend sein und darf kein NA enthalten.")
+        any(diff(dv) .<= 0) && SimLev.chk_stop("ut2.dates_streng", "withdrawal_paths")
     end
     ends = _anniv_ends(dates, frequency)
-    length(ends) < 2 && _stop("Pfade zu kurz für eine volle Periode der gewählten frequency.")
+    length(ends) < 2 && SimLev.chk_stop("rs.pfade_kurz", fn)
     e1 = ends[2:end]; e0 = ends[1:end-1]
     per(v) = (v = _dvec(v); v[e1] ./ v[e0])
     pcol(P, c) = P isa RFrame ? _dvec(P[c]) : _pcol_mat(P, c)
@@ -878,7 +1016,7 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
     R = _vapply_mat([per(pcol(P, column)) for P in x["paths"]], n_per)
     I = infl_from(size(R, 1), size(R, 2), dates[ends])
     if I === nothing
-        inflation in cn || _stop(@sprintf("Zusatzreihe '%s' nicht im Pfad. Verfügbar: %s", inflation, join(cn, ", ")))
+        inflation in cn || SimLev.chk_stop("rs.aux_pfad", fn, inflation, join(cn, ", "))
         kind = _aux_kind(_get(x, "config", RList()), inflation, it_given, inflation_type)
         kind === nothing || (inflation_type = kind == "level" ? "level" : "rate_pa")
         dt = Float64[_days(dates[i+1]) - _days(dates[i]) for i in 1:length(dates)-1] ./ 365.25
@@ -889,8 +1027,7 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
                 r = per(_cumprod(vcat(1.0, _pow_vec(1 .+ v[2:end] ./ 100, dt))))
                 bad = .!isfinite.(r) .| (r .<= 0)
                 if any(bad)
-                    _stop(@sprintf("Zusatzreihe '%s' (Rate in Prozent p. a.) ergibt nicht endliche oder nicht positive Periodenfaktoren (z. B. %s; Rate <= -100 %%?).",
-                                   inflation, _fmt_nan(r[bad][1]; digits = 4)))
+                    SimLev.chk_stop("rs.rate_periode", fn, inflation)
                 end
                 push!(vecs, r)
                 continue
@@ -908,7 +1045,7 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
             end
             r = per(v)
             any(.!isfinite.(r) .| (r .<= 0)) &&
-                _stop(@sprintf("Zusatzreihe '%s' ist kein positives Niveau (Verhältnisse nicht endlich oder <= 0); für eine Rate inflation_type = 'rate_pa' verwenden.", inflation))
+                SimLev.chk_stop("rs.niveau", fn, inflation)
             push!(vecs, r)
         end
         I = _vapply_mat(vecs, n_per)
@@ -916,7 +1053,7 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
     C = nothing
     if cape !== nothing
         cv = [pcol(P, cape)[e0] for P in x["paths"]]
-        C = n_per == 1 ? Float64[v[1] for v in cv] : reduce(hcat, cv)
+        C = _vapply_mat(cv, n_per)   # seit 1.6.4 auch bei einer Periode Perioden x Pfade (A-002)
     end
     return mk(R, I, C, _get(x, "weights"), column, frequency)
 end
@@ -940,8 +1077,9 @@ function _annual_real(wp)
     ppy == 1 && return real
     ny = size(real, 1) ÷ ppy
     (ny < 1 || size(real, 2) == 0) && return _apply_cols(real[1:ny*ppy, :], c -> _agg_prod(c, ppy))
-    A = _wcore().wd_annual_prod(real, ppy)    # Produkt je Jahr im Kern; bei einem Jahr ein Vektor (wie apply)
-    return ny == 1 ? A[1, :] : A
+    # Produkt je Jahr im Kern; immer Jahre x Pfade (seit 1.6.4, A-003: bis 1.6.3 bei einem Jahr ein Vektor wie apply,
+    # den withdrawal_perfect_rate als einen Pfad las)
+    return _wcore().wd_annual_prod(real, ppy)
 end
 
 """
@@ -977,12 +1115,15 @@ println(withdrawal_perfect_rate(R))
 function withdrawal_perfect_rate(real_returns; legacy = 0)
     _is_wp(real_returns) && (real_returns = _annual_real(real_returns))
     R = try
-        _numvec(real_returns) === nothing ? nothing : _as_matrix(real_returns)
+        # RFrame aus Zahlenspalten wie R as.matrix(data.frame) (bisher abgelehnt)
+        (_numvec(real_returns) === nothing && !(real_returns isa RFrame && _e3_numarray(real_returns))) ? nothing : _as_matrix(real_returns)
     catch
         nothing
     end
     msg_a = "withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %)."
-    (R === nothing || isempty(R)) && _stop(msg_a)
+    # Liste aus Matrizen (R list(m)) bzw. Feld mit mehr als zwei Dimensionen ist keine Matrix (seit 1.6.4, wie R)
+    (R === nothing || isempty(R) || (real_returns isa AbstractArray && ndims(real_returns) > 2) ||
+     (real_returns isa AbstractVector && any(e -> e isa AbstractArray, real_returns))) && _stop(msg_a)
     lv = _numvec(legacy)
     lg_ok = lv !== nothing && length(lv) == 1 && isfinite(lv[1]) && lv[1] >= 0
     # Prüfungen (nicht endlich, Median, negativ) und PWR je Spalte im Kern (core/withdrawal_core_impl.h, wd_pwr)
@@ -994,7 +1135,7 @@ function withdrawal_perfect_rate(real_returns; legacy = 0)
     end
     st == 3 && _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
     if !lg_ok
-        _stop(@sprintf("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; erhalten: %s).", _show(legacy)))
+        _stop("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 % des Startvermögens).")
     end
     return out
 end
@@ -1028,7 +1169,7 @@ end
 
 "Offene Lots als FIFO-Bestand für den Kern (R: `.wd_lots`)."
 function _wd_lots(ol, report, sv; tol = 1e-12)
-    n = Float64[]; basis = Float64[]; vp = Float64[]; group = Int[]
+    n = Float64[]; basis = Float64[]; vp = Float64[]; group = Int[]; wvs = Float64[]
     g = 0
     assets = 0.0
     for nm in _wd_held(ol, report, sv; tol = tol)
@@ -1046,10 +1187,25 @@ function _wd_lots(ol, report, sv; tol = 1e-12)
         append!(group, fill(g, length(u)))
         g += 1
         assets = assets + wv
+        push!(wvs, wv)
     end
     cash = sv - assets
-    if abs(cash) > tol * sv
+    if cash > tol * sv
         push!(n, cash); push!(basis, cash); push!(vp, 0.0); push!(group, g)
+    elseif -cash > tol * sv
+        # negativer Geldbestand: seit 1.6.4 kein negativer Cash-Lot (A-062, Entscheidungen 87 und 104), sondern vom
+        # ersten Verkauf abgezogen: der älteste Lot des wertgrößten Assets wird um den Fehlbetrag gemindert (reicht er
+        # nicht, die nächsten Lots dieses Assets), Basis und Vorabpauschale anteilig; keine Steuer auf diesen Rest
+        keep = trues(length(n)); rest = -cash
+        kmax = argmax(wvs) - 1                                    # erstes Maximum wie which.max
+        for j in findall(==(kmax), group)
+            rest > 0 || break
+            take = min(n[j], rest)
+            f = (n[j] - take) / n[j]
+            n[j] = n[j] - take; basis[j] = basis[j] * f; vp[j] = vp[j] * f; rest = rest - take
+            n[j] > 0 || (keep[j] = false)
+        end
+        n = n[keep]; basis = basis[keep]; vp = vp[keep]; group = group[keep]
     end
     return RList("n" => n, "basis" => basis, "vp" => vp, "group" => group)
 end
@@ -1086,7 +1242,7 @@ _sv_get(r, path...) = (v = r; for k in path; v = _get(v, k); end; v)
 function _wd_tax_mode(tax)
     tax === nothing && return "none"
     (tax isa RList && SimLev.inherits(tax, "SimLevTaxProfile")) ||
-        _stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht $(SimLev._blk_cls(tax)).")
+        _stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein.")
     pst = tax["private_sale_threshold"]
     un = ["private_sale_threshold" => !(pst isa Real && pst == 1000),
           "base_rate" => tax["base_rate"] !== nothing, "harvest" => tax["harvest"] !== nothing]
@@ -1115,7 +1271,7 @@ function _wd_zve(x, ny::Int, year1)
     who = "withdrawal_simulation"
     form = "eine Zahl (zvE in EUR für alle Planjahre), ein Vektor ohne Namen mit einem Wert je Planjahr (Länge $ny)" *
            (year1 === nothing ? "" : " oder nach Kalenderjahren benannt (Vektor bzw. data.frame mit den Spalten year und taxable_income; Planjahr 1 = $year1)")
-    zv = SimLev._check_taxable_income(x, Int[], "income_tariff"; plan_ok = true)
+    zv = SimLev._blk_check_taxable_income(x, Int[], "income_tariff"; plan_ok = true)   # seit K43 T1-N5 eine Fassung
     zv.all !== nothing && return fill(Float64(zv.all), ny + 1)
     if haskey(zv, :plan)
         v = zv.plan
@@ -1124,7 +1280,7 @@ function _wd_zve(x, ny::Int, year1)
     end
     year1 === nothing &&
         _stop("$who: taxable_income (income_tariff()) nach Kalenderjahren lässt sich nur mit einem SimLevResult als start_value auf Planjahre abbilden (Planjahr 1 = tax_report\$next_year\$year); erwartet wird $form.")
-    zv = SimLev._check_taxable_income(x, collect(year1:(year1 + ny - 1)), who)
+    zv = SimLev._blk_check_taxable_income(x, collect(year1:(year1 + ny - 1)), who)
     return Float64[get(zv.by_year, string(y), NA) for y in year1:(year1 + ny)]
 end
 
@@ -1192,7 +1348,8 @@ implementiert.
   Ergebnislisten-Eingabe: `"year"` (Standard), `"quarter"` oder `"month"`. Bei `withdrawal_paths` und Studien
   gilt die gespeicherte Frequenz.
 - `strategy`: Bei `SimLevBootstrapStudy`: Name der Strategie (`nothing` = erste gespeicherte).
-- `years`: Optional Anzahl Jahre (> 0, `years` x Perioden je Jahr muss ganzzahlig sein): Kürzung auf die
+- `years`: Optional Anzahl Jahre (seit 1.6.4 eine ganze Zahl von 1 bis 100,
+  auch bei unterjähriger frequency): Kürzung auf die
   ersten `years` Jahre (`years` x Perioden je Jahr Zeilen). Bei einem `SimLevResult` zugleich die
   Kohortenlänge (`nothing` = 30). `nothing` (Standard) = volle Pfadlänge.
 - `timing`: Zeitpunkt der Entnahme innerhalb jeder Periode: `"start"` (Standard; vor der Rendite) oder `"end"`
@@ -1202,6 +1359,9 @@ implementiert.
   `start`/`end` sind Planjahre (Standard 1 bzw. letztes Jahr, `start <= end`; Jahre nach dem Pfadende
   entfallen), `amount` ist ein realer Jahresbetrag in Kaufkraft des Startzeitpunkts. Einkommen mindern die
   Depotentnahme (Entnahme = max(0, Regelbetrag - Einkommen)) und zählen im Konsum (`spending`) mit.
+  Seit 1.6.4 sind start und end ganze Planjahre (end auch Inf); vorher wurden gebrochene Werte gerundet.
+  Seit 1.6.4 ist start ein ganzes Planjahr ≥ 1; wer kein Einkommen hat, lässt den Eintrag weg (vorher lief start =
+  Inf als nie und start ≤ 0 als Planjahr 1).
 - `tax`: Steuerdaten der Person: `nothing` (Standard; keine Steuern) oder ein Objekt aus `tax_profile()`
   (vereinfachte deutsche Besteuerung, siehe Details). Ausgewertet werden `rate` (Abgeltungsteuer inkl.
   Solidaritätszuschlag in Prozent, Standard 26.375), `church_tax` (Kirchensteuer in Prozent; der Satz der
@@ -1239,6 +1399,7 @@ implementiert.
   0): Skalar oder Matrix (Perioden x Pfade, gleiche Dimension wie die Renditen vor einer Kürzung mit `years`),
   maßgeblich ist der Wert der letzten Periode jedes Planjahres. Enthält `x` eine Basiszins-Reihe (Argument
   `base_rate` in `withdrawal_cohorts()`), wird diese verwendet.
+  Seit 1.6.4 ohne NA (auch in einer Reihe aus withdrawal_cohorts()); Jahre ohne Basiszins als 0 angeben.
 - `vorabpauschale`: Logisch: Vorabpauschale berücksichtigen (Standard `true`; nur mit `tax = tax_profile()`
   wirksam). Nicht angegeben und `start_value` ein `SimLevResult` mit `open_lots`, in dem kein gehaltenes Asset
   das Regime `"investment_fund"` hat (nur ETN/Zertifikate, `"capital_gains"`, bzw. `"private_sale"`): `false`,
@@ -1287,6 +1448,11 @@ implementiert.
   Erfolg über die volle Pfadlänge in `paths["success_full"]`). Horizonte über der Pfadlänge werden mit Warnung
   gekürzt. Die Regel selbst rechnet weiter mit den Restjahren der vollen Pfadlänge. Nicht zu verwechseln mit
   `horizon` in `planning_goal()` (Perioden).
+  Seit 1.6.4 als Zahl eine ganze Zahl von Jahren von 1 bis 100.
+
+# Eingaben
+Seit 1.6.4 geprüft: Renditen müssen endlich sein (NA wird vor dem Median gemeldet); eine Inflationsmatrix
+muss endliche Zahlen > 0 enthalten; `base_rate` als Matrix nur Zahlen.
 
 # Rückgabe
 Objekt der Klasse `SimLevWithdrawal` (Liste):
@@ -1445,8 +1611,18 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     partial_exemption = _num(_dflt(partial_exemption, 30.0)); vorabpauschale = _dflt(vorabpauschale, true)
     sale_cost = _num(_dflt(sale_cost, 0.0)); cost_basis = _num(_dflt(cost_basis, 100.0))
     loss_carryforward = _num(_dflt(loss_carryforward, 0.0))
+    fn = "withdrawal_simulation"
+    timing = _e3_match_arg(timing, ("start", "end"), fn, "timing")
+    fq0 = frequency   # (Schnittstelle wie bisher: frequency ohne match_arg-Kennzeichen)
+    frequency = _e3_match_arg(fq0, ("year", "quarter", "month"), fn, "frequency")
     freq_arg = frequency
-    timing = _match_arg(timing, ("start", "end"))
+    SimLev.chk_nofactor(strategy, fn, "strategy")
+    strategy = chk_name1(strategy, fn, "strategy"; null_ok = true)
+    # Länge 1 wie Einzelwert (Entscheidung 4); Matrizen bleiben Matrizen
+    _s1(v) = v isa AbstractMatrix ? v : chk_scalar(v)
+    (start_value, inflation, years, partial_exemption, sale_cost, cost_basis, loss_carryforward, gamma, vorabpauschale,
+     keep_paths, horizon, base_rate) = map(_s1, (start_value, inflation, years, partial_exemption, sale_cost, cost_basis,
+                                                 loss_carryforward, gamma, vorabpauschale, keep_paths, horizon, base_rate))
     tax_mode = _wd_tax_mode(tax)
     # Satz wie in simulation() (_tax_rates: Kirchensteuer, Günstigerprüfung einmal je Lauf); die Angaben stehen
     # ausdrücklich in tax_profile(), aus der Ansparphase wird nichts übernommen
@@ -1464,16 +1640,16 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     sparer_pauschbetrag = tax === nothing ? 1000 : tax["sparer_pauschbetrag"]
     if horizon !== nothing && !_is_horizon(horizon)
         if !_num1(horizon) || _f1(horizon) <= 0
-            _stop(@sprintf("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren > 0 sein, nicht %s.",
-                           _show(horizon)))
+            _stop("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren > 0 sein.")
         end
+        SimLev.chk_jahre(horizon, fn, "horizon")       # seit 1.6.4 ganze Jahre bis 100 (Entscheidungen 19 und 46)
         horizon = withdrawal_horizon("fixed"; years = horizon)
     end
-    _is_rule(rule) || _stop("rule muss mit withdrawal_rule() erstellt werden.")
+    _is_rule(rule) || SimLev.chk_stop("klasse", "withdrawal_simulation", "rule", "withdrawal_rule()")
     inflation === nothing && (inflation = 0)
     function chk(v, arg, what; lo = 0.0, hi = Inf)
         if !_num1(v) || _f1(v) < lo || _f1(v) > hi
-            _stop(@sprintf("withdrawal_simulation: '%s' muss %s sein, nicht %s.", arg, what, _rshow(v)))
+            _stop(@sprintf("withdrawal_simulation: '%s' muss %s sein.", arg, what))
         end
     end
     function frac(v, arg; hi = 1.0, unit = "%")
@@ -1487,7 +1663,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     chk(cost_basis, "cost_basis", "eine Zahl >= 0 in Prozent des Startwerts (z. B. 100)"); frac(cost_basis, "cost_basis")
     chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
     chk(gamma, "gamma", "eine Zahl >= 0 (relative Risikoaversion, z. B. 2)")
-    vorabpauschale isa Bool || _stop(@sprintf("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "vorabpauschale", _rshow(vorabpauschale)))
+    vorabpauschale isa Bool || _stop("withdrawal_simulation: 'vorabpauschale' muss TRUE oder FALSE sein.")
     kp = _keep_count(keep_paths, Inf, "withdrawal_simulation")   # Anzahl behaltener Pfade, begrenzt nach ncol(R)
     infl_is_mat = inflation isa AbstractMatrix
     if (_isnum(inflation)) || (inflation isa AbstractVector && length(inflation) == 1 && _numvec(inflation) !== nothing)
@@ -1496,17 +1672,18 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     end
     br_is_mat = base_rate isa AbstractMatrix
     br_is_mat || frac(base_rate, "base_rate"; hi = 0.05)
-    if years !== nothing && (!_num1(years) || _f1(years) <= 0)
-        _stop(@sprintf("years muss eine positive Zahl von Jahren sein (erhalten: %s).", _show(years)))
-    end
-    (!br_is_mat && !_num1(base_rate)) && _stop("base_rate muss eine Zahl (Prozent) oder eine Matrix Perioden x Pfade sein.")
+    # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; bis 1.6.3
+    # jede Zahl > 0, die ganze Perioden ergab)
+    years = SimLev.chk_jahre(years, fn, "years"; null_ok = true)
+    (br_is_mat ? !_e3_numarray(base_rate) : !_num1(base_rate)) &&
+        SimLev.chk_stop("ut2.base_rate", "withdrawal_simulation")
     if income isa Union{RList,NamedTuple,AbstractDict} && _get(income, "amount") !== nothing &&
        !(_get(income, "amount") isa Union{RList,NamedTuple,AbstractDict})
         income = Any[income]
     end
     if income !== nothing
         okinc = income isa AbstractVector && all(e -> e isa Union{RList,NamedTuple,AbstractDict} && _num1(_get(e, "amount")), income)
-        okinc || _stop("income muss eine Liste von list(start = Jahr, end = Jahr, amount = Betrag) sein (amount: realer Jahresbetrag).")
+        okinc || SimLev.chk_stop("ut2.income", "withdrawal_simulation")
     end
     lots = nothing
     adopted = RList()
@@ -1637,19 +1814,19 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         start_value = sv
     end
     (!_num1(start_value) || _f1(start_value) <= 0) &&
-        _stop(@sprintf("start_value muss ein positiver Geldbetrag (Zahl > 0) oder ein SimLevResult sein (erhalten: %s).", _wshow(start_value)))
+        SimLev.chk_stop("ut2.start_value", "withdrawal_simulation")
     start_value = Float64(_f1(start_value))
     src_taxed = false
     if _is_result(x)
         tp = _sv_get(x, "tax_report", "total_taxes_paid")
         src_taxed = _num1(tp) && _f1(tp) > 0
-        (_isnum(inflation)) || _stop("Bei einem SimLevResult ist 'inflation' ein Prozentsatz p. a.")
+        (_isnum(inflation)) || SimLev.chk_stop("rs.infl_prozent", "withdrawal_simulation", "SimLevResult")
         x = withdrawal_cohorts(x; inflation = inflation, years = years === nothing ? 30 : years,
-                               frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+                               frequency = freq_arg)
     elseif SimLev.inherits(x, "SimLevWrapperNav")   # Anteilswert eines Fonds-Wrappers (wrapper_nav()) als Kursreihe
-        (_isnum(inflation)) || _stop("Bei einem SimLevWrapperNav ist 'inflation' ein Prozentsatz p. a.")
+        (_isnum(inflation)) || SimLev.chk_stop("rs.infl_prozent", "withdrawal_simulation", "SimLevWrapperNav")
         x = withdrawal_cohorts(x; price = "nav", inflation = inflation, years = years === nothing ? 30 : years,
-                               frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+                               frequency = freq_arg)
     elseif x isa RFrame && haskey(x, "date")   # Kurstabelle, z. B. Ausschnitt aus wrapper_nav()
         _stop("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gewöhnliche " *
               "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln " *
@@ -1659,23 +1836,26 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
             lst = x isa AbstractDict || x isa NamedTuple ? collect(values(x)) : collect(x)
             src_taxed = any(r -> (tp = _sv_get(r, "tax_report", "total_taxes_paid"); _num1(tp) && _f1(tp) > 0), lst)
         end
-        x = withdrawal_paths(x; strategy = strategy, inflation = inflation, frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+        x = withdrawal_paths(x; strategy = strategy, inflation = inflation, frequency = freq_arg)
     end
     if src_taxed && tax_mode == "person" && _istrue(vorabpauschale)
         _warn("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); vorabpauschale = FALSE oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelzählung.")
     end
     if !_is_wp(x)
-        frequency = _match_arg(freq_arg, ("year", "quarter", "month"))
-        R = _numvec(x) === nothing ? nothing : _as_matrix(x)
-        (R === nothing || isempty(R)) && _stop("x muss eine numerische Matrix (Perioden x Pfade) von Brutto-Periodenrenditen sein.")
-        any(v -> !isnan(v) && v < 0, R) && _stop("x muss Brutto-Periodenrenditen enthalten (z. B. 1.05 für +5 %).")
-        any(isnan, R) && _stop("missing value where TRUE/FALSE needed")
-        _median(vec(R)) < 0.5 && _stop("x muss Brutto-Periodenrenditen enthalten (z. B. 1.05 für +5 %).")
+        R = ((x isa AbstractArray && ndims(x) > 2) || (_numvec(x) === nothing && !(x isa RFrame && _e3_numarray(x)))) ? nothing :
+            _as_matrix(x)   # RFrame wie R as.matrix
+        # Feld mit mehr als zwei Dimensionen oder Liste aus Matrizen: seit 1.6.4 abgelehnt (wie R)
+        (R === nothing || isempty(R) || (x isa AbstractArray && ndims(x) > 2) ||
+         (x isa AbstractVector && any(e -> e isa AbstractArray, x))) &&
+            SimLev.chk_stop("ut2.wd_x", "withdrawal_simulation")
+        any(v -> !isnan(v) && v < 0, R) && SimLev.chk_stop("ut2.wd_brutto", "withdrawal_simulation")
+        any(isnan, R) && SimLev.chk_stop("rs.na", "withdrawal_simulation")              # seit 1.6.4 vor dem Median (wie R)
+        _median(vec(R)) < 0.5 && SimLev.chk_stop("ut2.wd_brutto", "withdrawal_simulation")
         if infl_is_mat && size(inflation) != size(R)
-            _stop(@sprintf("inflation als Matrix braucht dieselbe Dimension wie die Renditen (%d x %d), hat aber %d x %d.",
-                           size(R, 1), size(R, 2), size(inflation, 1), size(inflation, 2)))
+            SimLev.chk_stop("rs.infl_dim", "withdrawal_simulation", size(R, 1), size(R, 2), size(inflation, 1), size(inflation, 2))
         end
-        (!infl_is_mat && !_num1(inflation)) && _stop("inflation muss eine Zahl (Prozent p. a.) oder eine Matrix Perioden x Pfade sein.")
+        (infl_is_mat ? !_e3_numarray(inflation) : !_num1(inflation)) &&
+            SimLev.chk_stop("ut2.wd_inflation", "withdrawal_simulation")
         I = infl_is_mat ? _mat(inflation) : fill(_rpow(1 + _f1(inflation) / 100, 1 / _wd_ppy(frequency)), size(R))
         x = RList("returns" => R, "inflation" => I, "cape" => nothing, "base_rate" => nothing, "frequency" => frequency,
                   "historical" => false, "start_dates" => nothing, "weights" => nothing, "source" => "matrix";
@@ -1683,21 +1863,19 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     end
     ppy = _wd_ppy(_get(x, "frequency"))
     R = _get(x, "returns"); I = _get(x, "inflation")
-    (!(R isa AbstractMatrix) || size(R, 1) == 0 || size(R, 2) == 0) && _stop("Keine Renditen (leere Matrix bzw. keine Pfade).")
+    (!(R isa AbstractMatrix) || size(R, 1) == 0 || size(R, 2) == 0) && SimLev.chk_stop("rs.keine_renditen", "withdrawal_simulation")
     R = _mat(R); I = _mat(I)
-    (any(isnan, R) || any(isnan, I)) && _stop("Renditen/Inflation enthalten NA.")
-    size(I) != size(R) && _stop(@sprintf("Inflation (%d x %d) passt nicht zu den Renditen (%d x %d).", size(I, 1), size(I, 2), size(R, 1), size(R, 2)))
+    (any(isnan, R) || any(isnan, I)) && SimLev.chk_stop("rs.na", "withdrawal_simulation")
+    size(I) != size(R) && SimLev.chk_stop("rs.infl_passt", "withdrawal_simulation", size(I, 1), size(I, 2), size(R, 1), size(R, 2))
     xcape = _get(x, "cape"); xbase = _get(x, "base_rate")
     if br_is_mat
         base_rate = _mat(base_rate)
         if xbase === nothing && size(base_rate) != size(R)
-            _stop(@sprintf("base_rate als Matrix braucht dieselbe Dimension wie die Renditen (%d x %d Perioden x Pfade), hat aber %d x %d.",
-                           size(R, 1), size(R, 2), size(base_rate, 1), size(base_rate, 2)))
+            SimLev.chk_stop("rs.base_dim", "withdrawal_simulation", size(R, 1), size(R, 2), size(base_rate, 1), size(base_rate, 2))
         end
     end
-    if years !== nothing
+    if years !== nothing                                   # ganze Jahre (oben geprüft): ganze Zahl von Perioden
         yy = _f1(years)
-        abs(yy * ppy - _round0(yy * ppy)) > 1e-8 && _stop(@sprintf("years = %s ergibt keine ganze Zahl von Perioden (%d je Jahr).", _fmt1(_num(years)), ppy))
         kr = min(size(R, 1), Int(_round0(yy * ppy)))
         R = R[1:kr, :]; I = I[1:kr, :]
         xcape === nothing || (xcape = _mat(xcape)[1:kr, :])
@@ -1707,15 +1885,27 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     size(R, 1) % ppy != 0 && _warn("Periodenzahl ist kein Vielfaches eines Jahres; letztes Planjahr unvollständig.")
     ny = cld(size(R, 1), ppy)
     nfy = size(R, 1) ÷ ppy
-    rule["type"] == "cape" && xcape === nothing && _stop("Die CAPE-Regel braucht eine CAPE-Reihe (Argument cape in withdrawal_cohorts/withdrawal_paths).")
+    rule["type"] == "cape" && xcape === nothing && SimLev.chk_stop("rs.cape", "withdrawal_simulation")
     CAPE = xcape !== nothing ? _mat(xcape) : zeros(size(R, 1), 0)
     BASE = xbase !== nothing ? _mat(xbase) : br_is_mat ? base_rate : fill(Float64(_f1(base_rate)), size(R))
+    # Werte der Reihen (seit 1.6.4): Renditen endlich, Inflation als Brutto-Faktor endlich und > 0, CAPE und Basiszins
+    # ohne NA (Entscheidung 17; bis 1.6.3 rechnete der Kern NA als 0 bzw. "nur cape_a")
+    SimLev.chk_nona(CAPE, fn, "cape", chk_msg("hinweis.cape"))
+    SimLev.chk_nona(BASE, fn, "base_rate", chk_msg("hinweis.basiszins"))
+    all(isfinite, R) || chk_stop("e3.werte", fn, "x (Renditen)")
+    all(v -> isfinite(v) && v > 0, I) || chk_stop("e3.werte_bereich", fn, "inflation (Brutto-Faktoren je Periode)", chk_msg("bereich.gt", "0"))
     inc = zeros(ny)
     for e in something(income, Any[])
         s0 = _get(e, "start", 1.0); e0 = _get(e, "end", _get(e, "end_", Inf))
         sv0 = _numvec(s0); ev0 = _numvec(e0)
-        if sv0 === nothing || ev0 === nothing || length(sv0) != 1 || length(ev0) != 1 || isnan(sv0[1]) || isnan(ev0[1]) || ev0[1] < sv0[1]
-            _stop(@sprintf("income: start und end müssen Planjahre mit start <= end sein (erhalten: start = %s, end = %s).", _wshow(s0), _wshow(e0)))
+        # seit 1.6.4 start ein ganzes Planjahr >= 1 (Entscheidung 44; bis 1.6.3 lief start = Inf als "nie" und start <= 0
+        # als Planjahr 1; kein Einkommen: Eintrag weglassen)
+        (sv0 === nothing || length(sv0) != 1 || !isfinite(sv0[1]) || sv0[1] != trunc(sv0[1]) || sv0[1] < 1) &&
+            SimLev.chk_stop("n2.einkommen_start", fn)
+        # seit 1.6.4 ganze Planjahre (Entscheidung 19; bis 1.6.3 start auf- und end abgerundet), end auch Inf
+        # (start ist nach der ersten Prüfung ein ganzes Planjahr >= 1; seit 1.6.4 K43 T2-N8 prüft die zweite nur end)
+        if ev0 === nothing || length(ev0) != 1 || isnan(ev0[1]) || ev0[1] < sv0[1] || (isfinite(ev0[1]) && ev0[1] != trunc(ev0[1]))
+            _stop("income: start und end müssen Planjahre mit start <= end sein.")
         end
         s1 = max(1, Int(ceil(sv0[1])))
         e1 = isfinite(ev0[1]) ? min(ny, Int(floor(ev0[1]))) : ny
@@ -1751,7 +1941,11 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     gamma = Float64(gamma)
     ncol = size(sp, 2)
     # Konsumkennzahlen je Pfad im Kern (wd_metrics, core/withdrawal_core_impl.h): je Jahr nur über volle Planjahre
-    mt = _wcore().wd_metrics(sp, nfy, nothing, gamma, start_value)
+    # seit 1.6.4 (A-092) mit horizon nicht für den vollen Zeitraum (die fünf Spalten werden unten mit den Kennzahlen bis
+    # zum Horizont ersetzt; bis 1.6.3 hier gerechnet und verworfen); die volle PWR bleibt (Prüfung, Fehler wie bisher)
+    mt = horizon === nothing ? _wcore().wd_metrics(sp, nfy, nothing, gamma, start_value) :
+         RList((k => fill(NA, ncol) for k in ("mean_spending", "min_spending", "spending_drawdown", "ce_spending",
+                                               "total_spending"))...)
     pwr = (ppy == 1 || size(R, 1) >= ppy) ?
           withdrawal_perfect_rate(_annual_real(RList("returns" => R, "inflation" => I, "frequency" => x["frequency"]))) : nothing
     pwr = pwr === nothing ? Union{Missing,Bool}[missing for _ in 1:ncol] :
@@ -1817,12 +2011,12 @@ function _wd_source(x, kw)
     years = get(kw, :years, nothing); freq_arg = get(kw, :frequency, nothing); strategy = get(kw, :strategy, nothing)
     if _is_result(x)
         return withdrawal_cohorts(x; inflation = inflation, years = years === nothing ? 30 : years,
-                                  frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+                                  frequency = freq_arg)
     elseif SimLev.inherits(x, "SimLevWrapperNav")
         return withdrawal_cohorts(x; price = "nav", inflation = inflation, years = years === nothing ? 30 : years,
-                                  frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+                                  frequency = freq_arg)
     elseif _is_study(x) || _is_result_list(x)
-        return withdrawal_paths(x; strategy = strategy, inflation = inflation, frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+        return withdrawal_paths(x; strategy = strategy, inflation = inflation, frequency = freq_arg)
     end
     return x
 end
@@ -1849,10 +2043,11 @@ SWR). Jeder Suchschritt ruft `withdrawal_simulation()` mit `keep_paths = false` 
   success <= 1 (95 statt 0.95 ist ein Fehler).
 - `lower`, `upper`: Suchintervall für `rate` in Prozent (Standard 0.5 und 20).
 - `tol`: Genauigkeit in Prozentpunkten (Standard 0.005; > 0). Es muss 0 <= lower < upper <= 100 gelten.
-- `kwargs...`: weitere Argumente für `withdrawal_simulation()` (z. B. `inflation`, `tax_mode`, `horizon`). Ein
+- `kwargs...`: weitere Argumente für `withdrawal_simulation()` (z. B. `inflation`, `tax`, `horizon`). Ein
   `horizon` aus `withdrawal_horizon()` mit `seed = nothing` wird einmal zu einem Startwert aufgelöst (ein Zug
   aus dem Zufallszustand von SimLev, `simlev_seed()`); alle Suchschritte vergleichen damit dieselben
   Laufzeiten.
+  Seit 1.6.4 meldet ein unbekanntes Argument oder keep_paths (setzt die Funktion selbst) einen Fehler vor der Suche.
 
 # Rückgabe
 Rate in Prozent (Zahl; 4 = 4 %) mit Attribut `"success"` (erreichte Erfolgsquote als Anteil). `NA`, wenn schon
@@ -1866,24 +2061,32 @@ R = exp.(0.05 .+ 0.15 .* randn(rng, 30, 200))   # 30 Jahre, 200 Pfade
 println(withdrawal_max_rate(R, withdrawal_rule("constant"); success = 0.9, inflation = 2))
 ```
 """
+# Argumente von withdrawal_simulation(), die withdrawal_max_rate() weiterreicht (ohne x, rule, keep_paths; R: formals)
+const _WMR_ARGS = ("start_value", "inflation", "frequency", "strategy", "years", "timing", "income", "tax",
+                   "partial_exemption", "base_rate", "vorabpauschale", "sale_cost", "cost_basis", "loss_carryforward",
+                   "gamma", "horizon")
+
 function withdrawal_max_rate(x, rule_pos = _MISSING; rule = _MISSING, success = 0.95, lower = 0.5, upper = 20, tol = 0.005, kwargs...)
+    # seit 1.6.4 (Entscheidung 21): weitere Argumente vor der Suche prüfen (bis 1.6.3 MethodError); keep_paths setzt
+    # withdrawal_max_rate() selbst
+    SimLev.chk_dots(keys(kwargs), _WMR_ARGS, "withdrawal_max_rate"; taken = ["keep_paths"])
     x = SimLev.as_rframe(x)
     rule_pos === _MISSING || (rule = rule_pos)
     rule === _MISSING && (rule = withdrawal_rule("constant"))
-    _is_rule(rule) || _stop("rule muss mit withdrawal_rule() erstellt werden.")
+    _is_rule(rule) || SimLev.chk_stop("klasse", "withdrawal_max_rate", "rule", "withdrawal_rule()")
     if rule["type"] in ("one_over_n", "vpw", "abw", "cape", "hebeler")
         _stop(@sprintf("withdrawal_max_rate: Die Regel '%s' nutzt rate nicht; eine Suche über rate ist dafür nicht möglich.", rule["type"]))
     end
+    success, lower, upper, tol = map(chk_scalar, (success, lower, upper, tol))   # Länge 1 wie Einzelwert (Entscheidung 4)
     if !_num1(success) || _f1(success) <= 0 || _f1(success) > 1
-        hint = (_num1(success) && 1 < _f1(success) <= 100) ? "; gemeint vermutlich " * _fmt1(_f1(success) / 100) : ""
-        _stop(@sprintf("withdrawal_max_rate: success muss ein Anteil mit 0 < success <= 1 sein (0.95 = 95 %%; erhalten: %s)%s.", _show(success), hint))
+        hint = (_num1(success) && 1 < _f1(success) <= 100) ? "; Prozentangaben durch 100 teilen" : ""
+        _stop("withdrawal_max_rate: success muss ein Anteil mit 0 < success <= 1 sein (0.95 = 95 %)" * hint * ".")
     end
     if !_num1(lower) || !_num1(upper) || lower < 0 || upper > 100 || lower >= upper
-        _stop(@sprintf("withdrawal_max_rate: lower und upper müssen Raten in Prozent mit 0 <= lower < upper <= 100 sein (erhalten: lower = %s, upper = %s).",
-                       _show(lower), _show(upper)))
+        _stop("withdrawal_max_rate: lower und upper müssen Raten in Prozent mit 0 <= lower < upper <= 100 sein.")
     end
     if !_num1(tol) || _f1(tol) <= 0
-        _stop(@sprintf("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005; erhalten: %s).", _show(tol)))
+        _stop("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005).")
     end
     lower = Float64(lower); upper = Float64(upper); success = Float64(success); tol = Float64(tol)
     # Ein Horizont mit seed = nothing wird einmal zu k aufgelöst; alle
@@ -1915,6 +2118,9 @@ function withdrawal_max_rate(x, rule_pos = _MISSING; rule = _MISSING, success = 
     s_up >= success && return mk(upper, s_up)
     while upper - lower > tol
         mid = (lower + upper) / 2
+        # seit 1.6.4 (A-007): Ende, wenn die Mitte keine neue Zahl mehr ist (tol unter dem Abstand benachbarter
+        # Zahlen, z. B. 1e-15); bis 1.6.3 lief die Suche dann endlos
+        (mid <= lower || mid >= upper) && break
         s_mid = f(mid)
         if s_mid >= success
             lower = mid; s_lo = s_mid
@@ -1947,7 +2153,7 @@ function _summary_wd(obj; probs = [0.05, 0.25, 0.5, 0.75, 0.95])
     end
     succ = Bool.(p["success"])
     sby = NamedMat(permutedims(reduce(hcat, [pick(1), pick(10), pick(20), pick(30)])); rownames = ["Jahr 1", "Jahr 10", "Jahr 20", "Jahr 30"])
-    pwr = _dvec(p["pwr"])
+    pwr = Float64[v === missing ? NA : Float64(v) for v in p["pwr"]]   # PWR ohne volle Jahre: missing wie R NA (bisher MethodError)
     swr = if _istrue(obj["historical"])
         fin = pwr[.!isnan.(pwr)]
         if isempty(fin)
@@ -1968,7 +2174,9 @@ function _summary_wd(obj; probs = [0.05, 0.25, 0.5, 0.75, 0.95])
                  "mean_spending" => wq(p["mean_spending"]), "min_spending" => wq(p["min_spending"]),
                  "spending_drawdown" => wq(p["spending_drawdown"]), "ce_spending" => wq(p["ce_spending"]),
                  "spending_by_year" => sby, "taxes" => wq(p["taxes"]), "pwr" => wq(pwr), "swr" => swr,
-                 "probs" => probs, "start_value" => obj["start_value"], "tax_mode" => obj["tax_mode"], "gamma" => obj["gamma"];
+                 "probs" => probs, "start_value" => obj["start_value"], "tax_mode" => obj["tax_mode"], "gamma" => obj["gamma"],
+                 # Median der Erschöpfungsjahre als 0,5-Quantil (seit 1.6.4, A-004; bis 1.6.3 das mittlere Element von probs)
+                 "depletion_median" => any(.!succ) ? _wquantile(_dvec(p["depletion_year"])[.!succ], w[.!succ], [0.5])[1] : nothing;
                  class = "summary.SimLevWithdrawal")
 end
 
@@ -1993,7 +2201,7 @@ function _print_summary_wd(io::IO, x)
     print(io, _sp("  Erfolgsquote:     %.1f %% (Depot reicht für alle geplanten Entnahmen)\n", 100 * x["success_rate"]))
     print(io, _sp("  Kapitalerhalt:    %.1f %% (reales Endvermögen >= Start)\n", 100 * x["preserve_rate"]))
     if _get(x, "depletion") !== nothing
-        print(io, _sp("  Erschöpfung:      Median im Jahr %.0f (bei gescheiterten Pfaden)\n", _dvec(x["depletion"])[cld(length(probs), 2)]))
+        print(io, _sp("  Erschöpfung:      Median im Jahr %.0f (bei gescheiterten Pfaden)\n", x["depletion_median"]))
     end
     print(io, _sp("  %s: %.2f %% der Startsumme\n", _istrue(x["historical"]) ? "SWR historisch (min. PWR)" : "SWR (5-%-Quantil PWR)", x["swr"]))
     print(io, _sp("\n  %s%s\n", _fw("real, in Startkaufkraft"), hdr))
@@ -2021,6 +2229,7 @@ end
 "Fächer des realen Vermögens und des realen Jahreskonsums als SVG (R: `plot.SimLevWithdrawal`)."
 function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], width = 900, height = 380)
     probs = _dvec(probs)
+    isempty(probs) && chk_stop("fa.probs_leer", "plot")      # seit 1.6.4 (A-032; bis 1.6.3 BoundsError)
     w = _dvec(x["weights"])
     panels = Any[]
     # keep_paths = k < Pfade: Vermögensfächer mit den Gewichten der behaltenen Spalten, Konsum mit allen;
@@ -2096,9 +2305,11 @@ Laufzeiten bei wiederholten Aufrufen; mit `seed = nothing` je Aufruf andere, au�
   `"sample"` (siehe oben). Fehlende Pflichtparameter führen zu einem Fehler.
 - `years`: Laufzeit(en) in Jahren: feste Laufzeit (`fixed`), mögliche Laufzeiten (`discrete`) bzw. Stichprobe
   (`sample`). Bei `discrete` und `sample` ist auch ein einzelner Wert erlaubt (dann immer diese Laufzeit).
+  Seit 1.6.4 ganze Zahlen von 1 bis 100 (vorher wurden gebrochene Laufzeiten abgeschnitten).
 - `prob`: `discrete`: Wahrscheinlichkeiten je Eintrag von `years` (gleiche Länge, >= 0, Summe > 0; werden
   normiert).
 - `min`, `max`: Untere und obere Grenze in Jahren (`uniform`, `normal`, `triangular`); `min <= max`.
+  Seit 1.6.4 ganze Zahlen von 1 bis 100.
 - `mean`, `sd`: `normal`: Mittelwert und Standardabweichung in Jahren.
 - `mode`: `triangular`: häufigster Wert in Jahren.
 - `seed`: Startwert für die Ziehung der Laufzeiten (Standard 1; ganze Zahl mit |seed| < 2^53); der
@@ -2121,9 +2332,10 @@ SimLevWithdrawal-methods).
 - triangular: `min`, `mode`, `max` mit `min <= mode <= max`.
 - sample: `years`: eigene Stichprobe von Laufzeiten, aus der mit Zurücklegen gezogen wird.
 
-Gezogene Laufzeiten werden auf ganze Jahre gebracht (bei `normal` und `triangular` gerundet) und sind
+Gezogene Laufzeiten sind ganze Jahre (bei `normal` und `triangular` gerundet) und sind
 mindestens 1 Jahr. Laufzeiten über der Pfadlänge kürzt `withdrawal_simulation()` mit Warnung. Die
-Laufzeit-Parameter `years`, `min`, `max`, `mean` und `mode` müssen > 0 sein (sonst Fehler).
+Laufzeit-Parameter `years`, `min`, `max`, `mean` und `mode` müssen > 0 sein (sonst Fehler); seit 1.6.4
+sind `years`, `min` und `max` ganze Zahlen von 1 bis 100 (vorher abgeschnitten).
 
 # Beispiel
 ```julia
@@ -2135,7 +2347,9 @@ println(withdrawal_simulation(R, withdrawal_rule("constant"; rate = 4); inflatio
 """
 function withdrawal_horizon(type_pos = nothing; type = type_pos, type_ = type, years = nothing, prob = nothing, min = nothing, max = nothing,
                        mean = nothing, sd = nothing, mode = nothing, seed = 1)
-    t = _match_arg(type_, ("fixed", "uniform", "discrete", "normal", "triangular", "sample"))
+    t = _e3_match_arg(type_, ("fixed", "uniform", "discrete", "normal", "triangular", "sample"), "withdrawal_horizon", "type")
+    min, max, mean, sd, mode, seed = map(chk_scalar, (min, max, mean, sd, mode, seed))   # Länge 1 (Entscheidung 4)
+    t == "fixed" && (years = chk_scalar(years))
     need = Dict("fixed" => ["years"], "uniform" => ["min", "max"], "discrete" => ["years", "prob"],
                 "normal" => ["mean", "sd", "min", "max"], "triangular" => ["min", "mode", "max"], "sample" => ["years"])[t]
     given = Dict{String,Any}("years" => years, "prob" => prob, "min" => min, "max" => max, "mean" => mean, "sd" => sd, "mode" => mode)
@@ -2146,25 +2360,35 @@ function withdrawal_horizon(type_pos = nothing; type = type_pos, type_ = type, y
         multi = k == "prob" || (k == "years" && t in ("discrete", "sample"))
         a = _numvec(v)
         if a === nothing || isempty(a) || any(!isfinite, a) || (!multi && length(a) != 1)
-            _stop(@sprintf("withdrawal_horizon('%s'): %s muss %s sein (erhalten: %s).", t, k,
-                           multi ? "ein endlicher Zahlenvektor" : "eine endliche Zahl", _show(v)))
+            SimLev.chk_stop(multi ? "e2.zahlen_endlich" : "zahl", "withdrawal_horizon('$t')", k)
         end
     end
     for k in [k for k in need if k in ("years", "min", "max", "mean", "mode")]
         any(_numvec(given[k]) .<= 0) &&
-            _stop(@sprintf("withdrawal_horizon('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s).", t, k, _show(given[k])))
+            SimLev.chk_stop("ut2.laufzeit_pos", "withdrawal_horizon('$t')", k)
+    end
+    # seit 1.6.4: Laufzeiten in ganzen Jahren (Entscheidung 19; bis 1.6.3 still abgeschnitten) und höchstens 100 Jahre
+    # (Entscheidung 46)
+    fnt = "withdrawal_horizon('$t')"
+    for k in [k for k in need if k in ("years", "min", "max")]
+        if k == "years" && t in ("discrete", "sample")
+            SimLev.chk_intvec(_numvec(given[k]), fnt, k)
+        else
+            SimLev.chk_int1(given[k], fnt, k)
+        end
+        SimLev.chk_max(_numvec(given[k]), SimLev.SL_MAX_JAHRE, fnt, k)
     end
     if t == "discrete"
         yv, pv = _numvec(years), _numvec(prob)
         (length(yv) != length(pv) || any(pv .< 0) || _rsum(pv) <= 0) &&
             _stop("withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
     end
-    min !== nothing && max !== nothing && _f1(min) > _f1(max) && _stop("min <= max erforderlich.")
+    min !== nothing && max !== nothing && _f1(min) > _f1(max) && SimLev.chk_stop("rs.min_max", fnt)
     if t == "triangular" && (mode < min || mode > max)
-        _stop(_sp("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
+        SimLev.chk_stop("ut2.mode", "withdrawal_horizon('triangular')")
     end
-    t == "normal" && sd < 0 && _stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
-    seed === nothing || SimLev.SLib.check_seed(seed)          # ganze Zahl, |seed| < 2^53
+    t == "normal" && sd < 0 && SimLev.chk_stop("ut2.sd", "withdrawal_horizon('normal')")
+    seed === nothing || SimLev.SLib.check_seed(seed, "withdrawal_horizon")          # ganze Zahl, |seed| < 2^53
     out = RList("type" => t, "seed" => seed; class = "SimLevHorizon")
     for k in need
         out[k] = _rval(given[k])
@@ -2175,15 +2399,17 @@ end
 "`seq(a, b)` (Schritt 1)."
 function _seq_from_to(a, b)
     a = Float64(a); b = Float64(b)
-    n = Int(floor(b - a + 1e-10))
-    return Float64[a + i for i in 0:n]
+    # Anzahl wie R's `:` (seq_colon): (R_xlen_t)(|b - a| + 1 + FLT_EPSILON), seit 1.6.4 (A-054; bis 1.6.3
+    # floor(b - a + 1e-10) + 1, im Band knapp unter einer ganzen Zahl ein Wert weniger als R)
+    n = trunc(Int, abs(b - a) + 1 + 1.1920928955078125e-07)
+    return a <= b ? Float64[a + i for i in 0:n-1] : Float64[a - i for i in 0:n-1]
 end
 
 "Laufzeiten ziehen (R: `.draw_horizon`); ganzzahlig, mindestens 1."
 function _draw_horizon(h, n)
     n = Int(n)
     # Hauptstrom aus h["seed"]; "fixed" zieht nicht
-    rs = h["type"] == "fixed" ? nothing : SimLev.SLib.main_stream(_get(h, "seed"))
+    rs = h["type"] == "fixed" ? nothing : SimLev.SLib.main_stream(_get(h, "seed"), "withdrawal_horizon")
     function pick(x, prob = nothing)
         x = _dvec(x)
         ix = prob === nothing ? SimLev.SLib.sample(length(x), n; replace = true, stream = rs) :

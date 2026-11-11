@@ -23,9 +23,8 @@ von denen der R- und Python-Fassung. Mit denselben Kursdaten rechnen alle drei S
 
 ## 1 Daten
 
-`simulation()` erwartet eine Tabelle (`RFrame`, NamedTuple von Vektoren,
-`Dict`, `DataFrame` oder jede Tabelle mit `propertynames`/`getproperty`) mit
-einer Spalte `date` (`Date`, `DateTime`, Text `"JJJJ-MM-TT"` oder Tage seit
+`simulation()` erwartet eine Tabelle als `RFrame` (andere Tabellen wie
+NamedTuple, `Dict` oder `DataFrame` werden abgelehnt) mit einer Spalte `date` (`Date`, `DateTime`, Text `"JJJJ-MM-TT"` oder Tage seit
 1970-01-01) und je Asset einer Spalte mit dem **Kursniveau** (keine
 Renditen). Hebel, Dividenden und Finanzierungskosten werden nicht intern
 berechnet, sie müssen in der Kursreihe enthalten sein. Weitere Spalten
@@ -35,9 +34,8 @@ Hier erzeugen wir zehn Jahre synthetische Kurse für einen Aktien-ETF
 (`WORLD`), einen Anleihe-ETF (`BONDS`) und physisch hinterlegtes Gold
 (`GOLD`). Julias Zufallszahlen steuern nur diese Beispieldaten; den Zufall
 von SimLev selbst setzen `simlev_seed()` bzw. das Argument `seed`. Die
-Erweiterungen (Bootstrap, Optimierung u. a.) erwarten Tabellen als `RFrame`;
-deshalb wandelt `RFrame(pairs(nt)...)` das NamedTuple in ein `RFrame` um,
-das alle Funktionen nehmen.
+Funktionen erwarten Tabellen als `RFrame`; deshalb wandelt
+`RFrame(pairs(nt)...)` das NamedTuple in ein `RFrame` um.
 
 ```julia
 using SimLev, Dates, Random

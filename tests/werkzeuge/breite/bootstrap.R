@@ -282,7 +282,7 @@ case("bd_dates", paste0(BD_R, "bootstrap_data(b, 1, dates = as.Date('2001-01-01'
      jl = paste0(BD_J, 'result = bootstrap_data(b, 1; dates = Date(2001, 1, 1) .+ Day.([0, 1, 2, 5, 6, 7, 8, 9, 12]))'))
 case("bd_dates_chr", paste0(BD_R, "bootstrap_data(b$paths[[1]][1:3, ], dates = c('2020-01-01', '2020-01-02', '2020-01-05'))"),
      paste0(BD_P, "result = bootstrap_data(b['paths'][0].iloc[:3], dates=['2020-01-01', '2020-01-02', '2020-01-05'])"), I,
-     jl = paste0(BD_J, 'result = bootstrap_data(b["paths"][1][1:3, :]; dates = ["2020-01-01", "2020-01-02", "2020-01-05"])'))
+     jl = paste0(BD_J, 'p = b["paths"][1]; result = bootstrap_data(SL.NamedMat(p.data[1:3, :]; colnames = p.colnames); dates = ["2020-01-01", "2020-01-02", "2020-01-05"])'))
 case("bd_attr", "b <- bootstrap(dp, bootstrap_config(c(us = 'us'), aux = c(infl = 'infl', cpi = 'cpi', zins = 'zins'), input = 'prices', aux_type = c(infl = 'rate', cpi = 'level')), 'raw', n = 1, seed = 1, progress = FALSE, path_length = 4); x <- bootstrap_data(b, 1); list(x, attr(x, 'aux_type'))",
      "b = bootstrap(dp, bootstrap_config({'us': 'us'}, aux={'infl': 'infl', 'cpi': 'cpi', 'zins': 'zins'}, input='prices', aux_type={'infl': 'rate', 'cpi': 'level'}), method='raw', n=1, seed=1, progress=False, path_length=4); x = bootstrap_data(b, i=1); result = [x, x.attrs.get('aux_type')]", I,
      jl = 'b = bootstrap(dp, bootstrap_config((us = "us",), aux = (infl = "infl", cpi = "cpi", zins = "zins"), input = "prices", aux_type = (infl = "rate", cpi = "level")), "raw"; n = 1, seed = 1, progress = false, path_length = 4); x = bootstrap_data(b, 1); result = [x, get(SL.attrs(x), "aux_type", nothing)]')

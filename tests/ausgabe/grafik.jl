@@ -1,7 +1,8 @@
 # grafik.jl: SVG-Grafiken der Julia-Fassung (Dashboard, Grafik-API, Grafiken der Analyse- und
 # Erweiterungsmodule mit SimLevPlot.data). R zeichnet mit Basisgrafik, die Referenzfälle tests/<gruppe>/faelle
 # vergleichen keine Grafiken; die Objekte stammen aber aus den Referenzfällen, damit Python und Julia dieselben
-# Eingaben zeichnen (Gegenstück: python/tests/test_dashboard.py, test_output.py, test_plot_*.py).
+# Eingaben zeichnen (Gegenstück: tests/ausgabe/test_grafik.py; bis 1.4.0 python/tests/test_dashboard.py,
+# test_output.py, test_plot_*.py).
 # Inhalt wörtlich aus engine_tests.jl ("Dashboards") und api_tests.jl ("Grafik-API", "Grafiken der
 # Erweiterungsmodule", "Grafiken der Analysemodule") bis 1.4.0.
 # Erwartet: `using SimLev`, `using Test, Dates, Logging`.
@@ -24,7 +25,8 @@ _api_err(f) = try f(); "" catch e; e isa ErrorException ? e.msg : sprint(showerr
 
 @testset "Dashboards" begin
     n = 400
-    d = (date = days("2022-01-03", "2023-02-06"), A = collect(range(100, 130; length = n)), B = collect(range(100, 110; length = n)))
+    # seit 1.6.4 RFrame: simulation() nimmt nur Tabellen (Entscheidung 6; bis 1.6.3 NamedTuple)
+    d = RFrame("date" => days("2022-01-03", "2023-02-06"), "A" => collect(range(100, 130; length = n)), "B" => collect(range(100, 110; length = n)))
     r = simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 30), B = asset_config("etf", "bnh", 0.4, 0, 0)))
     dsh = plot_dashboard(r)
     @test dsh isa SimLevPlot && occursin("Monatsrenditen (%)", dsh.svg) && occursin("Kennzahlen", dsh.svg)
@@ -67,7 +69,7 @@ _api_err(f) = try f(); "" catch e; e isa ErrorException ? e.msg : sprint(showerr
     rows = SL._comparison_rows(r, r)
     @test D["comparison"]["label"] == [z.metric for z in rows] && D["comparison"]["diff"] == [z.diff for z in rows]
     @test D["comparison"]["value"] == [z.v1 for z in rows] && D["comparison"]["compare"] == [z.v2 for z in rows]
-    rs = simulation((date = d.date[1:3], A = d.A[1:3], B = d.B[1:3]), create_strategy(A = asset_config("etf", "bnh", 1, 0, 0)); io = devnull)
+    rs = simulation(RFrame("date" => d.date[1:3], "A" => d.A[1:3], "B" => d.B[1:3]), create_strategy(A = asset_config("etf", "bnh", 1, 0, 0)); io = devnull)
     ps = plot_dashboard(rs)
     @test occursin("Zu wenige Daten", ps.svg) && names(ps.data["distribution"]) == ["return"] && nrow(ps.data["distribution"]) == 0
     pn = with_logger(NullLogger()) do
@@ -83,22 +85,21 @@ end
 
 @testset "Grafik-API" begin
     n = 300
-    d = (date = collect(Date(2022, 1, 3):Day(1):Date(2022, 1, 3) + Day(n - 1)),
-         A = collect(range(100, 130; length = n)), B = collect(range(100, 110; length = n)))
+    d = RFrame("date" => collect(Date(2022, 1, 3):Day(1):Date(2022, 1, 3) + Day(n - 1)),   # RFrame seit 1.6.4
+               "A" => collect(range(100, 130; length = n)), "B" => collect(range(100, 110; length = n)))
     r = simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 30), B = asset_config("etf", "bnh", 0.4, 0, 0)); io = devnull)
     dir = mktempdir()
     cd(dir) do
-        x, ws = _api_warns(() -> r_plot(r; style = "compact", colour = "red"))
-        @test x isa SimLevPlot
-        @test ws == ["plot.SimLevResult: unbekanntes Argument 'colour' wird ignoriert (Tippfehler?)."]
+        # seit 1.6.4 (K42 E5, Entscheidung 57) sind unbekannte Argumente wie in R ein Fehler (bis 1.6.3 eine Warnung)
+        @test _api_err(() -> r_plot(r; style = "compact", colour = "red")) ==
+              "plot.SimLevResult: unbekanntes Argument 'colour'."
         @test isempty(readdir(dir))                       # kein stilles Rplots.svg
         @test r_plot(r; file = "a.svg") isa SimLevPlot
         @test isfile("a.svg")
         @test occursin("nur als SVG", _api_err(() -> r_plot(r; file = "a.png")))
         @test !isfile("a.png")
         @test plot_dashboard(r; file = "b.svg") isa SimLevPlot && isfile("b.svg")
-        _, ws = _api_warns(() -> plot_dashboard(r; widht = 3))
-        @test ws == ["plot_dashboard: unbekanntes Argument 'widht' wird ignoriert (Tippfehler?)."]
+        @test _api_err(() -> plot_dashboard(r; widht = 3)) == "plot.SimLevResult: unbekanntes Argument 'widht'."
         @test occursin("die Endung '.pdf'", _api_err(() -> export_dashboard(r, "c.pdf")))
         @test !isfile("c.pdf")
         redirect_stderr(devnull) do
@@ -118,9 +119,9 @@ end
                        _api_err(() -> r_plot(r; file = "a.png")))
         @test occursin("plot_dashboard: file muss ein Dateiname (Zeichenkette) sein", _api_err(() -> plot_dashboard(r; file = 3)))
         @test sort(readdir(dir)) == ["a.svg", "b.svg", "c.svg", "w.svg"]
-        # Rahmen: Zeichenfunktion liefert (svg, data), String oder SimLevPlot
+        # Rahmen: Zeichenfunktion liefert (svg, data) oder SimLevPlot (seit 1.6.4 ohne den Übergang „nur String“)
         f1(x; a = 1, width = 100) = ("<svg>$a $width</svg>", RList("wealth" => RFrame("year" => [1, 2], "q50" => [x, x])))
-        f2(x) = "<svg/>"
+        f2(x) = ("<svg/>", RList())
         f3(x) = SimLevPlot("<svg>o</svg>")
         f4(x) = 42
         m1 = _SL._plot_method(f1, "Dummy")

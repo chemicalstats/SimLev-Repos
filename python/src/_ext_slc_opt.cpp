@@ -57,6 +57,26 @@ static PyObject *slc_opt_wsize(PyObject *self, PyObject *args)
     return PyLong_FromLongLong((long long) sl_opt_wsize(m, n));
 }
 
+/* seit 1.6.4 (B-028): maxit/maxfev nur im Bereich von int umwandeln (bis 1.6.3 undefiniert ab 2^31) */
+static int ctrl_int_ok(double a, double b)
+{
+    if (a >= -2147483648.0 && a <= 2147483647.0 && b >= -2147483648.0 && b <= 2147483647.0) return 1;
+    PyErr_SetString(PyExc_ValueError, "interner Fehler: maxit/maxfev ausserhalb des Bereichs von int");
+    return 0;
+}
+
+/* seit 1.6.4 (B-029): Arbeitsfeld mindestens so lang wie sein Kopf und wie fuer BFGS mit seiner Dimension (wie die
+ * R-Huelle check_ws); bis 1.6.3 las sl_opt_dim auch aus zu kurzen Feldern */
+static int ws_ok(const Py_buffer *ws)
+{
+    const Py_ssize_t len = NDBL(*ws);
+    if (len >= 64 && sl_opt_dim((const double *) ws->buf) >= 1 &&
+        len >= sl_opt_wsize(SL_OPT_BFGS, sl_opt_dim((const double *) ws->buf)))
+        return 1;
+    PyErr_SetString(PyExc_ValueError, "interner Fehler: Arbeitsfeld des Optimierers ungueltig");
+    return 0;
+}
+
 /* slc_opt_init(ws, method, x0, lo|None, hi|None, (maxit, maxfev, reltol, gtol, xtol, fnscale),
  *              parscale|None, have_grad) */
 static PyObject *slc_opt_init(PyObject *self, PyObject *args)
@@ -74,6 +94,7 @@ static PyObject *slc_opt_init(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "OiOOO(dddddd)Op", &ows, &m, &ox, &olo, &ohi, &c_maxit, &c_maxfev, &c.reltol,
                           &c.gtol, &c.xtol, &c.fnscale, &ops, &have_grad))
         return NULL;
+    if (!ctrl_int_ok(c_maxit, c_maxfev)) return NULL;   /* seit 1.6.4 (B-028) */
     c.maxit = (int) c_maxit;
     c.maxfev = (int) c_maxfev;
     if (dbuf(ox, &x, 0, -1, "par") < 0) return NULL;
@@ -108,11 +129,7 @@ static PyObject *slc_opt_ask(PyObject *self, PyObject *args)
     (void) self;
     if (!PyArg_ParseTuple(args, "OO", &ows, &ox)) return NULL;
     if (dbuf(ows, &ws, 1, -1, "Arbeitsfeld") < 0) return NULL;
-    if (sl_opt_dim((const double *) ws.buf) < 1) {
-        PyBuffer_Release(&ws);
-        PyErr_SetString(PyExc_ValueError, "interner Fehler: Arbeitsfeld des Optimierers ungueltig");
-        return NULL;
-    }
+    if (!ws_ok(&ws)) { PyBuffer_Release(&ws); return NULL; }
     if (dbuf(ox, &x, 1, sl_opt_dim((const double *) ws.buf), "x") < 0) { PyBuffer_Release(&ws); return NULL; }
     ctx_init(&cx);
     rc = sl_opt_ask(&cx, (const double *) ws.buf, (double *) x.buf, &need);
@@ -133,11 +150,7 @@ static PyObject *slc_opt_tell(PyObject *self, PyObject *args)
     (void) self;
     if (!PyArg_ParseTuple(args, "OdO", &ows, &f, &og)) return NULL;
     if (dbuf(ows, &ws, 1, -1, "Arbeitsfeld") < 0) return NULL;
-    if (sl_opt_dim((const double *) ws.buf) < 1) {
-        PyBuffer_Release(&ws);
-        PyErr_SetString(PyExc_ValueError, "interner Fehler: Arbeitsfeld des Optimierers ungueltig");
-        return NULL;
-    }
+    if (!ws_ok(&ws)) { PyBuffer_Release(&ws); return NULL; }
     if ((hg = obuf(og, &g, sl_opt_dim((const double *) ws.buf), "Gradient", &pg)) < 0) { PyBuffer_Release(&ws); return NULL; }
     ctx_init(&cx);
     rc = sl_opt_tell(&cx, (double *) ws.buf, f, pg);
@@ -157,11 +170,7 @@ static PyObject *slc_opt_result(PyObject *self, PyObject *args)
     (void) self;
     if (!PyArg_ParseTuple(args, "OO", &ows, &ox)) return NULL;
     if (dbuf(ows, &ws, 0, -1, "Arbeitsfeld") < 0) return NULL;
-    if (sl_opt_dim((const double *) ws.buf) < 1) {
-        PyBuffer_Release(&ws);
-        PyErr_SetString(PyExc_ValueError, "interner Fehler: Arbeitsfeld des Optimierers ungueltig");
-        return NULL;
-    }
+    if (!ws_ok(&ws)) { PyBuffer_Release(&ws); return NULL; }
     if (dbuf(ox, &x, 1, sl_opt_dim((const double *) ws.buf), "x") < 0) { PyBuffer_Release(&ws); return NULL; }
     sl_opt_result((const double *) ws.buf, (double *) x.buf, &f, &code, &iter, &nfev, &ngev);
     sl_opt_info((const double *) ws.buf, &reason, &ntot);
@@ -208,6 +217,7 @@ static PyObject *slc_opt_minimize_test(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "iiOOO(dddddd)Op", &id, &m, &ox, &olo, &ohi, &c_maxit, &c_maxfev, &c.reltol,
                           &c.gtol, &c.xtol, &c.fnscale, &ops, &use_grad))
         return NULL;
+    if (!ctrl_int_ok(c_maxit, c_maxfev)) return NULL;   /* seit 1.6.4 (B-028) */
     c.maxit = (int) c_maxit;
     c.maxfev = (int) c_maxfev;
     if (dbuf(ox, &x, 1, -1, "par") < 0) return NULL;

@@ -14,7 +14,6 @@
 //   .min_cvar_core      minimaler CVaR
 //   .min_cdar_core      minimaler Conditional Drawdown at Risk
 //   .quantile_reg_core  lineare Quantilsregression
-//   .hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
 //   .hmm_em_core        Baum-Welch-EM aus einem Startwert (seit 1.5.0)
 //   .goal_dp            Rueckwaertsrekursion von planning_goal() (seit 1.5.0)
 //   .pbo_cscv           Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0)
@@ -32,8 +31,15 @@
 #include "wrapper_core_impl.h"
 #include <vector>
 
+// seit 1.6.4 (B-029): Laengen wie die Python-Huelle pruefen (bis 1.6.3 las der Kern bei zu kurzen Feldern dahinter)
+static void need_len(R_xlen_t got, R_xlen_t want, const char* fn, const char* what) {
+  if (got != want) sl::stop("%s: '%s' muss die Laenge %ld haben (hat %ld).", fn, what, (long) want, (long) got);
+}
+
 static SEXP proj_box_simplex_r(sl::NumVec v, sl::NumVec lo, sl::NumVec hi) {
   const int n = v.size();
+  need_len(lo.size(), n, "proj_box_simplex", "lo");
+  need_len(hi.size(), n, "proj_box_simplex", "hi");
   sl::NumVec out = sl::new_num(n);
   simlev::proj_box_simplex(v.begin(), lo.begin(), hi.begin(), n, out.begin());
   return out.sexp;
@@ -63,6 +69,10 @@ extern "C" SEXP C_qp_box_simplex(SEXP s_Q, SEXP s_cvec, SEXP s_lo, SEXP s_hi, SE
     double L = sl::as_double(s_L);
     int maxit = sl::as_int(s_maxit);
     double tol = sl::as_double(s_tol);
+    const char* fn = "qp_box_simplex";
+    if (Q.nrow() < Q.ncol()) sl::stop("%s: 'Q' braucht mindestens so viele Zeilen wie Spalten.", fn);
+    need_len(cvec.size(), Q.ncol(), fn, "cvec"); need_len(lo.size(), Q.ncol(), fn, "lo");
+    need_len(hi.size(), Q.ncol(), fn, "hi"); need_len(w0.size(), Q.ncol(), fn, "w0");
     return simlev::qp_box_simplex(Q, cvec, lo, hi, w0, L, maxit, tol);
   });
 }
@@ -78,6 +88,9 @@ extern "C" SEXP C_min_cvar_core(SEXP s_R, SEXP s_alpha, SEXP s_lo, SEXP s_hi, SE
     double zeta0 = sl::as_double(s_zeta0);
     sl::NumVec scales = sl::num_vec(s_scales);
     int maxit = sl::as_int(s_maxit);
+    const char* fn = "min_cvar_core";
+    need_len(lo.size(), R.ncol(), fn, "lo"); need_len(hi.size(), R.ncol(), fn, "hi");
+    need_len(w0.size(), R.ncol(), fn, "w0");
     return simlev::min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit);
   });
 }
@@ -89,6 +102,7 @@ extern "C" SEXP C_min_cdar_core(SEXP s_R, SEXP s_alpha, SEXP s_lo, SEXP s_hi, SE
     sl::NumVec lo = sl::num_vec(s_lo);
     sl::NumVec hi = sl::num_vec(s_hi);
     int iters = sl::as_int(s_iters);
+    need_len(lo.size(), R.ncol(), "min_cdar_core", "lo"); need_len(hi.size(), R.ncol(), "min_cdar_core", "hi");
     return simlev::min_cdar_core(R, alpha, lo, hi, iters);
   });
 }
@@ -103,16 +117,8 @@ extern "C" SEXP C_quantile_reg_core(SEXP s_y, SEXP s_X, SEXP s_tau, SEXP s_beta0
     double sc = sl::as_double(s_sc);
     double tol = sl::as_double(s_tol);
     int maxit = sl::as_int(s_maxit);
+    need_len(y.size(), X.nrow(), "quantile_reg_core", "y"); need_len(beta0.size(), X.ncol(), "quantile_reg_core", "beta0");
     return simlev::quantile_reg_core(y, X, tau, beta0, sc, tol, maxit);
-  });
-}
-
-extern "C" SEXP C_hmm_forward_backward(SEXP s_B, SEXP s_A, SEXP s_p0) {
-  return sl::call([&]() {
-    sl::NumMat B = sl::num_mat(s_B);
-    sl::NumMat A = sl::num_mat(s_A);
-    sl::NumVec p0 = sl::num_vec(s_p0);
-    return simlev::hmm_forward_backward(B, A, p0);
   });
 }
 
@@ -151,7 +157,16 @@ extern "C" SEXP C_goal_dp(SEXP s_R, SEXP s_grid, SEXP s_cf, SEXP s_goal, SEXP s_
     if (S < 1 || K < 1 || ng < 2 || h < 1 || tie.size() != K) sl::stop("goal_dp: Abmessungen passen nicht");
     sl::NumVec stat = sl::new_num(K);
     sl::NumMat value = sl::new_mat(ng, h + 1);
-    SEXP pol = sl::keep(Rf_allocMatrix(INTSXP, h, ng));
+    // seit 1.6.4 (K43 T1-B2) ueber sl::alloc (Groesse h x ng vom Aufrufer) und dim unter rcall wie sl::new_mat
+    SEXP pol = sl::alloc(INTSXP, (R_xlen_t) h * (R_xlen_t) ng);
+    sl::rcall([&]() {
+      SEXP dim = PROTECT(Rf_allocVector(INTSXP, 2));
+      INTEGER(dim)[0] = h;
+      INTEGER(dim)[1] = ng;
+      Rf_setAttrib(pol, R_DimSymbol, dim);
+      UNPROTECT(1);
+      return R_NilValue;
+    });
     double p_dp = 0.0;
     const int64_t nc = simlev::goal_dp(S, K, R.ptr, ng, grid.ptr, h, cf.ptr, sl::as_double(s_goal), sl::as_double(s_wmin),
                                        sl::as_double(s_wmax), sl::as_double(s_sv), tie.ptr, stat.ptr, INTEGER(pol),
@@ -172,6 +187,8 @@ extern "C" SEXP C_pbo_cscv(SEXP s_B, SEXP s_T, SEXP s_combos, SEXP s_half, SEXP 
       sl::stop("pbo_cscv: Abmessungen passen nicht");
     const int C = (int) (cb.size() / (S / 2));
     for (R_xlen_t i = 0; i < cb.size(); i++) if (cb[i] < 1 || cb[i] > S) sl::stop("pbo_cscv: Block ausserhalb 1..%d", S);
+    // seit 1.6.4 (B-030): metric 0 bis 3 wie die Julia-Huelle (bis 1.6.3 rechnete ein anderer Wert still wie "mean")
+    if (sl::as_int(s_metric) < 0 || sl::as_int(s_metric) > 3) sl::stop("pbo_cscv: metric muss 0, 1, 2 oder 3 sein");
     sl::NumVec lam = sl::new_num(C), isb = sl::new_num(C), oosb = sl::new_num(C), oosm = sl::new_num(C);
     simlev::pbo_cscv(S, N, C, B.ptr, T.ptr, cb.ptr, sl::as_double(s_half), sl::as_int(s_metric), lam.ptr, isb.ptr, oosb.ptr,
                      oosm.ptr);
@@ -226,6 +243,7 @@ extern "C" SEXP C_kendall_tau_core(SEXP s_x, SEXP s_y) {
   return sl::call([&]() {
     sl::NumVec x = sl::num_vec(s_x);
     sl::NumVec y = sl::num_vec(s_y);
+    need_len(y.size(), x.size(), "kendall_tau_core", "y");   // seit 1.6.4 (B-029)
     return sl::wrap(simlev::kendall_tau_core(x, y));
   });
 }
@@ -235,6 +253,7 @@ extern "C" SEXP C_roll_cov_core(SEXP s_x, SEXP s_y, SEXP s_n) {
     sl::NumVec x = sl::num_vec(s_x);
     sl::NumVec y = sl::num_vec(s_y);
     int n = sl::as_int(s_n);
+    need_len(y.size(), x.size(), "roll_cov_core", "y");   // seit 1.6.4 (B-029)
     return simlev::roll_cov_core(x, y, n);
   });
 }

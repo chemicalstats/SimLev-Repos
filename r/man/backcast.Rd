@@ -41,13 +41,14 @@ echten Kurse an allen Beobachtungstagen).}
 
 \item{rebase}{\code{NULL} (Standard; Produkteinheiten, echte Kurse bleiben
 erhalten) oder Startwert der Reihe am ersten Indextag, z. B. 100
-(\code{value} und \code{model} werden skaliert, \code{product} nicht).}
+(\code{value} und \code{model} werden skaliert, \code{product} nicht). Seit 1.6.4 eine Zahl > 0.}
 
 \item{...}{Bei \code{fit = NULL}: Argumente wie in \code{\link[=backcast_fit]{backcast_fit()}}
 (\code{product}, \code{index} als Pflicht; \code{ter} (Standard 0),
 \code{leverage} (1), \code{rate} (\code{NULL} = 0), \code{fx},
 \code{rate_lag}, \code{ter_basis}, \code{rate_basis}, \code{accrual},
-\code{index_fill}, \code{lag}; \code{model} nur "structural").}
+\code{index_fill}, \code{lag}; \code{model} nur "structural").
+Seit 1.6.4 mit \code{fit} nicht erlaubt (die Angaben stammen aus dem Fit).}
 }
 \value{
 data.frame der Klasse \code{c("SimLevBackcast", "data.frame")} mit

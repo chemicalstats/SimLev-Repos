@@ -215,6 +215,10 @@ static const double TBLD_[28] = {1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e
 
 int sl_r_scientific(double r, int digits, int *kpower, int *nsig)
 {
+    /* seit 1.6.4 (C-012): digits auf 1 ... 28 (Laenge der Tabellen) geklemmt; bis 1.6.3 las TBL_[digits - 1] bei
+     * digits 0, < 0 oder > 28 ausserhalb. Die Huellen lehnen digits ausserhalb 1 ... 22 wie R ab. */
+    if (digits < 1) digits = 1;
+    if (digits > 28) digits = 28;
     int kp = (int) floor(log10(r)) - digits + 1;
     ldouble rp = (ldouble) r;
     if (kp >= -27 && kp <= 27) {

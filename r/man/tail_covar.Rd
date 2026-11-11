@@ -23,7 +23,7 @@ tail_covar(
 \item{assets}{Zeichenvektor der Kursspalten der einzelnen Anlagen.}
 
 \item{state}{Optionaler Zeichenvektor der Zustandsspalten (in ihrer
-eigenen Einheit). \code{NULL} (Standard) = zeitkonstante Quantile.}
+eigenen Einheit). \code{NULL} (Standard) = zeitkonstante Quantile. Seit 1.6.4 keine Spalte aus system oder assets.}
 
 \item{q}{Quantil als Anteil (Standard 0.05 = 5-\%-Quantil).}
 

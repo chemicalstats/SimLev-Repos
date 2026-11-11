@@ -134,28 +134,44 @@
 signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bins = 5L, breaks = NULL,
                             signal2 = NULL, bins2 = 3L, splits = 1L, degree = 2L) {
   if (!is.data.frame(data) || !"date" %in% names(data)) stop("signal_analysis: data muss ein data.frame mit Spalte 'date' sein.")
+  chk_col_nofactor(data, "date", "signal_analysis")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   n <- nrow(data); d <- .to_date(data$date, "signal_analysis: data$date")
-  getcol <- function(v, what) {
+  # seit 1.6.4: Spalten logisch oder numerisch (target numerisch; vorher Faktor-Codes bzw. Text als NA), Vektoren
+  # numerisch oder logisch (kein Faktor, keine Liste)
+  getcol <- function(v, what, type = "logisch_oder_numerisch") {
     if (is.character(v)) {
       if (length(v) != 1L || !v %in% names(data))
         stop(sprintf("signal_analysis: %s: Spalte '%s' fehlt in data (vorhanden: %s).", what, v[1], paste(names(data), collapse = ", ")))
+      chk_col_nofactor(data, v, "signal_analysis")   # Entscheidung 15
+      chk_col_type(data, v, "signal_analysis", type)
       return(as.numeric(data[[v]]))
     }
+    chk_nofactor(v, "signal_analysis", what)   # Entscheidung 15
+    if (!(is.numeric(v) || is.logical(v)) || !is.null(dim(v)))
+      chk_stop("e2.spalte_oder_vektor", "signal_analysis", what)
     if (length(v) != n) stop(sprintf("signal_analysis: %s hat L\u00e4nge %d, data hat %d Zeilen.", what, length(v), n))
     as.numeric(v)
   }
   sig <- getcol(signal, "signal")
   if (!is.character(target) || length(target) != 1L) stop("signal_analysis: target muss ein Spaltenname sein.")
-  px <- getcol(target, "target")
+  px <- getcol(target, "target", "numerisch")
   s2all <- if (!is.null(signal2)) getcol(signal2, "signal2") else NULL
   # zeitlich sortieren, doppelte Daten (letzter Wert) entfernen
   o <- order(d); o <- o[!is.na(d[o])]; dup <- duplicated(d[o], fromLast = TRUE)
   if (any(dup)) message(sprintf("Hinweis: signal_analysis: %d doppelte Daten; der letzte Wert je Datum wird verwendet.", sum(dup)))
   o <- o[!dup]; d <- d[o]; sig <- sig[o]; px <- px[o]; if (!is.null(s2all)) s2all <- s2all[o]; n <- length(o)
   px <- .fill_na(px, "locf", keep_leading = TRUE)
+  # seit 1.6.4: ganze Zahlen (vorher z. B. 2.5 und "21" still mit as.integer), Meldung ohne Eingabewert
+  int1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v) && v == trunc(v)
+  if (!int1(horizon)) chk_stop("ganz", "signal_analysis", "horizon", "1")
+  if (!is.null(step) && !(int1(step) && step >= 1)) stop("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
+  if (!(int1(bins) && bins >= 2)) stop("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+  chk_int1(bins2, "signal_analysis", "bins2", lo = 2)
+  chk_int1(splits, "signal_analysis", "splits")
+  chk_int1(degree, "signal_analysis", "degree", lo = 0)
   horizon <- as.integer(horizon); step <- as.integer(step %||% horizon)
   if (length(horizon) != 1L || is.na(horizon) || horizon < 1L || horizon >= n)
-    stop(sprintf("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen (ist: %s).", n - 1L, format(horizon)))
+    stop(sprintf("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen.", n - 1L))
   if (length(step) != 1L || is.na(step) || step < 1L) stop("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
   if (!is.null(breaks) && (!is.numeric(breaks) || length(breaks) < 3L || anyNA(breaks) || is.unsorted(breaks, strictly = TRUE)))
     stop("signal_analysis: breaks braucht mindestens 3 streng aufsteigende Grenzen (erste und letzte werden zu -Inf und Inf), z. B. c(-Inf, 0, Inf).")
@@ -168,7 +184,7 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
   df <- df[stats::complete.cases(df), , drop = FALSE]
   if (nrow(df) < 20) stop(sprintf("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorw\u00e4rtsrendite.", nrow(df)))
   if (length(unique(df$signal)) < 2L)
-    stop(sprintf("signal_analysis: Signal ist an allen Stichtagen gleich (%g); keine Bereiche m\u00f6glich.", df$signal[1]))
+    stop("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche m\u00f6glich.")
   ppy <- (n - 1) / (as.numeric(d[n] - d[1]) / 365.25)
   ann <- function(m) .pow1m(m, ppy / horizon)
   cutb <- function(v, k, br) {
@@ -179,8 +195,8 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
     cut(v, br, include.lowest = TRUE, right = FALSE)
   }
   df$bin <- cutb(df$signal, bins, breaks)
-  st <- function(z) c(n = length(z), mean = mean(z), median = stats::median(z), win_rate = mean(z > 0),
-                      sd = stats::sd(z), t = mean(z) / (stats::sd(z) / sqrt(length(z))))
+  st <- function(z) { m <- mean(z); s <- .sl_sd(z)
+    c(n = length(z), mean = m, median = stats::median(z), win_rate = mean(z > 0), sd = s, t = m / (s / sqrt(length(z)))) }
   tab <- do.call(rbind, lapply(split(df, df$bin), function(z) if (nrow(z)) data.frame(
     bin = as.character(z$bin[1]), from = min(z$signal), to = max(z$signal), t(st(z$forward)), annualized = ann(mean(z$forward)),
     check.names = FALSE) else NULL))
@@ -306,6 +322,7 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #'   97.5-%-Quantil der Bootstrap-Differenzen).
 #' @param B Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur
 #'   bei \code{method = "bootstrap"}.
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps in Perioden
 #'   (geometrisch verteilte Blocklaengen, Bloecke laufen zyklisch ueber das
 #'   Ende); \code{NULL} (Standard) = \code{max(2, round(T^(1/3)))} mit
@@ -349,11 +366,19 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #' @export
 sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c("hac", "bootstrap"),
                         B = 2000L, block = NULL, ppy = NULL, seed = NULL) {
+  .e5_choice(frequency, c("week", "day", "month"), "sharpe_test", "frequency")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
+  .e5_choice(method, c("hac", "bootstrap"), "sharpe_test", "method")
   frequency <- match.arg(frequency); method <- match.arg(method)
+  # seit 1.6.4: B, block, ppy und seed vor der Rechnung
+  chk_int1(B, "sharpe_test", "B")
+  chk_max(B, SL_MAX_N, "sharpe_test", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
+  chk_num1(block, "sharpe_test", "block", lo = 1, null_ok = TRUE)
+  chk_num1(ppy, "sharpe_test", "ppy", lo = 0, lo_open = TRUE, null_ok = TRUE)
+  if (!is.null(seed)) .sl_check_seed(seed, "sharpe_test")
   a <- .ret_from(x, frequency); b <- .ret_from(y, frequency)
   if (is.null(a$date) != is.null(b$date))
     stop("sharpe_test: x und y m\u00fcssen dieselbe Art sein: beide Renditevektoren oder beide Kursreihen/Ergebnisse (data.frame bzw. SimLevResult).")
-  if (!is.null(a$date) && !is.null(b$date)) {
+  if (!is.null(a$date)) {                                         # dann auch b$date (Pruefung oben)
     common <- intersect(as.numeric(a$date), as.numeric(b$date))
     ra <- a$r[match(common, as.numeric(a$date))]; rb <- b$r[match(common, as.numeric(b$date))]
     ppy <- ppy %||% ((length(common) - 1) / (diff(range(common)) / 365.25))
@@ -364,9 +389,9 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
   }
   ok <- is.finite(ra) & is.finite(rb); ra <- ra[ok]; rb <- rb[ok]; Tn <- length(ra)
   if (Tn < 10) stop(sprintf("sharpe_test: zu wenige gemeinsame Renditepaare (%d, mindestens 10).", Tn))
-  for (k in c("x", "y")) if (stats::sd(if (k == "x") ra else rb) == 0)
+  for (k in c("x", "y")) if (.sl_sd(if (k == "x") ra else rb) == 0)
     stop(sprintf("sharpe_test: Renditen von %s haben die Varianz 0; die Sharpe Ratio ist nicht definiert.", k))
-  sr <- function(r) mean(r) / stats::sd(r)
+  sr <- function(r) mean(r) / .sl_sd(r)
   d0 <- sr(ra) - sr(rb)
   if (identical(ra, rb))                                      # identische Reihen: kein Unterschied, kein Test noetig
     return(c(sharpe_x = sr(ra) * sqrt(ppy), sharpe_y = sr(rb) * sqrt(ppy), difference = 0, se = 0, z = 0, p_value = 1,
@@ -380,9 +405,9 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
     z <- d0 / se; p <- 2 * .sl_pnorm(-abs(z)); ci <- d0 + c(-1, 1) * .sl_qnorm(0.975) * se
   } else {
     block <- block %||% max(2, round(Tn^(1 / 3)))
-    S <- .sl_main_stream(seed)                                  # Hauptstrom
+    S <- .sl_main_stream(seed, "sharpe_test")                                  # Hauptstrom
     db <- vapply(seq_len(B), function(i) { k <- .sl_boot_idx_stationary(Tn, Tn, block, stream = S); sr(ra[k]) - sr(rb[k]) }, 0)
-    se <- stats::sd(db); z <- d0 / se; p <- mean(abs(db - d0) >= abs(d0))
+    se <- .sl_sd(db); z <- d0 / se; p <- mean(abs(db - d0) >= abs(d0))
     ci <- stats::quantile(db, c(0.025, 0.975), names = FALSE)
   }
   k <- sqrt(ppy)
@@ -427,6 +452,7 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
 #'   Benchmark-Renditen als Anteil mit genau einem Wert je Periode nach
 #'   Aggregation und Entfernen unvollstaendiger Zeilen.
 #' @param B Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 999).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps in Perioden
 #'   (geometrisch verteilte Blocklaengen, zyklisch); \code{NULL} (Standard) =
 #'   \code{max(2, round(T^(1/3)))} mit \eqn{T} = Anzahl Perioden.
@@ -475,31 +501,43 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
 #' @export
 overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, frequency = c("week", "day", "month"),
                           dates = NULL, seed = NULL) {
+  .e5_choice(frequency, c("week", "day", "month"), "overfit_reality_check", "frequency")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   frequency <- match.arg(frequency)
+  # seit 1.6.4: benchmark nur Zahl(en) oder Name (vorher Faktor als Codes), Spaltennummer ganz; B, block, seed vorab
+  chk_nofactor(benchmark, "overfit_reality_check", "benchmark")   # Entscheidung 15
+  if (!is.null(benchmark) && (!length(benchmark) || !is.null(dim(benchmark)) ||
+                              !(is.numeric(benchmark) || (is.character(benchmark) && length(benchmark) == 1L))))
+    chk_stop("e2.benchmark", "overfit_reality_check")
+  chk_int1(B, "overfit_reality_check", "B")
+  chk_max(B, SL_MAX_N, "overfit_reality_check", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
+  chk_num1(block, "overfit_reality_check", "block", lo = 1, null_ok = TRUE)
+  if (!is.null(seed)) .sl_check_seed(seed, "overfit_reality_check")
   rr <- .of_returns(x, frequency, dates); R <- rr$R
   if (is.null(benchmark)) b <- rep(0, nrow(R))
   else if (length(benchmark) == 1L) {
-    j <- if (is.character(benchmark)) match(benchmark, colnames(R)) else as.integer(benchmark)
+    j <- if (is.character(benchmark)) match(benchmark, colnames(R)) else if (is.finite(benchmark) && benchmark == trunc(benchmark)) as.integer(benchmark) else NA
     if (is.na(j) || j < 1 || j > ncol(R)) stop("benchmark: unbekannte Spalte.")
     b <- R[, j]; R <- R[, -j, drop = FALSE]
   } else b <- as.numeric(benchmark)
-  if (length(b) != nrow(R)) stop("benchmark passt nicht zur L\u00e4nge der Renditen.")
+  if (length(b) != nrow(R)) chk_stop("rs.benchmark_laenge", "overfit_reality_check")
   D <- R - b; Tn <- nrow(D); K <- ncol(D)
   fbar <- colMeans(D)
   block <- block %||% max(2, round(Tn^(1 / 3)))
-  S <- .sl_main_stream(seed)                                    # Hauptstrom
+  S <- .sl_main_stream(seed, "overfit_reality_check")                                    # Hauptstrom
   # colMeans(D[idx, , drop = FALSE]) ohne die Zeilenkopie (seit 1.6.3 Kern sl_r_colsums_idx, gleiche Summanden in
   # gleicher Folge wie colMeans; D ist eine double-Matrix (R - b); Ergebnis ohne Namen, die matrix() unten verwirft)
   Fb <- vapply(seq_len(B), function(i) .Call(C_sl_r_colsums_idx, D, .sl_boot_idx_stationary(Tn, Tn, block, stream = S),
                                              FALSE, TRUE), numeric(K))
   Fb <- matrix(Fb, nrow = B, ncol = K, byrow = TRUE)          # B x K, auch bei einem Kandidaten (vapply liefert dann einen Vektor)
-  om <- pmax(apply(Fb, 2, stats::sd), 1e-12) * sqrt(Tn)
+  om <- pmax(apply(Fb, 2, .sl_sd), 1e-12) * sqrt(Tn)
   V <- max(sqrt(Tn) * fbar)
-  Vb <- apply(sqrt(Tn) * sweep(Fb, 2, fbar), 1, max)
+  # Zeilenmaxima seit 1.6.4 ueber pmax statt apply je Zeile (B-109); die Maxima gehen nur in Vergleiche ein (NA wie NaN)
+  Vb <- do.call(pmax, unname(as.data.frame(sqrt(Tn) * sweep(Fb, 2, fbar))))
   p_rc <- mean(Vb >= V)
   Tspa <- max(max(sqrt(Tn) * fbar / om), 0)
   thr <- -sqrt(om^2 / Tn * 2 * log(log(Tn)))
-  spa_p <- function(g) { Z <- sweep(Fb, 2, g); Ts <- apply(sweep(sqrt(Tn) * Z, 2, om, "/"), 1, function(z) max(max(z), 0)); mean(Ts >= Tspa) }
+  spa_p <- function(g) { Z <- sweep(Fb, 2, g)
+    Ts <- do.call(pmax, c(unname(as.data.frame(sweep(sqrt(Tn) * Z, 2, om, "/"))), list(0))); mean(Ts >= Tspa) }
   structure(list(p_rc = p_rc, p_spa = spa_p(fbar * (fbar >= thr)), p_spa_lower = spa_p(pmax(fbar, 0)), p_spa_upper = spa_p(fbar),
                  best = colnames(D)[which.max(fbar)] %||% which.max(fbar), mean_excess = fbar, n = Tn, k = K, B = B),
             class = "SimLevRealityCheck")
@@ -535,6 +573,8 @@ print.SimLevRealityCheck <- function(x, ...) {
 #'   [result_index()]) oder \code{data.frame} mit \code{date} und einer
 #'   Wertspalte (\code{value}, sonst erste numerische Spalte; Niveaus). Die
 #'   beiden letzten werden in Renditen der \code{frequency} umgerechnet.
+#'   Seit 1.6.4 mindestens zwei endliche Renditen, die nicht alle gleich sind (sonst Fehler, in allen Sprachen wie
+#'   bisher in R).
 #' @param target Vergleichs-Sharpe-Ratio \eqn{SR^*} p. a. (Standard 0);
 #'   intern durch \eqn{\sqrt{ppy}} geteilt.
 #' @param prob Geforderte Sicherheit als Anteil (Standard 0.95 = 95 %).
@@ -566,11 +606,19 @@ print.SimLevRealityCheck <- function(x, ...) {
 #'   efficient frontier, Journal of Risk 15(2).
 #' @export
 sharpe_min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("week", "day", "month"), ppy = NULL) {
+  .e5_choice(frequency, c("week", "day", "month"), "sharpe_min_track_record", "frequency")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   frequency <- match.arg(frequency)
+  # seit 1.6.4: target endlich, prob in (0, 1), ppy > 0
+  chk_num1(target, "sharpe_min_track_record", "target")
+  chk_num1(prob, "sharpe_min_track_record", "prob", lo = 0, hi = 1, lo_open = TRUE, hi_open = TRUE)
+  chk_num1(ppy, "sharpe_min_track_record", "ppy", lo = 0, lo_open = TRUE, null_ok = TRUE)
   a <- .ret_from(x, frequency); r <- a$r[is.finite(a$r)]
+  # seit 1.6.4 (Entscheidung 37): entartete Renditen (weniger als zwei, alle gleich) sind ein Fehler in allen Sprachen
+  # (bis 1.6.3 R "missing value where TRUE/FALSE needed" bzw. NaN, Python und Julia "nicht ausreichend")
+  if (length(r) < 2L || !(.sl_sd(r) > 0)) chk_stop("renditen_entartet", "sharpe_min_track_record")
   ppy <- ppy %||% (if (!is.null(a$date)) (length(r) - 1) / (as.numeric(diff(range(a$date))) / 365.25) else switch(frequency, day = 252, week = 52, month = 12))
-  sr <- mean(r) / stats::sd(r); sr0 <- target / sqrt(ppy)
-  z <- (r - mean(r)) / stats::sd(r); g3 <- mean(z^3); g4 <- mean(z^4)
+  sr <- mean(r) / .sl_sd(r); sr0 <- target / sqrt(ppy)
+  z <- (r - mean(r)) / .sl_sd(r); g3 <- mean(z^3); g4 <- mean(z^4)
   need <- if (sr <= sr0) Inf else 1 + (1 - g3 * sr + (g4 - 1) / 4 * sr^2) * (.sl_qnorm(prob) / (sr - sr0))^2
   c(sharpe = sr * sqrt(ppy), periods = length(r), needed_periods = need, needed_years = need / ppy,
     available_years = length(r) / ppy, sufficient = as.numeric(length(r) >= need))
@@ -609,6 +657,7 @@ sharpe_min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("w
 #'   Werte werden durch den Index relativ zum Startdatum geteilt.
 #' @param max_years Laengste Haltedauer in Jahren (ganze Zahl, Standard 30);
 #'   hoechstens die Zahl der verfuegbaren Jahre.
+#'   Seit 1.6.4 hoechstens 100.
 #' @return Objekt der Klasse \code{SimLevHeatmap}, eine Liste mit
 #'   \code{matrix} (Zeilen = Startjahr, Spalten = Haltedauer 1, 2, ... Jahre;
 #'   annualisierte Rendite als Anteil, \code{NA} wenn der Zeitraum ueber das
@@ -630,6 +679,8 @@ sharpe_min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("w
 #' plot(hm)
 #' @export
 result_heatmap <- function(x, inflation = NULL, max_years = 30L) {
+  chk_int1(max_years, "result_heatmap", "max_years")   # seit 1.6.4 (vorher z. B. 2.5 oder -2 je Sprache anders)
+  chk_max(max_years, SL_MAX_JAHRE, "result_heatmap", "max_years")   # Entscheidungen 16 und 46
   s <- .da_series(x, "x")
   if (!is.null(inflation)) s <- .da_deflate(s, inflation)
   yr <- as.integer(format(s$date, "%Y")); m <- length(yr)

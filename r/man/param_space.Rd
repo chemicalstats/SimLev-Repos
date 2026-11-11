@@ -21,10 +21,11 @@ atomarer Vektor diskreter Werte (numerisch, Zeichen, logisch) oder ein
 Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.}
 
 \item{lower, upper}{Bereichsgrenzen (Zahlen in der Einheit des Parameters,
-\code{lower <= upper}; bei \code{log = TRUE} \code{lower > 0}).}
+\code{lower <= upper}; bei \code{log = TRUE} \code{lower > 0}).
+Seit 1.6.4 je eine endliche Zahl.}
 
 \item{n}{Anzahl Rasterpunkte des Bereichs bei \code{method = "grid"}
-(ganze Zahl >= 1, Standard 5); wird ignoriert, wenn \code{step}
+(ganze Zahl von 1 bis 1e6, Standard 5); wird ignoriert, wenn \code{step}
 angegeben ist.}
 
 \item{step}{Schrittweite des Rasters in der Einheit des Parameters
@@ -33,7 +34,8 @@ angegeben ist.}
 \code{NULL} (Standard) = \code{n} Punkte.}
 
 \item{integer}{Logisch (Standard \code{FALSE}): Raster- und Zufallswerte
-auf ganze Zahlen runden; doppelte Rasterwerte entfallen.}
+auf ganze Zahlen runden; doppelte Rasterwerte entfallen.
+Seit 1.6.4 nur TRUE oder FALSE.}
 
 \item{log}{Logisch (Standard \code{FALSE}): Raster gleichabstaendig auf
 der Log-Skala und Ziehung log-gleichverteilt, z. B. fuer

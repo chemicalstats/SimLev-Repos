@@ -4,8 +4,8 @@
 # Quelle: Gesetzestext § 32a Abs. 1 EStG und § 3 Abs. 3, § 4 SolZG 1995, jeweils in der Fassung ab VZ 2026
 #
 # Austausch: Fuer einen anderen Tarif diese Datei kopieren, die Zahlen aendern und den Pfad als
-# simulation(..., tax_tariff = "<Datei>") bzw. read_tax_tariff("<Datei>") angeben. Die Datei gilt fuer
-# alle Simulationsjahre (aktuelle Rechtslage, auf alle Jahre projiziert).
+# income_tariff(..., tariff = "<Datei>") (in tax_profile(income = ...)) bzw. tax_tariff("<Datei>") angeben. Die
+# Datei gilt fuer alle Simulationsjahre (aktuelle Rechtslage, auf alle Jahre projiziert).
 #
 # Format: Basis-R lesbar mit read.csv(datei, comment.char = "#"); KOMMA als Trennzeichen (kein Semikolon),
 # PUNKT als Dezimalzeichen (0.42, nicht 0,42), Zeilen mit # sind Kommentare. Spalten und Einheiten:
@@ -21,7 +21,7 @@
 #           soli: PROZENT. a = Zuschlagsatz in Prozent der ESt (5.5 fuer 5,5 %), b = Milderungssatz
 #                 in Prozent des Betrags, um den die ESt die Freigrenze uebersteigt (11.9 fuer 11,9 %)
 #   c       zone: EUR. Konstante der Formel (bei linearen Zonen der Abzugsbetrag, negativ)  (soli: leer)
-# Ergebnis der Zonenformel in EUR, danach auf volle Euro abgerundet. read_tax_tariff() prueft u. a.,
+# Ergebnis der Zonenformel in EUR, danach auf volle Euro abgerundet. tax_tariff() prueft u. a.,
 # dass der Grenzsteuersatz jeder Zone zwischen 0 und 1 liegt und die Steuer das Einkommen nicht uebersteigt.
 art,ab,bezug,teiler,a,b,c
 zone,0,0,1,0,0,0

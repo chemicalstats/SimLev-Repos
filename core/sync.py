@@ -15,8 +15,10 @@ Teilbaum und bekommen daher Byte-für-Byte-Kopien:
 * die C-ABI-Hülle der geteilten Kerne für Julia (``core/simlev_cabi.cpp``) nur nach
   ``julia/deps/core/``;
 * die Grundfunktionen mit R-Regeln (``core/slc_rbase*``) nur nach ``python/src/core/`` und
-  ``julia/deps/core/`` (R rechnet sie selbst); nur ``slc_rbase.cpp`` und ``slc_rbase.h`` auch nach
-  ``r/src/`` (``sl_r_sum`` und ``sl_r_zeroin2`` für Tagesengine und Auswertung von ``simulation()``).
+  ``julia/deps/core/`` (R rechnet sie selbst); auch nach ``r/src/`` nur ``slc_rbase.cpp`` und ``slc_rbase.h``
+  (``sl_r_sum`` und ``sl_r_zeroin2`` für Tagesengine und Auswertung von ``simulation()``, seit 1.6.4 ``sl_r_approx``)
+  und seit 1.6.4 (C-035) ``slc_rbase2.h``, ``slc_rbase_cov.cpp``, ``slc_rbase_smooth.cpp`` und
+  ``slc_rbase_clust.cpp`` (cov/cor/var/sd, filter, dist, hclust in R über die Kerne, ``r/R/slc_stats.R``).
 
 Aufruf::
 
@@ -58,11 +60,16 @@ def is_old_c(f: str) -> bool:
     return f.startswith("slc") and f.endswith(".c")
 
 
+# rbase-Dateien, die auch nach r/src/ gehen: slc_rbase.cpp/.h (sl_r_sum für die Summen der Tagesengine,
+# core/engine_core_impl.h) und seit 1.6.4 (C-035) die Kerne der Statistikwege von R (r/R/slc_stats.R)
+R_RBASE = ("slc_rbase.cpp", "slc_rbase.h", "slc_rbase2.h", "slc_rbase_cov.cpp", "slc_rbase_smooth.cpp",
+           "slc_rbase_clust.cpp")
+
+
 def is_rbase(f: str) -> bool:
     """Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst.
-    Ausnahme slc_rbase.cpp/.h (sl_r_sum für die Summen der Tagesengine, core/engine_core_impl.h)
-    gehen auch nach r/src/."""
-    return f.startswith("slc_rbase") and f not in ("slc_rbase.cpp", "slc_rbase.h")
+    Ausnahmen (auch nach r/src/): R_RBASE."""
+    return f.startswith("slc_rbase") and f not in R_RBASE
 
 
 def is_shared(f: str) -> bool:
@@ -102,6 +109,7 @@ def stale(target: str, files: list[str]) -> list[str]:
     keep |= {"slc_r_linalg.cpp"}  # R-Hülle der linearen Algebra (nur in r/src/)
     keep |= {"slc_r_opt.cpp"}   # R-Hülle der Optimierer (nur in r/src/)
     keep |= {"slc_r_models.cpp"}   # R-Hülle der Modelle (nur in r/src/)
+    keep |= {"slc_r_stats.cpp"}    # R-Hülle der Statistikwege (nur in r/src/, seit 1.6.4)
     return sorted(f for f in os.listdir(target)
                   if (is_slc(f) or is_old_c(f) or is_shared(f) or is_cabi(f)) and f not in keep)
 

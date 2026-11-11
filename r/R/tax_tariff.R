@@ -19,6 +19,8 @@
 #'
 #' @param file Zeichenkette oder NULL. Pfad der Tarifdatei; NULL = mitgelieferte Datei
 #'   \code{system.file("extdata", "steuertarif.csv", package = "SimLev")}.
+#'   Zahlen der Datei seit 1.6.4 auch in R nur mit ASCII-Ziffern und -Leerzeichen, unabhaengig von der
+#'   Spracheinstellung (z. B. ein geschuetztes Leerzeichen ist ein Fehler).
 #'
 #' @details
 #' Dateiformat (Basis-R lesbar mit \code{read.csv(file, comment.char = "#")}; Komma als
@@ -39,7 +41,9 @@
 #' als Anteil (\code{0.42} fuer 42 %, nicht 42); die Soli-Saetze dagegen in Prozent
 #' (\code{5.5} fuer 5,5 %).
 #'
-#' Geprueft wird: Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV,
+#' Geprueft wird (seit 1.6.4 auch: kein Ordner, Kodierung UTF-8, ein UTF-8-BOM am Anfang wird
+#' uebergangen, geschlossene Anfuehrungszeichen, keine Pflichtspalte doppelt, Zahlen nur mit
+#' ASCII-Ziffern): Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV,
 #' bzw. hat eine Zeile mehr Felder als die Kopfzeile, z. B. Dezimalkomma: Fehler mit Hinweis),
 #' Pflichtspalten vorhanden, \code{art} nur "zone" oder "soli", alle benoetigten Werte
 #' numerisch und endlich, \code{teiler > 0}, Zonen streng aufsteigend mit erster Zone ab 0,
@@ -79,7 +83,7 @@
 #' tax_tariff(f)
 #'
 #' @encoding UTF-8
-#' @seealso \code{\link{simulation}} (Argumente taxable_income, tax_tariff)
+#' @seealso \code{\link{income_tariff}} (Argument tariff), \code{\link{tax_profile}} (Argument income)
 #' @export
 tax_tariff <- function(file = NULL) {
   if (is.null(file)) {
@@ -108,26 +112,39 @@ tax_tariff <- function(file = NULL) {
   if (!is.character(file) || length(file) != 1L || is.na(file))
     stop("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.", call. = FALSE)
   if (!file.exists(file)) stop(sprintf("tax_tariff: Datei '%s' nicht gefunden.", file), call. = FALSE)
+  # seit 1.6.4 (A-071, A-037): Ordner, Kodierung und Anfuehrungszeichen vorab mit Meldung (bis 1.6.3 je Sprache
+  # verschiedene Abbrueche); ein UTF-8-BOM am Dateianfang (Excel "CSV UTF-8") wird uebergangen
+  if (dir.exists(file)) chk_stop("e1.tarif_ordner", "tax_tariff", file)
   raw <- readLines(file, warn = FALSE, encoding = "UTF-8")
+  if (!all(validUTF8(raw))) chk_stop("e1.tarif_utf8", "tax_tariff", file)
+  bom <- length(raw) && startsWith(raw[1], "\ufeff")
+  if (bom) raw[1] <- substring(raw[1], 2L)
   gl <- grep("^#\\s*Geltung\\s*:", raw, value = TRUE)
   geltung <- if (length(gl)) trimws(sub("^#\\s*Geltung\\s*:", "", gl[1])) else NA_character_
   # Trennzeichen pruefen: Semikolon-CSV (deutsches Excel) bzw. Dezimalkomma verschieben die Spalten
   body <- trimws(sub("#.*$", "", raw)); body <- body[nzchar(body)]
   if (length(body)) {
+    if (any(nchar(gsub("[^\"]", "", body)) %% 2L == 1L)) chk_stop("e1.tarif_quote", "tax_tariff", file)
     nf <- nchar(gsub("[^,]", "", body)) + 1L
+    # seit 1.6.4 ohne die Zeileninhalte (Entscheidung 8); die Datenzeile bleibt als Ort
     if (nf[1] == 1L)
-      stop(sprintf("tax_tariff: In '%s' wurde nur eine Spalte gelesen (Kopfzeile '%s'). Erwartet wird Komma als Trennzeichen%s und Punkt als Dezimalzeichen, z. B. 'zone,69879,0,1,0,0.42,-11135.63'.",
-                   file, body[1], if (grepl(";", body[1])) " (die Datei verwendet offenbar Semikolon, z. B. aus deutschem Excel)" else ""), call. = FALSE)
+      stop(sprintf("tax_tariff: In '%s' wurde nur eine Spalte gelesen. Erwartet wird Komma als Trennzeichen%s und Punkt als Dezimalzeichen, z. B. 'zone,69879,0,1,0,0.42,-11135.63'.",
+                   file, if (grepl(";", body[1])) " (die Datei verwendet offenbar Semikolon, z. B. aus deutschem Excel)" else ""), call. = FALSE)
     if (any(nf[-1] != nf[1])) {
       i <- which(nf != nf[1])[1]
-      stop(sprintf("tax_tariff: In '%s' hat die Zeile '%s' %d Felder, die Kopfzeile %d. Dezimalzeichen ist der Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen.",
-                   file, body[i], nf[i], nf[1]), call. = FALSE)
+      stop(sprintf("tax_tariff: In '%s' hat Datenzeile %d insgesamt %d Felder, die Kopfzeile %d. Dezimalzeichen ist der Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen.",
+                   file, i - 1L, nf[i], nf[1]), call. = FALSE)
     }
   }
   d <- tryCatch(utils::read.csv(file, comment.char = "#", stringsAsFactors = FALSE, strip.white = TRUE,
-                                colClasses = "character", encoding = "UTF-8"),
+                                colClasses = "character", encoding = "UTF-8", check.names = FALSE,
+                                fileEncoding = if (bom) "UTF-8-BOM" else ""),
                 error = function(e) stop(sprintf("tax_tariff: Datei '%s' ist keine lesbare CSV-Datei (%s).", file, conditionMessage(e)), call. = FALSE))
   need <- c("art", "ab", "bezug", "teiler", "a", "b", "c")
+  # seit 1.6.4 (A-039): eine Pflichtspalte doppelt ist ein Fehler (bis 1.6.3 nahm R die erste, Python und Julia die
+  # letzte)
+  dup <- need[need %in% names(d)[duplicated(names(d))]]
+  if (length(dup)) chk_stop("e1.tarif_doppelt", "tax_tariff", file, dup[1])
   miss <- setdiff(need, names(d))
   if (length(miss))
     stop(sprintf("tax_tariff: In '%s' fehlen die Spalten %s (erwartet: %s).", file,
@@ -135,13 +152,13 @@ tax_tariff <- function(file = NULL) {
   art <- tolower(d$art)
   bad <- which(!art %in% c("zone", "soli"))
   if (length(bad))
-    stop(sprintf("tax_tariff: Datenzeile %d hat art = '%s'; erlaubt sind \"zone\" und \"soli\".", bad[1], d$art[bad[1]]), call. = FALSE)
+    stop(sprintf("tax_tariff: Datenzeile %d hat ein ung\u00fcltiges art; erlaubt sind \"zone\" und \"soli\".", bad[1]), call. = FALSE)
   num <- function(col, rows) {
-    v <- suppressWarnings(as.numeric(d[[col]][rows]))
+    v <- chk_as_num(d[[col]][rows])   # seit 1.6.4 nur ASCII, unabhaengig von der Spracheinstellung (Entscheidung 27)
     nb <- which(!is.finite(v))
     if (length(nb))
-      stop(sprintf("tax_tariff: Spalte '%s' in Datenzeile %d (art = %s) ist nicht numerisch bzw. nicht endlich ('%s').",
-                   col, rows[nb[1]], art[rows[nb[1]]], d[[col]][rows[nb[1]]]), call. = FALSE)
+      stop(sprintf("tax_tariff: Spalte '%s' in Datenzeile %d (art = %s) ist nicht numerisch bzw. nicht endlich.",
+                   col, rows[nb[1]], art[rows[nb[1]]]), call. = FALSE)
     v
   }
   zr <- which(art == "zone"); sr <- which(art == "soli")
@@ -150,18 +167,17 @@ tax_tariff <- function(file = NULL) {
     stop(sprintf("tax_tariff: Es muss genau eine soli-Zeile geben (gefunden: %d).", length(sr)), call. = FALSE)
   z <- data.frame(ab = num("ab", zr), bezug = num("bezug", zr), teiler = num("teiler", zr),
                   a = num("a", zr), b = num("b", zr), c = num("c", zr))
-  if (z$ab[1] != 0) stop(sprintf("tax_tariff: Die erste Zone muss bei ab = 0 beginnen (ist %s).", format(z$ab[1])), call. = FALSE)
+  if (z$ab[1] != 0) stop("tax_tariff: Die erste Zone muss bei ab = 0 beginnen.", call. = FALSE)
   if (any(diff(z$ab) <= 0)) {
     k <- which(diff(z$ab) <= 0)[1]
-    stop(sprintf("tax_tariff: Die Zonen m\u00fcssen streng aufsteigend sein (Zone %d ab %s folgt auf ab %s).",
-                 k + 1L, format(z$ab[k + 1L]), format(z$ab[k])), call. = FALSE)
+    stop(sprintf("tax_tariff: Die Zonen m\u00fcssen streng aufsteigend sein (Zone %d).", k + 1L), call. = FALSE)
   }
-  if (any(z$teiler <= 0)) stop(sprintf("tax_tariff: teiler muss > 0 sein (Zone ab %s).", format(z$ab[which(z$teiler <= 0)[1]])), call. = FALSE)
+  if (any(z$teiler <= 0)) stop(sprintf("tax_tariff: teiler muss > 0 sein (Zone %d).", which(z$teiler <= 0)[1]), call. = FALSE)
   soli <- list(freigrenze = num("ab", sr), satz = num("a", sr), milderung = num("b", sr))
   if (soli$freigrenze < 0) stop("tax_tariff: Die Soli-Freigrenze (ab) darf nicht negativ sein.", call. = FALSE)
   for (s in c("satz", "milderung")) if (soli[[s]] < 0 || soli[[s]] > 100)
-    stop(sprintf("tax_tariff: Soli-%s muss zwischen 0 und 100 Prozent liegen (ist %s).",
-                 if (s == "satz") "Zuschlagsatz (a)" else "Milderungssatz (b)", format(soli[[s]])), call. = FALSE)
+    stop(sprintf("tax_tariff: Soli-%s muss zwischen 0 und 100 Prozent liegen.",
+                 if (s == "satz") "Zuschlagsatz (a)" else "Milderungssatz (b)"), call. = FALSE)
   out <- structure(list(zones = z, soli = soli, geltung = geltung, file = normalizePath(file)), class = "SimLevTaxTariff")
   f <- function(j, x) { u <- (x - z$bezug[j]) / z$teiler[j]; (z$a[j] * u + z$b[j]) * u + z$c[j] }
   # Plausibilitaet je Zone an beiden Raendern: Grenzsteuersatz (2 a u + b) / teiler in [0, 1], T(x) <= x

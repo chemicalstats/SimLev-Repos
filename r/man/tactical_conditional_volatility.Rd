@@ -58,7 +58,8 @@ Risikoanteils als Anteil (Standard 0 und 1; \code{min_exposure} hoechstens
 
 \item{min_history}{Mindesthistorie der Volatilitaetsschaetzung in Jahren
 (Standard 3), bevor gesteuert wird. Ist sie laenger als die vorhandene
-Historie, wird nie gesteuert (mit Warnung).}
+Historie, wird nie gesteuert (mit Warnung).
+Seit 1.6.4 hoechstens 100 Jahre.}
 
 \item{scaling}{\code{"inverse"} (Standard): Anteil
 \code{base * target / vol}; \code{"fixed"}: feste Anteile

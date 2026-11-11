@@ -13,7 +13,6 @@
  *   min_cvar_core(R, T, N, alpha, lo, hi, w0, zeta0, scales, maxit, out)
  *   min_cdar_core(R, T, N, alpha, lo, hi, iters, out)
  *   quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)
- *   hmm_forward_backward(B, T, K, A, anr, p0, al, ga, xi, cs)
  *   hmm_em(X, Tn, d, k, mu, S, A, p0, n_iter, tol, ridge, filt, smooth, lB) -> (status, ll, iter)  (seit 1.5.0;
  *     mu, S, A an Ort und Stelle; Matrizen spaltenweise)
  *   goal_dp(R, S, K, grid, cf, goal, wmin, wmax, sv, tie, static, policy, value) -> (collapsed, p_dp)  (seit 1.5.0;
@@ -158,33 +157,6 @@ PyObject* r_qreg(PyObject*, PyObject* args) {
     return Py_BuildValue("(NO)", ba, flag ? Py_True : Py_False);
 }
 
-PyObject* r_hmm(PyObject*, PyObject* args) {
-    PyObject *oB, *oA, *op0, *oal, *oga, *oxi, *ocs;
-    int T, K, anr;
-    const char* fn = "hmm_forward_backward";
-    if (!PyArg_ParseTuple(args, "OiiOiOOOOO:hmm_forward_backward", &oB, &T, &K, &oA, &anr, &op0, &oal,
-                          &oga, &oxi, &ocs)) return nullptr;
-    ext::Buf B, A, p0, al, ga, xi, cs;   // seit 1.6.3 ohne be (wurde nur auf die Laenge geprueft, kein Ergebnis)
-    if (!ext::get(oB, B, 'd', false, fn, "B") || !mat_dims(B, T, K, fn, "B") ||
-        !ext::get(oA, A, 'd', false, fn, "A") || !ext::get(op0, p0, 'd', false, fn, "p0") ||
-        !ext::get(oal, al, 'd', true, fn, "al", (Py_ssize_t) T * K) ||
-        !ext::get(oga, ga, 'd', true, fn, "ga", (Py_ssize_t) T * K) ||
-        !ext::get(oxi, xi, 'd', true, fn, "xi", (Py_ssize_t) K * K) ||
-        !ext::get(ocs, cs, 'd', true, fn, "cs", T)) return nullptr;
-    if (T < 1 || anr < K || A.n < (Py_ssize_t) anr * K || !need_len(p0, K, fn, "p0")) {
-        if (!PyErr_Occurred()) PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
-        return nullptr;
-    }
-    if (!ext::run([&] {
-            auto r = simlev::hmm_forward_backward(ext::mat(B, T, K), ext::mat(A, anr, K), ext::vec(p0));
-            ext::put(al, std::get<1>(r).ptr, (Py_ssize_t) T * K);
-            ext::put(ga, std::get<3>(r).ptr, (Py_ssize_t) T * K);
-            ext::put(xi, std::get<5>(r).ptr, (Py_ssize_t) K * K);
-            ext::put(cs, std::get<7>(r).ptr, T);
-        })) return nullptr;
-    Py_RETURN_NONE;
-}
-
 PyObject* r_hmm_em(PyObject*, PyObject* args) {
     PyObject *oX, *omu, *oS, *oA, *op0, *orid, *of, *osm, *olb;
     int Tn, d, k, n_iter;
@@ -283,6 +255,10 @@ PyObject* r_pbo_cscv(PyObject*, PyObject* args) {
         PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
         return nullptr;
     }
+    if (metric < 0 || metric > 3) {   // seit 1.6.4 (B-030) wie die Julia-Huelle
+        PyErr_Format(PyExc_ValueError, "%s: metric muss 0, 1, 2 oder 3 sein", fn);
+        return nullptr;
+    }
     ext::Buf B, T, cb, lam, isb, oosb, oosm;
     if (!ext::get(oB, B, 'd', false, fn, "B", (Py_ssize_t) 5 * S * N) || !ext::get(oT, T, 'd', false, fn, "T", (Py_ssize_t) 5 * N) ||
         !ext::get(oc, cb, 'i', false, fn, "combos")) return nullptr;
@@ -370,7 +346,6 @@ PyMethodDef simlev_ext_research_methods[] = {
     {"min_cdar_core", r_cdar, METH_VARARGS, "min_cdar_core(R, T, N, alpha, lo, hi, iters, out)"},
     {"quantile_reg_core", r_qreg, METH_VARARGS,
      "quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)"},
-    {"hmm_forward_backward", r_hmm, METH_VARARGS, "hmm_forward_backward(B, T, K, A, anr, p0, al, ga, xi, cs)"},
     {"goal_dp", r_goal_dp, METH_VARARGS,
      "goal_dp(R, S, K, grid, cf, goal, wmin, wmax, sv, tie, static, policy, value) -> (collapsed, p_dp)"},
     {"pbo_cscv", r_pbo_cscv, METH_VARARGS, "pbo_cscv(B, T, combos, half, metric, S, N, lam, isb, oosb, oosm)"},

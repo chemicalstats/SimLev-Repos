@@ -21,6 +21,7 @@ module Bootstrap
 
 import ..SimLev
 using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
+using ..SimLev: chk_bool1, chk_date1, chk_int1, chk_name1, chk_num1, chk_scalar, chk_stop   # pruefen.jl (seit 1.6.4)
 using Dates
 using Printf
 
@@ -56,9 +57,6 @@ function _fmtstrs(x; kw...)
 end
 "R-`format(x)` als ein Text (bei Vektoren `paste(format(x), collapse = \", \")`)."
 _fmt1(x; kw...) = join(_fmtstrs(x; kw...), ", ")
-"`paste(format(x), collapse = \", \")` (NULL → \"\")."
-_show(x) = x === nothing ? "" : _fmt1(_showable(x))
-_showable(x) = x isa RVector ? x.values : x isa Tuple ? collect(x) : x
 "`as.character` einer Zahl (15 signifikante Stellen)."
 function _as_char(x)
     r = SimLev.RFmt.as_character(x)
@@ -421,18 +419,37 @@ println(cfg["letf_names"])
 function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = nothing, aux_type = nothing,
                           cross = nothing, input = nothing)
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
+    SimLev.DataPrep._e5_match_arg(cross, ("ratio", "joint"), "bootstrap_config", "cross")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
+    SimLev.DataPrep._e5_match_arg(input, ("returns", "prices"), "bootstrap_config", "input")
     cross = _match_arg(cross, ("ratio", "joint"))
     input = _match_arg(input, ("returns", "prices"))
     inames = _names(indices)
-    (inames === nothing || any(==(""), inames)) && _stop("indices muss vollständig benannt sein: c(name1 = 'spalte1', ...)")
+    (inames === nothing || any(==(""), inames)) && chk_stop("ut2.indices", "bootstrap_config")
     index_names = collect(String, inames)
-    icols = String[string(v) for v in _values(indices)]
+    ivals = Any[chk_scalar(v) for v in _values(indices)]   # seit 1.6.4 Länge 1 wie Einzelwert (Entscheidung 4)
+    icols = String[string(v) for v in ivals]
     dup = _duplicated(index_names)
-    any(dup) && _stop("Doppelte Index-Namen: " * join(index_names[dup], ", "))
+    any(dup) && chk_stop("rs.index_doppelt", "bootstrap_config", join(index_names[dup], ", "))
     if aux !== nothing && (_names(aux) === nothing || any(==(""), _names(aux)))
-        _stop("aux muss benannt sein.")
+        chk_stop("ut2.aux", "bootstrap_config")
     end
     aux_names = aux === nothing ? String[] : collect(String, _names(aux))
+    # seit 1.6.4: Spaltenangaben je ein Name (Text); bis 1.6.3 wurde jeder Wert mit string() umgewandelt (FW2-1)
+    for (nm, v) in zip(index_names, ivals)
+        chk_name1(v, "bootstrap_config", "indices['$nm']")
+    end
+    if aux !== nothing
+        for (nm, v) in zip(aux_names, _values(aux))
+            chk_name1(v, "bootstrap_config", "aux['$nm']")
+        end
+    end
+    letfs === nothing || letfs isa Union{Tuple,RList,NamedTuple,AbstractDict} ||
+        (letfs isa AbstractVector && !(eltype(letfs) <: Union{Number,AbstractString,Missing})) ||
+        chk_stop("liste", "bootstrap_config", "letfs")
+    for (i, lt0) in enumerate(collect(letfs === nothing ? Any[] : letfs))
+        lt0 isa Union{RList,NamedTuple,AbstractDict} || chk_stop("liste", "bootstrap_config", "letfs[[$i]]")
+    end
+    regime_index = chk_name1(regime_index, "bootstrap_config", "regime_index"; null_ok = true)
     if aux_type !== nothing && _len(aux_type) == 0
         aux_type = nothing
     end
@@ -442,7 +459,7 @@ function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = 
         nm = _names(aux_type)
         vals = _values(aux_type)
         if nm === nothing || any(==(""), nm) || !all(v -> v isa AbstractString, vals)
-            _stop("aux_type muss ein benannter Zeichenvektor sein: c(<Name aus aux> = 'level' oder 'rate'), z. B. c(cpi = 'level', zins = 'rate').")
+            chk_stop("ut2.aux_type", "bootstrap_config")
         end
         at_names = collect(String, nm); at_vals = String[String(v) for v in vals]
         bad = _setdiff(at_names, aux_names)
@@ -454,8 +471,7 @@ function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = 
         any(d) && _stop(@sprintf("aux_type: Name '%s' doppelt angegeben.", at_names[d][1]))
         badi = findall(v -> !(v in ("level", "rate")), at_vals)
         if !isempty(badi)
-            _stop(@sprintf("aux_type['%s'] = '%s': erlaubt sind nur 'level' (Niveau, z. B. Preisindex) und 'rate' (Rate, z. B. Zins in Prozent).",
-                           at_names[badi[1]], at_vals[badi[1]]))
+            chk_stop("rs.aux_type_wert", "bootstrap_config", at_names[badi[1]])   # seit 1.6.4 ohne Eingabewert
         end
     end
     full = Dict{String,String}(nm => "rate" for nm in aux_names)
@@ -468,35 +484,43 @@ function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = 
     # LETF-Felder (seit 1.6.3 mit Typ und Länge wie in R): Zahlen einzeln und endlich, base und name einzelner Text,
     # finance und days Zahl oder Name einer Zusatzreihe
     num1(v) = _isnum(v) && isfinite(v)
-    chk_num(i, v, nm) = num1(v) || _stop(@sprintf("LETF %d: %s muss eine einzelne endliche Zahl sein", i, nm))
+    chk_num(i, v, nm) = num1(v) || chk_stop("zahl", "bootstrap_config", "letfs[[$i]]\$$nm")
     chk_col(i, v, nm) = num1(v) || v isa AbstractString ||
-        _stop(@sprintf("LETF %d: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein", i, nm))
+        chk_stop("ut2.zahl_oder_aux", "bootstrap_config", "letfs[[$i]]\$$nm")
     letf_list = Any[]
     for (i, lt0) in enumerate(collect(letfs === nothing ? Any[] : letfs))
         lt = lt0 isa Union{RList,NamedTuple,AbstractDict} ? lt0 : RList()
-        base = _get(lt, "base")
-        base === nothing && _stop(@sprintf("LETF %d: 'base' muss angegeben werden", i))
-        base isa AbstractString || _stop(@sprintf("LETF %d: base muss ein einzelner Name (Text) sein", i))
-        base in index_names || _stop(@sprintf("LETF %d: base '%s' nicht in indices. Verfügbar: %s", i, base, join(index_names, ", ")))
-        lev = _rval(_get(lt, "leverage", 2.0))
+        # seit 1.6.4 Felder als Vektor der Länge 1 wie Einzelwerte (Entscheidung 4)
+        _get(lt, "base") isa SimLev.RFmt.RFactor && chk_stop("text", "bootstrap_config", "letfs[[$i]]\$base")   # Faktor wie in R kein Text (Entscheidung 15; seit 1.6.4, K43 KE)
+        base = chk_scalar(_get(lt, "base"))
+        base === nothing && chk_stop("fehlt", "bootstrap_config", "letfs[[$i]]\$base")
+        base isa AbstractString || chk_stop("text", "bootstrap_config", "letfs[[$i]]\$base")
+        base in index_names || chk_stop("rs.letf_base", "bootstrap_config", "letfs[[$i]]\$base", base, join(index_names, ", "))
+        lev = _rval(chk_scalar(_get(lt, "leverage", 2.0)))
         chk_num(i, lev, "leverage")
-        lev == 0 && _stop(@sprintf("LETF %d: leverage darf nicht 0 sein", i))
-        fin = _rval(_get(lt, "finance", 3.5))
+        lev == 0 && chk_stop("rs.letf_null", "bootstrap_config", "letfs[[$i]]\$leverage")
+        fin = _rval(chk_scalar(_get(lt, "finance", 3.5)))
         chk_col(i, fin, "finance")
-        fin isa AbstractString && !(fin in aux_names) && _stop(@sprintf("LETF %d: finance-Reihe '%s' nicht in aux.", i, fin))
-        is_level(fin) && _stop(@sprintf("LETF %d: finance-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; der Finanzierungszins muss eine Rate (Prozent p. a.) sein.", i, fin))
+        fin isa AbstractString && !(fin in aux_names) && chk_stop("rs.letf_aux", "bootstrap_config", "letfs[[$i]]\$finance", fin)
+        is_level(fin) && chk_stop("ut2.finance_level", "bootstrap_config", "letfs[[$i]]\$finance", fin)
         _isnum(fin) && fin < 0 && _warn(@sprintf("LETF %d: negativer Finanzierungszins.", i))
-        exp_ = _rval(_get(lt, "expense", 0.5))
+        exp_ = _rval(chk_scalar(_get(lt, "expense", 0.5)))
         chk_num(i, exp_, "expense")
-        exp_ < 0 && _stop(@sprintf("LETF %d: expense muss >= 0 sein", i))
-        days = _rval(_get(lt, "days", 1.0))
+        exp_ < 0 && chk_stop("ut2.expense", "bootstrap_config", "letfs[[$i]]\$expense")
+        days = _rval(chk_scalar(_get(lt, "days", 1.0)))
         chk_col(i, days, "days")
-        days isa AbstractString && !(days in aux_names) && _stop(@sprintf("LETF %d: days-Reihe '%s' nicht in aux.", i, days))
-        is_level(days) && _stop(@sprintf("LETF %d: days-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden unverändert gebraucht ('rate').", i, days))
-        sp = _rval(_get(lt, "spread", 0.0)); rb = _rval(_get(lt, "rate_basis", 360.0)); tb = _rval(_get(lt, "ter_basis", 365.0))
+        days isa AbstractString && !(days in aux_names) && chk_stop("rs.letf_aux", "bootstrap_config", "letfs[[$i]]\$days", days)
+        is_level(days) && chk_stop("rs.letf_days_level", "bootstrap_config", "letfs[[$i]]\$days", days)
+        sp = _rval(chk_scalar(_get(lt, "spread", 0.0))); rb = _rval(chk_scalar(_get(lt, "rate_basis", 360.0)))
+        tb = _rval(chk_scalar(_get(lt, "ter_basis", 365.0)))
         chk_num(i, sp, "spread"); chk_num(i, rb, "rate_basis"); chk_num(i, tb, "ter_basis")
-        name = _get(lt, "name")
-        name === nothing || name isa AbstractString || _stop(@sprintf("LETF %d: name muss ein einzelner Name (Text) sein", i))
+        # seit 1.6.4 Tagesbasis > 0, Tage je Zeile > 0, Spread >= 0
+        lw = "LETF $i"
+        chk_num1(rb, lw, "rate_basis"; lo = 0, lo_open = true); chk_num1(tb, lw, "ter_basis"; lo = 0, lo_open = true)
+        _isnum(days) && chk_num1(days, lw, "days"; lo = 0, lo_open = true)
+        chk_num1(sp, lw, "spread"; lo = 0)
+        name = chk_scalar(_get(lt, "name"))
+        name === nothing || name isa AbstractString || chk_stop("text", "bootstrap_config", "letfs[[$i]]\$name")
         if name === nothing
             name = lev > 0 ? string(base, "_l", _as_char(lev)) : string(base, "_inv", _as_char(abs(lev)))
         end
@@ -504,13 +528,13 @@ function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = 
                                "expense" => exp_, "spread" => sp, "days" => days, "rate_basis" => rb, "ter_basis" => tb))
     end
     letf_names = String[l["name"] for l in letf_list]
-    any(_duplicated(vcat(index_names, letf_names, aux_names))) && _stop("Namen von Indizes, LETFs und aux müssen eindeutig sein.")
+    any(_duplicated(vcat(index_names, letf_names, aux_names))) && chk_stop("rs.namen_eindeutig", "bootstrap_config")
     if regime_index === nothing
         regime_index = index_names[1]
     elseif !(regime_index in index_names)
-        _stop(@sprintf("regime_index '%s' nicht in indices", regime_index))
+        chk_stop("rs.regime_index", "bootstrap_config", regime_index)
     end
-    aux_out = aux === nothing ? nothing : RVector(String[string(v) for v in _values(aux)]; names = aux_names)
+    aux_out = aux === nothing ? nothing : RVector(String[string(chk_scalar(v)) for v in _values(aux)]; names = aux_names)
     return RList("indices" => Any[RList("name" => nm, "col" => c) for (nm, c) in zip(index_names, icols)],
                  "letfs" => letf_list, "regime_index" => String(regime_index), "aux" => aux_out,
                  "aux_type" => aux_type_full, "aux_type_set" => at_names, "cross" => cross, "input" => input,
@@ -568,15 +592,14 @@ end
 _complete_rows(m::Matrix{Float64}) = Bool[!any(isnan, view(m, i, :)) for i in 1:size(m, 1)]
 
 "Renditematrix und Zusatzreihen extrahieren (R: `.extract_returns`)."
-function _extract_returns(data, config)
+function _extract_returns(data, config, who = "bootstrap")   # who seit 1.6.4 wie R (Meldungen mit Funktionsnamen, K43 RS)
+    _boot_data_check(data, who)
     is_df = data isa RFrame
     is_mat = data isa AbstractMatrix
-    (is_df || is_mat) || _stop("data muss ein data.frame oder eine Matrix sein")
     nr = is_df ? SimLev.nrow(data) : size(data, 1)
-    nr == 0 && _stop("data darf nicht leer sein")
     nms = is_df ? names(data) : (data isa NamedMat && data.colnames !== nothing ? data.colnames : String[])
     function get_col(col)
-        col in nms || _stop(@sprintf("Spalte '%s' nicht gefunden. Verfügbar: %s", col, join(nms, ", ")))
+        col in nms || chk_stop("rs.spalte_fehlt", who, col, join(nms, ", "))
         is_df && return _as_numeric_col(data[col])
         j = findfirst(==(col), nms)
         return _as_numeric_col(data[:, j])
@@ -603,12 +626,11 @@ function _extract_returns(data, config)
         ret = ret[ok, :]
         aux !== nothing && (aux = aux[ok, :])
     end
-    size(ret, 1) == 0 && _stop("data enthält keine vollständige Zeile in den verwendeten Spalten.")
+    size(ret, 1) == 0 && chk_stop("rs.keine_zeile", who)
     bad = findfirst(!isfinite, vec(ret))
     if bad !== nothing
         r0 = (bad - 1) % size(ret, 1) + 1; c0 = (bad - 1) ÷ size(ret, 1) + 1
-        _stop(@sprintf("Renditen enthalten nicht endliche Werte (Inf), erste in Spalte '%s', Zeile %d der verwendeten Daten.",
-                       inames[c0], r0))
+        chk_stop("rs.nicht_endlich", who, inames[c0], r0)
     end
     if aux !== nothing
         okw = findall(ok)
@@ -639,7 +661,7 @@ function _extract_returns(data, config)
         aux_start = RVector(prev1; names = anames)
         aux = NamedMat(aux; colnames = anames)
     end
-    any(<=(0), ret) && _stop("Renditen <= 0 gefunden (erwartet: Brutto-Renditen > 0, z. B. 1.002).")
+    any(<=(0), ret) && chk_stop("rs.rendite_null", who)
     _median(abs.(vec(ret) .- 1)) > 0.5 &&
         _warn("Renditen sehen nicht wie Brutto-Tagesrenditen aus (Median |R - 1| > 0.5). input = 'prices' vergessen?")
     return RList("ret" => NamedMat(ret; colnames = inames), "aux" => aux, "aux_ratio" => aux_ratio, "aux_start" => aux_start)
@@ -744,7 +766,8 @@ function _pw_block(x)
     r0 = acov(0)
     r0 <= 0 && return _pw_one()
     nlag = Int(floor(mmax))
-    rho = Float64[acov(k) for k in 1:nlag] ./ r0
+    A = Float64[acov(k) for k in 1:nlag]   # seit 1.6.4 (A-089) einmal für rho und Rk (M <= nlag)
+    rho = A ./ r0
     insig = abs.(rho) .< crit
     KNi = Int(ceil(KN))
     mhat = nothing
@@ -762,7 +785,7 @@ function _pw_block(x)
     kk = Float64.(1:M)
     t = abs.(kk ./ M)
     lam = Float64[v <= 0.5 ? 1.0 : (v <= 1 ? 2 * (1 - v) : 0.0) for v in t]
-    Rk = Float64[acov(Int(k)) for k in kk]
+    Rk = A[1:M]
     G = 2 * _rsum(lam .* kk .* Rk)
     g0 = r0 + 2 * _rsum(lam .* Rk)
     g0 <= 0 && return _pw_one()
@@ -784,6 +807,7 @@ max(5, √log_10 n)).
 # Argumente
 - `x`: Numerischer Vektor oder Matrix (Spalten = Reihen), z. B. (Log-)Renditen je Zeile. Nicht-endliche Werte
   werden je Spalte entfernt.
+  Seit 1.6.4 nur Zahlen (Text, Wahrheitswerte und Faktoren ergeben einen Fehler).
 - `transform`: Transformation vor der Schätzung: `"none"` (Standard, Reihe selbst), `"abs"` (|x - bar x|) oder
   `"squared"` ((x - bar x)^2).
 
@@ -816,7 +840,17 @@ println(bootstrap_block_length(x))
 ```
 """
 function bootstrap_block_length(x, transform_ = nothing; transform = nothing)
+    SimLev.DataPrep._e5_match_arg(transform === nothing ? transform_ : transform, ("none", "abs", "squared"), "bootstrap_block_length", "transform")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     transform = _match_arg(transform === nothing ? transform_ : transform, ("none", "abs", "squared"))
+    # seit 1.6.4: nur Zahlen (vorher Text MethodError; R: Text still 1, Python: Text wie Zahlen)
+    # Entscheidung 15: Faktor bzw. Faktorspalte mit eigener Meldung
+    SimLev.chk_nofactor(x, "bootstrap_block_length", "x")
+    x isa RFrame && for k in names(x); SimLev.chk_col_nofactor(x, k, "bootstrap_block_length"); end
+    numel(e) = e === missing || (e isa Real && !(e isa Bool))
+    ok = x isa RFrame ? (length(names(x)) >= 1 && all(c -> !(eltype(x[c]) <: Bool) && all(numel, x[c]), names(x))) :
+         x isa NamedMat ? (!(eltype(x.data) <: Bool) && all(numel, x.data)) :
+         x isa AbstractArray ? (!(eltype(x) <: Bool) && all(numel, x)) : (x isa Real && !(x isa Bool))
+    ok || chk_stop("e2.zahlen_matrix", "bootstrap_block_length", "x")
     if x isa RFrame
         cols = names(x)
         M = reduce(hcat, [_as_numeric_col(x[c]) for c in cols])
@@ -946,20 +980,10 @@ function _fit_tail(base_ret, prob, side)
                  "pool" => findall(mask), "method" => method)
 end
 
-"`seq(0, 1, length.out = n_out)`."
-function _seq_len_out(n_out)
-    n_out = Int(n_out)
-    if n_out > 2
-        n1 = n_out - 1.0
-        return vcat(0.0, Float64[0.0 + i * (1.0 / n1) for i in 1:n_out-2], 1.0)
-    end
-    return [0.0, 1.0][1:n_out]
-end
-
 "Regime aus rollierender Volatilität (R: `.prepare_regime_info`)."
 function _prepare_regime_info(base_ret, vol_window, n_regimes)
     vol = _SL().rolling_vol(base_ret, Int(trunc(Float64(vol_window))))
-    th = _quantile7(vol, _seq_len_out(Float64(n_regimes) + 1))
+    th = _quantile7(vol, SimLev.RStats.seq_len_out(0.0, 1.0, Int(Float64(n_regimes) + 1)))   # seq(0, 1, length.out =) im Kern (seit 1.6.4)
     th[end] = th[end] + 1e-10
     reg = _SL().assign_regimes(vol, th)
     return RList("regimes" => reg, "trans" => _SL().estimate_trans_mat(reg, Int(trunc(Float64(n_regimes)))), "vol" => vol)
@@ -1222,8 +1246,9 @@ function _build_path(g, aux, config; start = 100.0, aux_ratio = nothing, aux_sta
     ret = g["ret"]
     idx = _ivec(g["idx"])
     ret isa AbstractMatrix || return nothing
-    ret = _mat(ret)
-    (any(!isfinite, ret) || any(<=(0), ret)) && return nothing
+    # seit 1.6.4 (A-058) ohne Kopie einer Matrix{Float64} und ohne Vorprüfung auf nicht endliche Werte bzw. Werte <= 0:
+    # der Kern (sl_boot_path) prüft dieselbe Bedingung und liefert dann nothing (wie bisher); er liest ret nur
+    ret = ret isa Matrix{Float64} ? ret : _mat(ret)
     # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf)
     (spec !== nothing && size(ret, 1) >= 1 && length(idx) == size(ret, 1) && size(ret, 2) == length(spec.inames) &&
      (spec.aux === nothing || all(i -> 1 <= i <= size(spec.aux, 1), idx))) ||
@@ -1235,12 +1260,25 @@ function _build_path(g, aux, config; start = 100.0, aux_ratio = nothing, aux_sta
     return out
 end
 
+"Läufe gleicher Schlüssel (aufsteigend) als Pfadnummern je Chunk (seit 1.6.4, A-091; vorher findall je Schlüssel)."
+function _chunk_runs(keyv::Vector{Float64})
+    chunks = Vector{Int}[]
+    a = 1
+    for i in eachindex(keyv)
+        if i == length(keyv) || keyv[i+1] != keyv[i]
+            push!(chunks, collect(a:i))
+            a = i + 1
+        end
+    end
+    return chunks
+end
+
 "ESS-Design (R: `.ess_design`): RFrame oder `nothing`."
 function _ess_design(method, grid, budget, n_obs)
     grid === nothing && (grid = _get_ess_grid(method, n_obs))
     (grid === nothing || _len(grid) == 0) && return nothing
     ess_params = ("L", "block_length", "n_regimes", "tail_prob", "ms_n_regimes", "ms_ar_n_regimes", "tvtp_n_regimes")
-    non_ess = ("vol_window", "wild_type", "both_tails", "p_break", "garch_order", "ms_garch_model")
+    non_ess = ("vol_window", "wild_type", "both_tails", "p_break", "garch_order")   # seit 1.6.4 ohne Textparameter
     nm = collect(String, _names(grid))
     vals = [_dvec(v) for v in _values(grid)]
     # expand.grid: erster Faktor läuft am schnellsten
@@ -1249,7 +1287,10 @@ function _ess_design(method, grid, budget, n_obs)
         rows = [vcat(r, x) for x in v for r in rows]
     end
     nr = length(rows)
-    cols = Pair{String,Any}[k => Float64[r[i] for r in rows] for (i, k) in enumerate(nm)]
+    # seit 1.6.4 bleiben Wahrheitswerte logisch wie in R expand.grid (Entscheidung 45; bis 1.6.3 als 1.0/0.0, die
+    # Parameterprüfung lehnte both_tails dann ab)
+    isb = Bool[(v isa Bool) || (v isa Union{AbstractVector,Tuple} && !isempty(v) && all(x -> x isa Bool, v)) for v in _values(grid)]
+    cols = Pair{String,Any}[k => (isb[i] ? Bool[r[i] != 0 for r in rows] : Float64[r[i] for r in rows]) for (i, k) in enumerate(nm)]
     ess = Float64[_calculate_ess(n_obs, method, RList((k => rows[i][j] for (j, k) in enumerate(nm))...)) for i in 1:nr]
     push!(cols, "ess_per_boot" => ess)
     if any(k -> k in non_ess, nm)
@@ -1287,51 +1328,157 @@ function _ess_design(method, grid, budget, n_obs)
 end
 
 "Verfahrensparameter vor dem Ziehen prüfen (R: `.check_boot_params`)."
-function _check_boot_params(method, p, n_obs)
+function _check_boot_params(method, p, n_obs, who = "bootstrap")
+    # seit 1.6.4 vor der Vorberechnung, ohne Eingabewert in den Meldungen; dazu n_regimes, vol_window, tail_prob,
+    # both_tails und höchstens 64 MS-GARCH-Regime (R: .check_boot_params)
     if method == "stationary" && (!_num1(_get(p, "L")) || _f1(_get(p, "L")) < 1)
-        _stop(@sprintf("params\$L (erwartete Blocklänge) muss eine Zahl >= 1 sein (erhalten: %s).", _show(_get(p, "L"))))
+        chk_stop("ut2.param_L", who)
     end
     if method in ("block", "circular")
         b = _get(p, "block_length")
         hi = method == "block" ? n_obs - 1 : n_obs
         bv = _num1(b) ? _f1(b) : nothing
         if bv === nothing || bv != _round0(bv) || bv < 1 || bv > hi
-            _stop(@sprintf("params\$block_length muss eine ganze Zahl von 1 bis %d sein (%d Zeilen Historie%s; erhalten: %s).",
-                           hi, n_obs, method == "block" ? ", sonst gäbe es nur einen Blockstart" : "", _show(b)))
+            chk_stop("ut2.param_block", who, Int(hi), Int(n_obs), method == "block" ? ", sonst gäbe es nur einen Blockstart" : "")
         end
     end
     if method == "wild"
         w = _get(p, "wild_type")
         if !_num1(w) || !(_f1(w) in (0.0, 1.0, 2.0))
-            _stop(@sprintf("params\$wild_type muss 0 (Rademacher), 1 (Mammen) oder 2 (Normal) sein (erhalten: %s).", _show(w)))
+            chk_stop("ut2.param_wild", who)
         end
     end
     if method == "reset"
         pb = _get(p, "p_break")
         if !_num1(pb) || _f1(pb) < 0 || _f1(pb) > 1
-            _stop(@sprintf("params\$p_break muss ein Anteil zwischen 0 und 1 sein (erhalten: %s).", _show(pb)))
+            chk_stop("ut2.param_p_break", who)
         end
     end
+    if method == "regime"
+        chk_int1(_get(p, "n_regimes"), who, "params\$n_regimes"; lo = 1)
+        chk_int1(_get(p, "vol_window"), who, "params\$vol_window"; lo = 2)
+    end
+    method in ("evt", "tails") &&
+        chk_num1(_get(p, "tail_prob"), who, "params\$tail_prob"; lo = 0, hi = 0.5, lo_open = true, hi_open = true)
+    method == "evt" && chk_bool1(_get(p, "both_tails"), who, "params\$both_tails")
+    kn = method == "ms_garch" ? "ms_n_regimes" : method == "ms_ar_garch_m" ? "ms_ar_n_regimes" :
+         method == "tvtp_ms_garch" ? "tvtp_n_regimes" : nothing
+    # K < 2, nicht ganz usw. meldet _ms_garch_check (Vorberechnung); hier nur die Obergrenze des Kerns
+    kn !== nothing && _num1(_get(p, kn)) && _f1(_get(p, kn)) > 64 && chk_stop("ganz_bis", who, "params\$" * kn, "2", "64")
     return true
 end
 
-"Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (R: `.boot_setup`)."
-function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores = 1)
-    _is_config(config) || _stop("config muss mit bootstrap_config() erstellt werden")
-    method in _BOOT_METHODS || _stop("Unbekannte Methode '" * string(method) * "'. Verfügbar: " * join(_BOOT_METHODS, ", "))
-    (!_isnum(n) || n < 1) && _stop("n muss eine positive Zahl sein")
-    if path_length !== nothing && (!_num1(path_length) || _f1(path_length) < 1 || _f1(path_length) != _round0(_f1(path_length)))
-        _stop(@sprintf("path_length muss eine ganze Zahl >= 1 sein (erhalten: %s).", _show(path_length)))
+"Liste wie R `is.list` für Argumente wie sim_args und params (nothing, RList, NamedTuple, Dict, Paare, leerer Vektor)."
+_is_listlike(x) = x === nothing || x isa Union{RList,NamedTuple,AbstractDict,AbstractVector,Tuple}
+
+"sim_args wie R is.list: nothing, RList, NamedTuple, Dict, Paare; ein Vektor ohne Paare gilt als unbenannte Liste (Meldung
+von _sim_args_set: Argument ohne Namen)."
+_e2_sim_args(x) = (x isa Union{AbstractVector,Tuple} && !(x isa AbstractVector{<:Pair})) ? (isempty(x) ? RList() : ["" => first(x)]) : x
+
+"Atomarer Wert wie ein Element eines R-Vektors (Zahl, Text, Wahrheitswert)."
+_atomic1(v) = v isa Union{Real,AbstractString,Missing}
+
+"ESS-Gitter: `nothing` oder benannte Liste nicht leerer Wertevektoren (R: `.check_ess_grid`, seit 1.6.4)."
+function _check_ess_grid(g, who)
+    g === nothing && return nothing
+    g isa Union{RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}} && any(v -> v isa SimLev.RFmt.RFactor, _values(g)) &&
+        chk_stop("faktor", who, "ess_grid")   # Entscheidung 15
+    nms = g isa Union{RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}} ? _names(g) : nothing
+    ok = nms !== nothing && !isempty(nms) && all(k -> k isa AbstractString && !isempty(k), nms)
+    if ok
+        for v in _values(g)
+            ok &= v isa Union{AbstractVector,Tuple} ? (!isempty(v) && all(_atomic1, v)) : (_atomic1(v) && v !== missing)
+        end
     end
-    ex = _extract_returns(data, config)
+    ok || chk_stop("e2.gitter", who)
+    length(unique(nms)) == length(nms) || chk_stop("e2.doppelt", who, "ess_grid")
+    # seit 1.6.4 nur Zahlen (Entscheidung 31; Wahrheitswerte erlaubt, Entscheidung 45); R: is.numeric/is.logical
+    for v in _values(g)
+        all(z -> z isa Real, v isa Union{AbstractVector,Tuple} ? v : (v,)) || chk_stop("gitter_zahlen", who)
+    end
+    return nothing
+end
+
+"""Spalten der Konfiguration nur als Zahlen (seit 1.6.4, Entscheidung 39; R `.boot_numcols`): Faktor -> spalte_faktor,
+sonst nicht numerisch -> spalte_typ; eine Spalte nur aus NA zählt als Zahlenspalte (Entscheidung 14). Fehlende
+Spalten meldet `_extract_returns`."""
+function _boot_numcols(data, config, who)
+    cols = String[string(ix["col"]) for ix in config["indices"]]
+    config["n_aux"] != 0 && append!(cols, String[string(v) for v in _values(config["aux"])])
+    if data isa RFrame
+        fr = SimLev._to_frame(data)
+        for col in cols
+            haskey(fr.kinds, col) || continue
+            k = fr.kinds[col]
+            k == :factor && chk_stop("spalte_faktor", who, col)
+            (k == :numeric || (k == :logical && all(v -> v === missing, fr.cols[col]))) ||
+                chk_stop("spalte_typ", who, col, SimLev.chk_msg("typ.numerisch"))
+        end
+    elseif data isa AbstractMatrix && !(eltype(_mat_or_self(data)) <: Real)
+        nms = data isa NamedMat && data.colnames !== nothing ? data.colnames : String[]
+        for col in cols
+            col in nms && chk_stop("spalte_typ", who, col, SimLev.chk_msg("typ.numerisch"))
+        end
+    end
+    return nothing
+end
+_mat_or_self(x) = x isa NamedMat ? x.data : x
+
+"Einträge von params mit Länge 1 wie Einzelwerte (Entscheidung 4); garch_order bleibt."
+function _unwrap_params(params)
+    params isa Union{RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}} || return params
+    nms = _names(params)
+    nms === nothing && return params
+    out = RList()
+    for (k, v) in zip(nms, _values(params))
+        out[k] = k == "garch_order" ? v : chk_scalar(v)
+    end
+    return out
+end
+
+"data als Tabelle oder Matrix, nicht leer (R: `.boot_data_check`; seit 1.6.4 kein NamedTuple/Dict mehr)."
+function _boot_data_check(data, who = "bootstrap")
+    (data isa RFrame || data isa AbstractMatrix) || chk_stop("ut2.boot_data", who)
+    (data isa RFrame ? SimLev.nrow(data) : size(data, 1)) == 0 && chk_stop("rs.data_leer", who)
+    return nothing
+end
+
+"Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (R: `.boot_setup`)."
+function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores = 1, max_tries = 10,
+                     progress = true, who = "bootstrap")
+    _is_config(config) || chk_stop("klasse", who, "config", "bootstrap_config()")
+    # seit 1.6.4: Methode als einzelner Text, n auch NaN, Meldungen ohne Eingabewert; Länge 1 wie Einzelwert
+    method, n, path_length = chk_scalar(method), chk_scalar(n), chk_scalar(path_length)
+    (method isa AbstractString && method in _BOOT_METHODS) || chk_stop("auswahl", who, "method", join(["\"$m\"" for m in _BOOT_METHODS], ", "))
+    (!_isnum(n) || isnan(Float64(n)) || n < 1) && chk_stop("ut2.n_positiv", who)
+    if path_length !== nothing && (!_num1(path_length) || _f1(path_length) < 1 || _f1(path_length) != _round0(_f1(path_length)))
+        chk_stop("ganz", who, "path_length", "1")
+    end
+    # einheitliche Eingabeprüfung (seit 1.6.4): data wie _extract_returns, dann die übrigen Argumente vor der Vorberechnung
+    _boot_data_check(data, who)
+    chk_int1(n, who, "n")
+    # seit 1.6.4 Obergrenzen (Entscheidungen 16, 36 und 46): n <= 10^8, path_length <= 36 600 Tage (100 Jahre)
+    SimLev.chk_max(n, SimLev.SL_MAX_N, who, "n")
+    path_length === nothing || SimLev.chk_max(path_length, SimLev.SL_MAX_TAGE, who, "path_length")
+    _is_listlike(params) || chk_stop("liste", who, "params")
+    params = _unwrap_params(params)
+    ess = chk_bool1(ess, who, "ess")
+    _check_ess_grid(ess_grid, who)
+    chk_int1(max_tries, who, "max_tries")
+    cores = SimLev.chk_cores(cores, who)   # seit 1.6.4 höchstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
+    chk_bool1(progress, who, "progress")
+    _boot_numcols(data, config, who)   # seit 1.6.4 nur Zahlenspalten (Entscheidung 39)
+    ex = _extract_returns(data, config, who)
     ex["_path_spec"] = _boot_path_spec(ex["aux"], config, ex["aux_ratio"], ex["aux_start"])   # Kern sl_boot_path (seit 1.6.0)
     # seit 1.6.3: Renditematrix einmal je Lauf (bis 1.6.2 je Pfad und Versuch kopiert) und ob alle Zeilen gültig sind
     ex["_ret_m"] = _mat(ex["ret"])
     ex["_src_ok"] = all(v -> isfinite(v) && v > 0, ex["_ret_m"])
     n_obs = size(ex["ret"], 1)
+    # seit 1.6.4 (Entscheidung 38): ess = true mit dem Standardgitter braucht für Blocklängen mindestens 4 Renditen
+    ess && ess_grid === nothing && method in ("stationary", "block", "circular") && n_obs < 4 && chk_stop("ess_kurz", who, 4)
     n_out = _as_int(path_length !== nothing ? path_length : n_obs)
     if method in ("wild", "reset") && n_out != n_obs
-        _stop(@sprintf("Verfahren '%s' erhält die Chronologie; path_length muss %d sein.", method, n_obs))
+        chk_stop("ut2.chronologie", who, method, Int(n_obs))
     end
     params = _resolve_auto(params, ex["ret"])
     design = ess ? _ess_design(method, ess_grid, _as_int(n), n_obs) : nothing
@@ -1345,6 +1492,10 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
         combo_of_path = reduce(vcat, [fill(i, Int(design["n_sims"][i])) for i in 1:SimLev.nrow(design)]; init = Int[])
     end
     n_paths = length(combo_of_path)
+    base_p = RList[_get_base_params(cp) for cp in combos]
+    for bp in base_p
+        _check_boot_params(method, bp, n_obs, who)   # seit 1.6.4 vor der Vorberechnung
+    end
     infos = RList[]
     for cp in combos
         info = try
@@ -1355,14 +1506,11 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
         end
         push!(infos, info)
     end
-    base_p = RList[_get_base_params(cp) for cp in combos]
-    for bp in base_p
-        _check_boot_params(method, bp, n_obs)
-    end
     weights = design === nothing ? ones(n_paths) : design["weight"][combo_of_path]
     weights = weights ./ _rsum(weights) .* length(weights)
     return RList("ex" => ex, "n_obs" => n_obs, "n_out" => n_out, "design" => design, "combos" => combos, "base_p" => base_p,
-                 "infos" => infos, "combo_of_path" => combo_of_path, "n_paths" => n_paths, "weights" => weights)
+                 "infos" => infos, "combo_of_path" => combo_of_path, "n_paths" => n_paths, "weights" => weights,
+                 "cores" => cores)
 end
 
 """Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (R: `.draw_path`); `i` 1-basiert.
@@ -1394,12 +1542,12 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 "`nothing` -> einmal k aus G, sonst geprüft (Wert bleibt)."
-_seed_or_draw(seed) = seed === nothing ? _SL().next_seed() : (_SL().check_seed(seed); seed)
+_seed_or_draw(seed, fn) = seed === nothing ? _SL().next_seed() : (_SL().check_seed(seed, fn); seed)
 
 """
     bootstrap(data, config; method = "raw", n = 1000, params = RList(), ess = false,
               ess_grid = nothing, path_length = nothing, max_tries = 10, seed = nothing,
-              cores = 1, progress = true)
+              cores = "auto", progress = true)
 
 Bootstrap-Pfade erzeugen.
 
@@ -1414,6 +1562,8 @@ zum Tabelle (RFrame) für `simulation()`; `withdrawal_paths()` wandelt alle Pfad
 - `data`: Tabelle (RFrame) oder Matrix mit den in `config` genannten Spalten (Index-Spalten als
   Brutto-Renditen je Zeile oder, bei `input = "prices"`, als Kursniveaus; Zusatzreihen beliebig). Jede Zeile
   ist ein Simulationsschritt ("Tag"); eine Datumsspalte wird nicht ausgewertet.
+  Seit 1.6.4 keine Faktorspalten (Kategorien).
+  Seit 1.6.4 müssen die Spalten aus config Zahlen enthalten (Text, auch Zahlen als Text, ist ein Fehler).
 - `config`: Objekt aus `bootstrap_config()`.
 - `method`: Verfahren (Standard in `bootstrap()`: `"raw"`, in `bootstrap_study()`: `"stationary"`). In
   Klammern die Einträge von `params`, die das Verfahren verwendet:
@@ -1445,8 +1595,11 @@ zum Tabelle (RFrame) für `simulation()`; `withdrawal_paths()` wandelt alle Pfad
   Bei "wild" und "reset" muss `path_length` der Länge der Historie entsprechen.
 - `n`: Anzahl Pfade (Standard 1000); bei `ess = true` das Gesamtbudget, das auf die Parameterkombinationen
   verteilt wird. Pfade, die nach `max_tries` Versuchen ungültig bleiben, fehlen im Ergebnis.
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
+  Seit 1.6.4 höchstens 10^8.
 - `params`: Benannte Liste von Verfahrensparametern; nicht angegebene Einträge erhalten den Standardwert
   (Standard `()` = alle Standardwerte). Je Verfahren werden nur die oben genannten Einträge verwendet:
+  Seit 1.6.4 geprüft: n_regimes ganze Zahl ≥ 1, vol_window ganze Zahl ≥ 2, tail_prob > 0 und < 0.5, both_tails TRUE oder FALSE, MS-GARCH-Regime höchstens 64.
 
   - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1, Standard 20) oder `"auto"`
     (`bootstrap_block_length()`, Spalte `stationary`).
@@ -1476,14 +1629,21 @@ zum Tabelle (RFrame) für `simulation()`; `withdrawal_paths()` wandelt alle Pfad
   Budget `n` wird invers zur effektiven Stichprobengröße (ESS) je Kombination verteilt; die Pfade erhalten
   Gewichte (Mittel 1), mit denen `bootstrap_probability()` und `summary()` rechnen. Für "raw", "garch" und
   "gjr_garch" gibt es kein Standardgitter (dann normaler Bootstrap).
+  Seit 1.6.4 nur TRUE oder FALSE.
+  Seit 1.6.4 braucht ess = True mit dem Standardgitter bei stationary, block und circular mindestens 4 Renditen
+  (sonst Fehler).
 - `ess_grid`: Benannte Liste von Wertevektoren je Hyperparameter (z. B. `(L = [20, 50, 100],)`); `nothing`
   (Standard) = Standardgitter des Verfahrens (z. B. `L` bzw. `block_length` 5, 10, 20, 30, 50, 75, 100 Zeilen,
   begrenzt auf die halbe Historienlänge). Nur bei `ess = true` verwendet.
+  Seit 1.6.4 eine benannte Liste nicht leerer Wertevektoren (kein Faktor).
+  Seit 1.6.4 nur Zahlen (und Wahrheitswerte); Text wie ms_garch_model ist ein Fehler.
 - `path_length`: Pfadlänge in Zeilen (simulierte Schritte, ganze Zahl, mindestens 1); `nothing` (Standard) =
   Anzahl verwendbarer Zeilen der Historie. Damit lassen sich z. B. 50-jährige Pfade aus 30 Jahren Historie
   erzeugen. Jeder Pfad hat `path_length + 1` Zeilen (Startzeile plus Schritte).
+  Seit 1.6.4 höchstens 36600 (100 Jahre in Tagen).
 - `max_tries`: Versuche je Pfad (Standard 10), falls ein Pfad ungültig ist (Indexrendite <= 0 oder nicht
   endlich). Ein Totalverlust eines Hebelprodukts macht den Pfad nicht ungültig.
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
 - `seed`: Ganzzahliger Startwert (|seed| < 2^53); `nothing` (Standard) = genau einmal aus dem Zufallszustand
   von SimLev gezogen (siehe `simlev_seed()`; ganze Zahl von 0 bis 2^31 - 1, im Ergebnis unter `seed`
   gespeichert, damit reproduzierbar). Jeder Pfad i erhält einen eigenen Strom (Sprung um 2^128 Schritte je
@@ -1491,10 +1651,28 @@ zum Tabelle (RFrame) für `simulation()`; `withdrawal_paths()` wandelt alle Pfad
   `bootstrap()` und `bootstrap_study()` mit gleichem Seed (und gleichen Daten, Verfahren, `params`, `ess` und
   `path_length`) dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
   unverändert; mit `seed = nothing` liefern wiederholte Aufrufe verschiedene Pfade. `set.seed()` wirkt nicht.
-- `cores`: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf Windows). Bei den MS-GARCH-Verfahren
-  (`ms_garch`, `ms_ar_garch_m`, `tvtp_ms_garch`) rechnet der Fit seine Startpunkte zudem auf so vielen
-  Threads; das Ergebnis hängt davon nicht ab.
+- `cores`: Anzahl Läufe:
+  `"auto"` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+  Mit `"auto"` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+  die Zahl der Aufgaben (Tasks auf Threads statt Prozesse) und der Kern-Threads je Lauf selbst (Planer,
+  gleiche Regel in R, Python und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende
+  Prozesse gleicher oder höherer Priorität) und der Julia-Threads, so viele, wie
+  der freie Speicher trägt, und nur, wenn die Startkosten kleiner sind als der Gewinn (kleine Rechnungen
+  bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
+  Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
+  Einheitenreihenfolge.
+  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
+  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
+  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Das Ergebnis hängt nicht von
+  cores ab.
+  Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
+  Bei den MS-GARCH-Verfahren (`ms_garch`, `ms_ar_garch_m`, `tvtp_ms_garch`) rechnet der Fit seine
+  Startpunkte zudem auf so vielen Threads (mit `"auto"` auf den Kern-Threads: Zahl der Prozessoren bzw.
+  `SIMLEV_THREADS`); das Ergebnis hängt davon nicht ab.
 - `progress`: Logisch: Fortschritts- und Abschlussmeldung per `message()` ausgeben (Standard `true`).
+  Seit 1.6.4 nur TRUE oder FALSE.
 
 # Rückgabe
 Objekt der Klasse `bootstrap_result`, eine Liste mit
@@ -1544,12 +1722,13 @@ println(size(b["paths"][1]))
 ```
 """
 function bootstrap(data, config, method_pos = nothing; method = "raw", n = 1000, params = RList(), ess = false,
-                   ess_grid = nothing, path_length = nothing, max_tries = 10, seed = nothing, cores = 1, progress = true)
-    data = SimLev.as_rframe(data)
-    method_pos === nothing || (method = method_pos)
+                   ess_grid = nothing, path_length = nothing, max_tries = 10, seed = nothing, cores = "auto", progress = true)
+    method_pos === nothing || (method = method_pos)   # seit 1.6.4 data nur als RFrame oder Matrix (Entscheidung 6)
+    method, max_tries, cores, progress = chk_scalar(method), chk_scalar(max_tries), chk_scalar(cores), chk_scalar(progress)
     t0 = time()
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
-    seed = _seed_or_draw(seed)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress, "bootstrap")
+    cores = setup["cores"]   # begrenzt (Entscheidung 41)
+    seed = _seed_or_draw(seed, "bootstrap")
     streams = _SL().streams(seed, setup["n_paths"])            # U_i = J^i(S_0)
     res = _par_lapply(1:setup["n_paths"],
         i -> _draw_path(setup, i, streams[i], config, method, max_tries), cores)
@@ -1601,7 +1780,9 @@ zusammengesetzt wurden.
 # Argumente
 - `result`: Objekt der Klasse `bootstrap_result` aus `bootstrap()`.
 - `min_rows`: Mindestzeilenzahl je Pfad; `nothing` (Standard) = keine Mindestlänge.
+  Seit 1.6.4 eine ganze Zahl ≥ 0.
 - `verbose`: Logisch: Anzahl entfernter und gültiger Pfade ausgeben (Standard `true`).
+  Seit 1.6.4 nur TRUE oder FALSE.
 
 # Rückgabe
 Das bereinigte `bootstrap_result` (`paths`, `weights` und `param_values` gekürzt). Bleibt kein Pfad übrig,
@@ -1619,9 +1800,11 @@ println(length(b["paths"]))
 ```
 """
 function bootstrap_validate(result; min_rows = nothing, verbose = true)
-    _is_boot_result(result) || _stop("result muss ein bootstrap_result-Objekt sein")
+    _is_boot_result(result) || chk_stop("klasse", "bootstrap_validate", "result", "bootstrap()")
     P = collect(Any, something(_get(result, "paths"), Any[]))
-    isempty(P) && _stop("Keine Pfade im Ergebnis vorhanden")
+    isempty(P) && chk_stop("rs.keine_pfade", "bootstrap_validate")
+    min_rows = chk_int1(min_rows, "bootstrap_validate", "min_rows"; lo = 0, null_ok = true)   # seit 1.6.4
+    verbose = chk_bool1(verbose, "bootstrap_validate", "verbose")
     function valid(p)
         (p === nothing || !(p isa AbstractMatrix || p isa RFrame) || _nrow(p) == 0) && return false
         a = p isa RFrame ? reduce(vcat, [_as_numeric_col(c) for c in p.cols]) : vec(_mat(p))
@@ -1685,10 +1868,14 @@ Hebelprodukte, Zusatzreihen); die Strategie muss Assets mit diesen Namen verwend
 
 # Argumente
 - `result`: `bootstrap_result` aus `bootstrap()` oder eine einzelne Pfadmatrix (z. B. `result["paths"][[i]]`).
+  Seit 1.6.4 auch wie beschrieben ein einzelner Pfad: Zahlenmatrix (Spalten ohne Namen heißen V1, V2, …) oder Tabelle
+  aus Zahlenspalten.
 - `i`: Pfadnummer (Standard 1); nur bei `bootstrap_result` verwendet.
+  Seit 1.6.4 eine ganze Zahl von 1 bis zur Pfadzahl.
 - `dates`: Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen hat (`path_length + 1`), z. B. ein
   Handelstagskalender; `nothing` (Standard) = aufeinanderfolgende Kalendertage ab `start`.
 - `start`: Startdatum für `dates = nothing` (Zeichenkette oder Date, Standard "2000-01-01").
+  Seit 1.6.4 ein einzelnes Datum (Date oder "JJJJ-MM-TT"), keine Zahl.
 
 # Rückgabe
 Tabelle (RFrame) mit Spalte `date` (Klasse Date) und allen Pfadspalten (Kursniveaus mit Startwert 100;
@@ -1713,10 +1900,28 @@ println(res["cagr"])
 """
 function bootstrap_data(result, i_pos = 1; i = i_pos, dates = nothing, start = "2000-01-01")
     is_res = _is_boot_result(result)
+    # seit 1.6.4: Pfadnummer als ganze Zahl von 1 bis zur Pfadzahl (vorher z. B. 2.5 InexactError), start als Datum
+    is_res && (i = chk_int1(i, "bootstrap_data", "i"; lo = 1, hi = length(result["paths"])))
+    # seit 1.6.4 (Entscheidung 30) wie dokumentiert auch ein einzelner Pfad: Zahlenmatrix (Spalten ohne Namen V1, V2, …
+    # wie R as.data.frame) oder RFrame aus Zahlenspalten (bis 1.6.3 Matrix Fehler, Dict/NamedTuple angenommen)
+    if !is_res
+        ok = if result isa AbstractMatrix
+            eltype(_mat_or_self(result)) <: Real && !(eltype(_mat_or_self(result)) <: Bool) && size(result, 2) >= 1
+        elseif result isa RFrame
+            fr = SimLev._to_frame(result)
+            !isempty(fr.names) && all(nm -> fr.kinds[nm] == :numeric, fr.names)
+        else
+            false
+        end
+        ok || chk_stop("pfad", "bootstrap_data")
+    end
+    chk_date1(start, "bootstrap_data", "start")
+    start = chk_scalar(start)
     P = is_res ? result["paths"][Int(i)] : result
     nr = _nrow(P)
+    SimLev.chk_nofactor(dates, "bootstrap_data", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     dates === nothing && (dates = _seq_dates(_todate(start, "start")[1], nr))
-    _len(dates) != nr && _stop(@sprintf("dates hat Länge %d, Pfad hat %d Zeilen.", _len(dates), nr))
+    _len(dates) != nr && chk_stop("rs.dates_pfad", "bootstrap_data", _len(dates), nr)
     d = _todate(dates, "dates")
     out = _path_frame(d, P)
     if is_res
@@ -1725,8 +1930,6 @@ function bootstrap_data(result, i_pos = 1; i = i_pos, dates = nothing, start = "
         at = _get(cfg, "aux_type")
         keep = [s for s in sets if _aux_type_of(at, s) == "rate"]
         isempty(keep) || (SimLev.attrs(out)["aux_type"] = RVector(fill("rate", length(keep)); names = keep))
-    elseif !(P isa RFrame || P isa AbstractDict || P isa NamedTuple)
-        _stop("\$ operator is invalid for atomic vectors")
     end
     return out
 end
@@ -1792,6 +1995,7 @@ println(bootstrap_study_metrics(res))
 ```
 """
 function bootstrap_study_metrics(res)
+    _is_result(res) || chk_stop("klasse", "bootstrap_study_metrics", "res", "simulation()")   # seit 1.6.4
     s = _get(res, "statistics", RList())
     dq = _quantile7(_dvec(_get(res, "drawdowns")), [0.5, 0.9])
     worth = _dvec(_get(res, "worth"))
@@ -2038,10 +2242,10 @@ in Julia eine Ganzzahl). Fehler bei NA, Text, Vektor, negativen oder nicht ganze
 (Float64; `n` darf `Inf` sein).
 """
 function _keep_count(x, n, who)
+    x = chk_scalar(x)   # Länge 1 wie Einzelwert (Entscheidung 4)
     x isa Bool && return x ? Float64(n) : 0.0
     ok = x isa Real && !(x isa Bool) && isfinite(Float64(x)) && Float64(x) >= 0 && Float64(x) == _round0(Float64(x))
-    ok || _stop(@sprintf("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) sein, nicht %s.",
-                         who, _show(x)))
+    ok || chk_stop("ut2.keep_paths", who)   # seit 1.6.4 aus der Tabelle (K43 T2-B6)
     return min(Float64(x), Float64(n))
 end
 
@@ -2050,7 +2254,7 @@ end
                     ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
                     start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
                     benchmark = nothing, chunk_dir = nothing, keep_paths = 0, keep_returns = "none",
-                    keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = 1, progress = true)
+                    keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = "auto", progress = true)
 
 Strategien auf Bootstrap-Pfaden auswerten.
 
@@ -2096,6 +2300,7 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
   verteilt wird. Pfade, die nach `max_tries` Versuchen ungültig bleiben, fehlen im Ergebnis.
 - `strategies`: Benannte, nicht leere Liste. Jedes Element ist entweder direkt eine Strategie
   (`create_strategy()`) oder eine Liste mit
+  Seit 1.6.4 ohne doppelte Namen.
 
   - strategy: Strategie (Pflicht).
   - signal: Optional Funktion, die den Pfad-Tabelle (RFrame) (alle Zeilen einschließlich `burn_in`) erhält und
@@ -2151,6 +2356,7 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
   (Standard) = aufeinanderfolgende Kalendertage ab `start` (Standard "2000-01-01"), siehe `bootstrap_data()`.
 - `burn_in`: Anzahl Anfangszeilen des Pfads, die nach der Signalberechnung verworfen werden (Signal-Vorlauf,
   z. B. 730 Tage für eine 430-Tage-SMA; Standard 0). Muss kleiner als `path_length` sein.
+  Seit 1.6.4 eine ganze Zahl ≥ 0.
 - `sim_args`: Benannte Liste gemeinsamer Argumente für `simulation()` (Standard `()`), z. B. `(start_value =
   1000, tax = tax_profile())`: Argumente von `simulation()` außer `data` und `strategy`, also auch Bausteine
   (z. B. `dca = dca_plan(100, 1)`, `tax = tax_profile()`) und Pfade zu Parametern der Bausteine
@@ -2158,6 +2364,9 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
   `dca_value`) ergeben einen Fehler, der den Baustein nennt.
 - `metrics`: Funktion `SimLevResult -> benannter numerischer Vektor` (Standard `bootstrap_study_metrics()`);
   die Namen werden zu Spalten von `results`.
+  Seit 1.6.4 geprüft: eine Funktion.
+  Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen nicht path, weight, combo,
+  tries oder strategy heißen (sonst Fehler nach dem Rechnen).
 - `benchmark`: Name einer Strategie aus `strategies` als Vergleich für die gepaarte Auswertung in `summary()`;
   `nothing` (Standard) = keine.
 - `chunk_dir`: Optional (Standard `nothing`) Verzeichnis für Zwischenergebnisse je Chunk (Dateien
@@ -2167,6 +2376,9 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
   Quelltext), bricht die Studie mit einer Meldung ab. Vorhandene Dateien werden gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
   gleichem Seed fortgesetzt. Die Dateien werden nur über Chunk-Nummer, Seed, `keep_returns` und `keep_paths`
   zugeordnet: bei geänderten Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.
+  Seit 1.6.4 ein einzelner, nicht leerer Text.
+  Seit 1.6.4 werden die Dateien atomar geschrieben (temporärer Name, dann umbenannt); eine unvollständige oder
+  beschädigte Datei bricht bei jedem cores mit derselben Meldung ab.
 - `keep_paths`: Pfadmatrizen zusätzlich zurückgeben (Diagnose): `true` = alle Pfade, `false` oder 0 (Standard)
   = keine, ganze Zahl k >= 1 = die ersten k Pfade (k größer als die Pfadzahl: alle); `NA`, Text, Vektoren,
   negative oder nicht ganze Zahlen ergeben einen Fehler. Speicherbedarf: Alle behaltenen Pfadmatrizen bleiben
@@ -2189,9 +2401,11 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
   Inflation in Prozent p. a. Sind gespeicherte Faktoren nicht endlich oder <= 0 (z. B. eine nicht
   gekennzeichnete Zinsreihe mit Vorzeichenwechsel), warnt die Funktion, und `withdrawal_paths()` bricht mit
   dieser Reihe als Inflation ab. Standard `nothing`.
+  Seit 1.6.4 ohne doppelte Namen.
 - `max_tries`: Versuche je Pfad (Standard 10), falls ein Pfad ungültig ist (Indexrendite <= 0 oder nicht
   endlich). Ein Totalverlust eines Hebelprodukts macht den Pfad nicht ungültig.
 - `chunk_size`: Pfade je Arbeitspaket (Standard 25); Einheit der Parallelisierung und der Zwischenspeicherung.
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
 - `seed`: Ganzzahliger Startwert (|seed| < 2^53); `nothing` (Standard) = genau einmal aus dem Zufallszustand
   von SimLev gezogen (siehe `simlev_seed()`; ganze Zahl von 0 bis 2^31 - 1, im Ergebnis unter `seed`
   gespeichert, damit reproduzierbar). Jeder Pfad i erhält einen eigenen Strom (Sprung um 2^128 Schritte je
@@ -2199,10 +2413,29 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
   `bootstrap()` und `bootstrap_study()` mit gleichem Seed (und gleichen Daten, Verfahren, `params`, `ess` und
   `path_length`) dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
   unverändert; mit `seed = nothing` liefern wiederholte Aufrufe verschiedene Pfade. `set.seed()` wirkt nicht.
-- `cores`: Anzahl Prozesse (Standard 1); parallelisiert wird über Chunks. Der MS-GARCH-Fit der Vorberechnung
-  nutzt ebenso viele Threads (Ergebnis unabhängig davon).
-- `progress`: Logisch: Fortschrittsmeldungen per `message()` (Standard `true`; Meldung je Chunk nur bei `cores
-  = 1`).
+- `cores`: Anzahl Läufe; parallelisiert wird über Chunks:
+  `"auto"` (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl ≥ 1.
+  Mit `"auto"` rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und wählt dann
+  die Zahl der Aufgaben (Tasks auf Threads statt Prozesse) und der Kern-Threads je Lauf selbst (Planer,
+  gleiche Regel in R, Python und Julia): höchstens Zahl der freien Prozessoren (Prozessoren minus andere laufende
+  Prozesse gleicher oder höherer Priorität) und der Julia-Threads, so viele, wie
+  der freie Speicher trägt, und nur, wenn die Startkosten kleiner sind als der Gewinn (kleine Rechnungen
+  bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
+  Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
+  Einheitenreihenfolge.
+  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
+  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
+  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
+  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Ausgaben, die eigene Funktionen
+  (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
+  in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
+  Einheitenreihenfolge (R und Python: alle Ausgaben in Einheitenreihenfolge). Das Ergebnis hängt nicht von cores ab.
+  Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
+  Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads
+  (mit `"auto"` die Kern-Threads; Ergebnis unabhängig davon).
+- `progress`: Logisch: Fortschrittsmeldungen per `message()` (Standard `true`; Meldung je Chunk bei jedem `cores`,
+  seit 1.6.4; bis dahin nur bei `cores = 1` und `cores = "auto"`).
 
 # Rückgabe
 Objekt der Klasse `SimLevBootstrapStudy`, eine Liste mit
@@ -2255,20 +2488,28 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
                          params = RList(), ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
                          start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
                          benchmark = nothing, chunk_dir = nothing, keep_paths = 0, keep_returns = nothing,
-                         keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = 1, progress = true)
+                         keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = "auto", progress = true)
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
-    data = SimLev.as_rframe(data)
-    method_pos === nothing || (method = method_pos)
+    method_pos === nothing || (method = method_pos)   # seit 1.6.4 data nur als RFrame oder Matrix (Entscheidung 6)
+    SimLev.DataPrep._e5_match_arg(keep_returns, ("none", "year", "quarter", "month"), "bootstrap_study", "keep_returns")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     keep_returns = _match_arg(keep_returns, ("none", "year", "quarter", "month"))
+    fn = "bootstrap_study"
+    # seit 1.6.4: config vor keep_aux, keep_aux nur Text ohne Doppel; einheitliche Eingabeprüfung (R gleich)
+    _is_config(config) || chk_stop("klasse", "bootstrap_study", "config", "bootstrap_config()")
     if keep_aux !== nothing
-        keep_aux = keep_aux isa AbstractString ? [String(keep_aux)] : String[string(a) for a in keep_aux]
-        all(a -> a in _cfg_list(config, "aux_names"), keep_aux) || _stop("keep_aux muss Namen aus config\$aux enthalten.")
+        ka = keep_aux isa AbstractString ? Any[keep_aux] : keep_aux isa Union{AbstractVector,Tuple} ? collect(Any, keep_aux) : Any[keep_aux]
+        (all(a -> a isa AbstractString, ka) && all(a -> a in _cfg_list(config, "aux_names"), ka)) ||
+            chk_stop("ut2.keep_aux", "bootstrap_study")
+        keep_aux = String[String(a) for a in ka]
+        length(unique(keep_aux)) == length(keep_aux) || chk_stop("e2.doppelt", fn, "keep_aux")
     end
     t0 = time()
-    snm = strategies === nothing ? nothing : _names(strategies)
-    if strategies === nothing || _len(strategies) == 0 || snm === nothing || any(==(""), snm)
-        _stop("'strategies' muss eine benannte, nicht-leere Liste sein.")
+    snm = strategies === nothing || _is_strategy(strategies) || !(strategies isa Union{RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}}) ?
+          nothing : _names(strategies)
+    if strategies === nothing || snm === nothing || _len(strategies) == 0 || any(==(""), snm)
+        chk_stop("ut2.strategies", "bootstrap_study")
     end
+    length(unique(snm)) == length(snm) || chk_stop("e2.doppelt", fn, "strategies")   # vorher: R erste, Julia letzte
     snames = collect(String, snm)
     specs = Dict{String,Any}()
     for (k, s) in zip(snames, _values(strategies))
@@ -2278,32 +2519,65 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
             specs[k] = (strategy = s,)
         end
     end
-    benchmark !== nothing && !(benchmark in snames) && _stop("benchmark muss einer der Strategienamen sein.")
+    for k in snames
+        SimLev.Sensitivity._e2_check_strategy(_get(specs[k], "strategy"))   # wie simulation(), vor dem Ziehen (seit 1.6.4)
+    end
+    benchmark = chk_scalar(benchmark)
+    benchmark !== nothing && !(benchmark isa AbstractString && benchmark in snames) && chk_stop("ut2.benchmark_name", "bootstrap_study")
+    _is_listlike(sim_args) || chk_stop("liste", fn, "sim_args")
+    sim_args = _e2_sim_args(sim_args)
+    metrics isa Function || chk_stop("e2.funktion", fn, "metrics")
+    chunk_dir = chk_name1(chunk_dir, fn, "chunk_dir"; null_ok = true)
+    chunk_dir !== nothing && ispath(chunk_dir) && !isdir(chunk_dir) && chk_stop("e2.verzeichnis", fn, "chunk_dir")
+    burn_in = chk_int1(burn_in, fn, "burn_in"; lo = 0)
+    chunk_size = chk_int1(chunk_size, fn, "chunk_size")
+    chk_date1(start, fn, "start")
+    start = chk_scalar(start)
+    method, max_tries, cores, progress = chk_scalar(method), chk_scalar(max_tries), chk_scalar(cores), chk_scalar(progress)
     # Argumente für simulation() je Strategie einmal auflösen (Bausteine, Pfade; alte flache Namen: Fehler)
     sim_args = SimLev._sim_args_set(RList(), sim_args, "bootstrap_study")
     spec_sim = Dict{String,Any}(k => SimLev._sim_args_set(sim_args, _get(specs[k], "args"), "bootstrap_study") for k in snames)
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress, fn)
+    cores = setup["cores"]   # begrenzt (Entscheidung 41)
     keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # true = alle Pfade
     n_out = setup["n_out"]
+    SimLev.chk_nofactor(dates, "bootstrap_study", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     dates === nothing && (dates = _seq_dates(_todate(start, "start")[1], n_out + 1))
-    _len(dates) != n_out + 1 && _stop(@sprintf("dates braucht Länge %d (Pfadlänge + 1).", n_out + 1))
+    _len(dates) != n_out + 1 && chk_stop("rs.dates_studie", fn, n_out + 1)
     dates = _todate(dates, "dates")
-    burn_in >= n_out && _stop("burn_in ist länger als der Pfad.")
-    seed = _seed_or_draw(seed)
+    burn_in >= n_out && chk_stop("rs.burn_in", fn)
+    seed = _seed_or_draw(seed, "bootstrap_study")
     n_paths = setup["n_paths"]
     streams = _SL().streams(seed, n_paths)                     # U_i = J^i(S_0)
     cs = Float64(chunk_size)
     keyv = Float64[ceil(i / cs) for i in 1:n_paths]
-    chunks = [findall(==(k), keyv) for k in sort(unique(keyv))]
+    # seit 1.6.4 (A-091) über die Wechselstellen der (aufsteigenden) Schlüssel statt findall je Chunk über alle Pfade;
+    # gleiche Chunks in gleicher Reihenfolge
+    chunks = _chunk_runs(keyv)
+    cached = Vector{Any}(nothing, length(chunks))
     if chunk_dir !== nothing
         mkpath(chunk_dir)
         _chunk_pruefen(chunk_dir, length(chunks), seed, keep_returns, keep_paths, "_jl.bin")
+        # seit 1.6.4 (Entscheidung 29): vorhandene Zwischendateien vor dem Rechnen lesen; eine unvollständige oder
+        # beschädigte Datei bricht bei jedem cores mit derselben Meldung ab (R: gleiche Prüfung)
+        for ci in eachindex(chunks)
+            f = joinpath(chunk_dir, _chunk_stem(ci, seed, keep_returns, keep_paths) * "_jl.bin")
+            isfile(f) || continue
+            x = try
+                _load_chunk(f)
+            catch e
+                e isa InterruptException && rethrow()
+                nothing
+            end
+            (x isa AbstractVector && length(x) == length(chunks[ci])) || chk_stop("chunk_kaputt", fn, ci)
+            cached[ci] = x
+        end
     end
     bi = Int(burn_in)
     sim_rows = collect(bi+1:n_out+1)
     dsim = dates[sim_rows]
     ret_ends = keep_returns != "none" ? SimLev.Withdrawal._anniv_ends(dsim, keep_returns) : nothing
-    ret_ends !== nothing && length(ret_ends) < 2 && _stop("Pfad nach burn_in zu kurz für eine volle Periode in keep_returns.")
+    ret_ends !== nothing && length(ret_ends) < 2 && chk_stop("rs.burn_in_kurz", fn)
     per_ret(v) = (w = _dvec(v)[ret_ends]; w[2:end] ./ w[1:end-1])
     at = _get(config, "aux_type")
     sets = _cfg_list(config, "aux_type_set")
@@ -2355,7 +2629,12 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
             mp = _get(sp, "map")
             if mp !== nothing
                 for (a2, col) in zip(_names(mp), _values(mp))
-                    df[String(a2)] = df[String(col)]
+                    # wie R df[[a]] <- df[[col]]: fehlt col, entfällt a (seit 1.6.4; vorher KeyError)
+                    if String(col) in names(df)
+                        df[String(a2)] = df[String(col)]
+                    elseif String(a2) in names(df)
+                        df = SimLev.RFrame((c => df[c] for c in names(df) if c != String(a2))...)
+                    end
                 end
             end
             if bi > 0
@@ -2367,6 +2646,9 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
                 end
             end
             args = spec_sim[nm]
+            # seit 1.6.4 (K43 T2-R1) lokal: ohne `local` schrieb die Zuweisung das `res` von bootstrap_study (eine
+            # gemeinsame Variable aller Aufgaben); mit cores >= 2 bekamen Pfade Kennzahlen und Renditen anderer Pfade
+            local res
             res = try
                 _no_messages(() -> run(() -> _sim_call(df, _get(sp, "strategy"), args)))
             catch e
@@ -2400,16 +2682,33 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
         if chunk_dir !== nothing
             f = joinpath(chunk_dir, _chunk_stem(ci, seed, keep_returns, keep_paths) * "_jl.bin")
         end
-        f !== nothing && isfile(f) && return _load_chunk(f)
+        cached[ci] === nothing || return cached[ci]
         out = Any[eval_path(i) for i in chunks[ci]]
-        f !== nothing && _save_chunk(f, out)
-        progress && cores <= 1 && _message(@sprintf("  Chunk %d/%d fertig (%.0f s)", ci, length(chunks), time() - t0))
+        if f !== nothing   # seit 1.6.4 atomar: erst unter einem temporären Namen, dann umbenennen (Entscheidung 29)
+            tmp = f * ".tmp" * string(getpid())
+            _save_chunk(tmp, out)
+            mv(tmp, f; force = true)
+        end
+        # seit 1.6.4 bei jedem cores (Entscheidung 135; bis dahin nur bei cores = 1 und "auto")
+        progress && _message(@sprintf("  Chunk %d/%d fertig (%.0f s)", ci, length(chunks), time() - t0))
         return out
     end
-    progress && _message(@sprintf("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %d Kern(e)",
-                                  method, n_paths, length(specs), length(chunks), Int(cores)))
+    progress && _message(@sprintf("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %s Kern(e)",
+                                  method, n_paths, length(specs), length(chunks), cores == "auto" ? cores : string(Int(cores))))
     resc = _par_lapply(1:length(chunks), run_chunk, cores)
     res = Any[r for ch in resc for r in ch]
+    # seit 1.6.4 (Entscheidung 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte (R: gleiche
+    # Prüfung nach dem Rechnen)
+    for r in res
+        r === nothing && continue
+        for nm0 in snames
+            rw = r.rows[nm0].row
+            rw === nothing && continue
+            mn = rw.names[5:end]
+            (any(isempty, mn) || length(unique(mn)) != length(mn) ||
+             any(k -> k in ("path", "weight", "combo", "tries", "strategy"), mn)) && chk_stop("kennzahl_namen", fn)
+        end
+    end
     # Ergebnistabelle
     tcols = nothing
     strat_col = String[]
@@ -2595,6 +2894,7 @@ und einen maximalen Drawdown nicht zu überschreiten (wie `calc_metrics` in '06 
 - `thresholds`: Optional (Standard `nothing`) benannte Liste je Strategiename mit einer benannten Liste von
   Ausdrücken (`quote()`), z. B. `(sma = (ziel = quote(cagr >= 0.08),),)`. Für eine hier genannte Strategie
   ersetzen diese Bedingungen die Bedingungen aus `...` (strategiespezifische Schwellen).
+  Seit 1.6.4 geprüft: benannte Liste benannter Listen; ohne Bedingung (weder hier noch in ...) bricht die Funktion ab.
 - `env`: Modul, in dem freie Variablen und Funktionen der Bedingungen gesucht werden (Standard `Main`).
 - `named...`: Benannte oder unbenannte Bedingungen in Kennzahlnamen, z. B. `ttwror >= 0.13`, `joint = ttwror
   >= 0.13 & max_drawdown <= 0.95`. Unbenannte Bedingungen werden nach ihrem Ausdruck benannt.
@@ -2627,7 +2927,13 @@ println(bootstrap_probability(st, "cagr > 0"; joint = "cagr > 0.05 & max_drawdow
 ```
 """
 function bootstrap_probability(study, conds...; thresholds = nothing, env = Main, named...)
-    _is_study(study) || _stop("study muss ein SimLevBootstrapStudy-Objekt sein.")
+    _is_study(study) || chk_stop("klasse", "bootstrap_probability", "study", "bootstrap_study()")
+    # seit 1.6.4: thresholds als benannte Liste (je Strategie eine benannte Liste von Bedingungen)
+    if thresholds !== nothing
+        isnamed(t) = t isa Union{RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}} && (nm = _names(t); nm !== nothing &&
+                     !isempty(nm) && all(k -> k isa AbstractString && !isempty(k), nm))
+        (isnamed(thresholds) && all(isnamed, _values(thresholds))) || chk_stop("e2.benannt", "bootstrap_probability", "thresholds")
+    end
     cl0 = Pair{String,Any}[]
     for c in conds
         push!(cl0, (c isa Function ? string(nameof(c)) : string(c)) => c)
@@ -2635,6 +2941,7 @@ function bootstrap_probability(study, conds...; thresholds = nothing, env = Main
     for (k, c) in named
         push!(cl0, string(k) => c)
     end
+    isempty(cl0) && thresholds === nothing && chk_stop("e2.bedingung", "bootstrap_probability")   # seit 1.6.4 (vorher leer; R NULL)
     tab = study["results"]
     s_out = String[]; c_out = String[]; p_out = Float64[]; se_out = Float64[]; n_out = Int[]
     for s in _uniq(collect(String, tab["strategy"]))
@@ -2841,9 +3148,9 @@ function _plot_study(x; metric = "cagr", width = 640, height = 420)
     print(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" font-family=\"sans-serif\" font-size=\"12\">\n")
     print(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n")
     print(io, "<text x=\"", width / 2, "\" y=\"22\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"bold\">",
-          @sprintf("Verteilung %s (%s, %d Pfade)", metric, x["method"], x["n_paths"]), "</text>\n")
+          SimLev._esc(@sprintf("Verteilung %s (%s, %d Pfade)", metric, x["method"], x["n_paths"])), "</text>\n")
     print(io, "<rect x=\"$ml\" y=\"$mt\" width=\"$pw\" height=\"$ph\" fill=\"none\" stroke=\"black\"/>\n")
-    print(io, "<text x=\"", ml + pw / 2, "\" y=\"", height - 12, "\" text-anchor=\"middle\">", metric, "</text>\n")
+    print(io, "<text x=\"", ml + pw / 2, "\" y=\"", height - 12, "\" text-anchor=\"middle\">", SimLev._esc(metric), "</text>\n")
     print(io, "<text x=\"16\" y=\"", mt + ph / 2, "\" text-anchor=\"middle\" transform=\"rotate(-90 16 ", mt + ph / 2, ")\">Dichte</text>\n")
     rs = String[]; rx = Float64[]; ry = Float64[]
     for (i, (gx, gy)) in enumerate(dens)
@@ -2853,7 +3160,7 @@ function _plot_study(x; metric = "cagr", width = 640, height = 420)
         append!(rs, fill(strats[i], length(keep))); append!(rx, first.(keep)); append!(ry, last.(keep))
         print(io, "<polyline fill=\"none\" stroke=\"$col\" stroke-width=\"1.5\" points=\"$pts\"/>\n")
         print(io, "<line x1=\"", width - mr - 120, "\" y1=\"", mt + 16 * i, "\" x2=\"", width - mr - 100, "\" y2=\"", mt + 16 * i,
-              "\" stroke=\"$col\" stroke-width=\"1.5\"/><text x=\"", width - mr - 95, "\" y=\"", mt + 16 * i + 4, "\">", strats[i], "</text>\n")
+              "\" stroke=\"$col\" stroke-width=\"1.5\"/><text x=\"", width - mr - 95, "\" y=\"", mt + 16 * i + 4, "\">", SimLev._esc(strats[i]), "</text>\n")
     end
     print(io, "</svg>\n")
     svg = String(take!(io))

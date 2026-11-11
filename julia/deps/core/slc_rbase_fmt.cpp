@@ -51,6 +51,7 @@ void sl_r_free(void *p) { free(p); }
 
 static void scientific1(double r, int digits, int *kpower, int *nsig, int *rw)
 {
+    if (digits > 22) digits = 22;   /* seit 1.6.4 (C-012): R_MAX_DIGITS_OPT; bis 1.6.3 lief buff[512] ab 509 Stellen ueber */
     if (digits >= DBL_DIG_ + 1) {
         char buff[512];
         int j;
@@ -71,6 +72,13 @@ void sl_r_format_real(int64_t n, const double *x, const unsigned char *na, int d
     int64_t i;
     int naflag = 0, nanflag = 0, posinf = 0, neginf = 0, neg = 0, have = 0;
     int rgt = 0, mxl = 0, mnl = 0, mxsl = 0, mxns = 0;
+    /* seit 1.6.4 (C-012, FW6-6): digits auf 0 ... 22 und nsmall auf 0 ... 20 geklemmt (die Huellen lehnen andere Werte
+     * mit den Meldungen von R ab; bis 1.6.3 lasen die Tabellen ausserhalb bzw. lief nsmall = INT_MAX ueber; digits = 0
+     * bleibt wie in R ein eigener Fall, scientific() rechnet dann mit einer Stelle) */
+    if (digits < 0) digits = 0;
+    if (digits > 22) digits = 22;
+    if (nsmall < 0) nsmall = 0;
+    if (nsmall > 20) nsmall = 20;
     for (i = 0; i < n; i++) {
         double xi = x[i];
         if (!isfinite(xi)) {
@@ -114,7 +122,9 @@ void sl_r_format_real(int64_t n, const double *x, const unsigned char *na, int d
         *e = (mxl > 100 || mnl <= -99) ? 2 : 1;
         *d = mxns - 1;
         *w = neg + (*d > 0) + *d + 4 + *e;
-        if (wF <= *w + scipen) {
+        /* *w + scipen wie in R in 32 Bit mit Umlauf (R rechnet in int; scipen = 2147483647 ergibt dort wissenschaftliche
+         * Schreibweise), seit 1.6.4 ohne undefinierten Ganzzahlueberlauf (FW6-6) */
+        if (wF <= (int) (int32_t) ((uint32_t) *w + (uint32_t) scipen)) {
             *e = 0;
             if (nsmall > rgt) {
                 rgt = nsmall;
@@ -146,7 +156,7 @@ static void sb_put(sbuf *b, const char *s, int64_t len)
         if (b->ext) {
             q = (char *) malloc((size_t) c);
             if (q && b->n) memcpy(q, b->p, (size_t) b->n);
-            b->ext = 0;
+            if (q) b->ext = 0;   /* seit 1.6.4 (C-013) erst nach Erfolg: sonst gab der Aufrufer den Stapelpuffer frei */
         } else {
             q = (char *) realloc(b->p, (size_t) c);
         }
@@ -169,6 +179,10 @@ static void encode1(sbuf *b, double x, int isna_, int w, int d, int e, const cha
 {
     char tmp[1024];
     int len;
+    /* seit 1.6.4 wie R encodeReal0 (C-036): Breite höchstens NB - 1 = 999 Zeichen, Text in einem Puffer von NB = 1000
+     * Byte (bis 1.6.3 rechtsbündig in 1024 Byte und hinten gekürzt: ab etwa 1000 Zeichen fehlte die Zahl ganz oder
+     * teilweise, NA/NaN/Inf ohne Grenze) */
+    if (w > 999) w = 999;
     if (!isfinite(x)) {
         const char *s = isnan(x) ? (isna_ ? nastr : "NaN") : (x > 0 ? "Inf" : "-Inf");
         int64_t ls = (int64_t) strlen(s);
@@ -177,10 +191,10 @@ static void encode1(sbuf *b, double x, int isna_, int w, int d, int e, const cha
         return;
     }
     if (x == 0.0) x = 0.0;
-    if (e) len = snprintf(tmp, sizeof tmp, d ? "%#*.*e" : "%*.*e", w, d, x);
-    else len = snprintf(tmp, sizeof tmp, "%*.*f", w, d, x);
+    if (e) len = snprintf(tmp, 1000, d ? "%#*.*e" : "%*.*e", w, d, x);
+    else len = snprintf(tmp, 1000, "%*.*f", w, d, x);
     if (len < 0) len = 0;
-    if (len >= (int) sizeof tmp) len = (int) sizeof tmp - 1;
+    if (len >= 1000) len = 999;
     if (drop0) {
         char *p = strchr(tmp, '.');
         if (p) {
@@ -205,9 +219,8 @@ static void encode1(sbuf *b, double x, int isna_, int w, int d, int e, const cha
     sb_put(b, tmp, len);
 }
 
-static int finish_strs(sbuf *b, int64_t *offs, int64_t n, char **out, int64_t **off)
+static int finish_strs(sbuf *b, int64_t *offs, char **out, int64_t **off)
 {
-    (void) n;
     if (b->bad) { free(b->p); free(offs); return SL_ENOMEM; }
     if (!b->p) sb_put(b, "", 0);
     if (b->bad) { free(b->p); free(offs); return SL_ENOMEM; }
@@ -227,7 +240,7 @@ int sl_r_encode_real(int64_t n, const double *x, const unsigned char *na, int w,
         encode1(&b, x[i], na ? na[i] != 0 : slr_is_na(x[i]), w, d, e, dec, nastr, drop0);
         offs[i + 1] = b.n;
     }
-    return finish_strs(&b, offs, n, out, off);
+    return finish_strs(&b, offs, out, off);
 }
 
 /* as.character eines Doubles (StringFromReal, 15 Stellen) nach b */
@@ -248,7 +261,7 @@ int sl_r_as_character_real(int64_t n, const double *x, int scipen, const char *d
         real_to_str(&b, x[i], scipen, dec);
         offs[i + 1] = b.n;
     }
-    return finish_strs(&b, offs, n, out, off);
+    return finish_strs(&b, offs, out, off);
 }
 
 /* ── str_signif (formatC) ───────────────────────────────────────────────── */
@@ -259,15 +272,49 @@ static void put_cut(sbuf *b, const char *s, int len, int64_t lim)
     sb_put(b, s, len < lim ? len : lim);
 }
 
+/* seit 1.6.4 (C-011): snprintf in tmp (cap Zeichen); passt das Ergebnis nicht hinein, noch einmal in einen eigenen
+ * Puffer *dyn (vom Aufrufer freizugeben), damit wie in R der ganze Text entsteht. Bis 1.6.3 kopierte put_cut die von
+ * snprintf gewuenschte Laenge aus tmp und las ab Breite 8705 hinter den Puffer. Ergebnis: Zeiger auf den Text,
+ * *len seine Laenge, NULL bei einem Fehler von snprintf oder ohne Speicher. */
+static const char *fmt_any(char *tmp, size_t cap, char **dyn, int *len, const char *form, ...)
+{
+    va_list ap, aq;
+    int k;
+    *dyn = NULL;
+    va_start(ap, form);
+    va_copy(aq, ap);
+    k = vsnprintf(tmp, cap, form, ap);
+    va_end(ap);
+    if (k >= 0 && (size_t) k >= cap) {
+        *dyn = (char *) malloc((size_t) k + 1);
+        if (*dyn != NULL) k = vsnprintf(*dyn, (size_t) k + 1, form, aq);
+        else k = -1;
+    }
+    va_end(aq);
+    *len = k;
+    return k < 0 ? NULL : (*dyn != NULL ? *dyn : tmp);
+}
+
 int sl_r_str_signif(sl_ctx *cx, int64_t n, const double *x, int isint, int width, int digits, const char *format,
                     const char *flag, const int64_t *istrlen, char **out, int64_t **off)
 {
-    int dig = abs(digits), rm0 = digits >= 0, dofg = strcmp(format, "fg") == 0, aw = abs(width);
+    int dig, rm0 = digits >= 0, dofg = strcmp(format, "fg") == 0, aw;
     int64_t i, *offs;
-    char form[64], f0[64], tmp[MAXLINE_ + 512];
+    char form[64], f0[64], tmp[MAXLINE_ + 512], *dyn;
+    const char *s;
     sbuf b = {NULL, 0, 0, 0, 0};
     if (width == 0) return sl_fail(cx, SL_EARG, "width cannot be zero");
     if (strlen(flag) > 16 || strlen(format) > 8) return sl_fail(cx, SL_EARG, "invalid format");
+    /* seit 1.6.4 (C-011, FW6-6): keine Betraege von INT_MIN, nur die Formate von formatC (bis 1.6.3 schrieb z. B. "n"
+     * ueber %n in den Speicher) und Laengengrenzen >= 0; die Huellen pruefen vorher wie R */
+    if (width == INT_MIN || digits == INT_MIN) return sl_fail(cx, SL_EARG, "invalid 'width' or 'digits'");
+    if (strcmp(format, "d") && strcmp(format, "f") && strcmp(format, "e") && strcmp(format, "E") &&
+        strcmp(format, "g") && strcmp(format, "G") && !dofg)
+        return sl_fail(cx, SL_EARG, "invalid format");
+    if (strspn(flag, "0+- #'I") != strlen(flag)) return sl_fail(cx, SL_EARG, "invalid format");
+    for (i = 0; i < n; i++)
+        if (istrlen[i] < 0) return sl_fail(cx, SL_EARG, "invalid 'i.strlen'");
+    dig = abs(digits); aw = abs(width);
     offs = (int64_t *) malloc((size_t) (n + 1) * sizeof(int64_t));
     if (!offs) return SL_ENOMEM;
     offs[0] = 0;
@@ -275,11 +322,16 @@ int sl_r_str_signif(sl_ctx *cx, int64_t n, const double *x, int isint, int width
         if (!isint) { free(offs); return sl_fail(cx, SL_EARG, "'type' must be \"integer\" for  \"d\"-format"); }
         snprintf(form, sizeof form, "%%%s%s*d", flag, width < 0 ? "-" : "");
         for (i = 0; i < n; i++) {
-            int len = snprintf(tmp, sizeof tmp, form, aw, (int) x[i]);
-            put_cut(&b, tmp, len, istrlen[i] + 2);
+            int len;
+            /* (int) nur im Bereich von int (seit 1.6.4; die Huellen setzen NA vorher ein) */
+            const int xi = x[i] >= -2147483647.0 && x[i] <= 2147483647.0 ? (int) x[i] : INT_MIN;
+            s = fmt_any(tmp, sizeof tmp, &dyn, &len, form, aw, xi);
+            if (s == NULL) { free(b.p); free(offs); return SL_ENOMEM; }
+            put_cut(&b, s, len, istrlen[i] + 2);
+            free(dyn);
             offs[i + 1] = b.n;
         }
-        return finish_strs(&b, offs, n, out, off);
+        return finish_strs(&b, offs, out, off);
     }
     snprintf(form, sizeof form, "%%%s%s*.*%s", flag, width < 0 ? "-" : "", dofg ? "g" : format);
     snprintf(f0, sizeof f0, "%%%s.*f", flag);
@@ -290,6 +342,11 @@ int sl_r_str_signif(sl_ctx *cx, int64_t n, const double *x, int isint, int width
         if (dofg) {
             if (xx == 0.0) {
                 sb_put(&b, "0", 1);
+            } else if (!isfinite(xx)) {   /* seit 1.6.4: (int) aus log10(Inf/NaN) vermeiden; Huellen setzen sie vorher ein */
+                s = fmt_any(tmp, sizeof tmp, &dyn, &len, form, aw, dig, xx);
+                if (s == NULL) { free(b.p); free(offs); return SL_ENOMEM; }
+                put_cut(&b, s, len, lim);
+                free(dyn);
             } else {
                 double xxx = fabs(xx), X;
                 int iex = (int) floor(log10(xxx) + 1e-12);
@@ -300,25 +357,29 @@ int sl_r_str_signif(sl_ctx *cx, int64_t n, const double *x, int isint, int width
                 }
                 if (iex == -4 && fabs(xx) < 1e-4) iex = -5;
                 if (iex < -4) {
-                    len = snprintf(tmp, sizeof tmp, f0, dig - 1 + -iex, xx);
-                    if (len < 0) len = 0;
+                    s = fmt_any(tmp, sizeof tmp, &dyn, &len, f0, dig - 1 + -iex, xx);
+                    if (s == NULL) { free(b.p); free(offs); return SL_ENOMEM; }
                     if (len > lim) len = (int) lim;
-                    if (len >= (int) sizeof tmp) len = (int) sizeof tmp - 1;
                     if (rm0)
-                        while (len > 0 && tmp[len - 1] == '0') len--;
-                    sb_put(&b, tmp, len);
+                        while (len > 0 && s[len - 1] == '0') len--;
+                    sb_put(&b, s, len);
+                    free(dyn);
                 } else {
-                    len = snprintf(tmp, sizeof tmp, form, aw, iex >= dig ? iex + 1 : dig, xx);
-                    put_cut(&b, tmp, len, lim);
+                    s = fmt_any(tmp, sizeof tmp, &dyn, &len, form, aw, iex >= dig ? iex + 1 : dig, xx);
+                    if (s == NULL) { free(b.p); free(offs); return SL_ENOMEM; }
+                    put_cut(&b, s, len, lim);
+                    free(dyn);
                 }
             }
         } else {
-            len = snprintf(tmp, sizeof tmp, form, aw, dig, xx);
-            put_cut(&b, tmp, len, lim);
+            s = fmt_any(tmp, sizeof tmp, &dyn, &len, form, aw, dig, xx);
+            if (s == NULL) { free(b.p); free(offs); return SL_ENOMEM; }
+            put_cut(&b, s, len, lim);
+            free(dyn);
         }
         offs[i + 1] = b.n;
     }
-    return finish_strs(&b, offs, n, out, off);
+    return finish_strs(&b, offs, out, off);
 }
 
 /* ── sprintf ─────────────────────────────────────────────────────────────── */
@@ -334,7 +395,6 @@ typedef struct {
     int32_t *own_i;         /* eigene Felder nach Umwandlung */
     double *own_d;
     char **own_s;
-    int coerced;
 } sarg;
 
 static void sarg_free(sarg *a)
@@ -421,11 +481,14 @@ static int dollar(const char *s, size_t len, int *skip)
     return 0;
 }
 
+/* Umwandlung eines Arguments vor der Ausgabe des ersten Elements (ns == 0) wie do_sprintf: für jede Umwandlung im
+ * Format erneut, das Ergebnis ersetzt das Argument (R: a[nthis] = coerceVector(...)), sodass z. B. "%1$e %1$d" mit
+ * 4L rechnet. Seit 1.6.4 (C-037); bis 1.6.3 wegen des Merkers coerced nur einmal je Argument (dann der Fehler "invalid
+ * format '%d'"). Ein neues eigenes Feld wird erst gefüllt (es liest aus dem bisherigen) und das ersetzte danach
+ * freigegeben. */
 static int coerce_once(sarg *a, char sc, int scipen, const char *dec)
 {
     int64_t i;
-    if (a->coerced) return 0;
-    a->coerced = 1;
     if (strchr("dioxX", sc)) {
         if (a->type == SL_RS_DBL) {
             int exact = 1;
@@ -435,9 +498,11 @@ static int coerce_once(sarg *a, char sc, int scipen, const char *dec)
                 if (!isfinite(r) || !(fabs(r) < 2147483648.0) || trunc(r) != r) exact = 0;
             }
             if (exact) {
-                a->own_i = (int32_t *) malloc((size_t) (a->n > 0 ? a->n : 1) * sizeof(int32_t));
-                if (!a->own_i) return SL_ENOMEM;
-                for (i = 0; i < a->n; i++) a->own_i[i] = slr_is_na(a->dv[i]) ? NA_INT_ : (int32_t) a->dv[i];
+                int32_t *ni = (int32_t *) malloc((size_t) (a->n > 0 ? a->n : 1) * sizeof(int32_t));
+                if (!ni) return SL_ENOMEM;
+                for (i = 0; i < a->n; i++) ni[i] = slr_is_na(a->dv[i]) ? NA_INT_ : (int32_t) a->dv[i];
+                free(a->own_i);
+                a->own_i = ni;
                 a->iv = a->own_i;
                 a->type = SL_RS_INT;
                 a->sv = NULL;
@@ -445,14 +510,16 @@ static int coerce_once(sarg *a, char sc, int scipen, const char *dec)
         }
     } else if (strchr("aAefgEG", sc)) {
         if (a->type == SL_RS_LGL || a->type == SL_RS_INT || a->type == SL_RS_FACTOR) {
-            a->own_d = (double *) malloc((size_t) (a->n > 0 ? a->n : 1) * sizeof(double));
-            if (!a->own_d) return SL_ENOMEM;
+            double *nd = (double *) malloc((size_t) (a->n > 0 ? a->n : 1) * sizeof(double));
+            if (!nd) return SL_ENOMEM;
             for (i = 0; i < a->n; i++) {
                 double na = 0;
                 uint64_t u = UINT64_C(0x7FF00000000007A2);
                 memcpy(&na, &u, sizeof na);
-                a->own_d[i] = a->iv[i] == NA_INT_ ? na : (double) a->iv[i];
+                nd[i] = a->iv[i] == NA_INT_ ? na : (double) a->iv[i];
             }
+            free(a->own_d);
+            a->own_d = nd;
             a->dv = a->own_d;
             a->type = SL_RS_DBL;
             a->sv = NULL;
@@ -585,13 +652,15 @@ static int sprintf_impl(sl_ctx *cx, int64_t nfmt, const char *const *fmt, int na
                     }
                     s = &a[nstar];
                     used[nstar] = 1;
-                    if (ns == 0 && s->type == SL_RS_DBL && !s->own_i) {
-                        s->own_i = (int32_t *) malloc((size_t) (s->n > 0 ? s->n : 1) * sizeof(int32_t));
-                        if (!s->own_i) { st = SL_ENOMEM; goto done; }
+                    if (ns == 0 && s->type == SL_RS_DBL) {   /* neues Feld zuerst, dann das alte frei (C-037) */
+                        int32_t *ni = (int32_t *) malloc((size_t) (s->n > 0 ? s->n : 1) * sizeof(int32_t));
+                        if (!ni) { st = SL_ENOMEM; goto done; }
                         for (i = 0; i < s->n; i++) {
                             double r = s->dv[i];
-                            s->own_i[i] = (isnan(r) || !(fabs(r) < 2147483648.0)) ? NA_INT_ : (int32_t) r;
+                            ni[i] = (isnan(r) || !(fabs(r) < 2147483648.0)) ? NA_INT_ : (int32_t) r;
                         }
+                        free(s->own_i);
+                        s->own_i = ni;
                         s->iv = s->own_i;
                         s->type = SL_RS_INT;
                     }
@@ -740,7 +809,7 @@ int sl_r_sprintf(sl_ctx *cx, int64_t nfmt, const char *const *fmt, int nargs, co
         free(b.p);
         return st;
     }
-    return finish_strs(&b, offs, *nout, out, off);
+    return finish_strs(&b, offs, out, off);
 }
 
 /* sprintf für ein Format und skalare Argumente (schneller Weg der Engine-Texte): Ergebnis nach out (höchstens cap Bytes,

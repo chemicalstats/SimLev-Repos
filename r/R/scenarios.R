@@ -43,6 +43,9 @@
 #' @param expr Ereignis als Zeichenkette, ein R-Ausdruck ueber die
 #'   Spaltennamen der Szenario-Tabelle, der einen logischen Wert je
 #'   Szenario liefert (z. B. \code{"aktien < -5 & inflation > 3"}).
+#'   Seit 1.6.4 in R, Python und Julia gleich im gemeinsamen Ausdrucksumfang wie
+#'   die Regeltexte von [tactical_rules()]; auch eine Funktion der
+#'   Szenario-Tabelle (Ergebnis ein Wert je Szenario).
 #' @param op Art der Bedingung: \code{"="} (Standard), \code{"<="} oder
 #'   \code{">="}.
 #' @return Liste mit \code{type} (\code{"mean"}, \code{"prob"} oder
@@ -59,35 +62,55 @@ NULL
 
 #' @rdname views
 #' @export
-view_mean <- function(var, value, op = c("=", "<=", ">=")) list(type = "mean", var = var, value = .view_value(value, "view_mean"), op = match.arg(op))
+view_mean <- function(var, value, op = c("=", "<=", ">=")) {
+  chk_name1(var, "view_mean", "var")                              # seit 1.6.4 (K42 E4)
+  list(type = "mean", var = var, value = .view_value(value, "view_mean"), op = match.arg(op))
+}
 
 #' Zielwert einer Annahme pruefen (eine endliche Zahl, ggf. mit Bereich)
 #' @keywords internal
 #' @noRd
 .view_value <- function(value, what, lo = -Inf, hi = Inf) {
-  if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value < lo || value > hi)
-    stop(sprintf("%s: value muss eine endliche Zahl%s sein (erhalten: %s).", what,
-                 if (is.finite(lo) && is.finite(hi)) sprintf(" zwischen %g und %g", lo, hi) else if (is.finite(lo)) sprintf(" >= %g", lo) else "",
-                 paste(format(value), collapse = ", ")))
+  if (is.factor(value) || !is.numeric(value) || length(value) != 1 || !is.finite(value) || value < lo || value > hi)   # seit 1.6.4 ohne Wert
+    stop(sprintf("%s: value muss eine endliche Zahl%s sein.", what,
+                 if (is.finite(lo) && is.finite(hi)) sprintf(" zwischen %g und %g", lo, hi) else if (is.finite(lo)) sprintf(" >= %g", lo) else ""))
   value
 }
 
 #' @rdname views
 #' @export
-view_prob <- function(expr, value, op = c("=", "<=", ">=")) list(type = "prob", expr = expr, value = .view_value(value, "view_prob", 0, 1), op = match.arg(op))
+view_prob <- function(expr, value, op = c("=", "<=", ">=")) {
+  if (!is.function(expr)) chk_name1(expr, "view_prob", "expr")   # seit 1.6.4 (K42 E4); Funktion: Entscheidung 72
+  list(type = "prob", expr = expr, value = .view_value(value, "view_prob", 0, 1), op = match.arg(op))
+}
 
 #' @rdname views
 #' @export
-view_vol <- function(var, value, op = c("=", "<=", ">=")) list(type = "vol", var = var, value = .view_value(value, "view_vol", 0), op = match.arg(op))
+view_vol <- function(var, value, op = c("=", "<=", ">=")) {
+  chk_name1(var, "view_vol", "var")                               # seit 1.6.4 (K42 E4)
+  list(type = "vol", var = var, value = .view_value(value, "view_vol", 0), op = match.arg(op))
+}
 
 #' Szenario-Matrix aus Daten (Renditen in Prozent je Periode, Zustaende verzoegert)
 #' @keywords internal
 #' @noRd
-.scen_frame <- function(x, assets, states, frequency) {
+.scen_frame <- function(x, assets, states, frequency, fn) {
+  # seit 1.6.4 vor der Rechnung (K42 E4): Namen ohne NA, doppelte und 'date', keine gemeinsame Spalte; Kursdaten wie
+  # .e4_data, eine fertige Tabelle bzw. Matrix nur mit Zahlenspalten (B-009, B-040, B-052)
+  .e4_names(assets, fn, "assets")
+  .e4_names(states, fn, "states", null_ok = TRUE)
+  .e4_disjoint(assets, states, fn, "assets", "states")
+  if (is.data.frame(x) && "date" %in% names(x)) .e4_data(x, c(assets, states), fn)
+  else if (is.data.frame(x)) { chk_cols(x, c(assets, states), fn); for (k in c(assets, states)) .e4_numcol(x, k, fn) }
+  else if (is.matrix(x) && is.numeric(x)) { if (!is.null(colnames(x))) chk_cols(as.data.frame(x), c(assets, states), fn) }
+  else chk_stop("e4.szenarien", fn)
   if (is.data.frame(x) && "date" %in% names(x)) {
+    if (nrow(x) < 2L) chk_stop("e4.wenige", fn)                   # seit 1.6.4 (0 oder 1 Zeile)
     rd <- .dep_returns(x, assets, states, frequency)
     for (a in assets) rd[[a]] <- 100 * expm1(rd[[a]])
-    return(rd[stats::complete.cases(rd), , drop = FALSE])
+    rd <- rd[stats::complete.cases(rd), , drop = FALSE]
+    if (nrow(rd) < 2L) chk_stop("e4.wenige", fn)
+    return(rd)
   }
   as.data.frame(x)
 }
@@ -153,23 +176,30 @@ view_vol <- function(var, value, op = c("=", "<=", ">=")) list(type = "vol", var
 #' @export
 scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency = c("week", "day", "month"), prior = NULL) {
   frequency <- match.arg(frequency)
-  S <- .scen_frame(x, assets, states, frequency)
+  fn <- "scenario_entropy_pooling"
+  env <- parent.frame()                                           # freie Namen der Ausdruecke (Entscheidung 72)
+  if (!is.list(views) || is.data.frame(views) || !all(vapply(views, function(v) is.list(v) && length(v$type) == 1L &&
+                                                                 isTRUE(v$type %in% c("mean", "prob", "vol")), TRUE)))
+    chk_stop("e4.views", fn)                                      # seit 1.6.4 (K42 E4)
+  S <- .scen_frame(x, assets, states, frequency, fn)
   Tn <- nrow(S)
-  if (!is.null(prior) && (!is.numeric(prior) || length(prior) != Tn || any(!is.finite(prior)) || any(prior < 0) || sum(prior) <= 0))
-    stop(sprintf("scenario_entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; erhalten: L\u00e4nge %d%s).",
-                 Tn, length(prior), if (is.numeric(prior) && any(prior < 0, na.rm = TRUE)) ", negative Werte" else ""))
+  if (!is.null(prior) && (is.factor(prior) || !is.numeric(prior) || length(prior) != Tn || any(!is.finite(prior)) || any(prior < 0) || sum(prior) <= 0))
+    stop(sprintf("scenario_entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario).", Tn))   # seit 1.6.4 ohne Wert
   p <- prior %||% rep(1 / Tn, Tn); p <- p / sum(p)
   vars <- intersect(c(assets, states), names(S))
   m0 <- vapply(vars, function(v) sum(p * S[[v]]), 0)
   mean_view <- stats::setNames(rep(NA_real_, length(vars)), vars)
   for (v in views) if (v$type == "mean" && v$op == "=") mean_view[v$var] <- v$value
+  rx <- if (any(vapply(views, function(v) v$type == "prob" && is.character(v$expr), TRUE))) .e5_rexpr_env(env)
   rows <- lapply(views, function(v) {
     f <- switch(v$type,
       mean = S[[v$var]],
-      prob = as.numeric(eval(parse(text = v$expr), S, parent.frame())),
+      prob = as.numeric(if (is.function(v$expr)) v$expr(S)               # seit 1.6.4 auch eine Funktion (Entscheidung 72)
+                        else eval(.e5_rexpr_parse(v$expr), .sp_rexpr_data(S, rx), rx)),   # RExpr-Umfang wie tactical_rules (59)
       vol = { mu <- if (is.na(mean_view[v$var])) m0[v$var] else mean_view[v$var]; (S[[v$var]] - mu)^2 },
       stop("Unbekannter View-Typ."))
-    if (is.null(f) || length(f) != Tn) stop(sprintf("View '%s' passt nicht zu den Szenarien.", v$var %||% v$expr))
+    if (is.null(f) || length(f) != Tn) stop(sprintf("View '%s' passt nicht zu den Szenarien.",
+                                                     v$var %||% (if (is.function(v$expr)) "<Funktion>" else v$expr)))
     if (v$type == "vol" && !(is.numeric(v$value) && v$value >= 0)) stop("view_vol: Standardabweichung muss >= 0 sein.")
     val <- if (v$type == "vol") v$value^2 else v$value
     sg <- switch(v$op, "=" = 0, "<=" = 1, ">=" = -1)
@@ -230,6 +260,7 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
 #'   \code{date}.
 #' @param assets Zeichenvektor der Kurs- bzw. Renditespalten.
 #' @param n Anzahl Szenarien (ganze Zahl, Standard 10000).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param family Copula: \code{"t"} (Standard) oder \code{"gaussian"}.
 #' @param stress Optional benannte Liste von Quantilbaendern je Anlage als
 #'   Anteile \code{c(von, bis)} mit 0 <= von < bis <= 1, z. B.
@@ -269,7 +300,9 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
 scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), stress = NULL,
                              frequency = c("week", "day", "month"), seed = NULL) {
   family <- match.arg(family); frequency <- match.arg(frequency)
-  S <- .scen_frame(x, assets, NULL, frequency)
+  fn <- "scenario_copula"
+  .e4_count(n, fn, "n")                                           # B-026, Entscheidung 16
+  S <- .scen_frame(x, assets, NULL, frequency, fn)
   X <- as.matrix(S[, assets, drop = FALSE]); k <- ncol(X); Tn <- nrow(X)
   U <- apply(X, 2, .pobs)
   tau <- .kendall(X); R <- sin(pi * tau / 2)
@@ -286,20 +319,19 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
   nu <- if (family != "t") Inf else if (is.double(U) && is.matrix(U) && is.double(Ri) && identical(dim(Ri), c(k, k)) &&
                                         !is.null(nk <- .Call(C_sl_tcop_nu, U, Ri, as.double(ldR), 2.1, 100,
                                                              .Machine$double.eps^0.25, .sl_nthreads()))) nk else
-    stats::optimize(function(v) -ll_t(v), c(2.1, 100))$minimum
-  qmarg <- lapply(seq_len(k), function(j) { s <- sort(X[, j]); function(u) stats::approx((seq_len(Tn) - 0.5) / Tn, s, u, rule = 2)$y })
+    .sl_optimize(function(v) -ll_t(v), c(2.1, 100))$minimum
+  qmarg <- lapply(seq_len(k), function(j) { s <- sort(X[, j]); function(u) .sl_approx((seq_len(Tn) - 0.5) / Tn, s, u, rule = 2)$y })
   if (!is.null(stress)) {
     if (!is.list(stress) || !length(stress) || is.null(names(stress)) || any(names(stress) == "") || anyDuplicated(names(stress)))
       stop("stress: benannte Liste von Quantilb\u00e4ndern je Anlage erwartet, z. B. list(aktien = c(0, 0.05)).")
     unk <- setdiff(names(stress), assets)
     if (length(unk)) stop(sprintf("stress: unbekannte Anlage(n) %s; vorhanden: %s.", paste0("'", unk, "'", collapse = ", "), paste(assets, collapse = ", ")))
     for (a in names(stress)) { b <- stress[[a]]
-      if (!is.numeric(b) || length(b) != 2 || any(!is.finite(b)) || b[1] < 0 || b[2] > 1 || b[1] >= b[2])
-        stop(sprintf("stress: Band f\u00fcr '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent; erhalten: %s).",
-                     a, paste(format(b), collapse = ", "))) }
+      if (is.factor(b) || !is.numeric(b) || length(b) != 2 || any(!is.finite(b)) || b[1] < 0 || b[2] > 1 || b[1] >= b[2])   # seit 1.6.4 ohne Wert
+        stop(sprintf("stress: Band f\u00fcr '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent).", a)) }
   }
   sim <- {
-    rs <- .sl_main_stream(seed)                                 # Hauptstrom
+    rs <- .sl_main_stream(seed, "scenario_copula")                                 # Hauptstrom
     st <- if (is.null(stress)) integer(0) else match(names(stress), assets)
     Z <- matrix(0, n, k)
     if (length(st) == 1) {
@@ -355,8 +387,8 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
   structure(list(scenarios = out, prob = rep(1 / n, n), prior = rep(1 / n, n), assets = assets, states = NULL,
                  effective_n = n, copula = list(family = family, correlation = R, df = nu), stress = stress,
                  summary = data.frame(var = assets, mean_prior = colMeans(X), mean_post = colMeans(Y),
-                                      sd_prior = apply(X, 2, stats::sd), sd_post = apply(Y, 2, stats::sd), row.names = NULL),
-                 correlation = stats::cor(Y), frequency = frequency, kind = "copula"),
+                                      sd_prior = apply(X, 2, .sl_sd), sd_post = apply(Y, 2, .sl_sd), row.names = NULL),
+                 correlation = .sl_cor(Y), frequency = frequency, kind = "copula"),
             class = "SimLevScenarios")
 }
 
@@ -411,10 +443,12 @@ print.SimLevScenarios <- function(x, ...) {
 #' @export
 scenario_risk <- function(x, weights, alpha = 0.05) {
   if (!inherits(x, "SimLevScenarios")) stop("x muss ein SimLevScenarios sein.")
-  if (!is.numeric(alpha) || length(alpha) != 1 || !is.finite(alpha) || alpha <= 0 || alpha >= 1)
-    stop(sprintf("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein (erhalten: %s).", paste(format(alpha), collapse = ", ")))
-  if (!is.numeric(weights) || is.null(names(weights)) || any(names(weights) == ""))
+  if (is.factor(alpha) || !is.numeric(alpha) || length(alpha) != 1 || !is.finite(alpha) || alpha <= 0 || alpha >= 1)   # seit 1.6.4 ohne Wert
+    stop("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.")
+  if (is.factor(weights) || !is.numeric(weights) || !is.null(dim(weights)) || is.null(names(weights)) || any(names(weights) == ""))
     stop("scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).")
+  if (!all(is.finite(weights))) chk_stop("e3.werte", "scenario_risk", "weights")   # seit 1.6.4 (B-026)
+  if (anyDuplicated(names(weights))) chk_stop("e2.doppelt", "scenario_risk", "weights")
   unk <- setdiff(names(weights), names(x$scenarios))
   if (length(unk)) stop(sprintf("scenario_risk: unbekannte Anlage(n) %s.", paste0("'", unk, "'", collapse = ", ")))
   X <- as.matrix(x$scenarios[, names(weights), drop = FALSE]); q <- x$prob
@@ -495,14 +529,21 @@ scenario_risk <- function(x, weights, alpha = 0.05) {
 #' @export
 scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
   crises <- crises %||% .default_crises
+  fn <- "scenario_crisis"
   if (!is.data.frame(data) || !"date" %in% names(data)) stop("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
   if (!is.data.frame(crises) || !all(c("crisis", "start", "end") %in% names(crises)))
     stop("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
-  if (!is.numeric(weights) || is.null(names(weights)) || any(names(weights) == "") || any(!is.finite(weights)))
+  if (is.factor(weights) || !is.numeric(weights) || !is.null(dim(weights)) || is.null(names(weights)) || any(names(weights) == "") ||
+      any(!is.finite(weights)))
     stop("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+  if (anyDuplicated(names(weights))) chk_stop("e2.doppelt", fn, "weights")   # seit 1.6.4 (B-052)
   unk <- setdiff(names(weights), setdiff(names(data), "date"))
   if (length(unk)) stop(sprintf("scenario_crisis: Kursspalte(n) %s fehlen in data.", paste0("'", unk, "'", collapse = ", ")))
-  if (sum(weights) <= 0) stop(sprintf("scenario_crisis: Summe der Gewichte muss positiv sein (erhalten %g); sie wird auf 1 normiert.", sum(weights)))
+  chk_col_nofactor(data, "date", fn)                              # seit 1.6.4 (Entscheidung 15, B-009)
+  for (k in names(weights)) .e4_numcol(data, k, fn)
+  for (k in c("start", "end")) chk_col_nofactor(crises, k, fn)
+  chk_bool1(rebalance, fn, "rebalance")
+  if (sum(weights) <= 0) chk_stop("ut3.krise_summe", fn)          # seit 1.6.4 ohne Wert und Zusatz (Entscheidung 8, T3-B2)
   data <- .dep_sort_dates(data)
   d <- data$date; a <- names(weights); w <- weights / sum(weights)
   crises$start <- .to_date(crises$start, "scenario_crisis: crises$start"); crises$end <- .to_date(crises$end, "scenario_crisis: crises$end")

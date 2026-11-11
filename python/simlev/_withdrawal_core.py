@@ -1,6 +1,6 @@
 """Entnahme-Kern (``.wd_simulate``, Python-Hülle).
 
-Es rechnet der gemeinsame Kern von R und Python (``core/withdrawal_core_impl.h`` über
+Es rechnet der gemeinsame Kern von R, Python und Julia (``core/withdrawal_core_impl.h``, hier über
 ``simlev._ext``). Der bitgleiche Python-Port als Rückfall (``SIMLEV_NO_EXT=1``,
 mit ``rule_amount``, ``pmt_due`` und der FIFO-Steuer) ist seit 1.0.0 entfallen.
 """
@@ -9,12 +9,13 @@ from __future__ import annotations
 import numpy as np
 
 from . import _ext
+from ._r.rnum import _c64 as _f64   # zusammenhängendes float64-Feld (seit 1.6.4 eine Fassung)
 
 __all__ = ["wd_simulate", "wd_metrics", "wd_pwr", "wd_annual_prod", "wd_tariff_compact"]
 
 
 class WdError(ValueError):
-    """Fehler des Kerns (Rcpp ``stop``)."""
+    """Fehler des Kerns (Meldung der C++-Hülle in ``simlev._ext``; in R ``stop``)."""
 
 
 def _mat(x, nr=None):
@@ -22,10 +23,6 @@ def _mat(x, nr=None):
     if a.ndim == 1:
         a = a.reshape(-1, 1) if a.size else a.reshape(nr or 0, 0)
     return a
-
-
-def _f64(x):
-    return np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
 
 
 def wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,

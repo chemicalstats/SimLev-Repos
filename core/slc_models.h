@@ -126,7 +126,7 @@ int sl_backcast_fit(sl_ctx *cx, int m, const double *x, const double *c1, const 
 
 /* ── MS-GARCH und HMM (slc_msgarch.cpp) ───────────────────────────────── */
 
-/* Hamilton-Filter mit parallelen Varianzpfaden (wie der eigene Kern ms_garch_impl.c): h, pred,
+/* Hamilton-Filter mit parallelen Varianzpfaden (wie der frühere Kern ms_garch_impl.c): h, pred,
  * filt, lB je n x K; loglik = -Inf, sobald eine Mischungsdichte nicht endlich oder <= 0 ist. */
 int sl_msgarch_filter(sl_ctx *cx, int n, const double *y, int K, const double *omega,
                       const double *alpha, const double *beta, const double *gamma, const double *P,
@@ -166,6 +166,8 @@ int sl_msgarch_fit_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, int ns
  * zwei Rasterpunkten gamma < 0; höchstens SL_MSGARCH_MAXSTART Spalten, sGARCH 12, GJR 20).
  * starts: npar x SL_MSGARCH_MAXSTART. */
 #define SL_MSGARCH_MAXSTART 20   /* bis 1.0.0 12 */
+/* SL_MSGARCH_MAXSTART für Hüllen ohne Zugriff auf das Makro (Julia; seit 1.6.4, B-132) */
+int sl_msgarch_maxstart(void) SL_NOTHROW;
 int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double h1, int all_pts,
                       int *nstart, double *starts) SL_NOTHROW;
 /* ganzer Fit wie .ms_garch_fit: Starts (all_pts = 1; sGARCH 12, GJR 20), BFGS mit analytischem
@@ -178,7 +180,7 @@ int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, d
  * ridge = 1e-10 + 1e-6 var(x)); mu, S (Varianzen) je K, A K x K, ll, iter. */
 int sl_hmm_em_univ(sl_ctx *cx, int n, const double *x, int K, int win, int max_iter, double tol,
                    double *mu, double *S, double *A, double *ll, int *iter) SL_NOTHROW;
-/* skalierter Vorwärts-Rückwärts-Schritt des HMM (wie hmm_forward_backward): B Emissionsdichten T x K
+/* skalierter Vorwärts-Rückwärts-Schritt des HMM: B Emissionsdichten T x K
  * (spaltenweise), A Übergangsmatrix K x K mit lda Zeilen, p0 Start (K); Ergebnisse al, be, ga (T x K), xi (K x K,
  * hier genullt), cs (T); tmp Arbeitsfeld (K). Gleitender Mittelwert über w Werte (inkl. aktueller Zeile;
  * Neumaier-Summe, alle 4096 Schritte neu aufgebaut): gap vor dem ersten vollen Fenster und bei nicht endlichem Wert

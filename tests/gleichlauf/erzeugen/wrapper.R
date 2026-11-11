@@ -103,15 +103,15 @@ SZ("fondsanteil_kalender_und_reihenfolge", "wrapper_nav: Gebühren über die Kal
     r"(wrapper_nav(du, wf))",
     r"(result = wrapper_nav(du, wf))",
     r"(result = SL.wrapper_nav(du, wf))", druck = TRUE, inp = ein("wrapper/nav_unsorted", c("du")))))
-SZ("wrapper_in_simulation", "simulation() mit Wrapper-Assets: details-Protokoll (result$wrappers); ein Lauf mit Splits innen und beim direkten Asset (nicht beim Anteilswert), ganzen Stücken und NA in der Basiszins-Spalte (zählt als 0)", vor = VOR, teile = list(
+SZ("wrapper_in_simulation", "simulation() mit Wrapper-Assets: details-Protokoll (result$wrappers); ein Lauf mit Splits innen und beim direkten Asset (nicht beim Anteilswert), ganzen Stücken und Basiszins 0 in jeder dritten Zeile (NA seit 1.6.4 Fehler, Tabelle simulation)", vor = VOR, teile = list(
   sim_details = teil(
     r"(simulation(d[1:120, ], create_strategy(Z = asset_config('certificate', share = 0.8, wrapper = wb), C = asset_config('etf', 'bnh', 0.2)), rebalance = rebalance_plan(), details = TRUE))",
     r"(result = simlev.simulation(d.iloc[:120], create_strategy(Z=asset_config(asset_class='certificate', share=0.8, wrapper=wb), C=asset_config(asset_class='etf', trading='bnh', share=0.2)), rebalance=rebalance_plan(), details=True))",
     r"(result = SL.simulation(SL.rows(d, 1:120), SL.create_strategy("Z" => SL.asset_config("certificate"; share = 0.8, wrapper = wb), "C" => SL.asset_config("etf", "bnh", 0.2)); rebalance = SL.rebalance_plan(), details = true))", druck = TRUE, inp = ein("wrapper/sim_details", c("d"))),
-  sim_splits_br_na = teil(
-    r"(x <- dsp; x$br <- ifelse(seq_len(nrow(x)) %% 3 == 0, NA, 2.5); simulation(x, create_strategy(Z = asset_config('certificate', share = 0.5, wrapper = wb), A = asset_config('etf', 'bnh', 0.3), C = asset_config('etf', 'bnh', 0.2)), splits = split_rule(c(50, 150)), fractions = FALSE, tax = tax_profile(base_rate = 'br')))",
-    r"(x = dsp.copy(); x['br'] = [np.nan if (i + 1) % 3 == 0 else 2.5 for i in range(len(x))]; result = simlev.simulation(x, create_strategy(Z=asset_config(asset_class='certificate', share=0.5, wrapper=wb), A=asset_config(asset_class='etf', trading='bnh', share=0.3), C=asset_config(asset_class='etf', trading='bnh', share=0.2)), splits=split_rule([50, 150]), fractions=False, tax=tax_profile(base_rate='br')))",
-    r"(x = copy(dsp); x["br"] = [i % 3 == 0 ? SL.NA : 2.5 for i in 1:SL.nrow(x)]; result = SL.simulation(x, SL.create_strategy("Z" => SL.asset_config("certificate"; share = 0.5, wrapper = wb), "A" => SL.asset_config("etf", "bnh", 0.3), "C" => SL.asset_config("etf", "bnh", 0.2)); splits = SL.split_rule([50, 150]), fractions = false, tax = SL.tax_profile(; base_rate = "br")))", druck = TRUE, inp = ein("wrapper/sim_splits", c("dsp")))))
+  sim_splits_br0 = teil(
+    r"(x <- dsp; x$br <- ifelse(seq_len(nrow(x)) %% 3 == 0, 0, 2.5); simulation(x, create_strategy(Z = asset_config('certificate', share = 0.5, wrapper = wb), A = asset_config('etf', 'bnh', 0.3), C = asset_config('etf', 'bnh', 0.2)), splits = split_rule(c(50, 150)), fractions = FALSE, tax = tax_profile(base_rate = 'br')))",
+    r"(x = dsp.copy(); x['br'] = [0.0 if (i + 1) % 3 == 0 else 2.5 for i in range(len(x))]; result = simlev.simulation(x, create_strategy(Z=asset_config(asset_class='certificate', share=0.5, wrapper=wb), A=asset_config(asset_class='etf', trading='bnh', share=0.3), C=asset_config(asset_class='etf', trading='bnh', share=0.2)), splits=split_rule([50, 150]), fractions=False, tax=tax_profile(base_rate='br')))",
+    r"(x = copy(dsp); x["br"] = [i % 3 == 0 ? 0.0 : 2.5 for i in 1:SL.nrow(x)]; result = SL.simulation(x, SL.create_strategy("Z" => SL.asset_config("certificate"; share = 0.5, wrapper = wb), "A" => SL.asset_config("etf", "bnh", 0.3), "C" => SL.asset_config("etf", "bnh", 0.2)); splits = SL.split_rule([50, 150]), fractions = false, tax = SL.tax_profile(; base_rate = "br")))", druck = TRUE, inp = ein("wrapper/sim_splits", c("dsp")))))
 SZ("wrapper_in_aufrufern", "offene Bestände des Wrapper-Assets in die Entnahme, param_search mit Builder, der den Wrapper baut, Einmalanlage gegen Sparplan mit dem Anteilswert als Kurs", vor = VOR, teile = list(
   wd_lots = teil(
     r"(r <- simulation(d, create_strategy(Z = asset_config('certificate', spread = 0.2, wrapper = wb)), tax = tax_profile()); ws <- withdrawal_simulation(wrapper_nav(d, wb), withdrawal_rule('constant', rate = 4), years = 1, frequency = 'quarter', start_value = r, tax = tax_profile()); list(r$open_lots, ws$paths))",
@@ -218,6 +218,10 @@ TB("wrapper_config", "Meldungen und Warnungen von wrapper_config je Zeile (Einga
     r"(result = wrapper_config(create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.6), B=asset_config(asset_class='etf', trading='bnh', share=0.3))))",
     r"(result = SL.wrapper_config(SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.6), "B" => SL.asset_config("etf", "bnh", 0.3))))", inp = ein("wrapper/err_share", c()))))
 TB("simulation", "Meldungen und Warnungen von simulation je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("err_br_na",   # seit 1.6.4 Fehler (Entscheidungen 17, 42; bis 1.6.3 Teil sim_splits_br_na von wrapper_in_simulation, NA zählte als 0)
+    r"(x <- dsp; x$br <- ifelse(seq_len(nrow(x)) %% 3 == 0, NA, 2.5); simulation(x, create_strategy(Z = asset_config('certificate', share = 0.5, wrapper = wb), A = asset_config('etf', 'bnh', 0.3), C = asset_config('etf', 'bnh', 0.2)), splits = split_rule(c(50, 150)), fractions = FALSE, tax = tax_profile(base_rate = 'br')))",
+    r"(x = dsp.copy(); x['br'] = [np.nan if (i + 1) % 3 == 0 else 2.5 for i in range(len(x))]; result = simlev.simulation(x, create_strategy(Z=asset_config(asset_class='certificate', share=0.5, wrapper=wb), A=asset_config(asset_class='etf', trading='bnh', share=0.3), C=asset_config(asset_class='etf', trading='bnh', share=0.2)), splits=split_rule([50, 150]), fractions=False, tax=tax_profile(base_rate='br')))",
+    r"(x = copy(dsp); x["br"] = [i % 3 == 0 ? SL.NA : 2.5 for i in 1:SL.nrow(x)]; result = SL.simulation(x, SL.create_strategy("Z" => SL.asset_config("certificate"; share = 0.5, wrapper = wb), "A" => SL.asset_config("etf", "bnh", 0.3), "C" => SL.asset_config("etf", "bnh", 0.2)); splits = SL.split_rule([50, 150]), fractions = false, tax = SL.tax_profile(; base_rate = "br")))", inp = ein("wrapper/sim_splits", c("dsp"))),
   zeile("err_signal_list",
     r"(simulation(d, list(Z = list(asset_class = 'etf', trading = 'signal', share = 1, signal_buy = 'buy', signal_sell = 'sell', wrapper = wb))))",
     r"(result = simlev.simulation(d, {'Z': {'asset_class': 'etf', 'trading': 'signal', 'share': 1, 'signal_buy': 'buy', 'signal_sell': 'sell', 'wrapper': wb}}))",
@@ -234,6 +238,10 @@ TB("simulation", "Meldungen und Warnungen von simulation je Zeile (Eingabe -> Me
     r"(simulation(d, list(A = list(asset_class = 'fonds', trading = 'bnh', share = 1))))",
     r"(result = simlev.simulation(d, {'A': {'asset_class': 'fonds', 'trading': 'bnh', 'share': 1}}))",
     r"(result = SL.simulation(d, Dict("A" => Dict("asset_class" => "fonds", "trading" => "bnh", "share" => 1))))", inp = ein("wrapper/sim_err_list_class", c("d"))),
+  zeile("sim_err_list_share_pct",   # Hinweis bei 1 < share <= 100 (Entscheidung 12; seit 1.6.4, K43 KE)
+    r"(simulation(d, list(A = list(asset_class = 'etf', trading = 'bnh', share = 60))))",
+    r"(result = simlev.simulation(d, {'A': {'asset_class': 'etf', 'trading': 'bnh', 'share': 60}}))",
+    r"(result = SL.simulation(d, Dict("A" => Dict("asset_class" => "etf", "trading" => "bnh", "share" => 60))))", inp = ein("wrapper/sim_err_list_class", c("d"))),
   zeile("sim_err_list_regime",
     r"(simulation(d, list(A = list(asset_class = 'etf', trading = 'bnh', share = 1, tax_regime = 'none'))))",
     r"(result = simlev.simulation(d, {'A': {'asset_class': 'etf', 'trading': 'bnh', 'share': 1, 'tax_regime': 'none'}}))",
@@ -267,6 +275,10 @@ TB("asset_config", "Meldungen und Warnungen von asset_config je Zeile (Eingabe -
     r"(asset_config(share = 1.5))",
     r"(result = asset_config(share=1.5))",
     r"(result = SL.asset_config(; share = 1.5))", inp = ein("wrapper/cfg_err_share", c())),
+  zeile("cfg_err_share_150",   # ohne Hinweis über 100 (Entscheidung 12; seit 1.6.4, K43 KE)
+    r"(asset_config(share = 150))",
+    r"(result = asset_config(share=150))",
+    r"(result = SL.asset_config(; share = 150))", inp = ein("wrapper/cfg_err_share", c())),
   zeile("cfg_err_spread",
     r"(asset_config(spread = -1))",
     r"(result = asset_config(spread=-1))",

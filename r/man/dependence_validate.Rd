@@ -15,13 +15,13 @@ Matrix mit den Spalten der Konfiguration).}
 
 \item{agg}{Zeilen je Periode fuer die Aggregation (ganze Zahl, Standard 5;
 z. B. 5 Handelstage oder 7 Kalendertage ergibt Wochen; 1 = keine
-Aggregation).}
+Aggregation). Seit 1.6.4 eine ganze Zahl >= 1, hoechstens 10^8.}
 
 \item{q}{Tail-Wahrscheinlichkeit als Anteil fuer die Tail-Kennzahlen
 (Standard 0.10, siehe \code{\link[=tail_dependence]{tail_dependence()}}).}
 
 \item{max_paths}{Hoechstens so viele Pfade auswerten (die ersten
-\code{max_paths} Pfade; Standard 200).}
+\code{max_paths} Pfade; Standard 200). Seit 1.6.4 eine ganze Zahl >= 1 oder Inf (alle Pfade).}
 }
 \value{
 data.frame mit einer Zeile je Indexpaar und Kennzahl:

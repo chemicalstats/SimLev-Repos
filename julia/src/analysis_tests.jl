@@ -146,6 +146,7 @@ Zeit stabil ist. Das ist eine Beschreibung vergangener Muster, kein Nachweis ein
   die letzte Zeile (mit Hinweis).
 - `signal`: Spaltenname in `data` oder numerischer Vektor der Länge `nrow(data)`. Der Wert in Zeile t muss nur
   mit Daten bis einschließlich Zeile t berechnet sein (sonst Zukunftsinformation).
+  Seit 1.6.4 keine Faktoren (Spalte oder Vektor).
 - `target`: Name der Kursspalte (Niveaus, keine Renditen). Fehlende Kurse werden mit dem letzten bekannten
   Wert fortgeschrieben.
 - `horizon`: Vorwärtshorizont in Zeilen der Daten (ganze Zahl von 1 bis `nrow(data) - 1`, Standard 21), z. B.
@@ -162,8 +163,10 @@ Zeit stabil ist. Das ist eine Beschreibung vergangener Muster, kein Nachweis ein
   Quantilsbereiche (Standard 3) für eine 2D-Tabelle. `nothing` (Standard) = keine 2D-Tabelle.
 - `splits`: Anzahl gleich großer Gruppen aufeinanderfolgender Stichtage für die Stabilitätsprüfung (ganze
   Zahl, Standard 1 = keine Aufteilung).
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
 - `degree`: Grad der Polynom-Regression `forward ~ poly(signal, degree)` (ganze Zahl, Standard 2; 0 = keine).
   Wird nur geschätzt, wenn es mehr als `degree + 1` verschiedene Signalwerte gibt.
+  Seit 1.6.4 eine ganze Zahl ≥ 0.
 
 # Rückgabe
 Objekt der Klasse `SimLevSignalAnalysis`, eine Liste mit
@@ -212,42 +215,57 @@ println(sa["bins"])
 """
 function signal_analysis(data, signal, target; horizon = 21, step = nothing, bins = 5, breaks = nothing,
                          signal2 = nothing, bins2 = 3, splits = 1, degree = 2)
-    data = SimLev.as_rframe(data)
-    (DA._is_frame(data) && "date" in names(DA._as_frame(data))) ||
+    # seit 1.6.4 nur RFrame wie R data.frame (Entscheidung 6; vorher NamedTuple/Dict umgewandelt)
+    (data isa SimLev.RFrame && "date" in names(data)) ||
         DA._stop("signal_analysis: data muss ein data.frame mit Spalte 'date' sein.")
+    data["date"] isa SimLev.RFmt.RFactor && SimLev.chk_stop("spalte_faktor", "signal_analysis", "date")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     data = DA._as_frame(data)
     n = SimLev.nrow(data)
     d = DA._to_date_days(data["date"], "signal_analysis: data\$date")
     nms = names(data)
-    function getcol(v, what)
+    function getcol(v, what, type = "logisch_oder_numerisch")
         if v isa AbstractString || (v isa AbstractVector && !isempty(v) && first(v) isa AbstractString)
             vl = v isa AbstractString ? [String(v)] : String.(v)
             (length(vl) != 1 || !(vl[1] in nms)) &&
                 DA._stop(DA._sp("signal_analysis: %s: Spalte '%s' fehlt in data (vorhanden: %s).", what, vl[1], join(nms, ", ")))
+            SimLev.chk_col_type(data, vl[1], "signal_analysis", type)   # seit 1.6.4 (vorher Text MethodError)
             return DA._as_numeric_col(data[vl[1]])
         end
+        # seit 1.6.4: Vektoren nur numerisch oder logisch (keine Tabelle, Matrix oder Liste)
+        numel(e) = e === missing || e isa Real
+        ((v isa AbstractVector && all(numel, v)) || v isa Real) ||
+            SimLev.chk_stop("e2.spalte_oder_vektor", "signal_analysis", what)
         a = v isa AbstractVector ? v : [v]
         length(a) != n && DA._stop(DA._sp("signal_analysis: %s hat Länge %d, data hat %d Zeilen.", what, length(a), n))
         DA._as_numeric_col(a)
     end
     sig = getcol(signal, "signal")
+    target = SimLev.chk_scalar(target)
     target isa AbstractString || DA._stop("signal_analysis: target muss ein Spaltenname sein.")
-    px = getcol(target, "target")
+    px = getcol(target, "target", "numerisch")
     s2all = signal2 !== nothing ? getcol(signal2, "signal2") : nothing
     ok = findall(!isnan, d); nn = findall(isnan, d)
     o = vcat(ok[sortperm(d[ok]; alg = MergeSort)], nn)
     o = o[.!isnan.(d[o])]
-    dup = DA._duplicated_last(d[o])
+    dup = SimLev.DataPrep._duplicated(d[o]; from_last = true)   # duplicated(d, fromLast = TRUE) (seit 1.6.4 eine Fassung)
     any(dup) && DA._message(DA._sp("Hinweis: signal_analysis: %d doppelte Daten; der letzte Wert je Datum wird verwendet.", count(dup)))
     o = o[.!dup]
     d = d[o]; sig = sig[o]; px = px[o]
     s2all === nothing || (s2all = s2all[o])
     n = length(o)
     px = DA._f64(SimLev.Backcast._fill_na(px, "locf"; keep_leading = true))
+    # seit 1.6.4: ganze Zahlen (vorher z. B. 2.5 InexactError), Meldung ohne Eingabewert
+    horizon, step, bins = SimLev.chk_scalar(horizon), SimLev.chk_scalar(step), SimLev.chk_scalar(bins)
+    int1(v) = v isa Real && !(v isa Bool) && isfinite(Float64(v)) && Float64(v) == trunc(Float64(v))
+    int1(horizon) || SimLev.chk_stop("ganz", "signal_analysis", "horizon", "1")
+    step === nothing || (int1(step) && step >= 1) || DA._stop("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
+    (int1(bins) && bins >= 2) || DA._stop("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+    bins2 = SimLev.chk_int1(bins2, "signal_analysis", "bins2"; lo = 2)
+    splits = SimLev.chk_int1(splits, "signal_analysis", "splits")
+    degree = SimLev.chk_int1(degree, "signal_analysis", "degree"; lo = 0)
     hz = _as_int(horizon); stp = _as_int(step === nothing ? horizon : step)
     if length(hz) != 1 || hz[1] === nothing || hz[1] < 1 || hz[1] >= n
-        DA._stop(DA._sp("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen (ist: %s).", n - 1,
-                        join((h === nothing ? "NA" : string(h) for h in hz), ", ")))
+        DA._stop(DA._sp("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen.", n - 1))
     end
     (length(stp) != 1 || stp[1] === nothing || stp[1] < 1) && DA._stop("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
     horizon = hz[1]; step = stp[1]
@@ -272,7 +290,7 @@ function signal_analysis(data, signal, target; horizon = 21, step = nothing, bin
     rn = string.(findall(cc))
     dd = d[t0][cc]; sv = sig[t0][cc]; fw = fwd[cc]; s2v = s2 === nothing ? nothing : s2[cc]
     length(sv) < 20 && DA._stop(DA._sp("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorwärtsrendite.", length(sv)))
-    length(unique(sv)) < 2 && DA._stop(DA._sp("signal_analysis: Signal ist an allen Stichtagen gleich (%g); keine Bereiche möglich.", sv[1]))
+    length(unique(sv)) < 2 && DA._stop("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche möglich.")
     ppy = (n - 1) / ((d[n] - d[1]) / 365.25)
     ann(m) = SimLev._pow1m(m, ppy / horizon)
     codes, lv = _cut(sv, _cut_breaks(sv, breaks === nothing ? Float64(DA._first(bins)) : 0.0, breaks))
@@ -426,7 +444,24 @@ function _hac_cov(Y, lag = nothing)
 end
 
 "Hauptstrom."
-_main_stream(seed) = SimLev.SLib.main_stream(seed)
+_main_stream(seed, fn) = SimLev.SLib.main_stream(seed, fn)
+
+"""Tabellen nur als RFrame (Entscheidung 6, seit 1.6.4): NamedTuple, Dict und Paare sind in R Listen; Meldung wie R
+`.da_series` für eine Liste."""
+_no_list(x, name) = (x isa Union{NamedTuple,AbstractVector{<:Pair}} ||
+                     (x isa AbstractDict && !(x isa SimLev.SimLevResult) &&
+                      !(x isa SimLev.RList && SimLev.inherits(x, "SimLevResult")))) &&
+    DA._stop(DA._sp("'%s' muss ein SimLevResult oder ein data.frame(date, value) sein.", name))
+
+"benchmark: Zahl, Zahlenvektor oder ein einzelner Name (R: numerisch oder Text der Länge 1, kein Faktor)."
+function _bench_ok(b)
+    b isa AbstractString && return true
+    v = b isa SimLev.RVector ? b.values : b isa Union{AbstractVector,Tuple} ? collect(Any, b) : Any[b]
+    b isa AbstractMatrix && return false
+    isempty(v) && return false
+    length(v) == 1 && v[1] isa AbstractString && return true
+    return all(e -> e isa Real && !(e isa Bool), v)
+end
 _boot_idx(n, m, L, stream) = Vector{Int}(SimLev.SLib.boot_idx_stationary(n, m, L; stream = stream))
 _ppy_default(frequency) = Dict("day" => 252.0, "week" => 52.0, "month" => 12.0)[frequency]
 _sr(r) = SimLev.r_mean(r) / SimLev.r_sd(r)
@@ -461,12 +496,15 @@ optimistisch.
   Bootstrap-Differenzen, p-Wert = Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5- und
   97.5-%-Quantil der Bootstrap-Differenzen).
 - `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur bei `method = "bootstrap"`.
+  Seit 1.6.4 höchstens 10^8.
 - `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
   Blöcke laufen zyklisch über das Ende); `nothing` (Standard) = `max(2, round(T^(1/3)))` mit T = Anzahl
   Renditepaare. Nur bei `method = "bootstrap"`.
+  Seit 1.6.4 eine Zahl ≥ 1.
 - `ppy`: Perioden je Jahr für die Annualisierung. `nothing` (Standard) = bei Vektoren 252 (`"day"`), 52
   (`"week"`) bzw. 12 (`"month"`); bei Ergebnissen und Tabelle (RFrame) aus den gemeinsamen Daten geschätzt:
   (Anzahl Perioden - 1) / (Zeitspanne in Tagen / 365.25).
+  Seit 1.6.4 eine Zahl > 0.
 - `seed`: Startwert für den Bootstrap (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das
   Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau
   einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe
@@ -502,10 +540,18 @@ println(sharpe_test(RFrame("date" => d["date"], "a" => d["a"]), RFrame("date" =>
 """
 function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"], B = 2000,
                      block = nothing, ppy = nothing, seed = nothing)
-    x = SimLev.as_rframe(x)
-    y = SimLev.as_rframe(y)
+    SimLev.DataPrep._e5_match_arg(frequency, ("week", "day", "month"), "sharpe_test", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
+    SimLev.DataPrep._e5_match_arg(method, ("hac", "bootstrap"), "sharpe_test", "method")
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
     method = DA._match_arg(method, ["hac", "bootstrap"])
+    # seit 1.6.4: B, block, ppy und seed vor der Rechnung; Tabellen nur als RFrame (Entscheidung 6)
+    B = SimLev.chk_int1(B, "sharpe_test", "B")
+    SimLev.chk_max(B, SimLev.SL_MAX_N, "sharpe_test", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
+    block = SimLev.chk_num1(block, "sharpe_test", "block"; lo = 1, null_ok = true)
+    ppy = SimLev.chk_num1(ppy, "sharpe_test", "ppy"; lo = 0, lo_open = true, null_ok = true)
+    seed = SimLev.chk_scalar(seed)
+    seed === nothing || SimLev.SLib.check_seed(seed, "sharpe_test")
+    _no_list(x, "x"); _no_list(y, "y")
     a = _ret_from(x, frequency); b = _ret_from(y, frequency)
     (a["date"] === nothing) != (b["date"] === nothing) &&
         DA._stop("sharpe_test: x und y müssen dieselbe Art sein: beide Renditevektoren oder beide Kursreihen/Ergebnisse (data.frame bzw. SimLevResult).")
@@ -547,7 +593,7 @@ function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac"
         ci = [d0 + (-1 * qq) * se, d0 + (1 * qq) * se]
     else
         block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
-        S = _main_stream(seed)
+        S = _main_stream(seed, "sharpe_test")
         dbs = Vector{Float64}(undef, Int(B))
         for i in 1:Int(B)
             k = _boot_idx(Tn, Tn, block, S)
@@ -592,9 +638,12 @@ stationärem Block-Bootstrap der Ueberrenditen d_t,k = r_t,k - b_t.
   Spaltennummer bzw. -name in `x` (nach dem Verwerfen leerer Spalten), diese Spalte wird aus den Kandidaten
   entfernt; ein numerischer Vektor (Länge > 1) = Benchmark-Renditen als Anteil mit genau einem Wert je Periode
   nach Aggregation und Entfernen unvollständiger Zeilen.
+  Seit 1.6.4 eine Spaltennummer als ganze Zahl, kein Faktor.
 - `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 999).
+  Seit 1.6.4 höchstens 10^8.
 - `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
   zyklisch); `nothing` (Standard) = `max(2, round(T^(1/3)))` mit T = Anzahl Perioden.
+  Seit 1.6.4 eine Zahl ≥ 1.
 - `frequency`: Periodenlänge: `"week"` (Standard), `"day"` oder `"month"`. Mit Datum (bei `SimLevParamSearch`
   immer, bei Matrizen über `dates`) werden die Renditen geometrisch zu ISO-Wochen bzw. Kalendermonaten
   verkettet; ohne Datum wird nicht aggregiert, die Zeilen gelten dann als Perioden.
@@ -631,8 +680,19 @@ println(overfit_reality_check(R; B = 200, frequency = "day", seed = 1))
 """
 function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing, frequency = ["week", "day", "month"],
                        dates = nothing, seed = nothing)
-    x = SimLev.as_rframe(x)
+    SimLev.DataPrep._e5_match_arg(frequency, ("week", "day", "month"), "overfit_reality_check", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
+    # seit 1.6.4: benchmark nur Zahl(en) oder ein Name, Spaltennummer ganz; B, block, seed vorab; x nicht als
+    # NamedTuple/Dict (R: Liste)
+    benchmark === nothing || _bench_ok(benchmark) || SimLev.chk_stop("e2.benchmark", "overfit_reality_check")
+    B = SimLev.chk_int1(B, "overfit_reality_check", "B")
+    SimLev.chk_max(B, SimLev.SL_MAX_N, "overfit_reality_check", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
+    block = SimLev.chk_num1(block, "overfit_reality_check", "block"; lo = 1, null_ok = true)
+    seed = SimLev.chk_scalar(seed)
+    seed === nothing || SimLev.SLib.check_seed(seed, "overfit_reality_check")
+    (x isa Union{NamedTuple,AbstractVector{<:Pair}} ||
+     (x isa AbstractDict && !(x isa SimLev.RList && SimLev.inherits(x, "SimLevParamSearch")))) &&
+        SimLev.chk_stop("ut2.of_x", "overfit_reality_check")
     rr = SimLev.Overfitting._of_returns(x, frequency, dates)
     Rf = DA._rget(rr, "R")
     R = _mat(Rf)
@@ -645,7 +705,7 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
         if length(barr) == 1
             e = barr[1]
             j = e isa AbstractString ? (e in cn ? findfirst(==(e), cn) : nothing) :
-                (e isa Real && !(e isa Float64 && isnan(e))) ? Int(trunc(Float64(e))) : nothing
+                (e isa Real && !(e isa Bool) && isfinite(Float64(e)) && Float64(e) == trunc(Float64(e))) ? Int(Float64(e)) : nothing
             (j === nothing || j < 1 || j > size(R, 2)) && DA._stop("benchmark: unbekannte Spalte.")
             b = R[:, j]
             keepc = [i for i in 1:size(R, 2) if i != j]
@@ -654,12 +714,12 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
             b = DA._f64(barr)
         end
     end
-    length(b) != size(R, 1) && DA._stop("benchmark passt nicht zur Länge der Renditen.")
+    length(b) != size(R, 1) && SimLev.chk_stop("rs.benchmark_laenge", "overfit_reality_check")
     D = R .- b
     Tn, K = size(D)
     fbar = DA._col_means(D)
     block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
-    S = _main_stream(seed)
+    S = _main_stream(seed, "overfit_reality_check")
     Fb = Matrix{Float64}(undef, Int(B), K)
     if D isa Matrix{Float64} && Tn > 0
         # seit 1.6.3 colMeans(D[idx, ]) ohne Kopie (Kern sl_r_colsums_idx, gleiche Summanden in gleicher Folge wie
@@ -725,12 +785,16 @@ Simulation bzw. Kursreihe.
   Werte werden entfernt), `SimLevResult` aus `simulation()` (bereinigter Wertindex aus `result_index()`) oder
   `data.frame` mit `date` und einer Wertspalte (`value`, sonst erste numerische Spalte; Niveaus). Die beiden
   letzten werden in Renditen der `frequency` umgerechnet.
+  Seit 1.6.4 mindestens zwei endliche Renditen, die nicht alle gleich sind (sonst Fehler, in allen Sprachen wie
+  bisher in R).
 - `target`: Vergleichs-Sharpe-Ratio SR^* p. a. (Standard 0); intern durch √(ppy) geteilt.
 - `prob`: Geforderte Sicherheit als Anteil (Standard 0.95 = 95 %).
+  Seit 1.6.4 eine Zahl > 0 und < 1.
 - `frequency`: Periodenlänge `"week"` (Standard, ISO-Wochen), `"day"` oder `"month"`: bei `SimLevResult` und
   Tabelle (RFrame) die Aggregation (Wert am Periodenende); bei Vektoren nur für den Standardwert von `ppy`.
 - `ppy`: Perioden je Jahr. `nothing` (Standard) = bei Vektoren 252 (`"day"`), 52 (`"week"`) bzw. 12
   (`"month"`); sonst geschätzt als (Anzahl Renditen - 1) / (Zeitspanne in Tagen / 365.25).
+  Seit 1.6.4 eine Zahl > 0.
 
 # Rückgabe
 Benannter numerischer Vektor: `sharpe` (Sharpe Ratio p. a.), `periods` (vorhandene Perioden), `needed_periods`
@@ -748,10 +812,17 @@ println(sharpe_min_track_record(r; target = 0, ppy = 52))
 ```
 """
 function sharpe_min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
-    x = SimLev.as_rframe(x)
+    SimLev.DataPrep._e5_match_arg(frequency, ("week", "day", "month"), "sharpe_min_track_record", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
+    # seit 1.6.4: target endlich, prob in (0, 1), ppy > 0; Tabellen nur als RFrame (Entscheidung 6)
+    target = SimLev.chk_num1(target, "sharpe_min_track_record", "target")
+    prob = SimLev.chk_num1(prob, "sharpe_min_track_record", "prob"; lo = 0, hi = 1, lo_open = true, hi_open = true)
+    ppy = SimLev.chk_num1(ppy, "sharpe_min_track_record", "ppy"; lo = 0, lo_open = true, null_ok = true)
+    _no_list(x, "x")
     a = _ret_from(x, frequency)
     r = filter(isfinite, a["r"])
+    # seit 1.6.4 (Entscheidung 37): entartete Renditen (weniger als zwei, alle gleich) sind ein Fehler wie in R
+    (length(r) < 2 || !(SimLev.r_sd(r) > 0)) && SimLev.chk_stop("renditen_entartet", "sharpe_min_track_record")
     if ppy === nothing
         if a["date"] !== nothing
             dd = DA._days(a["date"])
@@ -801,6 +872,8 @@ Charts), wahlweise real. Zeigt auf einen Blick, wie stark das Ergebnis vom Einst
   Vektor mit Datumsnamen. Die Werte werden durch den Index relativ zum Startdatum geteilt.
 - `max_years`: Längste Haltedauer in Jahren (ganze Zahl, Standard 30); höchstens die Zahl der verfügbaren
   Jahre.
+  Seit 1.6.4 eine ganze Zahl ≥ 1.
+  Seit 1.6.4 höchstens 100.
 
 # Rückgabe
 Objekt der Klasse `SimLevHeatmap`, eine Liste mit `matrix` (Zeilen = Startjahr, Spalten = Haltedauer 1, 2, ...
@@ -830,7 +903,9 @@ println(size(hm["matrix"]))
 ```
 """
 function result_heatmap(x; inflation = nothing, max_years = 30)
-    x = SimLev.as_rframe(x)
+    max_years = SimLev.chk_int1(max_years, "result_heatmap", "max_years")   # seit 1.6.4
+    SimLev.chk_max(max_years, SimLev.SL_MAX_JAHRE, "result_heatmap", "max_years")   # Entscheidungen 16 und 46
+    _no_list(x, "x")   # Tabellen nur als RFrame (Entscheidung 6)
     s = DA._da_series(x, "x")
     inflation === nothing || (s = DA._da_deflate(s, inflation))
     d = s.date

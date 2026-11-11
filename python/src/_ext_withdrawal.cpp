@@ -75,14 +75,12 @@ PyObject* w_simulate(PyObject*, PyObject* args) {
             dims[0] = spending.nr; dims[1] = spending.nc; dims[2] = wealth.nr; dims[3] = wealth.nc;
             dims[4] = wealth_end.nr; dims[5] = wealth_end.nc; dims[6] = tariff_years.nr; dims[7] = tariff_years.nc;
         })) return nullptr;
-    // Felder aus dem Speicher des Allokators (Reihenfolge der Anlage wie in R:
-    // wealth, spending, planned, terminal, terminal_nom, taxes, depl, fail, wealth_end,
-    // taxes_end, st, tariff_years)
+    // Felder aus dem Speicher des Allokators in der Reihenfolge der Anlage wie in R: wealth, spending, planned,
+    // terminal, terminal_nom, taxes, depl, fail, wealth_end, taxes_end, tariff_years (= Rueckgabe terminal_real,
+    // terminal_nominal, taxes_real, depletion_period, failed; seit 1.6.4 ohne den Zustand st, den der Kern lokal haelt)
     std::deque<std::vector<double>>& st = ext::alloc().store;
-    // Rueckgabe in der Reihenfolge wealth, spending, planned, terminal_real, terminal_nominal,
-    // taxes_real, depletion_period, failed, wealth_end, taxes_end, tariff_years (st ausgelassen)
     for (int k = 0; k < 11; k++) {
-        const std::size_t sk = (std::size_t) (k < 10 ? k : 11);
+        const std::size_t sk = (std::size_t) k;
         o[k] = PyByteArray_FromStringAndSize(reinterpret_cast<const char*>(st[sk].data()),
                                              (Py_ssize_t) (st[sk].size() * sizeof(double)));
         if (!o[k]) {

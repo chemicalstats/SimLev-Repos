@@ -376,6 +376,17 @@ inline NumMat new_mat(int nr, int nc) {
   return m;
 }
 
+// Attribut ueber ein Symbol setzen (names, class; value gehalten), Zeichen und Text-Skalar anlegen: unter rcall
+// (seit 1.6.4, K43 T1-B2; bis dahin direkt, ein Allokationsfehler sprang per longjmp ueber die C++-Rahmen)
+inline void set_attr_sym(SEXP x, SEXP sym, SEXP value) {
+  rcall([&]() {
+    Rf_setAttrib(x, sym, value);
+    return R_NilValue;
+  });
+}
+inline SEXP mkchar(const char* s) { return rcall([&]() { return Rf_mkChar(s); }); }
+inline SEXP mkstring(const char* s) { return keep(rcall([&]() { return Rf_mkString(s); })); }
+
 // Attribut setzen (x.attr(name) = value)
 inline void set_attr(SEXP x, const char* name, SEXP value) {
   PROTECT(value);
@@ -391,20 +402,21 @@ inline void set_attr(SEXP x, const char* name, SEXP value) {
 // wrap(): Skalare und Container als neue R-Objekte
 // ---------------------------------------------------------------------------
 
-inline SEXP wrap(double v) { SEXP x = Rf_allocVector(REALSXP, 1); REAL(x)[0] = v; return x; }
-inline SEXP wrap(int v) { SEXP x = Rf_allocVector(INTSXP, 1); INTEGER(x)[0] = v; return x; }
-inline SEXP wrap(bool v) { SEXP x = Rf_allocVector(LGLSXP, 1); LOGICAL(x)[0] = v ? 1 : 0; return x; }
-inline SEXP wrap(const char* s) { return Rf_mkString(s); }
+// seit 1.6.4 (K43 T1-B2) ueber sl::alloc bzw. rcall (gehalten bis zum Ende des .Call)
+inline SEXP wrap(double v) { SEXP x = alloc(REALSXP, 1); REAL(x)[0] = v; return x; }
+inline SEXP wrap(int v) { SEXP x = alloc(INTSXP, 1); INTEGER(x)[0] = v; return x; }
+inline SEXP wrap(bool v) { SEXP x = alloc(LGLSXP, 1); LOGICAL(x)[0] = v ? 1 : 0; return x; }
+inline SEXP wrap(const char* s) { return mkstring(s); }
 inline SEXP wrap(SEXP x) { return x; }
 template <class T> SEXP wrap(const Vec<T>& v) { return v.sexp; }
 inline SEXP wrap(const NumMat& m) { return m.sexp; }
 inline SEXP wrap(const std::vector<double>& v) {
-  SEXP x = Rf_allocVector(REALSXP, (R_xlen_t) v.size());
+  SEXP x = alloc(REALSXP, (R_xlen_t) v.size());
   for (size_t i = 0; i < v.size(); i++) REAL(x)[i] = v[i];
   return x;
 }
 inline SEXP wrap(const std::vector<int>& v) {
-  SEXP x = Rf_allocVector(INTSXP, (R_xlen_t) v.size());
+  SEXP x = alloc(INTSXP, (R_xlen_t) v.size());
   for (size_t i = 0; i < v.size(); i++) INTEGER(x)[i] = v[i];
   return x;
 }
@@ -415,18 +427,17 @@ inline void fill_list(SEXP, SEXP, R_xlen_t) {}
 template <class T, class... Rest>
 void fill_list(SEXP res, SEXP names, R_xlen_t i, const char* name, const T& value, const Rest&... rest) {
   SET_VECTOR_ELT(res, i, wrap(value));
-  SET_STRING_ELT(names, i, Rf_mkChar(name));
+  SET_STRING_ELT(names, i, mkchar(name));
   fill_list(res, names, i + 1, rest...);
 }
 }  // namespace detail
 
 template <class... Args> SEXP named_list(const Args&... args) {
   const R_xlen_t n = (R_xlen_t) (sizeof...(Args) / 2);
-  SEXP res = keep(Rf_allocVector(VECSXP, n));
-  SEXP names = PROTECT(Rf_allocVector(STRSXP, n));
+  SEXP res = alloc(VECSXP, n);   // seit 1.6.4 (K43 T1-B2) Liste, Namen und Attribut unter rcall
+  SEXP names = alloc(STRSXP, n);
   detail::fill_list(res, names, 0, args...);
-  Rf_setAttrib(res, R_NamesSymbol, names);
-  UNPROTECT(1);
+  set_attr_sym(res, R_NamesSymbol, names);
   return res;
 }
 

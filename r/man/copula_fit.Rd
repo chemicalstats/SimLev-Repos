@@ -9,7 +9,7 @@ copula_fit(x, y, families = NULL)
 \arguments{
 \item{x, y}{Numerische Vektoren gleicher Laenge (z. B. Renditen; nur die
 Raenge zaehlen). Paare mit nicht endlichen Werten werden entfernt;
-mindestens 20 Paare noetig.}
+mindestens 20 Paare noetig. Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).}
 
 \item{families}{Zeichenvektor der Familien: \code{"gaussian"}, \code{"t"},
 \code{"clayton"}, \code{"gumbel"}, \code{"frank"}, jeweils optional mit
@@ -21,7 +21,7 @@ Vorzeichen von Kendalls Tau: bei Tau >= 0 \code{gaussian}, \code{t},
 \code{clayton_90}, \code{clayton_270}, \code{gumbel_90},
 \code{gumbel_270}. Rotationen gibt es nur fuer \code{clayton} und
 \code{gumbel} (Gauss-, t- und Frank-Copula sind radialsymmetrisch);
-andere Namen sind ein Fehler, ebenso eine konstante Reihe.}
+andere Namen sind ein Fehler, ebenso eine konstante Reihe. Seit 1.6.4 nicht leer.}
 }
 \value{
 data.frame mit einer Zeile je Familie, aufsteigend nach AIC

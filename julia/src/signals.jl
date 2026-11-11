@@ -19,6 +19,30 @@ const SC = SimLev.SignalsCore
 
 _asint(n) = Int(trunc(Float64(n)))
 
+using ..SimLev: chk_num1, chk_scalar, chk_stop
+const _IMAX = 2147483647
+
+"""Kursreihe prüfen (seit 1.6.4, B-009 bis B-012, B-016; R: .sig_x): numerischer Vektor (keine Matrix, keine
+Tabelle, kein Text, keine Wahrheitswerte; leer erlaubt; nur NA (missing) zählt als Zahlenvektor)."""
+function _sig_x(x, fn)
+    @nospecialize
+    SimLev.chk_nofactor(x, fn, "x")   # Entscheidung 15
+    v = x isa RVector ? x.values : x
+    ok = if v isa Real
+        !(v isa Bool)
+    elseif v isa AbstractVector && !(v isa AbstractVector{<:Pair})
+        all(e -> e === missing || (e isa Real && !(e isa Bool)), v)
+    else
+        false
+    end
+    ok || chk_stop("zahlen", fn, "x")
+    return nothing
+end
+
+"Fenster bzw. Verzögerung: ganze Zahl >= lo bis zur R-Ganzzahlgrenze (seit 1.6.4, Entscheidungen 19 und 32; bis 1.6.3 abgeschnitten)."
+_sig_win(x, fn, arg; lo = 1, null_ok = false) =
+    SimLev.chk_int1(chk_num1(x, fn, arg; lo = lo, hi = _IMAX, null_ok = null_ok), fn, arg; lo = lo, null_ok = null_ok)
+
 "Rollierender Mittelwert (Fenster `n` inkl. aktueller Zeile; NA bei fehlendem Wert im Fenster)."
 _roll_mean(x, n) = SC.roll_mean_core(DP._as_numeric(x), _asint(n))
 
@@ -43,8 +67,9 @@ function _ema(x, n)
     a = 2 / (n + 1)
     out[n] = SimLev.r_mean(x[1:n])
     if n < m
-        f = SimLev.RStats.r_filter(a .* x[n+1:m], 1 - a; method = "recursive", init = out[n])
-        out[n+1:m] .= vec(f isa RVector ? f.values : f)
+        # seit 1.6.4 (T3-R4) direkt über den Kern sl_r_filter_rec (gleiche Bits wie filter(method = "recursive")): r_filter
+        # gab bei einem Wert (n = m - 1) einen Skalar, vec() brach ab; spart zudem die Zwischenkopien von r_filter
+        out[n+1:m] .= SimLev._rb_filter(convert(Vector{Float64}, a .* @view(x[n+1:m])), Float64[1 - a], true, 2, false, Float64[out[n]])
     end
     return out
 end
@@ -70,6 +95,7 @@ function _sig_out(buy, sell, lag = 0)
     buy = _lglvec(buy); sell = _lglvec(sell)
     if lag > 0
         m = length(buy)
+        lag = min(lag, m)   # seit 1.6.4 (B-024): lag >= Länge ergibt nur false
         buy = vcat(fill(false, lag), buy[1:max(m - lag, 0)])
         sell = vcat(fill(false, lag), sell[1:max(m - lag, 0)])
     end
@@ -109,6 +135,12 @@ bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten 
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
 
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
+
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
 `signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
@@ -145,6 +177,8 @@ println(res["buys"], " ", res["sells"])
 """
 function signal_sma(x, n_ = nothing; n = 200, band = 0, lag = 0)
     n_ === nothing || (n = n_)
+    fn = "signal_sma"
+    _sig_x(x, fn); n = _sig_win(n, fn, "n"); band = chk_num1(band, fn, "band"; lo = 0); lag = _sig_win(lag, fn, "lag"; lo = 0)
     xv = DP._as_numeric(x)
     s = _roll_mean(xv, n)
     return _sig_out(_cmp(>=, xv, s .* (1 + band / 100)), _cmp(<, xv, s .* (1 - band / 100)), lag)
@@ -182,6 +216,12 @@ bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten 
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
 
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
+
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
 `signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
@@ -212,6 +252,8 @@ println(sum(signal_ema(x; n = 200, band = 1)["buy"]))
 """
 function signal_ema(x, n_ = nothing; n = 200, band = 0, lag = 0)
     n_ === nothing || (n = n_)
+    fn = "signal_ema"
+    _sig_x(x, fn); n = _sig_win(n, fn, "n"); band = chk_num1(band, fn, "band"; lo = 0); lag = _sig_win(lag, fn, "lag"; lo = 0)
     xv = DP._as_numeric(x)
     s = _ema(xv, n)
     return _sig_out(_cmp(>=, xv, s .* (1 + band / 100)), _cmp(<, xv, s .* (1 - band / 100)), lag)
@@ -250,6 +292,12 @@ bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten 
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
 
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
+
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
 `signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
@@ -281,8 +329,11 @@ println(sum(signal_crossover(x, 50, 200)["buy"]))
 function signal_crossover(x, fast_ = nothing, slow_ = nothing; fast = 50, slow = 200, type = ("sma", "ema"), band = 0, lag = 0)
     fast_ === nothing || (fast = fast_)
     slow_ === nothing || (slow = slow_)
-    type_ = DP._match_arg(type, ("sma", "ema"))
+    fn = "signal_crossover"
+    _sig_x(x, fn); fast = _sig_win(fast, fn, "fast"); slow = _sig_win(slow, fn, "slow")
+    type_ = DP._match_arg(chk_scalar(type), ("sma", "ema"))
     fast >= slow && error("fast muss kleiner als slow sein.")
+    band = chk_num1(band, fn, "band"; lo = 0); lag = _sig_win(lag, fn, "lag"; lo = 0)
     xv = DP._as_numeric(x)
     f = type_ == "sma" ? _roll_mean(xv, fast) : _ema(xv, fast)
     s = type_ == "sma" ? _roll_mean(xv, slow) : _ema(xv, slow)
@@ -323,6 +374,12 @@ bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten 
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
 
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
+
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
 `signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
@@ -353,6 +410,9 @@ println(sum(signal_momentum(x, 250)["buy"]))
 """
 function signal_momentum(x, n_ = nothing; n = 250, threshold = 0, band = 0, lag = 0)
     n_ === nothing || (n = n_)
+    fn = "signal_momentum"
+    _sig_x(x, fn); n = _sig_win(n, fn, "n"); threshold = chk_num1(threshold, fn, "threshold")
+    band = chk_num1(band, fn, "band"; lo = 0); lag = _sig_win(lag, fn, "lag"; lo = 0)
     x = DP._as_numeric(x)
     m = length(x)
     n = _asint(n)
@@ -396,6 +456,12 @@ bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten 
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
 
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
+
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
 `signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
@@ -427,6 +493,11 @@ println(sum(signal_drawdown(x, 20, 10)["sell"]))
 function signal_drawdown(x, sell_dd_ = nothing, buy_dd_ = nothing; sell_dd = 20, buy_dd = 10, window = nothing, lag = 0)
     sell_dd_ === nothing || (sell_dd = sell_dd_)
     buy_dd_ === nothing || (buy_dd = buy_dd_)
+    fn = "signal_drawdown"
+    _sig_x(x, fn)
+    sell_dd = chk_num1(sell_dd, fn, "sell_dd"; lo = 0, lo_open = true, hi = 100)
+    buy_dd = chk_num1(buy_dd, fn, "buy_dd"; lo = 0, lo_open = true, hi = 100)
+    window = _sig_win(window, fn, "window"; null_ok = true); lag = _sig_win(lag, fn, "lag"; lo = 0)
     x = DP._as_numeric(x)
     buy_dd > sell_dd && error("buy_dd darf nicht größer als sell_dd sein.")
     m = length(x)
@@ -489,6 +560,12 @@ bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten 
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
 
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
+
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
 `signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
@@ -519,6 +596,10 @@ println(sum(signal_volatility(x, 20; threshold = 25)["buy"]))
 """
 function signal_volatility(x, n_ = nothing; n = 20, threshold = 25, band = 0, ppy = 365.25, lag = 0)
     n_ === nothing || (n = n_)
+    fn = "signal_volatility"
+    _sig_x(x, fn); n = _sig_win(n, fn, "n"); threshold = chk_num1(threshold, fn, "threshold"; lo = 0)
+    band = chk_num1(band, fn, "band"; lo = 0); ppy = chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true)
+    lag = _sig_win(lag, fn, "lag"; lo = 0)
     x = DP._as_numeric(x)
     m = length(x)
     lx = Float64[SimLev.RLibm.log(v) for v in x]
@@ -532,6 +613,29 @@ function signal_volatility(x, n_ = nothing; n = 20, threshold = 25, band = 0, pp
 end
 
 _getsig(z, k) = z isa AbstractDict ? get(z, k, nothing) : z isa NamedTuple ? get(z, Symbol(k), nothing) : nothing
+
+"Signalvektor als Vector{Union{Missing,Bool}}; nothing, wenn kein Signal (Text, andere Zahlen, Matrix)."
+function _sig_vals(v)
+    @nospecialize
+    v === nothing && return nothing
+    v isa RVector && (v = v.values)
+    v isa Union{Bool,Real} && (v = [v])
+    (v isa AbstractVector && !(v isa AbstractVector{<:Pair})) || return nothing
+    out = Union{Missing,Bool}[]
+    for e in v
+        if e === missing || e === nothing || (e isa AbstractFloat && isnan(e))
+            push!(out, missing)
+        elseif e isa Bool
+            push!(out, e)
+        elseif e isa Real && (e == 0 || e == 1)
+            push!(out, e == 1)
+        else
+            return nothing
+        end
+    end
+    return out
+end
+
 
 """
     signal_combine(signals...; op = "and")
@@ -560,6 +664,12 @@ nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, da
 bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
 Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
 NA (das Hoch wird ohne sie fortgeführt).
+
+Eingaben (seit 1.6.4 geprüft): `x` ein numerischer Vektor (keine Matrix, Tabelle, kein Text, keine
+Wahrheitswerte; leer erlaubt); `n`, `fast`, `slow`, `window` je eine endliche Zahl `>= 1`, `lag >= 0` (seit 1.6.4
+ganze Zahlen, gebrochene Werte sind ein Fehler; `lag` ab der Länge von `x` ergibt nur `false`); `band >= 0`; `sell_dd`, `buy_dd`
+größer 0 und höchstens 100; bei `signal_volatility` `threshold >= 0` und `ppy > 0`; bei `signal_combine` `buy` und
+`sell` je true/false oder 0/1 (NA bleibt NA: Ergebnis dann `Union{Missing,Bool}`).
 
 `band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
 `simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
@@ -591,15 +701,29 @@ println(sum(both["buy"]))
 ```
 """
 function signal_combine(signals...; op = ("and", "or"))
-    op = DP._match_arg(op, ("and", "or"))
+    op = DP._match_arg(chk_scalar(op), ("and", "or"))
     s = collect(signals)
     isempty(s) && error("Keine Signale übergeben.")
-    len = [(b = _getsig(z, "buy"); b === nothing ? 0 : length(b)) for z in s]
-    slen = [(b = _getsig(z, "sell"); b === nothing ? 0 : length(b)) for z in s]
+    # seit 1.6.4 (B-008, Entscheidung 1): je Signal buy und sell, jeweils true/false oder 0/1 (missing/NaN = NA erlaubt,
+    # bleibt NA wie in R; bis 1.6.3 brach Julia mit NA ab)
+    VB = Vector{Vector{Union{Missing,Bool}}}(); VS = Vector{Vector{Union{Missing,Bool}}}()
+    for (i, z) in enumerate(s)
+        b = _sig_vals(_getsig(z, "buy")); c = _sig_vals(_getsig(z, "sell"))
+        (b === nothing || c === nothing) && chk_stop("e1.signal", "signal_combine", i)
+        push!(VB, b); push!(VS, c)
+    end
+    len = length.(VB); slen = length.(VS)
     (any(!=(len[1]), len) || any(slen .!= len)) &&
         error("signal_combine: Signale haben unterschiedliche Längen ($(join(len, ", "))); alle aus derselben Kursreihe erzeugen.")
     n = len[1]
-    B = [Bool.(_getsig(z, "buy")) for z in s]; S = [Bool.(_getsig(z, "sell")) for z in s]
+    if any(v -> any(ismissing, v), VB) || any(v -> any(ismissing, v), VS)   # mit NA: dreiwertig wie R
+        cj(vs, i) = (col = [v[i] for v in vs]; any(e -> e === false, col) ? false : (any(ismissing, col) ? missing : true))
+        dj(vs, i) = (col = [v[i] for v in vs]; any(e -> e === true, col) ? true : (any(ismissing, col) ? missing : false))
+        and_ = op == "and"
+        return RList("buy" => Union{Missing,Bool}[and_ ? cj(VB, i) : dj(VB, i) for i in 1:n],
+                     "sell" => Union{Missing,Bool}[and_ ? dj(VS, i) : cj(VS, i) for i in 1:n])
+    end
+    B = [Bool.(v) for v in VB]; S = [Bool.(v) for v in VS]
     if op == "and"
         return RList("buy" => Bool[all(b[i] for b in B) for i in 1:n], "sell" => Bool[any(c[i] for c in S) for i in 1:n])
     end

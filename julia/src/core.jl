@@ -40,15 +40,10 @@ struct TaxEntry
     taxes_paid::Float64
 end
 
+# Status je Asset nach dem Lauf: gelesen wird nur money (seit 1.6.4; bis 1.6.3 dazu count, price, worth, total,
+# target, actual, differ ohne Leser, wie R seit 1.6.3)
 mutable struct Status
-    count::Float64
-    price::Float64
-    worth::Float64
     money::Float64
-    total::Float64
-    target::Float64
-    actual::Float64      # historisch: normalisiertes ZIELgewicht
-    differ::Float64      # historisch: aktuelles PORTFOLIOgewicht
 end
 
 "Signalspalte: Werte als Double (NA = fehlend); `logical` = Spalte war logisch."

@@ -11,12 +11,14 @@ import pandas as pd
 
 from . import _ext
 from ._dates import fmt_date, year_of
-from ._r.rformat import r_as_character, r_deparse, r_format1, r_round
+from ._r.rformat import r_as_character, r_format1, r_round
 from ._r.rnum import r_median, r_sum
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
-from .config import _cls_all, _is_wrapper, _strategy_columns, _strategy_wrappers
+from .config import AssetConfig, _asset_list_fields, _is_wrapper, _strategy_columns, _strategy_wrappers
 from ._sim_blocks import SimLevSplitRule
+from ._pruefen import (_finite_num, _to_float, chk_bool1, chk_col_nona, chk_col_signal, chk_col_type, chk_msg, chk_name1,
+                       chk_num1, chk_range_text, chk_scalar, chk_stop)
 from .wrapper import _nav_raw, _wrapper_nav_calc
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 from ._sim_base import (
@@ -38,7 +40,6 @@ from ._sim_base import (
     _isna,
     _message,
     _num_vec,
-    _r_class_name,
     _r_strptime_ymd,
     _sched_spec,
     _sp,
@@ -51,6 +52,28 @@ from ._sim_base import (
 # ═══════════════════════════════════════════════════════════════════════════
 # Phase 1: Eingabeprüfung (sim_validate.R)
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _sim_check_asset_fields(a: dict, nm: str) -> None:
+    """Felder eines Assets der Strategie prüfen (seit 1.6.4; R ``.sim_check_asset_fields``): Listen-Assets gehen
+    durch dieselben Regeln wie ``asset_config()`` (FW1-1). Meldungen mit ``"simulation: Asset '<name>'"``."""
+    from .config import _is_date_like, _to_date
+    w = "simulation: Asset '%s'" % nm
+    if a.get("share") is None:
+        chk_stop("fehlt", w, "share")
+    s = chk_scalar(a.get("share"))   # bei 1 < share <= 100 wertfreier Hinweis (Entscheidung 12; seit 1.6.4, K43 KE)
+    if _finite_num(s) and 1 < _to_float(s) <= 100:
+        chk_stop("ke.zahl_bereich_prozent", w, "share", chk_range_text(0, 1, lo_open=True))
+    chk_num1(a.get("share"), w, "share", lo=0, hi=1, lo_open=True)
+    chk_num1(a.get("spread"), w, "spread", lo=0, null_ok=True)
+    chk_num1(a.get("partial_exemption"), w, "partial_exemption", lo=0, hi=100, null_ok=True)
+    if a.get("deliverable") is not None:   # Feld fehlt: Standard FALSE
+        chk_bool1(a.get("deliverable"), w, "deliverable")
+    st = a.get("start")
+    if st is not None and (not _is_date_like(st) or _to_date(st) is None):
+        chk_stop("datum", w, "start")
+    chk_name1(a.get("signal_buy"), w, "signal_buy", null_ok=True)
+    chk_name1(a.get("signal_sell"), w, "signal_sell", null_ok=True)
+
 
 def _frac_warn_col(fr: _Frame, col: str, arg: str, hi: float) -> None:
     if not fr.is_numeric(col):
@@ -122,51 +145,58 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
                       marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                       use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                       fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                      order_fee, dca_fee, harvest_mode, taxable_income, tariff) -> dict:
+                      order_fee, dca_fee, harvest_mode, taxable_income, tariff, liquidate=False) -> dict:
     """Phase 1 (``.sim_check_inputs``). ``tariff`` = Argument ``tax_tariff`` von ``_simulation_flat``; Werte aus
     den Bausteinen von ``simulation()`` (deren Prüfungen entfallen hier, Meldungen nennen die Bausteine; der
     flache Weg ohne Bausteine mit eigenen Prüfungen ist entfallen)."""
     tax_mode = _match_arg(tax_mode, ("none", "person"), "tax_mode")
-    if not isinstance(data, (pd.DataFrame, Mapping, _Frame)):
-        _stop("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht %s."
-              % ("fehlend" if data is None else _r_class_name(data)))
+    # seit 1.6.4 nur pandas.DataFrame wie R data.frame (Entscheidung 6; bis 1.6.3 auch dict von Spalten), Meldung
+    # ohne Klasse und mit der Umwandlung; der interne Rahmen _Frame (Aufrufe innerhalb von SimLev) gilt als Tabelle
+    if not isinstance(data, (pd.DataFrame, _Frame)):
+        _stop("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s)."
+              % chk_msg("tabelle.formen"))
     if strategy is None or len(strategy) == 0:
         _stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus "
-              "create_strategy()), nicht %s." % ("fehlend" if strategy is None else "leer (L\u00e4nge 0)"))
-    if not isinstance(strategy, Mapping) or any(str(k) == "" for k in strategy.keys()):
+              "create_strategy()).")
+    if not isinstance(strategy, Mapping) or any(k is None or str(k) == "" for k in strategy.keys()):   # 1.6.4: None
         _stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
     fr = _to_frame(data)   # meldet doppelte Spaltennamen
+    # seit 1.6.4: .filled ist der interne Name der aufgefüllten Tage (bis 1.6.3 schaltete eine solche Spalte den
+    # Handel still ab)
+    if ".filled" in fr.names:
+        chk_stop("spalte_intern", "simulation", ".filled")
     filled_attr = fr.filled_attr
     strat: dict = {}
     for k, a in strategy.items():
         nm = str(k)
         if not isinstance(a, Mapping):
             _stop("simulation: Asset '%s' in 'strategy' muss eine Liste bzw. asset_config() sein." % nm)
-        strat[nm] = dict(a)
+        if not isinstance(a, AssetConfig):   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
+            _asset_list_fields(a, nm, "simulation")
+        strat[nm] = {k: chk_scalar(v) for k, v in a.items()}   # seit 1.6.4 Länge 1 wie Einzelwert (Entscheidung 4)
     cls_ok = ["etf", "etn", "etc", "certificate", "etn_standard", "etn_deliverable"]
     for nm, a in strat.items():
         ac = a.get("asset_class")
         if not isinstance(ac, str) or ac not in cls_ok:
-            _stop("simulation: asset_class %s von Asset '%s' ist ung\u00fcltig; erlaubt sind %s (veraltet: etn_standard, "
+            _stop("simulation: asset_class von Asset '%s' ist ung\u00fcltig; erlaubt sind %s (veraltet: etn_standard, "
                   "etn_deliverable). Strategie am besten mit create_strategy()/asset_config() bauen."
-                  % (r_deparse(ac), nm, ", ".join(cls_ok[:4])))
+                  % (nm, ", ".join(cls_ok[:4])))
         tr_ = a.get("tax_regime")
         if tr_ is not None and (not isinstance(tr_, str) or tr_ not in ("investment_fund", "capital_gains",
                                                                            "private_sale")):
-            _stop("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, "
+            _stop("simulation: tax_regime von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, "
                   "private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden."
-                  % (r_deparse(tr_), nm, "tax = NULL"))
+                  % (nm, "tax = NULL"))
         at = a.get("trading")
         if not isinstance(at, str) or at not in ("bnh", "signal"):
-            _stop("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"."
-                  % (r_deparse(at), nm))
+            _stop("simulation: trading von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"." % nm)
         if a.get("wrapper") is not None:   # Fonds-Wrapper (wrapper.py)
             if not _is_wrapper(a["wrapper"]):
-                _stop("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein, nicht %s."
-                      % (nm, _cls_all(a["wrapper"])))
+                _stop("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein." % nm)
             if at != "bnh":
                 _stop("simulation: Asset '%s' ist ein Fonds-Wrapper; daf\u00fcr ist nur trading = \"bnh\" m\u00f6glich "
                       "(keine Signale auf den Anteilswert)." % nm)
+        _sim_check_asset_fields(a, nm)
     if "date" not in fr:
         _stop("simulation: Spalte 'date' fehlt in 'data'.")
     # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (_strategy_columns)
@@ -185,23 +215,23 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
     if fr.nrow < 1:
         _stop("simulation: 'data' enth\u00e4lt keine Zeilen.")
     kind = fr.kinds["date"]
-    if kind == "factor":
-        kind = "character"
+    if kind == "factor":   # seit 1.6.4 kein Faktor als Datumsspalte (Entscheidung 15; bis 1.6.3 still Text)
+        chk_stop("spalte_faktor", "simulation", "date")
     if kind == "character":
         raw = fr.get("date")
         dd = np.array([NA if v is None else (NA if (z := _r_strptime_ymd(v)) is None else float(z)) for v in raw],
                       dtype=np.float64)
         bad = [i for i in range(len(raw)) if math.isnan(dd[i]) and raw[i] is not None]
         if bad:
-            _stop("simulation: Spalte 'date' ist Text und '%s' (Zeile %d) ist kein Datum im Format JJJJ-MM-TT; vorher "
-                  "mit as.Date(..., format = ...) umwandeln." % (raw[bad[0]], bad[0] + 1))
+            _stop("simulation: Spalte 'date' ist Text und Zeile %d ist kein Datum im Format JJJJ-MM-TT; vorher "
+                  "mit as.Date(..., format = ...) umwandeln." % (bad[0] + 1))
         fr.set("date", dd, "date")
         _message("Hinweis: Spalte 'date' wurde von Text in Date umgewandelt.")
     elif kind == "posixct":
         fr.kinds["date"] = "date"
         _message("Hinweis: Spalte 'date' wurde von Datum-Uhrzeit in Date umgewandelt.")
     if fr.kinds["date"] != "date":
-        _stop("simulation: Spalte 'date' muss die Klasse Date haben (ist: %s)." % fr.r_class("date"))
+        _stop("simulation: Spalte 'date' muss die Klasse Date haben.")
     dvals = fr.get("date")
     if np.isnan(dvals).any():
         _stop("simulation: Spalte 'date' enth\u00e4lt NA (erstmals in Zeile %d)." % (int(np.flatnonzero(np.isnan(dvals))[0]) + 1))
@@ -280,13 +310,17 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
     pre_filled = pre_filled | all_na
     for nm in strat:
         if not fr.is_numeric(nm):
-            _stop("simulation: Kursspalte '%s' muss numerisch sein (ist: %s)." % (nm, fr.r_class(nm)))
+            _stop("simulation: Kursspalte '%s' muss numerisch sein." % nm)
         v = fr.get(nm)
         bad = np.flatnonzero(~np.isnan(v) & ~(np.isfinite(v) & (v > 0)))
         if bad.size:
-            _stop("simulation: Kursspalte '%s' enth\u00e4lt ung\u00fcltige Kurse (<= 0 oder unendlich), erstmals am %s "
-                  "(Wert %s); erwartet werden positive Kursniveaus." % (nm, fmt_date(int(dvals[bad[0]])),
-                                                                       r_format1(float(v[bad[0]]))))
+            _stop("simulation: Kursspalte '%s' enth\u00e4lt ung\u00fcltige Kurse (<= 0 oder unendlich), erstmals am %s; "
+                  "erwartet werden positive Kursniveaus." % (nm, fmt_date(int(dvals[bad[0]]))))
+        # seit 1.6.4 (A-005, Entscheidung 103): Kurse von 1e-100 bis 1e100 (sonst läuft die Stückzahl Geld / Kurs über)
+        bad = np.flatnonzero(~np.isnan(v) & ((v < 1e-100) | (v > 1e100)))
+        if bad.size:
+            from ._pruefen import chk_stop
+            chk_stop("fa.kurs_bereich", "simulation", nm, fmt_date(int(dvals[bad[0]])))
         ok = np.flatnonzero(~np.isnan(v))
         if ok.size == 0:
             _stop("simulation: Kursspalte '%s' enth\u00e4lt nur NA." % nm)
@@ -310,8 +344,9 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
         start_value = 10000.0
         _message("Hinweis: start_value ist NULL oder NA; verwendet wird der Standardwert 10000 EUR.")
     if not _is_num(start_value) or start_value <= 0:
-        _stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht %s."
-              % r_deparse(start_value))
+        _stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000).")
+    if start_value == float("inf"):   # seit 1.6.4 endlich (bis 1.6.3 still ein Depot von 0)
+        chk_stop("zahl", "simulation", "start_value")
     start_value = float(start_value)
     # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (die Prüfungen des flachen
     # Wegs sind entfallen); fractions und risk_free prüft simulation() selbst
@@ -319,11 +354,16 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
     if church_tax is not None:
         church_tax = float(church_tax)
 
-    def show_arg(x):
-        return "NULL" if x is None else r_deparse(x)
-
-    if not _is_bool(fractions):
-        _stop("simulation: '%s' muss TRUE oder FALSE sein, nicht %s." % ("fractions", show_arg(fractions)))
+    # seit 1.6.4 liquidate und details wie fractions (bis 1.6.3 nach bool(): Text "FALSE" galt als wahr)
+    for lg, v in (("fractions", fractions), ("liquidate", liquidate), ("details", details)):
+        if not _is_bool(v):
+            _stop("simulation: '%s' muss TRUE oder FALSE sein." % lg)
+    # seit 1.6.4 risk_free: None, eine endliche Zahl oder ein Spaltenname mit Zahlen
+    if risk_free is not None:
+        if not ((_is_num(risk_free) and math.isfinite(float(risk_free))) or (isinstance(risk_free, str) and risk_free != "")):
+            chk_stop("zahl_oder_spalte", "simulation", "risk_free")
+        if isinstance(risk_free, str) and risk_free in fr:   # nur Zahlen (Entscheidung 2; bis 1.6.3 Text/logisch umgewandelt)
+            chk_col_type(fr, risk_free, "simulation", "numerisch")
     sparer_pauschbetrag = float(sparer_pauschbetrag)
     private_sale_threshold = float(private_sale_threshold)
     use_guenstigerpruefung = bool(use_guenstigerpruefung)
@@ -357,7 +397,6 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
         tariff_env.zve_all = zv["all"]
         tariff_env.zve = zv["by_year"]
         tariff_env.church_k = church_tax / 100 if (church_tax is not None and church_tax > 0) else 0.0
-        tariff_env.kapest_rate = 0.25 / (1 + 0.25 * tariff_env.church_k)
         tariff_env.use_gp = bool(use_guenstigerpruefung)
 
     def is_private(a):
@@ -372,8 +411,8 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
     if balance_thresh is not None:
         balance_thresh = float(balance_thresh) / 100
     balance_thresh_type = _match_arg(balance_thresh_type, ("absolute", "relative"), "balance_thresh_type")
-    fee_order = _fee_spec(order_fee)
-    fee_dca = fee_order if dca_fee is None else _fee_spec(dca_fee)
+    fee_order = _fee_spec(order_fee, "simulation", "order_fee")
+    fee_dca = fee_order if dca_fee is None else _fee_spec(dca_fee, "simulation", "dca_fee")
     fees_on = fee_order is not None or fee_dca is not None
     _FEE.paid = 0.0
     if dca_mode:
@@ -381,10 +420,9 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
     shares = [a.get("share") for a in strat.values()]
     total_weight = r_sum([NA if s is None else float(s) for s in shares], na_rm=True)
     if abs(total_weight - 1.0) > 1e-6:
+        # seit 1.6.4 ohne die Eingabewerte (bis 1.6.3 "Aktuelle Gewichte: A=0.300, ..."); die Summe bleibt
         _stop(_sp("simulation: Asset-Gewichte (share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben "
-                  "(Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s", total_weight,
-                  ", ".join(_sp("%s=%.3f", k, NA if v.get("share") is None else float(v.get("share")))
-                            for k, v in strat.items())))
+                  "(Anteile, z. B. 0.6 und 0.4).", total_weight))
     # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (seit 1.1.0 auch für
     # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
     tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
@@ -415,17 +453,17 @@ def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_r
     dates = fr.get("date")
     start_date = int(dates[0])
     stopp_date = int(dates[-1])
+    # Basiszins-Spalte (seit 1.6.4): keine Kategorie (Entscheidung 15), nur Zahlen (wie risk_free, Entscheidungen 2 und
+    # F5: Text ist ein Fehler; nur NA zählt als Zahlenspalte, Entscheidung 14) und kein NA (Entscheidung 17; bis 1.6.3
+    # zählte NA als 0), auch nicht in einer Spalte nur aus NA (Entscheidung 42)
     if _is_true(base_rate_flex) and isinstance(base_rate_data, str) and base_rate_data in fr:
-        _frac_warn_col(fr, base_rate_data, "base_rate", hi=0.05)
-    if _is_true(base_rate_flex) and isinstance(base_rate_data, str) and base_rate_data in fr:
-        col = fr.get(base_rate_data)
         k = fr.kinds[base_rate_data]
-        if k == "numeric" and np.isnan(col).any():
-            col = col.copy()
-            col[np.isnan(col)] = 0.0
-            fr.cols[base_rate_data] = col
-        elif k != "numeric" and all(_isna(v) for v in col):
-            fr.set(base_rate_data, np.zeros(len(col)), "numeric")
+        if k == "factor":
+            chk_stop("spalte_faktor", "simulation", base_rate_data)
+        if not (k == "numeric" or (k == "logical" and all(_isna(v) for v in fr.get(base_rate_data)))):
+            chk_stop("spalte_typ", "simulation", base_rate_data, chk_msg("typ.numerisch"))
+        chk_col_nona(fr, base_rate_data, "simulation", chk_msg("hinweis.basiszins"))
+        _frac_warn_col(fr, base_rate_data, "base_rate", hi=0.05)
     expected_days = (stopp_date - start_date) + 1
     if fr.nrow != expected_days:
         _message("Hinweis: %d Zeilen, erwartet %d Kalendertage. Fehlende Tage werden aufgef\u00fcllt (LOCF; Signale = "
@@ -497,10 +535,9 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_date: int, stopp_date: in
         st_raw = a.get("start")
         bonus = a.get("partial_exemption")
         sim["assets"][name] = {
-            "class": ac, "style": a.get("trading"),
+            "style": a.get("trading"),
             "start": start_date if st_raw is None else _date_or_fail(st_raw),
             "tax_regime": regime, "bonus": (0.0 if bonus is None else float(bonus)) / 100,
-            "deliverable": a.get("deliverable") if a.get("deliverable") is not None else False,
         }
         if a.get("trading") == "signal":
             sb, ss = a.get("signal_buy"), a.get("signal_sell")
@@ -510,6 +547,10 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_date: int, stopp_date: in
             if ss is None or ss not in fr:
                 _stop("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s')." % (ss if ss is not None
                                                                                              else "NULL", name))
+            # seit 1.6.4 nur True/False oder 0/1 mit NA (Entscheidung 1; bis 1.6.3 jeder Wert nach bool(), Text
+            # "FALSE" als wahr, jede Zahl ungleich 0 als wahr)
+            chk_col_signal(fr, sb, "simulation")
+            chk_col_signal(fr, ss, "simulation")
         if base_rate_flex:
             if base_rate_data is None or base_rate_data not in fr:
                 if base_rate_data is None:
@@ -524,7 +565,6 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_date: int, stopp_date: in
             br = np.full(n, float(base_rate) if base_rate is not None else 0.0)
         spread_a = a.get("spread")
         sim["market"][name] = {
-            "asset_day": np.arange(start_date, stopp_date + 1, dtype=np.int64),
             "base_rates": br,
             "asset_price": np.array(fr.get(name), dtype=np.float64),
             "signal_buy": _signal_col(fr, a.get("signal_buy")),
@@ -576,12 +616,10 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
             continue
         sd1 = _as_date(sd0)
         if sd1 is None:
-            _stop("simulation: %s_start = '%s' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\")."
-                  % (a, r_format1(sd0) if not isinstance(sd0, str) else sd0))
+            _stop("simulation: %s_start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\")." % a)   # seit 1.6.4 ohne Wert
         if sd1 > stopp_date:
-            _stop("simulation: %s (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine."
-                  % ("start von %s" % ("dca_plan()" if a == "dca" else "rebalance_plan()"),
-                     fmt_date(sd1), fmt_date(stopp_date)))
+            _stop("simulation: %s liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine."
+                  % ("start von %s" % ("dca_plan()" if a == "dca" else "rebalance_plan()"), fmt_date(stopp_date)))
     balance = _sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, None, balance_anchor,
                          balance_start, balance_skip)
     dca = _sched_spec(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor, dca_start, dca_skip)
@@ -614,9 +652,9 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
     for name in flag_assets:
         st_a = sim["assets"][name]["start"]
         if st_a is not None and st_a > stopp_date:
-            _stop("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie "
+            _stop("simulation: start von '%s' liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie "
                   "handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie "
-                  "entfernen." % (name, fmt_date(st_a), fmt_date(stopp_date)))
+                  "entfernen." % (name, fmt_date(stopp_date)))   # seit 1.6.4 ohne Eingabewert
     # bis 1.3.0 _sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
     if not any(sim["assets"][nm]["start"] <= int(flag_date[0]) for nm in flag_assets):
         _stop("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); "

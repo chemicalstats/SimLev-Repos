@@ -22,7 +22,8 @@ Anlagen, die nur in einem vorkommen, erhalten im anderen 0. Je Zeile auf
 Summe 1 normiert.}
 
 \item{start, end}{Beginn und Ende des Uebergangs (Date oder
-\code{"JJJJ-MM-TT"}; Standard \code{NULL} = erstes bzw. letztes Datum).}
+\code{"JJJJ-MM-TT"}; Standard \code{NULL} = erstes bzw. letztes Datum).
+Seit 1.6.4 keine Zahl.}
 
 \item{every}{Rhythmus der Stufen: \code{"year"} (Standard),
 \code{"quarter"} oder \code{"month"}.}

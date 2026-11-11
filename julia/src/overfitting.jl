@@ -12,7 +12,7 @@
 module Overfitting
 
 import ..SimLev
-using ..SimLev: _match_arg, _which_max   # util.jl (seit 1.6.1 eine Fassung)
+using ..SimLev: _match_arg, _which_max   # util.jl (_match_arg auch für ParamSearch/Sensitivity über OF.) (seit 1.6.1 eine Fassung)
 using ..SimLev: _res_abline!, _res_fig, _res_finish, _res_hline!, _res_legend!, _res_line!, _res_panel, _res_points!,
                 _res_range, _res_rect!, _res_vline!
 using Dates
@@ -27,8 +27,10 @@ export overfit_pbo, sharpe_probabilistic, sharpe_deflated, overfit_walk_forward,
 # Kleine R-Hilfen (auch von ParamSearch / Sensitivity benutzt)
 # ═════════════════════════════════════════════════════════════════════════════
 
-_f64(v) = v === missing || v === nothing ? NA : Float64(v)
-using ..SimLev: _isna   # r/rnum.jl (seit 1.6.3)
+using ..SimLev: _isna, _f64   # r/rnum.jl (seit 1.6.3 bzw. 1.6.4)
+using ..SimLev: chk_bool1, chk_dots, chk_fmt, chk_int1, chk_max, chk_nofactor, chk_num1, chk_scalar,
+                chk_stop   # pruefen.jl (seit 1.6.4)
+_e5_match_arg(x, ch, fn, arg) = SL.DataPrep._e5_match_arg(x, ch, fn, arg)
 
 "`sprintf` (R) für Skalare → String."
 function _spf(f::AbstractString, args...)
@@ -62,10 +64,7 @@ end
 # Summen, Mittel und Kumulationen wie R in long double über die C-Kerne (core/slc_rbase.cpp)
 "`colSums` (long double, sequenziell)."
 _colsums(M::AbstractMatrix) = SL._ld_colsums(M)
-"`colMeans`: long-double-Summe / n."
-_colmeans(M::AbstractMatrix) = size(M, 1) == 0 ? fill(NaN, size(M, 2)) : SL._ld_colsums(M; mean = true)
-"`rowSums` (long double je Zeile)."
-_rowsums(M::AbstractMatrix) = SL._ld_rowsums(M)
+using ..SimLev: _colmeans   # util.jl (seit 1.6.4; die Aufrufer übergeben Matrix{Float64}; _rowsums ohne Aufrufer entfällt)
 "`rowMeans` (long double je Zeile / p)."
 _rowmeans(M::AbstractMatrix) = SL._ld_rowsums(M; mean = true)
 "`cumprod` (long double)."
@@ -196,7 +195,8 @@ _days(d::Date) = Dates.value(d - Date(1970, 1, 1))
 
 _is_ps(x) = x isa SL.RList && SL.inherits(x, "SimLevParamSearch")
 
-const _ERR_MAT = "x muss ein SimLevParamSearch oder eine numerische Renditematrix sein."
+# seit 1.6.4 Baustein ut2.of_x mit Funktionsnamen (K43 T2-B6)
+_err_mat(fn) = chk_stop("ut2.of_x", fn)
 
 _numeltype(T) = (S = Base.nonmissingtype(T); S <: Real)
 _isnumvec(v::AbstractVector) = _numeltype(eltype(v)) && !(Base.nonmissingtype(eltype(v)) <: Bool) ||
@@ -204,29 +204,29 @@ _isnumvec(v::AbstractVector) = _numeltype(eltype(v)) && !(Base.nonmissingtype(el
 _tofloat(v) = Float64[_f64(e) for e in v]
 
 "`as.matrix(x)` einer numerischen Eingabe → (Matrix, Spaltennamen oder nothing, Zeilennamen oder nothing)."
-function _as_return_matrix(x)
+function _as_return_matrix(x, fn = "overfit_reality_check")
     if x isa SL.RFrame
         cols = x.cols
         isempty(cols) && return zeros(SL.nrow(x), 0), String[], x.rownames
-        all(c -> _numeltype(eltype(c)) || _isnumvec(c), cols) || error(_ERR_MAT)
-        any(c -> _isnumvec(c), cols) || error(_ERR_MAT)       # nur logische Spalten: logische Matrix
+        # seit 1.6.4 nur Zahlenspalten (keine logischen Spalten, B-043; Faktoren wie bisher abgelehnt)
+        all(c -> !(c isa SL.RFmt.RFactor) && _isnumvec(c), cols) || _err_mat(fn)
         M = Matrix{Float64}(undef, SL.nrow(x), length(cols))
         for (j, c) in enumerate(cols); M[:, j] = _tofloat(c); end
         return M, names(x), x.rownames
     elseif x isa SL.NamedMat
-        _numeltype(eltype(x.data)) && !(Base.nonmissingtype(eltype(x.data)) <: Bool) || error(_ERR_MAT)
+        _numeltype(eltype(x.data)) && !(Base.nonmissingtype(eltype(x.data)) <: Bool) || _err_mat(fn)
         return Float64[_f64(v) for v in x.data], x.colnames, x.rownames
     elseif x isa AbstractMatrix
-        _numeltype(eltype(x)) && !(Base.nonmissingtype(eltype(x)) <: Bool) || error(_ERR_MAT)
+        _numeltype(eltype(x)) && !(Base.nonmissingtype(eltype(x)) <: Bool) || _err_mat(fn)
         return Float64[_f64(v) for v in x], nothing, nothing
     elseif x isa AbstractVector
-        _isnumvec(x) || error(_ERR_MAT)
+        _isnumvec(x) || _err_mat(fn)
         rn = x isa SL.RVector ? x.names : nothing
         return reshape(_tofloat(x), :, 1), nothing, rn
     elseif x isa Real && !(x isa Bool)
         return fill(Float64(x), 1, 1), nothing, nothing
     end
-    error(_ERR_MAT)
+    _err_mat(fn)
 end
 
 "Interne Renditequelle wie die Liste `rr` in R."
@@ -242,14 +242,21 @@ end
 _isokey(d::Date) = (th = d + Day(4 - Dates.dayofweek(d)); lpad(string(Dates.year(th)), 4, '0') * "-" * lpad(string(Dates.week(d)), 2, '0'))
 _ymkey(d::Date) = lpad(string(Dates.year(d)), 4, '0') * "-" * lpad(string(Dates.month(d)), 2, '0')
 
-function _rr(x, frequency, dates = nothing, risk_free = 0)
+# fn: Funktionsname für die Meldungen (seit 1.6.4); Standard für den Aufrufer overfit_reality_check()
+function _rr(x, frequency, dates = nothing, risk_free = 0, fn = "overfit_reality_check")
     if _is_ps(x)
         ret = get(x, "returns", nothing)
-        ret === nothing && error("Suche ohne gespeicherte Renditen (keep_returns = \"none\").")
-        R, cn, rn = _as_return_matrix(ret)
+        ret === nothing && SimLev.chk_stop("rs.ps_ohne_renditen", fn)
+        R, cn, rn = _as_return_matrix(ret, fn)
         dates = get(x, "dates", nothing)
     else
-        R, cn, rn = _as_return_matrix(x)
+        x isa SL.RFmt.RFactor && _err_mat(fn)
+        R, cn, rn = _as_return_matrix(x, fn)
+        if dates !== nothing             # seit 1.6.4: Länge, kein Faktor, aufsteigend ohne NA (B-020)
+            chk_nofactor(dates, fn, "dates")
+            (dates isa Union{AbstractVector,Tuple} ? length(dates) : 1) == size(R, 1) ||
+                chk_stop("laenge", fn, "dates", chk_fmt(size(R, 1)))
+        end
     end
     cn === nothing && (cn = ["p$j" for j in 1:size(R, 2)])
     cn = collect(String, cn)
@@ -258,22 +265,33 @@ function _rr(x, frequency, dates = nothing, risk_free = 0)
     cols = findall(keep)
     cn = cn[keep]
     dts = dates === nothing ? nothing : _dates(dates, "dates")
+    if dts !== nothing
+        dd = Float64[v === missing ? NaN : Float64(_days(v)) for v in dts]
+        (any(isnan, dd) || any(i -> dd[i] < dd[i-1], 2:length(dd))) && chk_stop("e5.datum_vektor", fn, "dates")
+    end
     if dts !== nothing && frequency != "day"
-        key = frequency == "week" ? _isokey.(dts) : _ymkey.(dts)
-        length(key) == size(R, 1) || error("incorrect length for 'group'")
-        lev = unique(key)
-        pos = Dict(k => i for (i, k) in enumerate(lev))
-        codes = Int[pos[k] for k in key]
+        # seit 1.6.4 (B-103) Gruppen über ganzzahlige Schlüssel (Montag der ISO-Woche bzw. Jahr * 12 + Monat; Daten
+        # aufsteigend: jede Periode ein Lauf, in Reihenfolge des ersten Auftretens wie bisher), Text nur für die
+        # Zeilennamen der Perioden
+        ck = frequency == "week" ? Int[Dates.value(d) - (Dates.dayofweek(d) - 1) for d in dts] :
+                                   Int[Dates.year(d) * 12 + Dates.month(d) for d in dts]
+        nk = length(ck)
+        nk == size(R, 1) || error("incorrect length for 'group'")
+        first = Bool[i == 1 || ck[i] != ck[i-1] for i in 1:nk]
+        lev = frequency == "week" ? _isokey.(dts[first]) : _ymkey.(dts[first])
+        codes = cumsum(first)
         S = _rowsum(_log1p_w(R), codes, length(lev))
         R = SL.RLibm.expm1.(S)                 # seit 1.6.2 expm1 (P2)
         rn = lev
-        last = vcat([key[i] != key[i+1] for i in 1:length(key)-1], true)
+        last = vcat(Bool[ck[i] != ck[i+1] for i in 1:nk-1], true)
         dts = dts[last]
     end
     ok = [!any(isnan, view(R, i, :)) for i in 1:size(R, 1)]
     R = R[ok, :]
     rn === nothing || (rn = collect(String, rn)[ok])
     dts === nothing || (dts = dts[ok])
+    any(isinf, R) && chk_stop("e5.renditen_inf", fn)   # seit 1.6.4 (B-012)
+    size(R, 1) < 2 && chk_stop("e5.perioden", fn)       # seit 1.6.4 Mindestlänge (B-016)
     ppy = if dts !== nothing && length(dts) > 1
         (length(dts) - 1) / (Float64(_days(dts[end]) - _days(dts[1])) / 365.25)
     else
@@ -351,9 +369,7 @@ end
 
 "`log1p(R)` mit R's Warnung \"NaNs produced\" (Werte unter -1, -Inf; seit 1.5.1)."
 function _log1p_w(R)
-    out = SL.RLibm.log1p.(R)
-    any(i -> isnan(out[i]) && !isnan(R[i]), eachindex(out, R)) && @warn "NaNs produced"
-    out
+    SL.RLibm.log1p.(R)   # seit 1.6.4 warnt die RLibm selbst, einmal je Aufruf (C-094)
 end
 
 "`combn(S, k)` in lexikographischer Reihenfolge (Matrix k × C, eine Kombination je Spalte)."
@@ -409,6 +425,7 @@ mittlere Ränge und können ebenfalls λ = 0 ergeben.
 
 # Argumente
 - `x`: Renditequelle:
+  Seit 1.6.4 keine logischen Spalten und keine unendlichen Renditen; nach dem Entfernen der Zeilen mit fehlenden Werten mindestens zwei Perioden.
 
   - `SimLevParamSearch` aus `param_search()` mit gespeicherten Renditen (`keep_returns = "day"`); verwendet
     werden `x["returns"]` (tägliche Renditen je Punkt) und `x["dates"]`;
@@ -420,7 +437,9 @@ mittlere Ränge und können ebenfalls λ = 0 ergeben.
   "sharpe"` außerdem Spalten ohne Schwankung (Standardabweichung <= 1e-10 je Periode, mit Warnung), deren
   Sharpe Ratio nicht definiert ist. Mindestens zwei Spalten nötig. Bei `print()`/`plot()`: Objekt der Klasse
   `SimLevPBO`.
-- `S`: Anzahl Blöcke (gerade ganze Zahl >= 2, Standard 16 ergibt binom(16, 8) = 12870 Aufteilungen).
+- `S`: Anzahl Blöcke (gerade ganze Zahl von 2 bis 24, Standard 16 ergibt binom(16, 8) = 12870 Aufteilungen;
+  seit 1.6.4 höchstens 24: binom(24, 12) = 2704156 Aufteilungen, rund 0,5 GB Speicher, in Julia 0,8 GB).
+  Seit 1.6.4 ohne Abschneiden: eine gebrochene Zahl ist ein Fehler.
 - `metric`: Kennzahl je Periode (nach Abzug von `risk_free`, nicht annualisiert): `"sharpe"` (Standard;
   Mittelwert / Standardabweichung), `"sortino"` (Mittelwert / Wurzel des mittleren quadrierten negativen
   Teils), `"geometric"` (geometrische Periodenrendite exp(log(1 + r)) - 1, Anteil) oder `"mean"`
@@ -433,6 +452,7 @@ mittlere Ränge und können ebenfalls λ = 0 ergeben.
   annualisierte Sharpe Ratios und `risk_free`).
 - `dates`: Datum je Zeile von `x` (Date oder umwandelbar), nur bei Matrix-Eingabe; `nothing` (Standard) =
   keine Aggregation. Bei `SimLevParamSearch` wird `x["dates"]` verwendet.
+  Seit 1.6.4 genau ein Datum je Zeile, aufsteigend, ohne NA und kein Faktor.
 - `risk_free`: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als `risk_free / 100 / ppy` von
   jeder Periodenrendite abgezogen. `ppy` (Perioden je Jahr) wird aus dem Datum geschätzt: (Anzahl Perioden -
   1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (`"day"`), 52 (`"week"`) bzw. 12 (`"month"`).
@@ -464,17 +484,21 @@ println(overfit_pbo(R; S = 10, frequency = "day")["pbo"])  # etwa 0.5
 function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = nothing, risk_free = 0)
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
-    metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"))
-    frequency = _match_arg(frequency, ("week", "day", "month"))
-    S = trunc(Int, S)
-    (S < 2 || isodd(S)) && error("S muss gerade und >= 2 sein.")
-    rr = _rr(x, frequency, dates, risk_free)
+    fn = "overfit_pbo"
+    metric = _e5_match_arg(metric, ("sharpe", "sortino", "geometric", "mean"), fn, "metric")
+    frequency = _e5_match_arg(frequency, ("week", "day", "month"), fn, "frequency")
+    S = chk_int1(S, fn, "S"; lo = 2)   # seit 1.6.4 ganze Zahl (bis 1.6.3 abgeschnitten, Entscheidung 19)
+    S > 24 && chk_stop("e5.pbo_S", fn)   # seit 1.6.4 S <= 24 (Speicher; Entscheidung 138, vorher 28 nach 56)
+    S = Int(S)
+    (S < 2 || isodd(S)) && chk_stop("ut2.pbo_S", fn)
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    rr = _rr(x, frequency, dates, risk_free, fn)
     metric == "sharpe" && (rr = _of_drop_flat(rr, "overfit_pbo"))
     R = rr.R
     N = size(R, 2); Tn = size(R, 1)
-    N < 2 && error("Mindestens zwei Punkte nötig.")
+    N < 2 && SimLev.chk_stop("rs.zwei_punkte", fn)
     bl = Tn ÷ S
-    bl < 4 && error("Zu wenige Beobachtungen ($Tn) für S = $S Blöcke.")
+    bl < 4 && SimLev.chk_stop("rs.pbo_beob", fn, Tn, Int(S))
     R = R[(Tn - bl * S + 1):Tn, :]
     blk = repeat(1:S, inner = bl)
     Rc = R .- _colmeans(R)'
@@ -554,6 +578,7 @@ z. B. `v <- result_index(res)\$value; r <- v[-1] / v[-length(v)] - 1`.
 # Argumente
 - `r`: Numerischer Vektor einfacher Periodenrenditen als Anteil (0.01 = 1 %); nicht endliche Werte werden
   entfernt. Ein risikoloser Zins wird nicht abgezogen.
+  Seit 1.6.4 mindestens zwei endliche Werte, die nicht alle gleich sind (sonst Fehler).
 - `benchmark`: Vergleichs-Sharpe-Ratio SR^* p. a. (Standard 0); intern durch √(ppy) geteilt.
 - `ppy`: Perioden je Jahr der Renditen in `r` (Standard 52 = Wochenrenditen; z. B. 252 für Handelstage, 12 für
   Monate). Wird nicht geschätzt und dient nur der Umrechnung von `benchmark`.
@@ -572,13 +597,25 @@ println(sharpe_probabilistic(r; benchmark = 0, ppy = 52))
 ```
 """
 function sharpe_probabilistic(r; benchmark = 0, ppy = 52)
+    fn = "sharpe_probabilistic"
+    chk_nofactor(r, fn, "r")
+    r = SL.DataPrep._e5_numvec(r, fn, "r")
+    benchmark = chk_num1(benchmark, fn, "benchmark")
+    ppy = chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true)
+    rf = filter(isfinite, _tofloat(r isa AbstractVector ? r : [r]))
+    (length(rf) < 2 || !(SL.r_sd(rf) > 0)) && chk_stop("e5.renditen_kurz", fn, "r")   # seit 1.6.4 (B-016, B-041)
+    return _of_psr(r, benchmark, ppy)
+end
+
+"PSR ohne Prüfung (für `sharpe_deflated`)."
+function _of_psr(r, benchmark, ppy)
     v = _tofloat(r isa AbstractVector ? r : [r])
     v = filter(isfinite, v)
     n = length(v)
     mu = SL.r_mean(v); sd = SL.r_sd(v)
     sr = mu / sd
     sr0 = Float64(benchmark) / sqrt(Float64(ppy))
-    z = (v .- SL.r_mean(v)) ./ SL.r_sd(v)
+    z = (v .- mu) ./ sd
     g3 = SL.r_mean(Float64[SL.r_pow(e, 3.0) for e in z])
     g4 = SL.r_mean(Float64[SL.r_pow(e, 4.0) for e in z])
     den = 1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)
@@ -607,8 +644,10 @@ mit festem Zins hält) haben keine definierte Sharpe Ratio und werden mit Warnun
   Spalten = Punkte, einfache Renditen als Anteil). Bei `print()`: Objekt der Klasse `SimLevDSR`.
 - `id`: Zu prüfender Punkt: bei `SimLevParamSearch` die `id` aus `x["results"]`, bei einer Matrix die
   Spaltennummer der ursprünglichen Matrix. `nothing` (Standard) = Punkt mit der höchsten Sharpe Ratio.
+  Seit 1.6.4 eine ganze Zahl.
 - `n_trials`: Versuchsanzahl N (positive Zahl, überschreibt die Schätzung), z. B. wenn vorher schon andere
   Suchen gelaufen sind. `nothing` (Standard) = aus `x` geschätzt (siehe `effective`).
+  Seit 1.6.4 eine einzelne endliche Zahl > 0.
 - `effective`: Logisch. `true` (Standard) = effektive Versuchsanzahl N_eff; `false` = Anzahl gültiger Spalten.
 - `frequency`: Periodenlänge der Auswertung: `"week"` (Standard), `"day"` oder `"month"`. Mit Datum (bei
   `SimLevParamSearch` immer, bei Matrizen über `dates`) werden die Tagesrenditen geometrisch zu ISO-Wochen
@@ -621,6 +660,12 @@ mit festem Zins hält) haben keine definierte Sharpe Ratio und werden mit Warnun
 - `risk_free`: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als `risk_free / 100 / ppy` von
   jeder Periodenrendite abgezogen. `ppy` (Perioden je Jahr) wird aus dem Datum geschätzt: (Anzahl Perioden -
   1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (`"day"`), 52 (`"week"`) bzw. 12 (`"month"`).
+- `rho_method`: Rechenweg der mittleren paarweisen Korrelation barρ: `"cor"` (Standard; `nothing` = `"cor"`) =
+  Mittel des oberen Dreiecks der vollen Korrelationsmatrix (Rechenzeit wie T N^2); `"linear"` = (‖Σ_j z_j‖^2 -
+  N) / (N (N - 1)) mit den zentrierten und auf Länge 1 skalierten Spalten z_j (Rechenzeit wie T N).
+  Mathematisch gleich; `rho`, `n_eff`, `n_trials`, `sr0` und `dsr` weichen in den letzten Stellen ab (in R,
+  Python und Julia gleich). Mit nicht endlichen Renditen rechnet auch `"linear"` über die Korrelationsmatrix.
+  Seit 1.6.4.
 
 # Rückgabe
 Objekt der Klasse `SimLevDSR`, eine Liste mit `id` (geprüfter Punkt), `sharpe` (seine Sharpe Ratio p. a.),
@@ -641,11 +686,17 @@ R = 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 2000, 20)   # 20 Zufallsstrategien
 println(sharpe_deflated(R; frequency = "day"))
 ```
 """
-function sharpe_deflated(x; id = nothing, n_trials = nothing, effective::Bool = true, frequency = nothing,
-                         dates = nothing, risk_free = 0)
+function sharpe_deflated(x; id = nothing, n_trials = nothing, effective = true, frequency = nothing,
+                         dates = nothing, risk_free = 0, rho_method = nothing)
     x = SimLev.as_rframe(x)
-    frequency = _match_arg(frequency, ("week", "day", "month"))
-    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_deflated")
+    fn = "sharpe_deflated"
+    frequency = _e5_match_arg(frequency, ("week", "day", "month"), fn, "frequency")
+    rho_method = _e5_match_arg(rho_method, ("cor", "linear"), fn, "rho_method")   # seit 1.6.4 (B-075, Entscheidung 92)
+    id = chk_int1(id, fn, "id"; lo = 1, null_ok = true)   # seit 1.6.4 (B-007)
+    n_trials = chk_num1(n_trials, fn, "n_trials"; lo = 0, lo_open = true, null_ok = true)
+    effective = chk_bool1(effective, fn, "effective")
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free, fn), "sharpe_deflated")
     R = rr.R
     N = size(R, 2)
     sr = _of_col_metric(R, "sharpe")
@@ -653,10 +704,12 @@ function sharpe_deflated(x; id = nothing, n_trials = nothing, effective::Bool = 
         _which_max(sr)
     else
         jj = findfirst(==(Float64(id)), Float64.(rr.cols))
-        jj === nothing && error("id nicht unter den gültigen Punkten (Spalten ohne endliche Werte oder ohne Schwankung zählen nicht).")
+        jj === nothing && SimLev.chk_stop("rs.id_punkt", fn)
         jj
     end
-    rho = if N > 1
+    rho = if N > 1 && rho_method == "linear" && all(isfinite, R)
+        _of_rho_linear(Matrix{Float64}(R))
+    elseif N > 1
         Cm = SL.RStats.cor(R)
         Cm = Cm isa SL.NamedMat ? Cm.data : Cm
         SL.r_mean(Float64[Cm[i, k] for k in 1:N for i in 1:k-1]; na_rm = true)
@@ -674,10 +727,21 @@ function sharpe_deflated(x; id = nothing, n_trials = nothing, effective::Bool = 
     r = R[:, j]
     sq = sqrt(rr.ppy)
     return SL.RList("id" => rr.cols[j], "sharpe" => sr[j] * sq, "sr0" => sr0 * sq,
-                    "psr" => sharpe_probabilistic(r; benchmark = 0, ppy = rr.ppy),
-                    "dsr" => sharpe_probabilistic(r; benchmark = sr0 * sq, ppy = rr.ppy),
+                    "psr" => _of_psr(r, 0, rr.ppy),
+                    "dsr" => _of_psr(r, sr0 * sq, rr.ppy),
                     "n_trials" => Nt, "n_points" => N, "n_eff" => n_eff, "rho" => rho, "var_sr" => v * rr.ppy,
                     "n_obs" => size(R, 1), "frequency" => frequency; class = "SimLevDSR")
+end
+
+# Mittlere paarweise Pearson-Korrelation der Spalten von R (endlich, N >= 2) in O(T N) (seit 1.6.4, B-075; R
+# `.of_rho_linear`, dieselben Kerne in derselben Folge): (Σ_t (Σ_j z_tj)^2 - N) / (N (N - 1)), z_j zentriert (colMeans)
+# und auf Länge 1 skaliert (√colSums(C .* C)); Summen in long double wie colSums/rowSums/sum
+function _of_rho_linear(R::Matrix{Float64})
+    N = size(R, 2)
+    C = R .- reshape(SL._ld_colsums(R; mean = true), 1, :)
+    Z = C ./ reshape(sqrt.(SL._ld_colsums(C .* C)), 1, :)
+    u = SL._ld_rowsums(Z)
+    return (SL.r_sum(u .* u) - N) / (Float64(N) * (N - 1))
 end
 
 function _print_dsr(io::IO, x)
@@ -726,6 +790,7 @@ Punkt (Rückschau) und mit dem Durchschnitt aller Punkte (zufällige Wahl).
   einmal, für das jüngste Fenster, dessen Test schon begonnen hat (die Kennzahlen in `windows` beziehen sich
   auf das ganze Testfenster). Mit `step > test` entstehen Lücken zwischen den Testfenstern; sie fehlen in
   `series` und zählen nicht als Zeit.
+  Seit 1.6.4 je eine Zahl, die gerundet mindestens einen Monat ergibt (12 * Jahre >= 1), höchstens 100 Jahre.
 - `anchored`: Logisch. `false` (Standard) = rollierendes Trainingsfenster der Länge `train`; `true` = Training
   beginnt immer am ersten Tag (expandierendes Fenster).
 - `metric`: Auswahl- und Bewertungskennzahl, je Fenster aus den Tagesrenditen: `"sharpe"` (Standard),
@@ -777,14 +842,28 @@ wf = overfit_walk_forward(ps; train = 3, test = 1)
 println(wf["summary"])
 ```
 """
-function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::Bool = false, metric = nothing,
+function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored = false, metric = nothing,
                       select = nothing, risk_free = 0)
     x = SimLev.as_rframe(x)
     step === nothing && (step = test)
-    metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"))
-    select = _match_arg(select, ("best", "plateau"))
-    (_is_ps(x) && get(x, "returns", nothing) !== nothing) || error("x muss ein SimLevParamSearch mit Renditen sein.")
-    rr = _rr(x, "day", nothing, risk_free)
+    fn = "overfit_walk_forward"
+    metric = _e5_match_arg(metric, ("sharpe", "sortino", "geometric", "mean"), fn, "metric")
+    select = _e5_match_arg(select, ("best", "plateau"), fn, "select")
+    (_is_ps(x) && get(x, "returns", nothing) !== nothing) || chk_stop("ut2.ps_renditen", "overfit_walk_forward")
+    # seit 1.6.4: Jahre, die gerundet mindestens einen Monat ergeben, höchstens 100 Jahre (B-006: step = 0 lief endlos)
+    vals = Dict{String,Any}()
+    for (a, v) in (("train", train), ("test", test), ("step", step))
+        chk_nofactor(v, fn, a)
+        v = chk_scalar(v)
+        (v isa Real && !(v isa Bool) && isfinite(Float64(v)) && _r_round(12 * Float64(v)) >= 1) ||
+            chk_stop("e5.jahre_monat", fn, a)
+        chk_max(v, 100, fn, a)
+        vals[a] = v
+    end
+    train, test, step = vals["train"], vals["test"], vals["step"]
+    anchored = chk_bool1(anchored, fn, "anchored")
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    rr = _rr(x, "day", nothing, risk_free, fn)
     R = rr.R; d = rr.dates
     dn = Float64[_days(v) for v in d]
     nb = select == "plateau" ? SL.ParamSearch._ps_neighbours(x) : nothing
@@ -818,7 +897,7 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::
                     oos_average = SL.r_mean(Float64[SL._geo_ret(Ro[:, c]) for c in 1:size(Ro, 2)])))
         k += 1
     end
-    isempty(win) && error("Historie zu kurz für ein Trainings- und Testfenster.")
+    isempty(win) && SimLev.chk_stop("rs.wf_kurz", fn)
     params = _strs(x["params"])
     ids = Int[w.id for w in win]
     W = SL.RFrame("train_start" => Date[w.train_start for w in win], "test_start" => Date[w.test_start for w in win],
@@ -923,7 +1002,9 @@ lassen sich über `map` in der Spezifikation abbilden.
 - `config`: Konfiguration aus `bootstrap_config()`.
 - `ids`: Ganzzahliger Vektor von `id`-Werten aus `x["results"]`; `nothing` (Standard) = die `top` besten
   Punkte nach `by`.
+  Seit 1.6.4 nur vorhandene id-Werte ohne Doppel.
 - `top`: Anzahl bester Punkte (ganze Zahl, Standard 5); nur ohne `ids`.
+  Seit 1.6.4 ganze Zahl >= 1.
 - `by`: Rangfolge für `top`: `"objective"` (Standard, Zielgröße der Suche) oder `"plateau"` (`plateau_mean`
   aus `param_plateau()`); Richtung nach `x["maximize"]`, Punkte mit `NA` entfallen.
 - `map`: Benannter Zeichenvektor von Spalten-Aliasen, die jeder Spezifikation hinzugefügt werden, z. B. `(letf
@@ -933,6 +1014,7 @@ lassen sich über `map` in der Spezifikation abbilden.
   ein Buy-and-Hold (Standard: keine).
 - `kwargs...`: Weitere Argumente für `bootstrap_study()`, z. B. `method`, `n` (Anzahl Pfade), `params`,
   `seed`, `cores`, `progress`, `sim_args`, `burn_in`.
+  Seit 1.6.4 nur Argumente von bootstrap_study(); unbekannte oder doppelte Namen sind ein Fehler.
 
 # Rückgabe
 Objekt der Klasse `SimLevBootstrapStudy` (siehe `bootstrap_study()`); die Strategien heißen `p<id>` (plus die
@@ -960,9 +1042,29 @@ println(bs["results"])
 function param_bootstrap(x, data, config; ids = nothing, top = 5, by = nothing, map = nothing,
                          include = nothing, kwargs...)
     data = SimLev.as_rframe(data)
-    by = _match_arg(by, ("objective", "plateau"))
-    _is_ps(x) || error("x muss ein SimLevParamSearch sein.")
+    fn = "param_bootstrap"
+    by = _e5_match_arg(by, ("objective", "plateau"), fn, "by")
+    _is_ps(x) || SimLev.chk_stop("klasse", "param_bootstrap", "x", "param_search()")
     res = x["results"]
+    # seit 1.6.4 (K42 E5): ids ganze Zahlen aus x$results$id ohne Doppel (B-007, B-045), top ganze Zahl >= 1,
+    # map benannter Zeichenvektor, include benannte Liste, kwargs nur Argumente von bootstrap_study() (Entscheidung 21)
+    if ids !== nothing
+        chk_nofactor(ids, fn, "ids")
+        iv = ids isa Union{AbstractVector,Tuple} ? collect(Any, ids) : Any[ids]
+        known = Set(Float64[_f64(v) for v in res["id"]])
+        (!isempty(iv) && all(v -> v isa Real && !(v isa Bool) && isfinite(Float64(v)) && Float64(v) in known, iv) &&
+         length(unique(Float64.(iv))) == length(iv)) || chk_stop("e5.ids", fn)
+    end
+    top = chk_int1(top, fn, "top"; lo = 1)
+    if map !== nothing
+        chk_nofactor(map, fn, "map")
+        mk = _kv(map)
+        (!isempty(mk) && all(p -> !isempty(p.first) && p.second isa AbstractString && !isempty(p.second), mk)) ||
+            chk_stop("e5.map", fn)
+    end
+    (include === nothing || (_islistlike(include) && all(p -> !isempty(p.first), _kv(include)))) ||
+        chk_stop("e2.benannt", fn, "include")
+    chk_dots(collect(keys(kwargs)), _pb_args(), fn; taken = ["data", "config", "strategies"])
     if ids === nothing
         v = by == "plateau" ? SL.ParamSearch.param_plateau(x)["plateau_mean"] : res[String(x["objective"])]
         o = _order(_tofloat(v); decreasing = get(x, "maximize", nothing) === true, na_last = nothing)
@@ -999,12 +1101,18 @@ function param_bootstrap(x, data, config; ids = nothing, top = 5, by = nothing, 
     return st
 end
 
-# Attribut `param_ids` (R: attr(st, "param_ids")): RList kennt keine Attribute;
-# daher eine Tabelle nach Objektidentität. Abfrage über `param_ids(st)`.
+"Argumente, die `param_bootstrap()` über kwargs an `bootstrap_study()` weitergibt (R `.pb_args`)."
+_pb_args() = unique(String[string(k) for m in methods(SL.Bootstrap.bootstrap_study) for k in Base.kwarg_decl(m)
+                           if !(string(k) in ("data", "config", "strategies")) && !endswith(string(k), "...")])
+
+# Attribut `param_ids` (R: attr(st, "param_ids")) in `attrs` des Ergebnisses (RList, RFrame, RVector; seit 1.6.4 auch
+# RList, B-108: bis 1.6.3 hielt eine globale Tabelle nach Objektidentität jedes Studienergebnis fest). Andere Typen
+# wie bisher über die Tabelle. Abfrage über `param_ids(st)`.
 const _PARAM_IDS = IdDict{Any,Any}()
 const _PARAM_IDS_LOCK = ReentrantLock()
+_has_attrs(st) = st isa SL.RList || st isa SL.RFrame || st isa SL.RVector
 function _set_param_ids!(st, pid)
-    if st isa SL.RFrame || st isa SL.RVector
+    if _has_attrs(st)
         SL.attrs(st)["param_ids"] = pid
     else
         lock(() -> (_PARAM_IDS[st] = pid), _PARAM_IDS_LOCK)
@@ -1012,7 +1120,7 @@ function _set_param_ids!(st, pid)
     st
 end
 "Attribut `param_ids` eines Ergebnisses von [`param_bootstrap`](@ref) (Strategiename → id)."
-param_ids(st) = (st isa SL.RFrame || st isa SL.RVector) ? get(SL.attrs(st), "param_ids", nothing) : lock(() -> get(_PARAM_IDS, st, nothing), _PARAM_IDS_LOCK)
+param_ids(st) = _has_attrs(st) ? get(SL.attrs(st), "param_ids", nothing) : lock(() -> get(_PARAM_IDS, st, nothing), _PARAM_IDS_LOCK)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Haircut
@@ -1036,8 +1144,10 @@ zeigt, wie viel der gemessenen Sharpe Ratio die Suche selbst erklärt.
   `ppy` angeben).
 - `n_obs`: Anzahl Perioden T, auf denen die Sharpe Ratios beruhen (Perioden der Länge, die `ppy` beschreibt);
   nur und zwingend bei Vektor-Eingabe. Sonst die Zeilenzahl nach Aggregation.
+  Seit 1.6.4 ganze Zahl >= 1; die Sharpe Ratios in x müssen endlich sein.
 - `n_tests`: Gesamtzahl der Versuche M (ganze Zahl). `nothing` (Standard) = Anzahl Sharpe Ratios bzw. Punkte;
   bei früheren Suchen entsprechend höher ansetzen (fehlende Versuche gehen mit p = 1 in die Korrektur ein).
+  Seit 1.6.4 ganze Zahl von 1 bis 10^8, mindestens die Anzahl Sharpe Ratios bzw. Punkte (sonst ein Fehler).
 - `frequency`, `dates`, `risk_free`: Aggregation, Datum und risikoloser Zins (Prozent p. a.) wie bei
   `overfit_pbo()`; nur bei Suche oder Matrix.
 - `ppy`: Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 = Wochen). Bei Suche oder Matrix wird es wie
@@ -1068,21 +1178,35 @@ println(sharpe_haircut([1, 0.5]; n_obs = 520, n_tests = 50, ppy = 52))
 function sharpe_haircut(x; n_obs = nothing, n_tests = nothing, frequency = nothing, dates = nothing,
                         risk_free = 0, ppy = 52)
     x = SimLev.as_rframe(x)
-    frequency = _match_arg(frequency, ("week", "day", "month"))
-    isvec = (x isa AbstractVector && !(x isa SL.RFrame) && _isnumvec(x)) || (x isa Real && !(x isa Bool))
+    fn = "sharpe_haircut"
+    frequency = _e5_match_arg(frequency, ("week", "day", "month"), fn, "frequency")
+    # seit 1.6.4: n_tests ganze Zahl von 1 bis 10^8 (Entscheidung 16; C-017), Sharpe Ratios endlich, n_obs ganze Zahl
+    if n_tests !== nothing
+        n_tests = chk_int1(n_tests, fn, "n_tests"; lo = 1)
+        chk_max(n_tests, 1e8, fn, "n_tests")
+    end
+    risk_free = chk_num1(risk_free, fn, "risk_free")
+    isvec = (x isa AbstractVector && !(x isa SL.RFrame) && !(x isa SL.RFmt.RFactor) && _isnumvec(x)) ||
+            (x isa Real && !(x isa Bool))
     if isvec
-        n_obs === nothing && error("n_obs angeben.")
+        all(isfinite, _tofloat(x isa AbstractVector ? x : [x])) || chk_stop("e2.zahlen_endlich", fn, "x")
+        n_obs === nothing && SimLev.chk_stop("fehlt", fn, "n_obs")
+        n_obs = chk_int1(n_obs, fn, "n_obs"; lo = 1)
+        ppy = chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true)
         sr = _tofloat(x isa AbstractVector ? x : [x]) ./ sqrt(Float64(ppy))
         Tn = n_obs
         ids = collect(1:length(sr))
         ppy = Float64(ppy)
     else
-        rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_haircut")
+        rr = _of_drop_flat(_rr(x, frequency, dates, risk_free, fn), "sharpe_haircut")
         sr = _of_col_metric(rr.R, "sharpe")
         Tn = size(rr.R, 1)
         ppy = rr.ppy
         ids = rr.cols
     end
+    # seit 1.6.4 (K43 T2-N7) mindestens so viele Tests wie Sharpe Ratios (bis dahin still durch deren Zahl ersetzt, das
+    # Attribut n_tests nannte den angegebenen Wert)
+    n_tests !== nothing && n_tests < length(sr) && chk_stop("ut2.n_tests", fn)
     M = n_tests !== nothing ? n_tests : length(sr)
     tstat = sr .* sqrt(Float64(Tn))
     p = 2 .* SL.SLib.pnorm(Float64[-abs(t) for t in tstat])

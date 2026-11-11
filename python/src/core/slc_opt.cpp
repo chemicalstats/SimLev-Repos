@@ -232,6 +232,8 @@ static int finish(W *w, int code, int reason)
     return 0;
 }
 
+/* Fehler: Status st im Kontext; das Ergebnis traegt danach den Code 1 (wie "maxit erreicht", Grund SL_WHY_ERROR) –
+ * beobachtbar nur ueber sl_opt_result nach einem Fehler (P07-R17, dokumentiert seit 1.6.4) */
 static int fail(sl_ctx *cx, W *w, int st, const char *what)
 {
     sl_fail(cx, st, "%s: %s", sl_opt_method_name(HI_(H_METHOD)), what);

@@ -290,10 +290,14 @@ result = O.portfolio_risk_contributions(R4, pd.Series({'A': 0.5, 'B': 0.5}), mea
 result = O.portfolio_risk_contributions(R4, pd.Series({'A': 0.5, 'B': simlev._r.fmt.NA_REAL})))",
     r"(result = O.portfolio_risk_contributions(R4, SL.named("A" => 0.5, "B" => SL.NA)))", inp = ein("optimize/rc_err_na", c("R4")))))
 TB("portfolio_rolling", "Meldungen und Warnungen von portfolio_rolling je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
-  zeile("ro_fail",
-    r"(w <- portfolio_rolling(d2, c('a', 'b'), window = 0.5, frequency = 'month'); list(w, attr(w, 'failed_dates')))",
-    r"(w = O.portfolio_rolling(d2, ['a', 'b'], window=0.5, frequency='month'); result = [w, w.attrs['failed_dates']])",
-    r"(w = O.portfolio_rolling(d2, ["a", "b"]; window = 0.5, frequency = "month"); result = [w, SL.attrs(w)["failed_dates"]])", inp = ein("optimize/ro_fail", c("d2"))),
+  zeile("ro_fail",   # seit 1.6.4 ganze Jahre (Entscheidung 70): statt window = 0.5 ein Kurs je 61 Tage (5 Monatsrenditen je Jahr)
+    r"(w <- portfolio_rolling(d2[seq(1, nrow(d2), by = 61), ], c('a', 'b'), window = 1, frequency = 'month'); list(w, attr(w, 'failed_dates')))",
+    r"(w = O.portfolio_rolling(d2.iloc[::61].reset_index(drop=True), ['a', 'b'], window=1, frequency='month'); result = [w, w.attrs['failed_dates']])",
+    r"(w = O.portfolio_rolling(SL.rows(d2, 1:61:SL.nrow(d2)), ["a", "b"]; window = 1, frequency = "month"); result = [w, SL.attrs(w)["failed_dates"]])", inp = ein("optimize/ro_fail", c("d2"))),
+  zeile("ro_err_window_frac",   # seit 1.6.4 Fehler (Entscheidung 70; bis 1.6.3 Fall ro_fail)
+    r"(portfolio_rolling(d2, c('a', 'b'), window = 0.5, frequency = 'month'))",
+    r"(result = O.portfolio_rolling(d2, ['a', 'b'], window=0.5, frequency='month'))",
+    r"(result = O.portfolio_rolling(d2, ["a", "b"]; window = 0.5, frequency = "month"))", inp = ein("optimize/ro_fail", c("d2"))),
   zeile("ro_err_method",
     r"(portfolio_rolling(d2, c('a', 'b'), method = 'min_varianze', window = 2))",
     r"(result = O.portfolio_rolling(d2, ['a', 'b'], method='min_varianze', window=2))",

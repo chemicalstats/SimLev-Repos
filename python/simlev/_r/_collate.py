@@ -180,6 +180,15 @@ def _u16(s):
     return b, len(b) // 2
 
 
+def _u8(s):
+    """UTF-8-Bytes wie bisher mit ``surrogateescape``; ein einzelnes Surrogat außerhalb U+DC80..U+DCFF (dort bis 1.6.3
+    ``UnicodeEncodeError``) seit 1.6.4 mit ``surrogatepass`` wie ``collate_key`` (Befund C-059)."""
+    try:
+        return s.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        return s.encode("utf-8", "surrogatepass")
+
+
 def str_collate(a, b):
     """Vergleich zweier Zeichenketten wie R's ``Scollate``: -1, 0 oder 1."""
     _init()
@@ -187,8 +196,8 @@ def str_collate(a, b):
     if mode == "icu":
         f = _ST["f"]
         if "ucol_strcollUTF8" in f:
-            ab = a.encode("utf-8", "surrogateescape")
-            bb = b.encode("utf-8", "surrogateescape")
+            ab = _u8(a)
+            bb = _u8(b)
             st = ctypes.c_int(0)
             r = f["ucol_strcollUTF8"](_ST["coll"], ab, len(ab), bb, len(bb), ctypes.byref(st))
             if st.value > 0:
@@ -198,8 +207,8 @@ def str_collate(a, b):
         ub, nb = _u16(b)
         return int(f["ucol_strcoll"](_ST["coll"], ua, na, ub, nb))
     if mode == "bytes":
-        ab = a.encode("utf-8", "surrogateescape")
-        bb = b.encode("utf-8", "surrogateescape")
+        ab = _u8(a)
+        bb = _u8(b)
     else:
         _warn_cp()
         ab, bb = a, b

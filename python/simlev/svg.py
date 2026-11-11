@@ -58,9 +58,9 @@ Nutzung durch eine Modul-Zeichenfunktion (Muster wie in Julia)::
 - ``file`` wird vor dem Zeichnen geprüft (nur ``.svg``, sonst ``ValueError`` mit dem
   Julia-Wortlaut); deklariert ``f`` selbst ``file``, bekommt es ``file=None``. Geschrieben
   wird erst nach dem Zeichnen, nur mit ``file``.
-- Rückgabe von ``f``: ``(svg, data)`` (bevorzugt), ein ``SimLevPlot`` oder (Übergang) nur der
-  SVG-Text, dann ist ``data`` leer. ``data`` darf ``None``, ein ``dict`` von
-  ``DataFrame`` (oder spaltenweisen ``dict``) sein; die Reihenfolge der Schlüssel bleibt.
+- Rückgabe von ``f``: ``(svg, data)`` oder ein ``SimLevPlot``; ``data`` ist ein ``dict`` von
+  ``DataFrame`` (oder spaltenweisen ``dict``); die Reihenfolge der Schlüssel bleibt. (Die
+  Übergangsformen „nur SVG-Text“ und ``data = None`` entfallen seit 1.6.4: kein Zeichner liefert sie.)
 - Ergebnis immer ``SimLevPlot(svg, data, x, cls)``.
 
 Regeln für ``data`` (siehe Spezifikation P2): eine Tabelle je Panel, Schlüssel = Panelname,
@@ -163,8 +163,6 @@ def _warn_unknown_kw(who: str, bad, stacklevel: int = 3) -> None:
 
 def _as_data(data: Any, who: str) -> dict:
     """``data`` einer Zeichenfunktion vereinheitlichen: ``dict[str, DataFrame]``."""
-    if data is None:
-        return {}
     import pandas as pd
     if not isinstance(data, dict):
         raise ValueError("%s: die Grafikmethode lieferte keine Daten als dict (sondern %s)."
@@ -177,16 +175,17 @@ def _as_plot(res: Any, who: str, x: Any, cls: str) -> SimLevPlot:
         return SimLevPlot(res.svg, res.data, x, cls)
     if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], str):
         return SimLevPlot(res[0], _as_data(res[1], who), x, cls)
-    if isinstance(res, str):
-        return SimLevPlot(res, {}, x, cls)
     raise ValueError("%s: die Grafikmethode lieferte kein SVG (sondern %s)." % (who, type(res).__name__))
 
 
 _PK = inspect.Parameter
 
 
-def _plot_method(f, cls: str):
+def _plot_method(f, cls: str, strict: bool = False):
     """Macht aus einer Zeichenfunktion ``f(x, **kw) -> (svg, data)`` die plot-Methode für ``cls``.
+
+    ``strict = True`` (seit 1.6.4, ``plot.SimLevResult``, Entscheidung 57): unbekannte Schlüsselwörter sind ein Fehler
+    (Meldung ``argument_unbekannt``) statt einer Warnung.
 
     Nur die von ``f`` deklarierten Schlüsselwörter werden weitergegeben, unbekannte ergeben
     eine Warnung; Ergebnis immer ``SimLevPlot``; geschrieben wird nur mit ``file = "….svg"``.
@@ -203,6 +202,9 @@ def _plot_method(f, cls: str):
         if args:
             warnings.warn("%s: %d zusätzliche(s) Positionsargument(e) wird/werden ignoriert; Optionen bitte als "
                           "Schlüsselwort angeben." % (who, len(args)), UserWarning, stacklevel=2)
+        if strict:
+            from ._pruefen import chk_dots
+            chk_dots([k for k in kw if k not in known], (), who)
         _warn_unknown_kw(who, [k for k in kw if k not in known])
         if file is not None:
             _check_svg_file(file, who)
@@ -236,6 +238,55 @@ def _plot_method(f, cls: str):
 # Ein `_esc` für Titel, Achsen- und Legendentexte aller Stile (& < > ").
 def _esc(s: Any) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+
+# ── Farbverläufe wie R (seit 1.6.4, B-062/B-063, Entscheidung 99) ───────────────────────────
+def _r_seq01(n: int) -> list:
+    """``seq.int(0, 1, length.out = n)`` wie R (``do_seq``: 0 + i by mit by = 1 / (n - 1), letztes Element genau 1)."""
+    if n <= 0:
+        return []
+    if n == 1:
+        return [0.0]
+    by = 1.0 / (n - 1)
+    out = [0.0 + i * by for i in range(n)]
+    out[n - 1] = 1.0
+    return out
+
+
+def _r_approx1(v: float, x: list, y: list) -> float:
+    """Lineare Interpolation wie R's ``approx1`` (Bisektion, Stützstellen exakt)."""
+    i, j = 0, len(x) - 1
+    while i < j - 1:
+        ij = (i + j) // 2
+        if v < x[ij]:
+            j = ij
+        else:
+            i = ij
+    if v == x[j]:
+        return y[j]
+    if v == x[i]:
+        return y[i]
+    return y[i] + (y[j] - y[i]) * ((v - x[i]) / (x[j] - x[i]))
+
+
+def _r_ramp_rgb(chans, n: int) -> list:
+    """``colorRampPalette(cols)(n)`` aus Kanälen ``col2rgb(cols) / 255`` (0 … 1): lineare Interpolation über
+    ``seq.int(0, 1, length.out = length(cols))``, auf [0, 1] begrenzt, mal 255 und wie ``rgb(…, maxColorValue = 255)``
+    abgeschnitten, Großbuchstaben wie R."""
+    xs = _r_seq01(len(chans))
+    out = []
+    for v in _r_seq01(n):
+        c = []
+        for k in range(3):
+            z = _r_approx1(v, xs, [float(ch[k]) for ch in chans])
+            c.append(int(min(max(z, 0.0), 1.0) * 255))
+        out.append("#%02X%02X%02X" % tuple(c))
+    return out
+
+
+def _r_ramp(cols, n: int) -> list:
+    """``colorRampPalette(cols)(n)`` für Farbtexte ``#RRGGBB`` (wie R, siehe :func:`_r_ramp_rgb`)."""
+    return _r_ramp_rgb([(int(c[1:3], 16) / 255, int(c[3:5], 16) / 255, int(c[5:7], 16) / 255) for c in cols], n)
 
 
 # ── R-Achsenteilung ─────────────────────────────────────────────────────────
@@ -318,7 +369,7 @@ def _col2rgba(v: Any) -> tuple[float, float, float, float]:
         raise ValueError("invalid color name '%s'" % ("TRUE" if v else "FALSE"))
     if isinstance(v, (int, float, np.integer, np.floating)):
         f = float(v)
-        if math.isnan(f):
+        if not math.isfinite(f) or abs(f) >= 2147483648:   # seit 1.6.4 wie R (NA nach as.integer) transparent (B-049)
             return (1.0, 1.0, 1.0, 0.0)
         if f < 0:
             raise ValueError("numerical color values must be >= 0, found %d" % int(f))
@@ -331,17 +382,20 @@ def _col2rgba(v: Any) -> tuple[float, float, float, float]:
     if v.startswith("#"):
         if len(v) not in (7, 9):
             raise ValueError("invalid RGB specification")
-        try:
-            vals = [int(v[i:i + 2], 16) for i in range(1, len(v), 2)]
-        except ValueError:
-            raise ValueError("invalid hex digit in 'color' or 'lty'") from None
+        # seit 1.6.4 nur ASCII-Hexziffern (Entscheidung 27, B-056; bis 1.6.3 auch z. B. "３")
+        if not all(c in "0123456789abcdefABCDEF" for c in v[1:]):
+            raise ValueError("invalid hex digit in 'color' or 'lty'")
+        vals = [int(v[i:i + 2], 16) for i in range(1, len(v), 2)]
         if len(vals) == 3:
             vals.append(255)
         return tuple(c / 255 for c in vals)  # type: ignore[return-value]
     if v in ("NA", "transparent"):
         return (1.0, 1.0, 1.0, 0.0)
-    if v[:1].isdigit():
-        return _col2rgba(float(int(v)) if v.isdigit() else float("nan"))
+    if v[:1] in tuple("0123456789"):   # seit 1.6.4 nur ASCII-Ziffern (Entscheidung 27, B-056)
+        # und nur reine Ganzzahltexte als Farbnummer (Entscheidung 55; "3.0", "2e0", "0x1", "9abc" Fehler)
+        if not all(c in "0123456789" for c in v):
+            raise ValueError('invalid color specification "%s"' % v)
+        return _col2rgba(float(int(v)))
     key = v.replace(" ", "").lower()
     hx = _color_table().get(key)
     if hx is None:
@@ -493,34 +547,50 @@ def _decimate(xs, ys, maxn: int = 1600) -> tuple[np.ndarray, np.ndarray]:
     if n <= maxn:
         return xs, ys
     bucket = math.ceil(n / (maxn // 2))
-    ox: list[float] = []
-    oy: list[float] = []
-    for s in range(0, n, bucket):
-        seg = ys[s:min(n, s + bucket)]
-        good = np.flatnonzero(np.isfinite(seg))
-        if good.size == 0:
-            continue
-        imin = s + int(good[np.argmin(seg[good])])
-        imax = s + int(good[np.argmax(seg[good])])
-        for i in sorted({imin, imax}):
-            ox.append(float(xs[i]))
-            oy.append(float(ys[i]))
-    return np.array(ox), np.array(oy)
+    # je Block erstes Minimum und erstes Maximum der endlichen Werte, aufsteigend (eines bei Gleichheit); seit 1.6.4
+    # über eine Blöcke x bucket-Matrix (B-086; bis 1.6.3 numpy-Aufrufe je Block, gleiche Punkte)
+    nb = -(-n // bucket)
+    m = np.full(nb * bucket, np.nan)
+    m[:n] = ys
+    m = m.reshape(nb, bucket)
+    fin = np.isfinite(m)
+    lo = np.argmin(np.where(fin, m, np.inf), axis=1)
+    hi = np.argmax(np.where(fin, m, -np.inf), axis=1)
+    keep = fin.any(axis=1)
+    base = np.arange(nb) * bucket
+    a = (base + np.minimum(lo, hi))[keep]
+    b = (base + np.maximum(lo, hi))[keep]
+    two = (lo != hi)[keep]
+    idx = np.empty(a.size + int(two.sum()), dtype=np.int64)
+    pos = np.arange(a.size) + np.concatenate(([0], np.cumsum(two)[:-1])).astype(np.int64)
+    idx[pos] = a
+    idx[pos[two] + 1] = b[two]
+    return xs[idx], ys[idx]
 
 
 def _path(p: _Panel, xs, ys, step: bool = False) -> str:
+    # seit 1.6.4 (B-086) Koordinaten als Feld gerechnet (elementweise wie _px/_py) und je Punkt nur noch verkettet
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    k = min(xs.size, ys.size)                                  # wie zip
+    xs, ys = xs[:k], ys[:k]
+    with np.errstate(all="ignore"):                            # wie Rechnen mit Python-Zahlen: ohne numpy-Meldung
+        X = p.x0 + (xs - p.xlo) / (1.0 if p.xhi == p.xlo else p.xhi - p.xlo) * p.w
+        Y = p.y0 + p.h - (ys - p.ylo) / (1.0 if p.yhi == p.ylo else p.yhi - p.ylo) * p.h
+    fx = ["%.1f" % v if math.isfinite(v) else _c(v) for v in X.tolist()]
+    fy = ["%.1f" % v if math.isfinite(v) else _c(v) for v in Y.tolist()]
     out = []
     first = True
-    prev = 0.0
-    for x, y in zip(np.asarray(xs, dtype=float).tolist(), np.asarray(ys, dtype=float).tolist()):
-        if not math.isfinite(y):
+    prev = None
+    for i, ok in enumerate(np.isfinite(ys).tolist()):
+        if not ok:
             first = True
             continue
         if step and not first:
-            out.append("L" + _c(_px(p, x)) + " " + _c(_py(p, prev)))
-        out.append(("M" if first else "L") + _c(_px(p, x)) + " " + _c(_py(p, y)))
+            out.append("L" + fx[i] + " " + prev)
+        out.append(("M" if first else "L") + fx[i] + " " + fy[i])
         first = False
-        prev = y
+        prev = fy[i]
     return "".join(out)
 
 
@@ -787,28 +857,15 @@ def _ana_legend(s, p, labels, cols, x=None, y=None, box=False):
 
 
 def _ana_ramp(cols, n):
-    """Farbverlauf wie ``colorRampPalette(cols)(n)`` (Julia-Fassung)."""
-    rgb = [(int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)) for c in cols]
-    if n == 1:
-        return [cols[0]]
-    out = []
-    for i in range(n):
-        t = i / (n - 1) * (len(cols) - 1)
-        k = min(int(math.floor(t)) + 1, len(cols) - 1)
-        f = t - (k - 1)
-        out.append("#" + "".join("%02x" % int(round(rgb[k - 1][j] + f * (rgb[k][j] - rgb[k - 1][j])))
-                                 for j in range(3)))
-    return out
+    """Farbverlauf wie ``colorRampPalette(cols)(n)``; seit 1.6.4 wie R abgeschnitten und in Großbuchstaben (B-063;
+    bis 1.6.3 gerundet, Kleinbuchstaben)."""
+    return _r_ramp(cols, n)
 
 
-def _ana_svg_done(s, file=None):
-    """SVG abschließen; Text zurück, mit ``file`` zusätzlich in die Datei geschrieben (wie Julia)."""
+def _ana_svg_done(s):
+    """SVG abschließen; Text zurück (wie Julia; seit 1.6.4 ohne den ungenutzten Parameter ``file``)."""
     s.write("</svg>\n")
-    txt = "".join(s.buf)
-    if file is not None:
-        with open(file, "w", encoding="utf-8", newline="") as fh:
-            fh.write(txt)
-    return txt
+    return "".join(s.buf)
 
 
 def _ana_year_ticks(days):
@@ -847,10 +904,11 @@ class _GridBox:
         self.x0, self.y0, self.w, self.h = float(x0), float(y0), float(w), float(h)
 
 
-def _grid_svg(keys, makefn, ncol=2, file=None, width=900, height=650):
+def _grid_svg(keys, makefn, ncol=2, width=900, height=650):
     """Felder ``keys`` im Raster (``ncol`` Spalten); ``makefn(key)(out, box)`` zeichnet ein Feld.
 
-    Ergebnis wie in Julia ein :class:`simlev.SimLevPlot` (nur SVG); mit ``file`` zusätzlich geschrieben.
+    Ergebnis: der SVG-Text (seit 1.6.4; bis 1.6.3 ein :class:`simlev.SimLevPlot`, von dem alle Aufrufer nur ``svg``
+    nahmen, und ein ungenutzter Parameter ``file``).
     """
     J = _jl_str
     n = len(keys)
@@ -865,11 +923,7 @@ def _grid_svg(keys, makefn, ncol=2, file=None, width=900, height=650):
         r, cidx = divmod(k, nc)
         makefn(key)(out, _GridBox(cidx * cw + 60, r * ch + 40, cw - 85, ch - 85))
     out.append("</svg>\n")
-    d = SimLevPlot("".join(out))
-    if file is not None:
-        with open(file, "w", encoding="utf-8", newline="") as fh:
-            fh.write(d.svg)
-    return d
+    return "".join(out)
 
 
 def _grid_range(vals, lim):
@@ -1121,7 +1175,7 @@ def _res_tx(p, x):
 
 
 def _res_yv(p, y):
-    return math.log10(y) if p.logy else y
+    return _jl_log10(y) if p.logy else y   # seit 1.6.4 wie Julia (B-100; bis 1.6.3 libm)
 
 
 def _res_ty(p, y):
@@ -1134,10 +1188,10 @@ def _res_ticks(lo, hi, n=5):
     if hi == lo:
         return [lo]
     raw = (hi - lo) / n
-    mag = _jl_pow(10.0, math.floor(math.log10(raw)))
+    mag = _jl_pow(10.0, math.floor(_jl_log10(raw)))      # seit 1.6.4 _jl_log10/_jl_ceil wie Julia (B-100)
     st = raw / mag
     step = (1 if st < 1.5 else 2 if st < 3 else 5 if st < 7 else 10) * mag
-    t0 = math.ceil(lo / step) * step
+    t0 = _jl_ceil(lo / step) * step
     return _jl_range(t0, step, hi + step * 1e-9)
 
 
@@ -1163,7 +1217,7 @@ def _res_range(v):
 def _res_panel(f, x0, y0, w, h, xlim, ylim, title="", xlab="", ylab="", logy=False, xticks=None, xticklabels=None,
                yticks=None, yticklabels=None, grid=True):
     """Panel mit Achsen, Titel und Beschriftungen."""
-    ylo, yhi = (math.log10(ylim[0]), math.log10(ylim[1])) if logy else ylim
+    ylo, yhi = (_jl_log10(ylim[0]), _jl_log10(ylim[1])) if logy else ylim   # seit 1.6.4 wie Julia (B-100)
     p = _ResPanel(x0, y0, w, h, xlim[0], xlim[1], ylo, yhi, logy)
     _res_svg(f, "<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" fill=\"none\" stroke=\"#555\"/>"
              % (_res_c(x0), _res_c(y0), _res_c(w), _res_c(h)))
@@ -1175,7 +1229,7 @@ def _res_panel(f, x0, y0, w, h, xlim, ylim, title="", xlab="", ylab="", logy=Fal
                      % (_res_c(X), _res_c(y0), _res_c(X), _res_c(y0 + h)))
         _res_text(f, X, y0 + h + 14, _res_tick_lab(t) if xticklabels is None else xticklabels[i], size=9)
     if yticks is None:
-        yt = ([_jl_pow(10.0, k) for k in _jl_range(math.floor(ylo), 1.0, math.ceil(yhi)) if ylo <= k <= yhi]
+        yt = ([_jl_pow(10.0, k) for k in _jl_range(math.floor(ylo), 1.0, _jl_ceil(yhi)) if ylo <= k <= yhi]
               if logy else _res_ticks(*ylim))
     else:
         yt = yticks
@@ -1258,12 +1312,16 @@ def _res_legend(f, x, y, labels, colors):
         _res_text(f, x + 24, Y + 4, lab, size=10, anchor="start")
 
 
-def _res_ramp(t):
-    """Farbverlauf wie ``colorRampPalette(c("#B5562B", "#F2E9DC", "#2C6E9B"))``."""
-    a, b, c = (0xB5, 0x56, 0x2B), (0xF2, 0xE9, 0xDC), (0x2C, 0x6E, 0x9B)
-    t = min(max(t, 0.0), 1.0)
-    u, v, s = (a, b, 2 * t) if t < 0.5 else (b, c, 2 * t - 1)
-    return "#" + "".join("%02x" % int(_rint(u[i] + (v[i] - u[i]) * s)) for i in range(3))
+_RES_PAL = None
+
+
+def _res_pal() -> list:
+    """64 Stufen ``colorRampPalette(c("#B5562B", "#F2E9DC", "#2C6E9B"))(64)`` wie R ``plot(<SimLevParamSearch>)``
+    (seit 1.6.4, B-063; bis 1.6.3 stetiger Verlauf ``_res_ramp``)."""
+    global _RES_PAL
+    if _RES_PAL is None:
+        _RES_PAL = _r_ramp(["#B5562B", "#F2E9DC", "#2C6E9B"], 64)
+    return _RES_PAL
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1349,19 +1407,15 @@ def _bc_panel(out, series, x0=0, y0=0, w=720, h=360, title="", xlab="", ylab="",
         out.append("<text x=\"%s\" y=\"%s\" font-size=\"11\">%s</text>\n" % (J(x0 + ml + 32), J(yy), _bc_esc(lab)))
 
 
-def _bc_doc(f, w, h, file=None):
-    """SVG-Rahmen um ``f(out)``; Text zurück, mit ``file`` zusätzlich geschrieben (wie Julia)."""
+def _bc_doc(f, w, h):
+    """SVG-Rahmen um ``f(out)``; Text zurück (wie Julia; seit 1.6.4 ohne den ungenutzten Parameter ``file``)."""
     J = _jl_str
     out = ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%s\" height=\"%s\" viewBox=\"0 0 %s %s\" "
            "font-family=\"sans-serif\">\n" % (J(w), J(h), J(w), J(h)),
            "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n"]
     f(out)
     out.append("</svg>\n")
-    svg = "".join(out)
-    if file is not None:
-        with open(file, "w", encoding="utf-8", newline="") as fh:
-            fh.write(svg)
-    return svg
+    return "".join(out)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1378,9 +1432,9 @@ def _alloc_ticks(lo, hi, n=5):
     if hi <= lo:
         hi = lo + 1
     raw = (hi - lo) / n
-    p = _jl_pow(10.0, math.floor(math.log10(raw)))
+    p = _jl_pow(10.0, math.floor(_jl_log10(raw)))        # seit 1.6.4 _jl_log10/_jl_ceil wie Julia (B-100)
     step = min(s_ for s_ in (1 * p, 2 * p, 5 * p, 10 * p) if s_ >= raw)
-    return _jl_range(math.ceil(lo / step) * step, step, hi + 1e-12)
+    return _jl_range(_jl_ceil(lo / step) * step, step, hi + 1e-12)
 
 
 def _alloc_c(v):
@@ -1389,18 +1443,9 @@ def _alloc_c(v):
 
 
 def _alloc_ramp(n):
-    """Farbverlauf wie ``colorRampPalette(c(...))(n)`` (Julia ebenso ``_alloc_ramp``)."""
-    base = [(0x2C, 0x6E, 0x9B), (0x3E, 0x8E, 0x5A), (0xC4, 0x9A, 0x2C), (0xB5, 0x56, 0x2B), (0x8A, 0x5B, 0xA8),
-            (0x4A, 0x4A, 0x4A)]
-    if n == 1:
-        return ["#2C6E9B"]
-    out = []
-    for i in range(n):
-        p = i / (n - 1) * (len(base) - 1)
-        k = min(int(math.floor(p)), len(base) - 2)
-        f = p - k
-        out.append("#" + "".join("%02x" % int(_rint((1 - f) * base[k][j] + f * base[k + 1][j])) for j in range(3)))
-    return out
+    """Farbverlauf wie ``colorRampPalette(c(...))(n)`` (Julia ebenso ``_alloc_ramp``); seit 1.6.4 wie R abgeschnitten
+    und in Großbuchstaben (B-063)."""
+    return _r_ramp(["#2C6E9B", "#3E8E5A", "#C49A2C", "#B5562B", "#8A5BA8", "#4A4A4A"], n)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1438,7 +1483,18 @@ def _wrap64(v: int) -> int:
 def _two_mul(a: float, b: float) -> tuple[float, float]:
     """Julia ``Base.Math.two_mul``: Produkt und exakter Rundungsfehler (für ``_jl_pow_int`` und Bereiche)."""
     p = a * b
-    return p, math.fma(a, b, -p)
+    return p, _fma(a, b, -p)
+
+
+def _fma(a: float, b: float, c: float) -> float:
+    """``fma(a, b, c)`` mit IEEE-Ergebnis wie Julia statt Ausnahme (seit 1.6.4, Befund B-099): ungültige Operation
+    (z. B. ``inf * inf - inf``, ``0 * inf``) ergibt NaN, Überlauf ±Inf."""
+    try:
+        return math.fma(a, b, c)
+    except ValueError:
+        return math.nan
+    except OverflowError:
+        return math.copysign(math.inf, a * b if math.isfinite(a * b) else (a * b + c if math.isfinite(c) else c))
 
 
 def _jl_pow_int(x, n) -> float:
@@ -1460,7 +1516,7 @@ def _jl_pow_int(x, n) -> float:
         if n == -2:
             return rx * rx
         if math.isfinite(x):
-            xnlo = -math.fma(x, rx, -1.0) * rx
+            xnlo = -_fma(x, rx, -1.0) * rx
         x, n = rx, -n
     while n > 1:
         if n & 1:
@@ -1490,23 +1546,95 @@ def _jl_pow(x, y) -> float:
     return r_pow(x, y)
 
 
-_TLOG = None
+# Tabelle ``t_log_Float64`` aus Julias ``base/special/log.jl`` (N = 39): je j = 0..128 (hi, lo) mit lb = log(1 + j/128)
+# in 80 Dezimalstellen (decimal), hi = lb auf ein Vielfaches von 2^-39 gerundet (half even), lo = lb - hi, beide als
+# float. Seit 1.6.4 als Literal (B-111; bis 1.6.3 bei der ersten Nutzung je Prozess mit Decimal berechnet, ≈ 14 ms);
+# die Werte sind repr der berechneten Zahlen (verlustfrei, Bit für Bit gleich; Rechnung siehe _tlog_rechnen).
+_TLOG = [
+    (0.0, 0.0), (0.007782140442941454, -8.865052917267247e-13),
+    (0.015504186536418274, -4.530198941364935e-13), (0.0231670592820592, -5.248209479295644e-13),
+    (0.03077165866670839, 4.529814257790929e-14), (0.0383188643027097, -5.730994833076631e-13),
+    (0.04580953603181115, -5.16945692881222e-13), (0.053244514518155484, 6.567993368985218e-13),
+    (0.06062462181580486, 6.299848199383311e-13), (0.06795066190898069, -4.729424109166329e-13),
+    (0.07522342123775161, -1.6408301585598662e-13), (0.08244366921098845, 8.614512936087814e-14),
+    (0.08961215869021544, -5.283050530808144e-13), (0.09672962645890948, -3.5836667430094137e-13),
+    (0.10379679368088546, 7.581073923016376e-13), (0.11081436634049169, -2.0157368416016215e-13),
+    (0.11778303565552051, 8.629474042969438e-13), (0.1247034785010328, -7.556920687451337e-14),
+    (0.1315763577895268, -8.075373495358435e-13), (0.13840232285838283, 7.363043577087051e-13),
+    (0.14518200984457508, -7.718001336828099e-14), (0.15191604202664166, -7.996871607743758e-13),
+    (0.15860503017574956, 8.890223439724663e-13), (0.16524957289584563, -5.384682618788232e-13),
+    (0.17185025692742784, -7.686134224018169e-13), (0.17840765747314435, -3.2605717931058157e-13),
+    (0.18492233849428885, -2.7685884310448306e-13), (0.1913948530000198, -3.903387893794952e-13),
+    (0.1978257433293038, 6.160755775588723e-13), (0.20421554142922105, -5.30156516006026e-13),
+    (0.21056476910780475, -4.55112422774782e-13), (0.21687393830143264, -8.182853292737783e-13),
+    (0.22314355131493357, -7.238189921749681e-13), (0.22937410106533207, -4.86240001538379e-13),
+    (0.23556607131286, -9.30945949519689e-14), (0.24171993688651128, 6.338907368997553e-13),
+    (0.24783616390413954, 4.4171755371315547e-13), (0.25391520998164196, -6.785208495970588e-13),
+    (0.25995752443668607, 2.3999540484211735e-13), (0.2659635484978935, -7.555569400283742e-13),
+    (0.27193371548310097, 5.407904186145515e-13), (0.2778684510030871, 3.692037508208009e-13),
+    (0.28376817313073843, -9.3834172236637e-14), (0.28963329258294834, 9.43339818951269e-14),
+    (0.29546421289342106, 4.148131870425857e-13), (0.3012613305781997, -3.7923164802093147e-14),
+    (0.3070250352957373, -8.25463138725004e-13), (0.31275571000333, 5.668653582900739e-13),
+    (0.318453731119007, -4.723727821986367e-13), (0.32411946865431673, -1.0475750058776541e-13),
+    (0.32975328637257917, -1.1118671389559323e-13), (0.33535554192167183, -5.339989292003297e-13),
+    (0.3409265869704541, 1.3912841212197566e-13), (0.3464667673470103, -8.017372713972018e-13),
+    (0.35197642315688427, 2.9391859187648e-13), (0.3574558889213222, 4.815896111723205e-13),
+    (0.3629054936900502, -6.817539406325327e-13), (0.36832556115950865, -8.009990055432491e-13),
+    (0.3737164097929053, 6.787566823158706e-13), (0.37907835293481185, 1.5761203773969435e-13),
+    (0.3844116989112081, -8.760375990774874e-13), (0.38971675114044046, -4.152515806343612e-13),
+    (0.3949938082405424, 3.2655698896907146e-13), (0.40024316412745975, -4.4704265010452445e-13),
+    (0.4054651081078191, 3.452764795203977e-13), (0.4106599249844294, 8.390050778518307e-13),
+    (0.4158278951435932, 1.1776978751369214e-13), (0.4209692946442374, -1.0774341461609579e-13),
+    (0.42608439531068143, 2.186334329321591e-13), (0.43117346481813, 2.413263949133313e-13),
+    (0.4362367667745275, 3.90574622098307e-13), (0.44127456080423144, 6.437879097373207e-13),
+    (0.44628710262804816, 3.713514191959202e-13), (0.45127464413963025, -1.7166921336082432e-13),
+    (0.4562374334818742, -2.8658285157914353e-13), (0.4611757151214988, 6.713692791384601e-13),
+    (0.46608972992544295, -8.437281040871276e-13), (0.4709797152190731, -2.821014384618127e-13),
+    (0.4758459048698569, 1.0701931762114255e-13), (0.4806885293455707, 1.8119346366441111e-13),
+    (0.4855078157816024, 9.840465278232627e-14), (0.49030398804461583, 5.780031989454028e-13),
+    (0.49507726679803454, -1.8302857356041668e-13), (0.4998278695566114, -1.620740015674495e-13),
+    (0.5045560107519123, 4.83033149495532e-13), (0.5092619017905236, -7.156055317238212e-13),
+    (0.5139457511013461, 8.882123951857185e-13), (0.5186077642083546, -3.0900580513238243e-13),
+    (0.5232481437651586, -6.10765519728515e-13), (0.5278670896204858, 3.565996966334783e-13),
+    (0.532464798869114, 3.5782396591276384e-13), (0.5370414658973459, -4.622608700154458e-13),
+    (0.5415972824321216, 6.227976291722515e-13), (0.5461324375974073, 7.283894727206574e-13),
+    (0.5506471179523942, 2.680964661521167e-13), (0.5551415075406112, -1.0960825046059278e-13),
+    (0.5596157879353996, 2.3119493838005378e-14), (0.5640701382853877, -5.846905800529924e-13),
+    (0.5685047353526897, -2.1037482511444942e-14), (0.5729197535620187, -2.332318294558741e-13),
+    (0.5773153650352469, -4.2333694288141915e-13), (0.5816917396350618, -4.3933937969737843e-13),
+    (0.5860490450031648, 4.1341647073835564e-13), (0.590387446602108, 6.841763641591467e-14),
+    (0.5947071077462169, 4.758553400443064e-13), (0.5990081896452466, 8.367967867475769e-13),
+    (0.6032908514389419, -8.576373464665864e-13), (0.6075552502243227, 2.1913281229340092e-13),
+    (0.6118015411066153, -6.224284253643115e-13), (0.6160298772156239, -1.098359432543843e-13),
+    (0.6202404097512044, 6.531043137763365e-13), (0.6244332880123693, -4.758019902171077e-13),
+    (0.6286086594227527, -3.785425126545704e-13), (0.6327666695706284, 4.0939233218678666e-13),
+    (0.636907462236195, 8.742438391485829e-13), (0.6410311794206791, 2.521818845684288e-13),
+    (0.6451379613736208, -3.6081313604225574e-14), (0.649227946625615, -5.05185559242809e-13),
+    (0.6533012720119586, 7.869940332335532e-13), (0.6573580727090302, -6.702087696194906e-13),
+    (0.6613984822452039, 1.6108575753932459e-13), (0.6654226325445052, 5.852718843625151e-13),
+    (0.6694306539429817, -3.5246757297904794e-13), (0.6734226752123504, -1.8372084495629058e-13),
+    (0.6773988235909201, 8.860668981349492e-13), (0.6813592248072382, 6.64862680714687e-13),
+    (0.6853040030982811, 6.383161517064652e-13), (0.6892332812385575, 2.5144230728376075e-13),
+    (0.6931471805601177, -1.7239444525614835e-13),
+]
 
 
 def _tlog():
-    """Tabelle ``t_log_Float64`` aus Julias ``base/special/log.jl`` (N = 39), einmal berechnet."""
-    global _TLOG
-    if _TLOG is None:
-        with localcontext() as ctx:
-            ctx.prec = 80
-            sn = Decimal(2) ** 39
-            tab = []
-            for j in range(129):
-                lb = (Decimal(1) + Decimal(j) / Decimal(128)).ln()
-                hi = (sn * lb).to_integral_value(rounding="ROUND_HALF_EVEN") / sn
-                tab.append((float(hi), float(lb - hi)))
-        _TLOG = tab
+    """Tabelle ``t_log_Float64`` aus Julias ``base/special/log.jl`` (N = 39)."""
     return _TLOG
+
+
+def _tlog_rechnen():
+    """Die Tabelle ``_TLOG`` neu berechnen (wie bis 1.6.3; zur Prüfung des Literals)."""
+    with localcontext() as ctx:
+        ctx.prec = 80
+        sn = Decimal(2) ** 39
+        tab = []
+        for j in range(129):
+            lb = (Decimal(1) + Decimal(j) / Decimal(128)).ln()
+            hi = (sn * lb).to_integral_value(rounding="ROUND_HALF_EVEN") / sn
+            tab.append((float(hi), float(lb - hi)))
+    return tab
 
 
 def _jl_log10(x) -> float:

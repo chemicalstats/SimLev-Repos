@@ -11,7 +11,8 @@ series_check(data, columns = NULL, jump = 20, stale = 10, revert = 0.8)
 \code{"JJJJ-MM-TT"}) und Kursspalten.}
 
 \item{columns}{Zeichenvektor der zu pruefenden Spalten (Standard
-\code{NULL} = alle numerischen Spalten ausser \code{date}).}
+\code{NULL} = alle numerischen Spalten ausser \code{date}).
+Seit 1.6.4 muessen die Spalten vorhanden und numerisch sein und duerfen nicht doppelt vorkommen.}
 
 \item{jump}{Sprungschwelle in Prozent (20 = 20 \%): Veraenderung zum
 vorigen vorhandenen Wert, ab der ein Sprung gemeldet wird.}

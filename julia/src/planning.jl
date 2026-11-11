@@ -17,6 +17,7 @@ using Dates
 export series_shift_return, bootstrap_pooled, portfolio_returns, planning_goal
 
 const DA = SimLev.DeepAnalysis
+const W = SimLev.Withdrawal      # Eingabeprüfung Entnahme und Planung (_e3_*; seit 1.6.4)
 const _NA = SimLev.NA
 
 "Werte und Namen eines numerischen Arguments (Skalar, Vektor, RVector, Dict, Paare)."
@@ -63,6 +64,10 @@ kommt derselbe Tabelle (RFrame) mit verschobenen Spalten.
 - `ppy`: Renditen (Zeilen) je Jahr. `nothing` (Standard): bei einem Tabelle (RFrame) mit `date` Anzahl der
   Renditen geteilt durch die Spanne von `date` in Jahren (Tage / 365.25), sonst 252.
 
+# Eingaben
+Seit 1.6.4 geprüft: `data` nur als Tabelle; `columns` nicht leere Namen von Zahlenspalten; `target` endlich
+und > -100; `ppy` eine Zahl > 0.
+
 # Rückgabe
 `data` mit angepassten Spalten. Attribut `shift`: benannter Vektor der angewendeten Verschiebung je Spalte in
 Prozent p. a. (geometrisch; negativ = Rendite abgesenkt). Fehlende Werte werden bei der Mittelwertbildung
@@ -77,17 +82,26 @@ println(prod(d2["us"])^(365.25 / 3650) - 1)   # etwa 0.04 = 4 % p. a.
 ```
 """
 function series_shift_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
-    data = SimLev.as_rframe(data)
-    type = DA._match_arg(type, ["returns", "prices"])
-    DA._is_frame(data) || DA._stop("data muss ein data.frame sein.")
-    data = DA._as_frame(data)
-    columns = _cols(columns)
+    fn = "series_shift_return"
+    type = W._e3_match_arg(type, ["returns", "prices"], fn, "type")
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): Tabelle, Spaltennamen, Zahlenspalten, target endlich > -100,
+    # ppy > 0
+    SimLev.chk_df(data, fn, "data")
+    data = DA._as_frame(SimLev.as_rframe(data))
+    columns = W._e3_names(columns, fn, "columns")
     nms = names(data)
     miss = [c for c in unique(columns) if !(c in nms)]
-    isempty(miss) || DA._stop(DA._sp("Spalte(n) nicht in data: %s.", join(miss, ", ")))
+    isempty(miss) || SimLev.chk_stop("spalten", fn, join(["'$m'" for m in miss], ", "))
+    for k in columns
+        W._e3_numcol(data[k], k, fn)
+    end
+    W._e3_datecol(data, fn)
     tv, tn = _numvals(target)
-    (_all_num(tv) && !any(isnan, _as_num(tv))) || DA._stop("target muss numerisch sein (Prozent p. a., z. B. 4).")
+    (_all_num(tv) && !any(isnan, _as_num(tv))) || SimLev.chk_stop("ut2.target_zahlen", "series_shift_return")
     tvf = _as_num(tv)
+    all(v -> isfinite(v) && v > -100, tvf) ||
+        SimLev.chk_stop("e3.werte_bereich", fn, "target", SimLev.chk_range_text(-100, nothing, true))
+    ppy = SimLev.chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true, null_ok = true)
     tg = Dict{String,Float64}()
     if length(tvf) == 1 && tn === nothing
         for c in columns
@@ -95,7 +109,7 @@ function series_shift_return(data, columns, target; type = ["returns", "prices"]
         end
     elseif tn === nothing || any(c -> !(c in tn), columns)
         lst = tn === nothing ? columns : [c for c in columns if !(c in tn)]
-        DA._stop(DA._sp("target braucht einen Skalar oder einen benannten Eintrag je Spalte aus columns; fehlt für: %s.", join(lst, ", ")))
+        SimLev.chk_stop("rs.target_spalten", fn, join(lst, ", "))
     else
         for (k, v) in zip(tn, tvf)
             haskey(tg, k) || (tg[k] = v)
@@ -112,7 +126,7 @@ function series_shift_return(data, columns, target; type = ["returns", "prices"]
     if type == "prices" && dd !== nothing
         keys_ = [isnan(v) ? :NA : v for v in dd]
         length(unique(keys_)) < length(keys_) &&
-            DA._stop("type = 'prices': date enthält doppelte Daten; Kursniveaus brauchen eine eindeutige Zeitfolge.")
+            SimLev.chk_stop("rs.preise_doppelt", fn)
     end
     if ppy === nothing
         if dd !== nothing
@@ -157,10 +171,11 @@ function _period_keys(d, frequency)
 end
 
 "Periodenrenditen (brutto) aus Kursreihen (`.period_gross`): NamedMat Perioden x Spalten."
-function _period_gross(df, columns, frequency)
+function _period_gross(df, columns, frequency, fn = nothing, land = nothing)
     df = DA._as_frame(df)
     columns = _cols(columns)
     d = DA._to_date_days(df["date"], "data\$date")
+    fn === nothing || W._e3_dates_sorted(d, fn, land)   # seit 1.6.4: aufsteigend, ohne NA
     key = _period_keys(d, frequency)
     e = DA._last_of_key(key)
     V = zeros(length(e), length(columns))
@@ -202,19 +217,29 @@ lange Baissen) in die Planung ein - US-Daten allein überschätzen langfristige 
   B. CPI), die in allen Ländern vorhanden ist. Sie wird im selben Block wie die Kurse gezogen.
 - `frequency`: Periodenlänge: `"year"` (Standard), `"quarter"` oder `"month"`.
 - `n`: Anzahl simulierter Pfade (Standard 1000).
+  Seit 1.6.4 höchstens 10^8.
 - `years`: Länge jedes Pfads in Jahren (Standard 30); ergibt `years` x Perioden je Jahr (1, 4 bzw. 12)
-  Perioden.
+  Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei `"quarter"` und `"month"` (vorher jede Zahl, die
+  ganze Perioden ergab).
 - `L`: Mittlere Blocklänge in Perioden der gewählten `frequency` (Blocklänge = 1 + geometrisch verteilte Zahl
-  mit Mittel `L` - 1). `nothing` (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw. 120 Monate.
+  mit Mittel `L` - 1). `nothing` (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw. 120 Monate. Seit 1.6.4
+  höchstens 100 Jahre (100 Jahre, 400 Quartale bzw. 1200 Monate).
 - `country_weights`: Numerischer Vektor der Ziehungswahrscheinlichkeiten je Land in der Reihenfolge von
   `datasets` (wird auf Summe 1 normiert). `nothing` (Standard) = alle Länder gleich wahrscheinlich.
 - `target`: Optional Renditeannahmen in Prozent p. a. (geometrisch): Skalar für alle `columns` oder benannter
   Vektor je Spalte. Die Verschiebung wird über die gepoolten Renditen aller Länder bestimmt und für alle
   Länder gleich angewendet (wie `series_shift_return()`). `nothing` (Standard) = historische Renditen.
+  Benannt auch für die Spalte aus inflation (seit 1.6.4 dokumentiert).
 - `seed`: Startwert der Ziehung (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das
   Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau
   einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe
   liefern dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Eingaben
+Seit 1.6.4 geprüft: je Land eine Tabelle mit aufsteigender Spalte `date` ohne NA und den Zahlenspalten aus
+`columns` (und `inflation`); `n` ganze Zahl >= 1; `years` ganze Zahl von 1 bis 100; `L` >= 1 und höchstens 100 Jahre in Perioden;
+`country_weights` je Land >= 0 mit Summe > 0, benannt nach den Ländern zugeordnet; `target` endlich > -100,
+benannt nur mit Spalten aus `columns` (bzw. `inflation`).
 
 # Rückgabe
 Objekt der Klasse `withdrawal_paths` (Liste) mit `returns` (Matrix Perioden x Pfade der
@@ -251,28 +276,73 @@ println(size(pb["returns"]))   # 30 Jahre x 200 Pfade
 function bootstrap_pooled(datasets, columns; weights = nothing, inflation = nothing,
                           frequency = ["year", "quarter", "month"], n = 1000, years = 30, L = nothing,
                           country_weights = nothing, target = nothing, seed = nothing)
-    frequency = DA._match_arg(frequency, ["year", "quarter", "month"])
+    fn = "bootstrap_pooled"
+    frequency = W._e3_match_arg(frequency, ["year", "quarter", "month"], fn, "frequency")
     dn, dv = DA._is_listlike(datasets) ? DA._list_items(datasets) : (nothing, Any[])
-    (dn === nothing || any(==(""), dn)) && DA._stop("datasets muss eine benannte Liste sein (Land -> data.frame).")
-    columns = _cols(columns)
+    (dn === nothing || isempty(dv) || any(==(""), dn)) && SimLev.chk_stop("ut2.datasets", "bootstrap_pooled")
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): je Land eine Tabelle mit date und den Spalten, Anzahlen,
+    # Blocklänge, Ländergewichte, Renditeannahmen
+    columns = W._e3_names(columns, fn, "columns")
+    SimLev.chk_nofactor(inflation, fn, "inflation")
+    inflation = SimLev.chk_name1(inflation, fn, "inflation"; null_ok = true)
+    xc = inflation === nothing ? columns : vcat(columns, String(inflation))
+    for (k, df) in zip(dn, dv)
+        SimLev.chk_df(df, fn, "datasets[['$k']]")
+        nms = names(SimLev.as_rframe(df))
+        miss = String[c for c in unique(vcat("date", xc)) if !(c in nms)]
+        isempty(miss) || SimLev.chk_stop("e3.spalten_land", fn, join(("'$c'" for c in miss), ", "), k)
+        for cl in xc
+            W._e3_numcol(df[cl], cl, fn)
+        end
+        W._e3_datecol(df, fn)
+    end
     ppy = _wd_ppy(frequency)
+    n = SimLev.chk_int1(n, fn, "n"; lo = 1)
+    SimLev.chk_max(n, SimLev.SL_MAX_N, fn, "n") # seit 1.6.4 (Entscheidung 16)
+    # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; vorher
+    # Baustein e3.jahre_perioden: jede Zahl > 0, die ganze Perioden ergab)
+    years = SimLev.chk_jahre(years, fn, "years")
+    L = SimLev.chk_num1(L, fn, "L"; lo = 1, null_ok = true)
+    L === nothing || SimLev.chk_max(L, SimLev.SL_MAX_JAHRE * ppy, fn, "L")   # seit 1.6.4 höchstens 100 Jahre in Perioden (K43 T2-N1)
+    if country_weights !== nothing
+        nc0 = length(dv)
+        cwv, cwn = _numvals(country_weights)
+        (length(cwv) == nc0 && _all_num(cwv) && all(isfinite, _as_num(cwv)) && all(>=(0), _as_num(cwv)) &&
+         SimLev.r_sum(_as_num(cwv)) > 0) ||
+            SimLev.chk_stop("e3.gewichte", fn, "country_weights", "Land aus datasets ($nc0)")
+        cwf = _as_num(cwv)
+        if cwn !== nothing                                   # benannt: nach den Namen der Länder (wie weights)
+            (length(unique(cwn)) == length(cwn) && Set(cwn) == Set(dn)) ||
+                SimLev.chk_stop("e3.namen_passen", fn, "country_weights", "datasets")
+            cwf = Float64[cwf[findfirst(==(k), cwn)] for k in dn]
+        end
+        country_weights = cwf
+    end
+    if target !== nothing
+        tv0, tn0 = _numvals(target)
+        (!isempty(tv0) && _all_num(tv0)) || SimLev.chk_stop("zahlen", fn, "target")
+        all(v -> isfinite(v) && v > -100, _as_num(tv0)) ||
+            SimLev.chk_stop("e3.werte_bereich", fn, "target", SimLev.chk_range_text(-100, nothing, true))
+        bad = tn0 === nothing ? length(tv0) != 1 : (length(unique(tn0)) != length(tn0) || any(k -> !(k in xc), tn0))
+        bad && SimLev.chk_stop("e3.ziel", fn)
+    end
     wpair = nothing
     if weights !== nothing
         wv, wn = _numvals(weights)
         if !_all_num(wv) || length(wv) != length(columns) || any(isnan, _as_num(wv)) || any(<(0), _as_num(wv)) ||
            SimLev.r_sum(_as_num(wv)) <= 0
-            DA._stop(DA._sp("weights muss je Spalte aus columns (%d) ein Gewicht >= 0 enthalten (Summe > 0).", length(columns)))
+            SimLev.chk_stop("e3.gewichte", fn, "weights", "Spalte aus columns ($(length(columns)))")
         end
         if wn === nothing
             wn = copy(columns)
         elseif Set(wn) != Set(columns)
-            DA._stop(DA._sp("Namen von weights (%s) passen nicht zu columns (%s).", join(wn, ", "), join(columns, ", ")))
+            SimLev.chk_stop("rs.weights_namen", fn, join(wn, ", "), join(columns, ", "))
         end
         wpair = (wn, _as_num(wv))
     end
     cols = inflation === nothing ? columns : vcat(columns, String(inflation))
-    G = Matrix{Float64}[Matrix(_period_gross(df, cols, frequency).data) for df in dv]
-    any(g -> size(g, 1) < 2, G) && DA._stop("Ein Land hat zu wenige Perioden.")
+    G = Matrix{Float64}[Matrix(_period_gross(df, cols, frequency, fn, k).data) for (k, df) in zip(dn, dv)]
+    any(g -> size(g, 1) < 2, G) && SimLev.chk_stop("rs.land_kurz", fn)
     ci = Dict{String,Int}()
     for (i, c) in enumerate(cols)
         haskey(ci, c) || (ci[c] = i)
@@ -318,7 +388,7 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
         end
         out
     end
-    draw = draw_all(SimLev.SLib.main_stream(seed))        # Hauptstrom
+    draw = draw_all(SimLev.SLib.main_stream(seed, "bootstrap_pooled"))        # Hauptstrom
     Gall = reduce(vcat, G)
     off = vcat(0, cumsum(nrs))[1:nc]
     gi = zeros(Int, nper, nn)
@@ -377,6 +447,11 @@ Ergebnis dient als Szenario-Stichprobe für `planning_goal()`.
   Spaltennamen des Ergebnisses; ohne Namen `"P1"`, `"P2"`, ...
 - `frequency`: Periodenlänge und Rebalancing-Rhythmus: `"year"` (Standard), `"quarter"` oder `"month"`.
 
+# Eingaben
+Seit 1.6.4 geprüft: `data` nur als Tabelle mit aufsteigender Spalte `date` ohne NA; `candidates` nicht leer,
+je Kandidat benannte Gewichte (Namen = Zahlenspalten), endlich mit Summe > 0 (einzelne negative Gewichte
+erlaubt).
+
 # Rückgabe
 Numerische Matrix Perioden x Kandidaten mit Brutto-Renditen (z. B. 1.05 = +5 %); nur Perioden, in denen alle
 beteiligten Kursspalten Werte haben.
@@ -394,17 +469,34 @@ println(size(portfolio_returns(d, cand)))
 ```
 """
 function portfolio_returns(data, candidates; frequency = ["year", "quarter", "month"])
+    fn = "portfolio_returns"
+    frequency = W._e3_match_arg(frequency, ["year", "quarter", "month"], fn, "frequency")
+    # Eingaben vor der Rechnung prüfen (seit 1.6.4): Tabelle; Kandidaten als benannte Gewichtsvektoren mit endlichen
+    # Werten und positiver Summe (einzelne negative Gewichte bleiben erlaubt); Spalten vorhanden und numerisch
+    SimLev.chk_df(data, fn, "data")
     data = SimLev.as_rframe(data)
-    frequency = DA._match_arg(frequency, ["year", "quarter", "month"])
-    cn, cands = DA._is_listlike(candidates) ? DA._list_items(candidates) : (nothing, Any[candidates])
+    cn, cands = DA._is_listlike(candidates) ? DA._list_items(candidates) : (nothing, Any[])
     cn === nothing && (cn = ["P$i" for i in eachindex(cands)])
     ws = Tuple{Vector{String},Vector{Float64}}[]
     for w in cands
         wv, wn = _numvals(w)
-        push!(ws, (wn === nothing ? String[] : wn, _as_num(wv)))
+        if wn === nothing || isempty(wv) || !_all_num(wv) || !all(k -> !isempty(k), wn)
+            empty!(ws)
+            break
+        end
+        push!(ws, (wn, _as_num(wv)))
+    end
+    isempty(ws) && SimLev.chk_stop("e3.kandidaten", fn)
+    for ((wn, wv), cnm) in zip(ws, cn)
+        (all(isfinite, wv) && SimLev.r_sum(wv) > 0) || SimLev.chk_stop("e3.kandidat_summe", fn, cnm)
     end
     a = unique(vcat([wn for (wn, _) in ws]...))
-    G = _period_gross(data, a, frequency)
+    SimLev.chk_cols(data, vcat("date", a), fn)
+    for k in a
+        W._e3_numcol(data[k], k, fn)
+    end
+    W._e3_datecol(data, fn)
+    G = _period_gross(data, a, frequency, fn)
     Gm = G.data
     M = zeros(size(Gm, 1), length(ws))
     for (j, (wn, wv)) in enumerate(ws)
@@ -417,8 +509,6 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 # planning_goal
 # ═══════════════════════════════════════════════════════════════════════════
-
-_fmt_vals(v) = join(DA._format(v isa Union{AbstractVector,Tuple} ? (all(DA._isnum_el, v) ? DA._f64(v) : collect(v)) : v), ", ")
 
 "`as.matrix(returns)` → (Matrix, Spaltennamen, numerisch?)."
 function _as_matrix(r)
@@ -465,16 +555,22 @@ ausgewertet.
 - `horizon`: Anzahl Perioden bis zum Ziel (ganze Zahl >= 1; Periodenlänge wie die Zeilen von `returns`, z. B.
   Jahre bei Jahresrenditen). Nicht zu verwechseln mit `horizon` in `withdrawal_simulation()` (Objekt aus
   `withdrawal_horizon()` oder Jahre).
+  Seit 1.6.4 höchstens 36600 Perioden (wie path_length: 100 Jahre in Tagen).
 - `contributions`: Zahlung je Periode als Geldbetrag (Standard 0): Skalar oder Vektor (wird mit `rep_len()`
   auf `horizon` Perioden gebracht); positiv = Einzahlung, negativ = Entnahme, jeweils zu Periodenbeginn vor
   der Rendite.
 - `n_grid`: Anzahl Punkte des logarithmischen Vermögensrasters (Standard 301, mindestens 2; dazu Ziel und
   Startwert); mehr Punkte = genauer, aber langsamer.
+  Seit 1.6.4 höchstens 10^6.
 - `n_sim`: Anzahl Pfade der Vorwärtssimulation der optimalen Politik (Standard 5000).
+  Seit 1.6.4 höchstens 10^8.
 - `seed`: Startwert für die Vorwärtssimulation (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53)
   ist das Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird
   genau einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte
   Aufrufe liefern dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Eingaben
+Seit 1.6.4 geprüft: `n_grid` und `n_sim` sind ganze Zahlen.
 
 # Rückgabe
 Objekt der Klasse `SimLevGoalPlan` (Liste):
@@ -534,19 +630,25 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
     R, cn0, isnum = _as_matrix(returns)
     S, K = R === nothing ? (0, 0) : size(R)
     if !isnum || S == 0 || K == 0 || any(!isfinite, R) || any(<(0), R)
-        DA._stop("returns muss eine Matrix (Szenarien x Kandidaten) endlicher Brutto-Renditen >= 0 ohne NA sein (z. B. 1.05).")
+        SimLev.chk_stop("ut2.goal_returns", "planning_goal")
     end
     num1(v) = (a = v isa Union{AbstractVector,Tuple} ? collect(v) : [v]; length(a) == 1 && DA._isnum_el(a[1]) && isfinite(Float64(a[1])))
     v1(v) = Float64(DA._first(v))
-    (num1(start_value) && v1(start_value) > 0) || DA._stop(DA._sp("start_value muss ein Geldbetrag > 0 sein (erhalten: %s).", _fmt_vals(start_value)))
-    (num1(goal) && v1(goal) >= 0) || DA._stop(DA._sp("goal muss ein Geldbetrag >= 0 sein (erhalten: %s).", _fmt_vals(goal)))
-    (num1(horizon) && v1(horizon) >= 1 && v1(horizon) == round(v1(horizon))) ||
-        DA._stop(DA._sp("horizon muss eine ganze Zahl >= 1 sein (Anzahl Perioden; erhalten: %s).", _fmt_vals(horizon)))
-    (num1(n_grid) && v1(n_grid) >= 2) || DA._stop(DA._sp("n_grid muss eine ganze Zahl >= 2 sein (erhalten: %s).", _fmt_vals(n_grid)))
-    (num1(n_sim) && v1(n_sim) >= 1) || DA._stop(DA._sp("n_sim muss eine ganze Zahl >= 1 sein (erhalten: %s).", _fmt_vals(n_sim)))
+    # Meldungen ohne den Eingabewert (seit 1.6.4, Entscheidung 8); n_grid und n_sim seit 1.6.4 ganzzahlig
+    whole(v) = v1(v) == round(v1(v))
+    (num1(start_value) && v1(start_value) > 0) || SimLev.chk_stop("ut2.geldbetrag_gt0", "planning_goal", "start_value")
+    (num1(goal) && v1(goal) >= 0) || SimLev.chk_stop("ut2.geldbetrag_ge0", "planning_goal", "goal")
+    (num1(horizon) && v1(horizon) >= 1 && whole(horizon)) ||
+        SimLev.chk_stop("ganz", "planning_goal", "horizon", "1")
+    (num1(n_grid) && v1(n_grid) >= 2 && whole(n_grid)) || SimLev.chk_stop("ganz", "planning_goal", "n_grid", "2")
+    (num1(n_sim) && v1(n_sim) >= 1 && whole(n_sim)) || SimLev.chk_stop("ganz", "planning_goal", "n_sim", "1")
+    # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46; horizon in Perioden wie path_length: 36 600 = 100 Jahre in Tagen)
+    SimLev.chk_max(horizon, SimLev.SL_MAX_TAGE, "planning_goal", "horizon")
+    SimLev.chk_max(n_grid, SimLev.SL_MAX_GITTER, "planning_goal", "n_grid")
+    SimLev.chk_max(n_sim, SimLev.SL_MAX_N, "planning_goal", "n_sim")
     cv = contributions isa Union{AbstractVector,Tuple} ? collect(contributions) : Any[contributions]
     (_all_num(cv) && !isempty(cv) && all(isfinite, _as_num(cv))) ||
-        DA._stop("contributions muss ein endlicher Geldbetrag oder Vektor von Geldbeträgen sein.")
+        SimLev.chk_stop("ut2.contributions", "planning_goal")
     start_value = v1(start_value); goal = v1(goal); horizon = Int(v1(horizon))
     ngrid = v1(n_grid); nsim = Int(trunc(v1(n_sim)))
     cn = cn0 !== nothing ? cn0 : ["P$j" for j in 1:K]
@@ -591,7 +693,7 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
         end
         SimLev.RList("terminal" => W, "choice" => choice, "success" => .!ruined .& (W .>= goal))
     end
-    sim = run(SimLev.SLib.main_stream(seed))              # Hauptstrom
+    sim = run(SimLev.SLib.main_stream(seed, "planning_goal"))              # Hauptstrom
     p_sim = DA._mean_lgl(sim["success"])
     se = sqrt(p_sim * (1 - p_sim) / nsim)
     tol = 4 * sqrt(max(p_sim * (1 - p_sim), 1 / nsim) / nsim) + 0.01
@@ -650,7 +752,8 @@ function _plot_goalplan(x)
     nq = length(keep)
     per = Int[t for t in 1:H for _ in 1:nq]
     ch = Int[Int(P[t, q]) for t in 1:H for q in 1:nq]
-    data = SimLev.RList("policy" => SimLev.RFrame("period" => per, "wealth" => Float64[g[keep][q] for _ in 1:H for q in 1:nq],
+    gk = g[keep]   # einmal (bis 1.6.3 je Zelle neu angelegt)
+    data = SimLev.RList("policy" => SimLev.RFrame("period" => per, "wealth" => Float64[gk[q] for _ in 1:H for q in 1:nq],
                                                   "choice" => ch, "candidate" => String[cands[clamp(c, 1, K)] for c in ch]))
     return (_ana_svg_done(s), data)
 end

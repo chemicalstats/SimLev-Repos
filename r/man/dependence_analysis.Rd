@@ -36,11 +36,11 @@ umwandelbar), Kursspalten (Kursniveaus, keine Renditen) und
 Zustandsspalten (z. B. mit \code{\link[=series_align]{series_align()}} und \code{\link[=series_align_macro]{series_align_macro()}}
 vorbereitet).}
 
-\item{assets}{Zeichenvektor der Kursspalten (mindestens zwei).}
+\item{assets}{Zeichenvektor der Kursspalten (mindestens zwei). Seit 1.6.4 ohne doppelte Namen und ohne 'date'.}
 
 \item{conditions}{Zeichenvektor der Zustandsspalten (Drittvariablen, in
 ihrer eigenen Einheit); gehen um eine Periode verzoegert ein.
-\code{NULL} (Standard) = keine bedingte Analyse.}
+\code{NULL} (Standard) = keine bedingte Analyse. Seit 1.6.4 ohne doppelte Namen und keine Spalte aus assets.}
 
 \item{frequency}{Renditefrequenz: \code{"week"} (Standard; ISO-Woche,
 vermeidet Effekte unterschiedlicher Handelszeiten), \code{"day"} oder
@@ -48,12 +48,12 @@ vermeidet Effekte unterschiedlicher Handelszeiten), \code{"day"} oder
 
 \item{quantiles}{Numerischer Vektor von Tail-Wahrscheinlichkeiten als
 Anteil (Standard \code{c(0.05, 0.10)}) fuer die Tail-Kennzahlen ueber
-die ganze Stichprobe (siehe \code{\link[=tail_dependence]{tail_dependence()}}).}
+die ganze Stichprobe (siehe \code{\link[=tail_dependence]{tail_dependence()}}). Seit 1.6.4 echt zwischen 0 und 1, ohne doppelte Werte.}
 
 \item{breaks}{Optional benannte Liste von Grenzen je Zustandsvariable in
 deren Einheit, z. B. \code{list(inflation = c(-Inf, 2, 4, Inf))};
 Intervalle links geschlossen, rechts offen. \code{NULL} (Standard) bzw.
-fehlender Eintrag = \code{n_regimes} gleich besetzte Quantilsgruppen.}
+fehlender Eintrag = \code{n_regimes} gleich besetzte Quantilsgruppen. Seit 1.6.4 nur Namen aus conditions, Grenzen streng steigend ohne NA.}
 
 \item{n_regimes}{Anzahl Regime ohne \code{breaks} (ganze Zahl, Standard 3:
 niedrig, mittel, hoch). Fallen Quantilsgrenzen zusammen oder bliebe eine
@@ -63,7 +63,7 @@ erscheinen mit \code{n = 0} und \code{NA}-Kennzahlen.}
 
 \item{window}{Fenster der rollierenden Pearson-Korrelation in Perioden der
 gewaehlten Frequenz. \code{NULL} (Standard) = Anzahl Perioden je Jahr
-(aus den Daten ermittelt, mindestens 10).}
+(aus den Daten ermittelt, mindestens 10). Seit 1.6.4 eine ganze Zahl >= 1.}
 
 \item{dcc}{Logisch: DCC(1,1) mit \code{\link[=dependence_dcc]{dependence_dcc()}} schaetzen (nur bei
 mindestens 100 Perioden; Fehler werden als Meldung ausgegeben).}
@@ -72,12 +72,12 @@ mindestens 100 Perioden; Fehler werden als Meldung ausgegeben).}
 Regime ab 40 Perioden).}
 
 \item{B}{Anzahl Bootstrap-Wiederholungen fuer die Regime-Vergleiche
-(ganze Zahl, Standard 499; 0 = aus).}
+(ganze Zahl, Standard 499; 0 = aus). Seit 1.6.4 hoechstens 10^8.}
 
 \item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
 \code{NULL} (Standard) = Politis-White-Schaetzung auf dem Produkt der
 standardisierten Renditen (Maximum ueber die Paare, begrenzt auf 2 bis
-n / 10).}
+n / 10). Seit 1.6.4 eine Zahl >= 1.}
 
 \item{tail_q}{Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) fuer die
 Tail-Kennzahlen je Regime.}

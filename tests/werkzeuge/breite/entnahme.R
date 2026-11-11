@@ -117,7 +117,10 @@ case("coh_month", "withdrawal_cohorts(m[1:120, ], price = 'depot', years = 8)", 
 case("coh_cpi", "withdrawal_cohorts(m, price = 'depot', inflation = 'cpi', years = 10, step = 'year', frequency = 'quarter')",
      "result = withdrawal_cohorts(m, price='depot', inflation='cpi', years=10, step='year', frequency='quarter')", I,
      jl = 'result = withdrawal_cohorts(m; price = "depot", inflation = "cpi", years = 10, step = "year", frequency = "quarter")')
-case("coh_rate", "withdrawal_cohorts(m, price = 'depot', inflation = 'infl', inflation_type = 'rate_pa', years = 2.5, frequency = 'quarter', step = 'year')",
+case("coh_rate", "withdrawal_cohorts(m, price = 'depot', inflation = 'infl', inflation_type = 'rate_pa', years = 3, frequency = 'quarter', step = 'year')",
+     "result = withdrawal_cohorts(m, price='depot', inflation='infl', inflation_type='rate_pa', years=3, frequency='quarter', step='year')", I,
+     jl = 'result = withdrawal_cohorts(m; price = "depot", inflation = "infl", inflation_type = "rate_pa", years = 3, frequency = "quarter", step = "year")')   # seit 1.6.4 ganze Jahre (Entscheidungen 47, 49 G4)
+case("coh_rate_frac", "withdrawal_cohorts(m, price = 'depot', inflation = 'infl', inflation_type = 'rate_pa', years = 2.5, frequency = 'quarter', step = 'year')",
      "result = withdrawal_cohorts(m, price='depot', inflation='infl', inflation_type='rate_pa', years=2.5, frequency='quarter', step='year')", I,
      jl = 'result = withdrawal_cohorts(m; price = "depot", inflation = "infl", inflation_type = "rate_pa", years = 2.5, frequency = "quarter", step = "year")')
 case("coh_monthly_freq", "withdrawal_cohorts(m[1:60, ], price = 'depot', inflation = 'infl', inflation_type = 'rate', years = 1, frequency = 'month', step = 'year')",

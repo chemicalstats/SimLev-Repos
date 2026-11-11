@@ -140,6 +140,21 @@ end
 "`stats::cov2cor` (über RStats, mit R's Warnung)."
 _cov2cor(V) = _fmat(SimLev.RStats.cov2cor(_fmat(V)))
 
+"""Datumsvektor (Date, DateTime oder Text wie R Date/character), keine Zahl, kein Faktor, nicht leer
+(Entscheidungen 7 und 15; R `regime_states`)."""
+function _e4_dates(@nospecialize(dv), fn)
+    dv isa RVector && (dv = dv.values)
+    isd(v) = v isa Union{Date,DateTime,AbstractString} || v === missing
+    ok = !(dv isa SimLev.RFmt.RFactor) && (dv isa Union{Date,DateTime,AbstractString} ||
+         (dv isa AbstractVector && !(dv isa AbstractMatrix) && !isempty(dv) && all(isd, dv) &&
+          # nur fehlende Werte: gültig, wenn der Vektor als Datum oder Text getypt ist (seit 1.6.4, T3-N9; R
+          # as.Date(c(NA, NA))); ein ungetyptes [missing] bleibt abgelehnt
+          ((nonmissingtype(eltype(dv)) !== Union{} && nonmissingtype(eltype(dv)) <: Union{Date,DateTime,AbstractString}) ||
+           !all(v -> v === missing, dv))))
+    ok || SimLev.chk_stop("e4.daten", fn)
+    return dv
+end
+
 function _isint_scalar(k)
     k isa AbstractVector && (length(k) == 1 ? (k = k[1]) : return false)
     (k isa Real && !(k isa Bool)) || return false
@@ -167,12 +182,15 @@ Beschreibung.
   Kovarianzmatrix je Zustand).
 - `k`: Anzahl Zustände (ganze Zahl >= 2, Standard 2); es werden mindestens `50 * k` Perioden benötigt. Spalten
   ohne Schwankung (z. B. konstante Kurse) sind ein Fehler.
+  Seit 1.6.4 höchstens 10^8.
 - `frequency`: Periodenlänge der Renditen: `"week"` (Standard, ISO-Wochen), `"day"` oder `"month"`. Bei
   `"day"` entfallen Tage, an denen alle Renditen 0 sind (z. B. fortgeschriebene Wochenenden).
 - `n_start`: Anzahl Startwerte (ganze Zahl, Standard 5): der erste aus Quantilen einer rollierenden
   Volatilität, die übrigen zufällig; es zählt das Ergebnis mit der höchsten Log-Likelihood.
+  Seit 1.6.4 höchstens 10^8.
 - `max_iter`, `tol`: Höchstzahl Baum-Welch-Iterationen je Start (Standard 300) und relative Abbruchschranke:
   Abbruch, wenn sich die Log-Likelihood um weniger als `tol * (1 + |logL|)` ändert (Standard 1e-7).
+  Seit 1.6.4 max_iter eine ganze Zahl von 0 bis 10^8, tol eine Zahl ≥ 0.
 - `seed`: Startwert (Standard 1) für die zufälligen Startzuordnungen (nur bei `n_start > 1`). Mit Startwert
   (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt
   unverändert; mit `nothing` wird genau einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe
@@ -242,17 +260,23 @@ println(hmm["volatility"])
 """
 function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), n_start = 5, max_iter = 300,
                     tol = 1e-7, seed = 1)
-    data = SimLev.as_rframe(data)
     D = _D()
     frequency = D._match_arg(frequency, ("week", "day", "month"))
-    _isint_scalar(k) || error("regime_hmm: k muss eine ganze Zahl >= 2 sein (erhalten: $(D._fmt1(k))); ein Zustand wäre " *
-                              "eine einzige Normalverteilung ohne Regime.")
+    fn = "regime_hmm"                                          # seit 1.6.4 vor der Rechnung (K42 E4)
+    (!D._e4_isfactor(k) && _isint_scalar(k)) || error("regime_hmm: k muss eine ganze Zahl >= 2 sein; ein Zustand wäre " *
+                              "eine einzige Normalverteilung ohne Regime.")   # seit 1.6.4 ohne Wert
+    SimLev.chk_max(SimLev.chk_scalar(k), SimLev.SL_MAX_N, fn, "k")   # B-054
+    columns = D._e4_names(columns, fn, "columns")
+    D._e4_data(data, columns, fn)                              # B-015
+    data = SimLev.as_rframe(data)
+    n_start = D._e4_count(n_start, fn, "n_start")              # B-032
+    max_iter = D._e4_count(max_iter, fn, "max_iter"; lo = 0)
+    tol = SimLev.chk_num1(tol, fn, "tol"; lo = 0)
     k = Int(Float64(k isa AbstractVector ? k[1] : k))
-    columns = D._as_names(columns)
     rd = D._dep_returns(data, columns, nothing, frequency)
     X = reduce(hcat, [_fvec(rd[c]) for c in columns])
     Tn, d = size(X)
-    Tn < 50 * k && error("regime_hmm: zu wenige Perioden für die Zustandszahl ($Tn Perioden, mindestens $(50 * k) für k = $k).")
+    Tn < 50 * k && error("regime_hmm: zu wenige Perioden für die Zustandszahl ($Tn Perioden, mindestens $(50 * k)).")
     flat = [columns[j] for j in 1:d if SimLev.r_sd(X[:, j]) == 0]
     isempty(flat) || error("regime_hmm: Spalte(n) $(join(["'$f'" for f in flat], ", ")) ohne Schwankung (alle Periodenrenditen " *
                            "gleich, z. B. konstante Kurse); kein Modell schätzbar.")
@@ -265,7 +289,7 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
     end
     lg = SimLev.RLibm.log
     win = max(4.0, D._r_round(ppy / 12))
-    rs = n_start >= 2 ? SimLev.SLib.main_stream(seed) : nothing   # Hauptstrom, nur bei Zufallsstarts
+    rs = n_start >= 2 ? SimLev.SLib.main_stream(seed, "regime_hmm") : nothing   # Hauptstrom, nur bei Zufallsstarts
     inits = Any[]
     for s in 1:Int(n_start)
         if s == 1
@@ -344,12 +368,12 @@ function _plot_hmm(x; data = nothing, width = 900, height = 380)   # data: wie R
     k = Int(x["k"])
     top = _fmat(x["filtered"])[:, k]
     data = SimLev.RList("filtered" => SimLev.RFrame("date" => collect(Date, x["dates"]), "probability" => top))
-    p = _grid_svg(["p"], _ -> ((c, box) -> _grid_lines!(c, box, [(D._days(x["dates"]), top, "#B5562B", "P(Z$k | bis t)")];
+    svg = _grid_svg(["p"], _ -> ((c, box) -> _grid_lines!(c, box, [(D._days(x["dates"]), top, "#B5562B", "P(Z$k | bis t)")];
                                                        ylim = (0.0, 1.0), hline = [(0.5, "grey")], dates = true,
                                                        ylabel = "P(Z$k | bis t)",
                                                        title = "Gefilterte Wahrscheinlichkeit des unruhigsten Zustands (Z$k)"));
                 width = width, height = height)
-    return (p.svg, data)
+    return (svg, data)
 end
 
 """
@@ -371,8 +395,10 @@ Zukunftsinformation und kann als Signal oder Bedingung dienen.
   `"probability"` (Wahrscheinlichkeit von `state_prob` als Anteil; nicht mit `type = "viterbi"`).
 - `state_prob`: Zustandsnummer (1 bis k) für `output = "probability"`; Standard `x["k"]`, der unruhigste
   Zustand.
+  Seit 1.6.4 eine ganze Zahl von 1 bis k.
 - `lag`: Verzögerung in Kalendertagen (Standard 1): Der Wert einer Periode gilt ab Periodenende + `lag` Tage;
   0 = schon am Periodenende.
+  Seit 1.6.4 eine ganze Zahl ≥ 0.
 
 # Rückgabe
 Vektor mit einem Wert je Datum in `dates`: ganze Zahlen (Zustand) bzw. Wahrscheinlichkeiten als Anteil; `NA`
@@ -393,11 +419,16 @@ println(count(isequal(2), s))
 """
 function regime_states(x, dates; type = ("filtered", "smoothed", "viterbi"), output = ("state", "probability"),
                        state_prob = nothing, lag = 1)
-    dates = SimLev.as_rframe(dates)
     D = _D()
     type = D._match_arg(type, ("filtered", "smoothed", "viterbi"))
     output = D._match_arg(output, ("state", "probability"))
+    fn = "regime_states"                                       # seit 1.6.4 vor der Rechnung (K42 E4)
+    SimLev.inherits(x, "SimLevHMM") || SimLev.chk_stop("klasse", fn, "x", "regime_hmm()")
     state_prob === nothing && (state_prob = x["k"])
+    dates isa RFrame && SimLev.chk_cols(dates, ["date"], fn)  # B-054
+    _e4_dates(dates isa RFrame ? dates["date"] : dates, fn)
+    state_prob = SimLev.chk_int1(state_prob, fn, "state_prob"; lo = 1, hi = x["k"])   # B-007
+    lag = SimLev.chk_int1(lag, fn, "lag"; lo = 0)              # B-012
     type != "filtered" && @warn "Geglättete bzw. Viterbi-Zustände nutzen Zukunftsdaten - nur zur Beschreibung verwenden."
     src = D._is_frame(dates) ? D._as_frame(dates)["date"] : dates
     d = D._to_date(src isa AbstractVector ? src : [src], "regime_states: dates")

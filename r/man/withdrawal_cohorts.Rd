@@ -33,12 +33,13 @@ Kosten), z. B. eine Backcast-Reihe. Standard \code{"value"}.}
 Inflation in Prozent p. a. (2 = 2 \% p. a., tagesgenau ueber 365.25 Tage
 je Jahr umgerechnet) oder Zeichenkette = Name einer Preisindex-Spalte
 (CPI-Niveau, z. B. HVPI) bzw. einer Ratenspalte (siehe
-\code{inflation_type}).}
+\code{inflation_type}).
+Eine Zahl muss endlich und > -100 sein. Genannte Spalten (auch \code{price}, \code{cape}, \code{base_rate}) muessen in \code{data} stehen und Zahlen enthalten (kein Text, kein Faktor; eine Spalte nur aus NA gilt als Zahlenspalte).}
 
 \item{years}{Laenge jeder Kohorte in Jahren (Standard 30; intern
-12 x \code{years} Monate). Muss ganze Perioden der \code{frequency}
-ergeben (bei \code{"year"} ganze Jahre, bei \code{"quarter"} z. B. auch
-2.5).}
+12 x \code{years} Monate). Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
+\code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze
+Perioden ergab, z. B. 2.5).}
 
 \item{frequency}{Periodenlaenge der Entnahme-Simulation: \code{"year"}
 (Standard), \code{"quarter"} oder \code{"month"}.}
@@ -50,15 +51,18 @@ Kohorte beginnt einen Monat spaeter) oder \code{"year"} (alle 12 Monate).}
 Datenende hinaus durch Fortsetzung am Datenanfang verlaengern (wie FI Calc,
 Option "loop"), so dass jeder Startzeitpunkt gemaess \code{step} eine
 Kohorte ergibt;
-\code{FALSE}: nur Kohorten, die vollstaendig in den Daten liegen.}
+\code{FALSE}: nur Kohorten, die vollstaendig in den Daten liegen.
+Nur \code{TRUE} oder \code{FALSE}.}
 
 \item{cape}{Optional Name einer Spalte mit CAPE-Werten (fuer die Regel
 \code{"cape"} in \code{\link[=withdrawal_rule]{withdrawal_rule()}}); verwendet wird der Wert zu Beginn
-jeder Periode.}
+jeder Periode.
+Seit 1.6.4 ohne NA: CAPE fuer jeden Tag angeben (vorher fortgeschrieben bzw. als fehlend gerechnet).}
 
 \item{base_rate}{Optional Name einer Spalte mit dem Basiszins in Prozent
 (2.5 = 2,5 \%) fuer die Vorabpauschale (Wert zu Beginn jeder Periode);
-sonst gilt \code{base_rate} aus \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}.}
+sonst gilt \code{base_rate} aus \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}.
+Seit 1.6.4 ohne NA: Basiszins fuer jeden Tag angeben, Jahre ohne Basiszins als 0.}
 
 \item{inflation_type}{Behandlung einer Spalte in \code{inflation}:
 \code{"level"} (Reihe ist ein Preisindex-Niveau; Inflation = Verhaeltnis

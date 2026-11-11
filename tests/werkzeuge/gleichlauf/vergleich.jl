@@ -4,7 +4,8 @@
 # Aufruf:  julia --project=julia tests/werkzeuge/gleichlauf/vergleich.jl [--protokoll P] <datei.jsonl.gz | ordner> ...
 #                [-k muster] [-v] [--lax]
 #
-# Ohne Pfad der Katalog tests/<gruppe>/faelle. Vergleich wie die Tests (tests/lib/faelle.jl), strikt NA ≠ NaN (--lax:
+# Ohne Pfad der Katalog tests/<gruppe>/faelle. Vergleich wie die Tests (tests/lib/faelle.jl, mit der Toleranzstufe aus
+# tests/lib/toleranz.tsv seit 1.6.4), strikt NA ≠ NaN (--lax:
 # NA = NaN bei Engine-Fällen). Ausgabe je Modul "<modul> <ok>/<n> bitgleich" und "Gesamt: <ok>/<n>"; Ende 1 bei
 # einer Abweichung. Die Fälle werden einzeln gelesen und geprüft (seit 1.6.3; bis 1.6.2 alle einer Datei zugleich).
 #

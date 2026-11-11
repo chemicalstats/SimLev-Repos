@@ -27,7 +27,7 @@ Kontextzeilen und ``^``), Fehler des Lexers wie
 ``'\\q' is an unrecognized escape … (<input>:1:4)``.
 
 Werte sind intern Vektoren wie in R (Listen-Unterklassen ``LGL``, ``INT``,
-``NUM``, ``CHR``, ``DAT``; NA als ``None`` bzw. ``NA_REAL``, NULL als leerer
+``NUM``, ``CHR``, ``DAT``; NA als ``None`` bzw. ``NA_REAL`` (``NUM``, ``DAT``), NULL als leerer
 logischer Vektor); alle Operationen elementweise mit Recycling und
 dreiwertiger NA-Logik, Ganzzahlarithmetik mit Überlauf → NA und Warnung,
 Zahlen wie R (``^`` über ``R_POW``, ``%%``/``%/%`` wie ``myfmod``/``myfloor``,
@@ -41,16 +41,16 @@ Ergebnis von :func:`eval_r`: logisch → ``ndarray`` (``object``: ``True``,
 ``False``, ``None``), ganzzahlig → ``int64`` (mit NA: ``float64`` und
 ``NA_REAL``), numerisch → ``float64`` (NA = ``NA_REAL``, NaN = ``nan``),
 Zeichen → ``ndarray`` (``object``, NA = ``None``), Datum →
-``datetime64[D]``.
+``datetime64[D]`` (Bruchteile abgerundet, NA, NaN und ±Inf als NaT).
 """
 from __future__ import annotations
 
 import datetime as _dt
 import inspect
+import itertools as _itertools
 import math
 import struct
 import threading
-import unicodedata
 import warnings
 from collections.abc import Mapping
 
@@ -63,6 +63,8 @@ from . import fmt as _fmt
 from . import libm as _libm
 from . import stats as _stats
 from . import rnum as _rnum
+from . import _wctype as _wct   # glibc-Zeichenklassen (seit 1.6.4, C-026)
+from . import rformat as _rformat   # r_deparse_str (seit 1.6.4, C-089)
 from .linalg import RError   # eine Klasse für RExpr und stats (seit 1.6.3)
 from .rnum import NA_REAL, _bits
 
@@ -92,15 +94,67 @@ class CHR(list):
 
 
 class DAT(list):
-    """Datumsvektor (Tage seit 1970-01-01, ``None`` = NA)."""
+    """Datumsvektor: Tage seit 1970-01-01 als double wie R (auch mit Bruchteilen und ±Inf; NA = ``NA_REAL``, NaN = andere
+    NaN). Seit 1.6.4 (C-003, Entscheidung 97); bis 1.6.3 ganze Tage (``int``, abgerundet) mit ``None`` als NA."""
+
+
+class DIF(list):
+    """Zeitdifferenz in Tagen (schlanke Nachbildung von R's difftime mit units = "days", seit 1.6.4, Entscheidung 105):
+    Ergebnis von Datum - Datum; Werte wie ``NUM``."""
 
 
 def _warn(msg):
     warnings.warn(msg, UserWarning, stacklevel=2)
 
 
+_MAX_LEN = 100000000   # seit 1.6.4 (C-006, Entscheidung 79): höchstens 1e8 Werte je Vektor (wie Entscheidung 16)
+
+
+def _len_error():
+    from .._meldungen import EINGABE
+    _error(EINGABE["sp.rexpr_laenge"] % _MAX_LEN)
+
+
 def _error(msg):
     raise RError(msg)
+
+
+# ── Namen (seit 1.6.4, C-001, Entscheidung 97) ───────────────────────────────────────────────────────────────────────
+# Ein Vektor trägt Namen wie in R als Attribut ``names`` (Liste von str, None = NA); ohne Namen fehlt das Attribut.
+# Namen entstehen in c(), as.Date und quantile und laufen wie in R durch [, Operatoren, Math-Funktionen, is.na & Co.,
+# ifelse, rep, cumsum, nchar, pmin/pmax; as.numeric & Co., [[, Zusammenfassungen und %in% lassen sie fallen. Nach außen
+# (to_python) fallen sie weg. Bis 1.6.3 verwarf c() die Namen, x["b"] ergab NA und x[["b"]] einen Fehler.
+
+def _nm(v):
+    return getattr(v, "names", None)
+
+
+def _setnm(v, nm):
+    """Namen an ein neues Ergebnis hängen (nie an NULL)."""
+    if nm is not None and v is not _NULLV:
+        v.names = list(nm)
+    return v
+
+
+def _strip(v):
+    """Kopie ohne Namen (as.vector-Regel), wenn v Namen trägt."""
+    return type(v)(v) if _nm(v) is not None else v
+
+
+def _cp(cls, r):
+    """``cls(r)`` mit den Namen von r."""
+    return _setnm(cls(r), _nm(r))
+
+
+def _binnames(a, b, n):
+    """Namen eines zweistelligen Operators wie R (arithmetic.c, relop.c, logic.c): die des ersten Operanden mit der
+    Länge des Ergebnisses, sonst die des zweiten."""
+    na, nb = _nm(a), _nm(b)
+    if na is not None and len(a) == n:
+        return na
+    if nb is not None and len(b) == n:
+        return nb
+    return None
 
 
 def _d(b):
@@ -292,15 +346,14 @@ def _isblank_u(c):
 
 
 def _isletter(c):
-    return unicodedata.category(c).startswith("L")
-
-
-def _isalpha_u(c):
-    return _isletter(c)
+    """Anfang eines Namens wie R (glibc iswalpha in C.UTF-8; seit 1.6.4, C-026: auch Buchstabenziffern Nl wie Ⅳ und
+    Ziffern anderer Schriften wie ٣, bis 1.6.3 nur Unicode-Kategorie L*)."""
+    return _wct.iswalpha(c)
 
 
 def _isalnum_u(c):
-    return _isletter(c) or _isdig(c) or (c >= "\x80" and unicodedata.category(c) == "Nd")
+    """Weiteres Zeichen eines Namens wie R (glibc iswalnum in C.UTF-8; seit 1.6.4, C-026)."""
+    return _wct.iswalnum(c)
 
 
 def _skipspace(L):
@@ -337,7 +390,7 @@ def _numeric(L, c, fl, fc):
 
     while True:
         c = _getc(L)
-        if not (_isdig(c) or c in ".eExXL") or c == _EOF:
+        if not (_isdig(c) or c in ".eExXL"):   # _EOF ("\0") ist keins davon
             break
         count += 1
         if c == "L":
@@ -359,7 +412,7 @@ def _numeric(L, c, fl, fc):
                 nd += 1
             if nd == 0:
                 return err()
-            if c in "pP" and c != _EOF:
+            if c in "pP":
                 seenexp = True
                 buf.append(c)
                 c = _getc(L)
@@ -520,6 +573,8 @@ def _string(L, quote, forsym, fl, fc):
                     _lexerr(L, "nul character not allowed")
                 if big and val > 0x10FFFF:
                     _lexerr(L, ("invalid \\U{xxxxxxxx} value %6x" if delim else "invalid \\Uxxxxxxxx value %6x") % val)
+                if 0xD800 <= val <= 0xDFFF:   # seit 1.6.4 wie R (C-089, P11-B3)
+                    L.warns.append("unpaired surrogate Unicode point %x" % val)
                 buf.extend(chr(val).encode("utf-8", "surrogatepass"))
                 use_wcs = True
                 continue
@@ -534,6 +589,8 @@ def _string(L, quote, forsym, fl, fc):
         return Tok("INCOMPLETE_STRING", None, fl, fc)
     s = bytes(buf).decode("utf-8", "surrogateescape")
     if forsym:
+        if s == "":   # seit 1.6.4 wie R install("") beim Zerlegen (C-025)
+            _error("attempt to use zero-length variable name")
         return Tok("SYMBOL", s, fl, fc)
     if use_wcs and oct_or_hex:
         _lexerr(L, "mixing Unicode and octal/hex escapes in a string is not allowed")
@@ -654,7 +711,7 @@ def _token(L):
         return _string(L, c, True, fl, fc)
     if c == "_":
         return T("PLACEHOLDER")
-    if _isalpha_u(c):
+    if _isletter(c):
         return _symbol(L, c, fl, fc)
     if c == "<":
         if _nextchar(L, "="):
@@ -732,9 +789,21 @@ def _ifpop(L):
         L.cstack.pop()
 
 
+# Kontextstapel wie R's gram.y (CONTEXTSTACK_SIZE 50): seit 1.6.4 (C-006) mit R's Grenze und Meldung
+# „contextstack overflow (<input>:Zeile:Spalte)“; bis 1.6.3 ohne Grenze (Python RecursionError, Julia Stapelüberlauf)
+_CONTEXTSTACK_SIZE = 50
+
+
+def _cpush(L, c, k=1):
+    if len(L.cstack) - 1 >= _CONTEXTSTACK_SIZE - (k - 1):
+        _lexerr(L, "contextstack overflow")
+    for _ in range(k):
+        L.cstack.append(c)
+
+
 def _ifpush(L):
     if _ctop(L) in "{[(i":
-        L.cstack.append("i")
+        _cpush(L, "i")
 
 
 _EATS = {"PLUS", "MINUS", "STAR", "SLASH", "CARET", "LT", "LE", "GE", "GT", "EQ", "NE", "OR", "AND", "OR2",
@@ -782,15 +851,14 @@ def _yylex(L):
         elif k in _NOEAT:
             L.eat = False
         elif k == "LBB":
-            L.cstack.append("[")
-            L.cstack.append("[")
+            _cpush(L, "[", 2)
         elif k == "LBRACKET":
-            L.cstack.append("[")
+            _cpush(L, "[")
         elif k == "LBRACE":
-            L.cstack.append("{")
+            _cpush(L, "{")
             L.eat = True
         elif k == "LPAREN":
-            L.cstack.append("(")
+            _cpush(L, "(")
         elif k == "RBRACKET" or k == "RPAREN":
             while _ctop(L) == "i":
                 _ifpop(L)
@@ -835,6 +903,7 @@ class Parser:
     def __init__(self, L):
         self.L = L
         self.la = None
+        self.depth = 0   # Schachtelung von _expr (seit 1.6.4, C-006)
 
 
 def _peek(P):
@@ -872,7 +941,47 @@ _SPECIAL_SYMS = {"if", "while", "repeat", "for", "break", "next", "return", "fun
                  "||", "!", "<-", "<<-", "=", "$", "[", "[[", "$<-", "[<-", "[[<-"}
 
 
+#: höchste Schachtelungstiefe eines Ausdrucks (seit 1.6.4, Entscheidung 75): Tiefe des Syntaxbaums wie R's
+#: Aufrufbaum (jeder Aufruf, auch Operator, Klammer, Index, eine Ebene; Namen und Konstanten 0)
+_MAX_DEPTH = 200
+
+
+def _depth_error():
+    from .._meldungen import EINGABE
+    _error(EINGABE["sp.rexpr_tiefe"] % _MAX_DEPTH)
+
+
+def _tree_depth(e):
+    """Tiefe des Syntaxbaums ohne Rekursion (Aufruf 1 + Tiefe des tiefsten Kinds, auch der Funktion bei callx)."""
+    best = 0
+    stack = [(e, 0)]
+    while stack:
+        x, d = stack.pop()
+        if x.head in ("call", "callx"):
+            d += 1
+            if d > best:
+                best = d
+            if d > _MAX_DEPTH:
+                return d
+            for a in x.args:
+                stack.append((a, d))
+            if x.head == "callx":
+                stack.append((x.val, d))
+    return best
+
+
 def _expr(P, minbp, ctx, first=None):
+    # seit 1.6.4 (C-006): mehr als _MAX_DEPTH + 1 geschachtelte Teilausdrücke ergeben einen Baum tiefer als _MAX_DEPTH
+    P.depth += 1
+    if P.depth > _MAX_DEPTH + 1:
+        _depth_error()
+    try:
+        return _expr0(P, minbp, ctx, first)
+    finally:
+        P.depth -= 1
+
+
+def _expr0(P, minbp, ctx, first=None):
     t0 = _next(P) if first is None else first
     lhs = _primary(P, t0)
     while True:
@@ -905,6 +1014,8 @@ def _expr(P, minbp, ctx, first=None):
                    % (t.line, t.col))
         rctx = "assign" if k == "EQ_ASSIGN" else (ctx if k == "QUESTION" else "expr")
         rbp = bp - 1 if assoc == "right" else bp
+        if k == "EQ_ASSIGN":   # seit 1.6.4 (C-024) wie R's Grammatik: rechts darf '<-' stehen (a = b <- 3)
+            rbp = 4
         r1 = _peek(P)
         rhs = _expr(P, rbp, rctx)
         if k == "LEFT_ASSIGN":
@@ -955,6 +1066,8 @@ def _expect(P, k):
 def _primary(P, t):
     k = t.kind
     if k == "NUM":
+        if isinstance(t.val, str):   # 1i, NA_complex_: seit 1.6.4 in allen drei Sprachen abgelehnt (Entscheidung 64)
+            _error("RExpr: komplexe Zahlen werden nicht unterstützt")
         return Node("const", t.val, line=t.line, col=t.col)
     if k == "STR" or k == "SYMBOL":
         n = _peek(P)
@@ -1009,6 +1122,8 @@ def _primary(P, t):
                 s = _next(P)
                 if s.kind != "SYMBOL":
                     _synerr(P, s)
+                if s.val in formals:   # seit 1.6.4 wie R's CheckFormalArgs (C-024)
+                    _error("repeated formal argument '%s' (<input>:%d:%d)" % (s.val, s.line, s.col))
                 formals.append(s.val)
                 if _peek(P).kind == "EQ_ASSIGN":
                     _next(P)
@@ -1137,6 +1252,8 @@ def _parse_all(s):
         t = _next(P)
         if t.kind not in ("NL", "SEMI"):
             _synerr(P, t)
+        if _tree_depth(e) > _MAX_DEPTH:   # seit 1.6.4 (C-006, Entscheidung 75)
+            _depth_error()
         if _has_placeholder(e):
             _error("invalid use of pipe placeholder (<input>:%d:%d)" % (L.line - 1 if t.kind == "NL" else L.line, L.col))
         exprs.append(e)
@@ -1145,6 +1262,7 @@ def _parse_all(s):
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
+_CACHE_MAX = 1000   # seit 1.6.4 (C-069): höchstens so viele Regeltexte, danach fällt der älteste weg (bis 1.6.3 ohne Grenze)
 
 
 def parse_r(s):
@@ -1153,7 +1271,7 @@ def parse_r(s):
     Mehrere Elemente einer Liste/eines Arrays werden zeilenweise verbunden.
     Syntaxfehler → :class:`RError` (``ValueError``) mit R's Meldung;
     Warnungen des Lexers (z. B. zu ``1.5L``) bei jedem Aufruf. Ergebnisse
-    werden zwischengespeichert.
+    werden zwischengespeichert (seit 1.6.4 höchstens ``_CACHE_MAX`` Texte, C-069).
     """
     if not isinstance(s, str):
         s = "\n".join(str(x) for x in s)
@@ -1162,6 +1280,9 @@ def parse_r(s):
     if hit is None:
         hit = _parse_all(s)
         with _CACHE_LOCK:
+            if s not in _CACHE:
+                while len(_CACHE) >= _CACHE_MAX:
+                    del _CACHE[next(iter(_CACHE))]
             _CACHE[s] = hit
     exprs, warns = hit
     for w in warns:
@@ -1228,13 +1349,17 @@ def _from_seq(v):
     if all(isinstance(x, str) for x in nonna):
         return CHR([None if _nanlike(x) else str(x) for x in v])
     if all(isinstance(x, (_dt.date, np.datetime64, pd.Timestamp)) for x in nonna):
-        return DAT([None if _nanlike(x) else _day_of(x) for x in v])
+        return DAT([NA_REAL if _nanlike(x) else _dayf(_day_of(x)) for x in v])
     return None
+
+
+def _dayf(d):
+    return NA_REAL if d is None else float(d)
 
 
 def from_python(v):
     """Python-Wert → R-Vektor (``None``, wenn der Wert keine Daten sind)."""
-    if isinstance(v, (LGL, INT, NUM, CHR, DAT)):
+    if isinstance(v, (LGL, INT, NUM, CHR, DAT, DIF)):
         return v
     if v is None:
         return _NULLV
@@ -1249,7 +1374,7 @@ def from_python(v):
     if isinstance(v, str):
         return CHR([v])
     if isinstance(v, (_dt.date, np.datetime64, pd.Timestamp)):
-        return DAT([_day_of(v)])
+        return DAT([_dayf(_day_of(v))])
     if isinstance(v, pd.Categorical):
         return CHR([None if _is_na_obj(x) or (isinstance(x, float) and x != x) else str(x)
                     for x in np.asarray(v, dtype=object)])
@@ -1258,6 +1383,10 @@ def from_python(v):
             return from_python(pd.Categorical(v))
         if v.dtype.kind == "M":
             return from_python(np.asarray(v.to_numpy(), dtype="datetime64[ns]").astype("datetime64[D]"))
+        if pd.api.types.is_extension_array_dtype(v.dtype) and v.dtype.kind in "biuf":
+            # seit 1.6.4 (C-027): Nullable-Spalten (Int64, Float64, boolean) mit pd.NA als NA wie R und Julia,
+            # ganzzahlige bleiben ganzzahlig (bis 1.6.3 NaN bzw. Kommazahl)
+            return _from_seq(list(v.to_numpy(dtype=object, na_value=None)))
         if v.dtype.kind in "biuf":
             return from_python(v.to_numpy())
         return from_python(v.to_numpy(dtype=object))
@@ -1279,7 +1408,9 @@ def from_python(v):
             return NUM([_f2na(x) for x in a.tolist()])
         if k == "M":
             d = a.astype("datetime64[D]")
-            return DAT([None if np.isnat(x) else int(x.astype(np.int64)) for x in d])
+            f = d.astype(np.int64).astype(np.float64)   # Tage als double (seit 1.6.4, C-003)
+            f[np.isnat(d)] = NA_REAL
+            return DAT(f.tolist())
         if k in "US":
             return CHR([str(x) for x in a.tolist()])
         if k == "O":
@@ -1300,15 +1431,26 @@ def to_python(v):
         if any(x is None for x in v):
             return np.array([NA_REAL if x is None else float(x) for x in v], dtype=np.float64)
         return np.array(list(v), dtype=np.int64)
-    if isinstance(v, NUM):
+    if isinstance(v, (NUM, DIF)):
         return np.array([math.nan if (x != x and not isna_strict(x)) else x for x in v], dtype=np.float64)
     if isinstance(v, CHR):
         a = np.empty(len(v), dtype=object)
         a[:] = list(v)
         return a
     if isinstance(v, DAT):
-        return np.array([np.datetime64("NaT", "D") if x is None else np.datetime64(int(x), "D") for x in v],
-                        dtype="datetime64[D]")
+        # seit 1.6.4 (C-003): Bruchteile abgerundet; NA, NaN, ±Inf und Beträge über 1e15 Tage als NaT (bis 1.6.3 nur
+        # ganze Tage im Vektor)
+        if all(t is float for t in map(type, v)):
+            # als Feld (seit 1.6.4, C-032; bis dahin je Element): floor exakt, |x| <= 1e15 < 2^53, dieselben Tage
+            f = np.array(v, dtype=np.float64)
+            with np.errstate(invalid="ignore"):
+                ok = np.isfinite(f) & (np.abs(f) <= 1e15)
+            out = np.full(f.shape[0], np.datetime64("NaT", "D"), dtype="datetime64[D]")
+            out[ok] = np.floor(f[ok]).astype(np.int64).astype("datetime64[D]")
+            return out
+        return np.array([np.datetime64(int(math.floor(x)), "D") if (math.isfinite(x) and abs(x) <= 1e15)
+                         else np.datetime64("NaT", "D")
+                         for x in v], dtype="datetime64[D]")
     return v
 
 
@@ -1321,7 +1463,7 @@ def _as_lgl(v):
         return LGL([None if x != x else x != 0 for x in v])
     if isinstance(v, CHR):
         return LGL([_lgl_str(x) for x in v])
-    return LGL([None if x is None else x != 0 for x in v])
+    return LGL([None if x != x else x != 0 for x in v])   # DAT, DIF wie double (seit 1.6.4, C-003)
 
 
 def _lgl_str(x):
@@ -1337,7 +1479,9 @@ def _lgl_str(x):
 def _as_num(v):
     if isinstance(v, NUM):
         return v
-    if isinstance(v, (LGL, INT, DAT)):
+    if isinstance(v, (DAT, DIF)):
+        return NUM(v)   # Tage als double, Bits unverändert (seit 1.6.4, C-003)
+    if isinstance(v, (LGL, INT)):
         return NUM([NA_REAL if x is None else float(x) for x in v])
     bad = False
     out = NUM()
@@ -1389,6 +1533,8 @@ def _as_int(v):
 def _as_chr(v):
     if isinstance(v, CHR):
         return v
+    if isinstance(v, DIF):
+        return _as_chr(NUM(v))
     if isinstance(v, NUM):
         if not v:
             return CHR()
@@ -1401,47 +1547,795 @@ def _as_chr(v):
         return CHR([None if x is None else "%d" % x for x in v])
     if isinstance(v, LGL):
         return CHR([None if x is None else ("TRUE" if x else "FALSE") for x in v])
-    return CHR([None if x is None else _date_str(x) for x in v])
+    return CHR([_date_chr(x) for x in v])
 
 
-def _date_str(d):
-    return _dt.date.fromordinal(d + _EPOCH_ORD).isoformat() if 1 <= d + _EPOCH_ORD <= 3652059 else \
-        _fmt.format_date(np.array([d], dtype="datetime64[D]"))[0]
+def _date_chr(x):
+    """``as.character(<Date>)`` wie R 4.3.3 (as.character.POSIXt über Date2POSIXlt): ``"%d-%02d-%02d"`` mit dem Jahr
+    ohne Auffüllen (``"53-06-19"``, ``"-1-01-01"``, ``"12345-01-01"``), Bruchteile abgerundet; NA bleibt NA, NaN, ±Inf
+    und Jahre außerhalb von int als Zahltext (``"NaN"``, ``"Inf"``, ``"1e+15"``). Seit 1.6.4 (C-003, C-005,
+    Entscheidung 97); bis 1.6.3 ISO-Text mit vierstelligem Jahr."""
+    if x != x and isna_strict(x):
+        return None
+    if math.isfinite(x):
+        y, m, d = _civil_from_days(int(math.floor(x)))
+        if -2147483648 <= y - 1900 <= 2147483647:
+            if y > 2147483647:
+                _error("invalid format '%d'; use format %f, %e, %g or %a for numeric objects")
+            return "%d-%02d-%02d" % (y, m, d)
+    return _as_chr(NUM([x]))[0]
 
 
-def _parse_date1(x):
+def _days_from_civil(y, m, d):
+    """Tage seit 1970-01-01 im proleptischen gregorianischen Kalender (auch Jahr 0)."""
+    y -= m <= 2
+    era = (y if y >= 0 else y - 399) // 400
+    yoe = y - era * 400
+    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
+
+
+def _strptime_ymd(x, sep):
+    """R's strptime(x, "%Y<sep>%m<sep>%d") als Tageszahl oder None (R_strptime: vor jeder Zahl nur ASCII-Leerzeichen
+    überspringen, %Y bis 4, %m/%d bis 2 ASCII-Ziffern, Rest des Textes egal; ungültiger Tag ergibt NA)."""
+    n = len(x)
+
+    def num(i, lo, hi, nd):
+        while i < n and x[i] == " ":
+            i += 1
+        if i >= n or not ("0" <= x[i] <= "9"):
+            return None, i
+        v = k = 0
+        while k < nd and i < n and "0" <= x[i] <= "9":
+            v = v * 10 + ord(x[i]) - 48
+            i += 1
+            k += 1
+        return (v if lo <= v <= hi else None), i
+
+    y, i = num(0, 0, 9999, 4)
+    if y is None or i >= n or x[i] != sep:
+        return None
+    m, i = num(i + 1, 1, 12, 2)
+    if m is None or i >= n or x[i] != sep:
+        return None
+    d, i = num(i + 1, 1, 31, 2)
+    if d is None:
+        return None
+    leap = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+    if d > ((29 if leap else 28) if m == 2 else 30 if m in (4, 6, 9, 11) else 31):
+        return None
+    return _days_from_civil(y, m, d)
+
+
+# ── strptime wie R 4.3.3 (seit 1.6.4, C-002, Entscheidung 97) ────────────────────────────────────────────────────────
+# Übertragung von w_strptime_internal (src/main/Rstrptime.h, Fassung für Mehrbyte-Locales wie C.UTF-8) und der
+# Nachbearbeitung in do_strptime/glibc_fix/validate_tm/POSIXlt2Date (src/main/datetime.c), soweit sie das Datum
+# bestimmt: Namen von Monat und Wochentag englisch (C-Locale), Groß-/Kleinschreibung nur ASCII, Leerraum im Format wie
+# glibc iswspace; fehlen Jahr, Monat oder Tag, gelten die des heutigen Tags (lokale Zeit) wie R; %z verschiebt in UTC.
+
+_WDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+_MON_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+              "November", "December"]
+_MON_YDAY = ((0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365),
+             (0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366))
+_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+_IWSPACE = frozenset("\t\n\x0b\x0c\r              "
+                     " 　")   # glibc iswspace in C.UTF-8
+
+
+def _cdivi(a, b):
+    """Ganzzahldivision wie C (Richtung 0)."""
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b > 0) else -q
+
+
+def _cmodi(a, b):
+    return a - b * _cdivi(a, b)
+
+
+def _isleap(y):
+    return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+
+def _dim(mon, yr):
+    """days_in_month(mon, yr) von datetime.c (yr = Jahr - 1900)."""
+    return 29 if (mon == 1 and _isleap(1900 + yr)) else _MONTH_DAYS[mon]
+
+
+class _TM:
+    __slots__ = ("sec", "min", "hour", "mday", "mon", "year", "wday", "yday")
+
+    def __init__(self):
+        self.sec = self.min = self.hour = 0
+        self.mday = self.mon = self.year = self.wday = self.yday = None   # NA_INTEGER
+
+    def copy(self):
+        t = _TM()
+        for k in _TM.__slots__:
+            setattr(t, k, getattr(self, k))
+        return t
+
+
+def _yv(y):
+    """tm_year mit NA_INTEGER wie C (für Rechnungen, die R auch ohne Jahr ausführt)."""
+    return -2147483648 if y is None else y
+
+
+def _wmatch(name, s, i):
+    """Rwcsncasecmp: name am Anfang von s[i:], ohne Unterschied der Großschreibung (nur ASCII)."""
+    n = len(name)
+    if s[i:i + n].lower() == name.lower() and all(c < "\x80" for c in s[i:i + n]):
+        return i + n
+    return -1
+
+
+def _day_of_the_week(tm):
+    if tm.year is None or tm.mon is None or tm.mday is None:
+        return
+    cy = 1900 + tm.year - (tm.mon < 2)
+    q4 = _cdivi(cy, 4)
+    wday = (-473 + 365 * (tm.year - 70) + q4 - _cdivi(q4, 25) + (1 if _cmodi(q4, 25) < 0 else 0)
+            + _cdivi(_cdivi(q4, 25), 4) + _MON_YDAY[0][tm.mon] + tm.mday - 1)
+    tm.wday = _cmodi(_cmodi(wday, 7) + 7, 7)
+
+
+def _day_of_the_year(tm):
+    if tm.year is None or tm.mon is None or tm.mday is None:
+        return
+    tm.yday = _MON_YDAY[1 if _isleap(1900 + tm.year) else 0][tm.mon] + tm.mday - 1
+
+
+_RE_STRTOD = None
+
+
+def _wcstod(s, i):
+    """wcstod für %OS: (Wert, Ende); ohne Zahl (0.0, i)."""
+    global _RE_STRTOD
     import re
-    m = re.match(r"^(\d{1,4})-(\d{1,2})-(\d{1,2})$", x)
-    if m is None:
-        return None
+    if _RE_STRTOD is None:
+        _RE_STRTOD = re.compile(r"[+-]?(?:0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?"
+                                r"|(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?"
+                                r"|[nN][aA][nN](?:\([0-9A-Za-z_]*\))?)", re.ASCII)
+    j = i
+    while j < len(s) and s[j] in _IWSPACE:
+        j += 1
+    m = _RE_STRTOD.match(s, j)
+    if not m:
+        return 0.0, i
+    t = m.group(0)
     try:
-        return _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).toordinal() - _EPOCH_ORD
-    except ValueError:
-        return None
+        if "x" in t or "X" in t:
+            v = float.fromhex(t if ("p" in t or "P" in t) else t + "p0")
+        elif t.lstrip("+-")[:1] in "nN":
+            v = math.nan
+        else:
+            v = float(t)
+    except (ValueError, OverflowError):
+        v = math.inf
+    return v, m.end()
 
 
-def _as_date(v):
+def _strptime_w(s, i, fmt, tm, st):
+    """w_strptime_internal: Index hinter dem gelesenen Teil von s oder -1 (NULL)."""
+    n, nf = len(s), len(fmt)
+    at = lambda k: s[k] if k < n else "\0"   # noqa: E731
+    have_I = is_pm = 0
+    century = -1
+    want_century = 0
+    have_wday = want_xday = have_yday = have_mon = have_mday = 0
+    have_uweek = have_wweek = 0
+    week_no = 0
+    f = 0
+
+    def num(lo, hi, nd):
+        nonlocal i
+        while at(i) == " ":
+            i += 1
+        if not ("0" <= at(i) <= "9"):
+            return None
+        v = 0
+        while True:
+            v = v * 10 + ord(at(i)) - 48
+            i += 1
+            nd -= 1
+            if not (nd > 0 and "0" <= at(i) <= "9"):
+                break
+        return v if lo <= v <= hi else None
+
+    while f < nf:
+        c = fmt[f]
+        if c in _IWSPACE:
+            while at(i) in _IWSPACE and i < n:
+                i += 1
+            f += 1
+            continue
+        if c != "%":
+            if at(i) != c:
+                return -1
+            i += 1
+            f += 1
+            continue
+        f += 1
+        c = fmt[f] if f < nf else "\0"
+        f += 1
+        if c == "E":
+            c2 = fmt[f] if f < nf else "\0"
+            if c2 not in "cCyYxX" or c2 == "\0":
+                return -1
+            c = c2
+            f += 1
+        if c == "%":
+            if at(i) != "%":
+                return -1
+            i += 1
+        elif c in "aA":
+            k = -1
+            for cnt, nm in enumerate(_WDAY_NAMES):
+                k = _wmatch(nm, s, i)
+                if k >= 0:
+                    break
+            if k < 0:
+                for cnt, nm in enumerate(_WDAY_NAMES):
+                    k = _wmatch(nm[:3], s, i)
+                    if k >= 0:
+                        break
+            if k < 0:
+                return -1
+            i = k
+            tm.wday = cnt
+            have_wday = 1
+        elif c in "bBh":
+            k = -1
+            for cnt, nm in enumerate(_MON_NAMES):
+                k = _wmatch(nm, s, i)
+                if k >= 0:
+                    break
+            if k < 0:
+                for cnt, nm in enumerate(_MON_NAMES):
+                    k = _wmatch(nm[:3], s, i)
+                    if k >= 0:
+                        break
+            if k < 0:
+                return -1
+            i = k
+            tm.mon = cnt
+            want_xday = 1
+        elif c in "cDxFrRTX":
+            sub = {"c": "%a %b %e %H:%M:%S %Y", "D": "%y/%m/%d", "x": "%y/%m/%d", "F": "%Y-%m-%d",
+                   "r": "%I:%M:%S %p", "R": "%H:%M", "T": "%H:%M:%S", "X": "%H:%M:%S"}[c]
+            i = _strptime_w(s, i, sub, tm, st)
+            if i < 0:
+                return -1
+            if c in "DxF":
+                want_xday = 1
+        elif c == "C":
+            v = num(0, 99, 2)
+            if v is None:
+                return -1
+            century = v
+            want_xday = 1
+        elif c in "de":
+            v = num(1, 31, 2)
+            if v is None:
+                return -1
+            tm.mday = v
+            have_mday = want_xday = 1
+        elif c in "kH":
+            v = num(0, 24, 2)
+            if v is None:
+                return -1
+            tm.hour = v
+            have_I = 0
+        elif c in "lI":
+            v = num(1, 12, 2)
+            if v is None:
+                return -1
+            tm.hour = v % 12
+            have_I = 1
+        elif c == "j":
+            v = num(1, 366, 3)
+            if v is None:
+                return -1
+            tm.yday = v - 1
+            have_yday = 1
+        elif c == "m":
+            v = num(1, 12, 2)
+            if v is None:
+                return -1
+            tm.mon = v - 1
+            have_mon = want_xday = 1
+        elif c == "M":
+            v = num(0, 59, 2)
+            if v is None:
+                return -1
+            tm.min = v
+        elif c in "nt":
+            while at(i) in _IWSPACE and i < n:
+                i += 1
+        elif c == "p":
+            k = _wmatch("AM", s, i)
+            if k < 0:
+                k = _wmatch("PM", s, i)
+                if k < 0:
+                    return -1
+                is_pm = 1
+            i = k
+        elif c == "s":
+            if not ("0" <= at(i) <= "9"):
+                return -1
+            secs = 0
+            while "0" <= at(i) <= "9":
+                secs = secs * 10 + ord(at(i)) - 48
+                i += 1
+            import time as _time
+            try:
+                lt = _time.localtime(secs)
+            except (OverflowError, OSError, ValueError):
+                return -1
+            tm.sec, tm.min, tm.hour, tm.mday = lt.tm_sec, lt.tm_min, lt.tm_hour, lt.tm_mday
+            tm.mon, tm.year, tm.wday, tm.yday = lt.tm_mon - 1, lt.tm_year - 1900, (lt.tm_wday + 1) % 7, lt.tm_yday - 1
+        elif c == "S":
+            v = num(0, 61, 2)
+            if v is None:
+                return -1
+            tm.sec = v
+        elif c == "u":
+            v = num(1, 7, 1)
+            if v is None:
+                return -1
+            tm.wday = v % 7
+            have_wday = 1
+        elif c == "g":
+            if num(0, 99, 2) is None:
+                return -1
+        elif c == "G":
+            if not ("0" <= at(i) <= "9"):
+                return -1
+            while "0" <= at(i) <= "9":
+                i += 1
+        elif c in "UW":
+            v = num(0, 53, 2)
+            if v is None:
+                return -1
+            week_no = v
+            if c == "U":
+                have_uweek = 1
+            else:
+                have_wweek = 1
+        elif c == "V":
+            if num(0, 53, 2) is None:
+                return -1
+        elif c == "w":
+            v = num(0, 6, 1)
+            if v is None:
+                return -1
+            tm.wday = v
+            have_wday = 1
+        elif c == "y":
+            v = num(0, 99, 2)
+            if v is None:
+                return -1
+            tm.year = v if v >= 69 else v + 100
+            want_century = want_xday = 1
+        elif c == "Y":
+            v = num(0, 9999, 4)
+            if v is None:
+                return -1
+            tm.year = v - 1900
+            want_century = 0
+            want_xday = 1
+        elif c == "z":
+            while at(i) == " ":
+                i += 1
+            if at(i) not in "+-" or at(i) == "\0":
+                return -1
+            neg = at(i) == "-"
+            i += 1
+            k = v = 0
+            while k < 4 and "0" <= at(i) <= "9":
+                v = v * 10 + ord(at(i)) - 48
+                i += 1
+                k += 1
+            if k != 4 or v % 100 >= 60:
+                return -1
+            v = (v // 100) * 100 + ((v % 100) * 50) // 30
+            if v > 1400:
+                _warn("values for %z outside +/-1400 are an error")
+                return -1
+            off = (v * 3600) // 100
+            st[1] = -off if neg else off
+        elif c == "Z":
+            _error("use of %Z for input is not supported")
+        elif c == "O":
+            c2 = fmt[f] if f < nf else "\0"
+            f += 1
+            if c2 in "de" and c2 != "\0":
+                v = num(1, 31, 2)
+                if v is None:
+                    return -1
+                tm.mday = v
+                have_mday = want_xday = 1
+            elif c2 == "H":
+                v = num(0, 23, 2)
+                if v is None:
+                    return -1
+                tm.hour = v
+                have_I = 0
+            elif c2 == "I":
+                v = num(1, 12, 2)
+                if v is None:
+                    return -1
+                tm.hour = v % 12
+                have_I = 1
+            elif c2 == "m":
+                v = num(1, 12, 2)
+                if v is None:
+                    return -1
+                tm.mon = v - 1
+                have_mon = want_xday = 1
+            elif c2 == "M":
+                v = num(0, 59, 2)
+                if v is None:
+                    return -1
+                tm.min = v
+            elif c2 == "S":
+                sv, e = _wcstod(s, i)
+                if 0.0 <= sv <= 61.0:
+                    tm.sec = int(sv)
+                    st[0] = sv
+                i = e
+            elif c2 in "UW" and c2 != "\0":
+                v = num(0, 53, 2)
+                if v is None:
+                    return -1
+                week_no = v
+                if c2 == "U":
+                    have_uweek = 1
+                else:
+                    have_wweek = 1
+            elif c2 == "V":
+                if num(0, 53, 2) is None:
+                    return -1
+            elif c2 == "w":
+                v = num(0, 6, 1)
+                if v is None:
+                    return -1
+                tm.wday = v
+                have_wday = 1
+            elif c2 == "y":
+                v = num(0, 99, 2)
+                if v is None:
+                    return -1
+                tm.year = v if v >= 69 else v + 100
+                want_xday = 1
+            else:
+                return -1
+        else:
+            return -1
+
+    if have_I and is_pm:
+        tm.hour += 12
+    if century != -1:
+        tm.year = (tm.year % 100 + (century - 19) * 100) if want_century else (century - 19) * 100
+    if want_xday and not have_wday:
+        if not (have_mon and have_mday) and have_yday:
+            yr = 1900 + _yv(tm.year)
+            lp = 1 if _isleap(yr) else 0
+            if tm.yday > (365 if lp else 364):
+                _warn("day-of-year %d in year %d is invalid\n" % (tm.yday + 1, yr))
+                t_mon = 12
+            else:
+                t_mon = 0
+                while _MON_YDAY[lp][t_mon] <= tm.yday:
+                    t_mon += 1
+            if not have_mon:
+                tm.mon = t_mon - 1
+            if not have_mday:
+                tm.mday = tm.yday - _MON_YDAY[lp][t_mon - 1] + 1
+        _day_of_the_week(tm)
+    if want_xday and not have_yday:
+        _day_of_the_year(tm)
+    if (have_uweek or have_wweek) and have_wday:
+        save_wday, save_mday, save_mon = tm.wday, tm.mday, tm.mon
+        w_offset = 0 if have_uweek else 1
+        tm.mday = 1
+        tm.mon = 0
+        _day_of_the_week(tm)
+        if have_mday:
+            tm.mday = save_mday
+        if have_mon:
+            tm.mon = save_mon
+        if not have_yday:
+            tm.yday = (_cmodi(7 - (tm.wday - w_offset), 7) + (week_no - 1) * 7 + save_wday - w_offset)
+            if tm.yday < 0:
+                tm.yday += 7
+        if not have_mday or not have_mon:
+            yr = 1900 + _yv(tm.year)
+            lp = 1 if _isleap(yr) else 0
+            if tm.yday > (365 if lp else 364):
+                _warn("(0-based) yday %d in year %d is invalid\n" % (tm.yday, yr))
+                t_mon = 12
+            else:
+                t_mon = 0
+                while _MON_YDAY[lp][t_mon] <= tm.yday:
+                    t_mon += 1
+            if not have_mon:
+                tm.mon = t_mon - 1
+            if not have_mday:
+                tm.mday = tm.yday - _MON_YDAY[lp][t_mon - 1] + 1
+        tm.wday = save_wday
+    return i
+
+
+def _validate_tm(tm):
+    """validate_tm von datetime.c: 0 gültig, -1 ungültig, > 0 Zahl der Korrekturen (tm wird angepasst)."""
+    res = 0
+    if tm.sec < 0 or tm.sec > 60:
+        res += 1
+        tmp = _cdivi(tm.sec, 60)
+        tm.sec -= 60 * tmp
+        tm.min += tmp
+        if tm.sec < 0:
+            tm.sec += 60
+            tm.min -= 1
+    if tm.min < 0 or tm.min > 59:
+        res += 1
+        tmp = _cdivi(tm.min, 60)
+        tm.min -= 60 * tmp
+        tm.hour += tmp
+        if tm.min < 0:
+            tm.min += 60
+            tm.hour -= 1
+    if tm.hour == 24 and tm.min == 0 and tm.sec == 0:
+        tm.hour = 0
+        tm.mday += 1
+        if 0 <= tm.mon <= 11 and tm.mday > _dim(tm.mon, tm.year):
+            tm.mon += 1
+            tm.mday = 1
+            if tm.mon == 12:
+                tm.year += 1
+                tm.mon = 0
+    elif tm.hour < 0 or tm.hour > 23:
+        res += 1
+        tmp = _cdivi(tm.hour, 24)
+        tm.hour -= 24 * tmp
+        tm.mday += tmp
+        if tm.hour < 0:
+            tm.hour += 24
+            tm.mday -= 1
+    if tm.mon < 0 or tm.mon > 11:
+        res += 1
+        tmp = _cdivi(tm.mon, 12)
+        tm.mon -= 12 * tmp
+        tm.year += tmp
+        if tm.mon < 0:
+            tm.mon += 12
+            tm.year -= 1
+    if tm.mday < -1000000 or tm.mday > 1000000:
+        return -1
+    if abs(tm.mday) > 366:
+        res += 1
+        while tm.mon > 0:
+            tm.mon -= 1
+            tm.mday += _dim(tm.mon, tm.year)
+        while tm.mday < 1:
+            tm.year -= 1
+            tm.mday += 366 if _isleap(1900 + tm.year) else 365
+        while True:
+            tmp = 366 if _isleap(1900 + tm.year) else 365
+            if tm.mday <= tmp:
+                break
+            tm.mday -= tmp
+            tm.year += 1
+    while tm.mday < 1:
+        res += 1
+        tm.mon -= 1
+        if tm.mon < 0:
+            tm.mon += 12
+            tm.year -= 1
+        tm.mday += _dim(tm.mon, tm.year)
+    while True:
+        tmp = _dim(tm.mon, tm.year)
+        if tm.mday <= tmp:
+            break
+        res += 1
+        tm.mon += 1
+        if tm.mon > 11:
+            tm.mon -= 12
+            tm.year += 1
+        tm.mday -= tmp
+    return res
+
+
+def _glibc_fix(tm):
+    """glibc_fix von datetime.c: fehlendes Jahr, fehlender Monat oder Tag aus dem heutigen Datum (lokale Zeit); False,
+    wenn nur der Tag fehlt."""
+    import time as _time
+    lt = _time.localtime()
+    if tm.year is None:
+        tm.year = lt.tm_year - 1900
+    if tm.mon is not None and tm.mday is not None:
+        return True
+    if tm.yday is not None:
+        yday, mon = tm.yday, 0
+        while True:
+            if mon > 11:   # in R über das Monatsende hinaus (undefiniert); hier ungültig
+                return False
+            tmp = _dim(mon, tm.year)
+            if yday < tmp:
+                break
+            yday -= tmp
+            mon += 1
+        tm.mon = mon
+        tm.mday = yday + 1
+        return True
+    if tm.mday is None:
+        if tm.mon is not None:
+            return False
+        tm.mday = lt.tm_mday
+    if tm.mon is None:
+        tm.mon = lt.tm_mon - 1
+    return True
+
+
+def _strptime1(x, fmt, utc=True):
+    """Ein Element von as.Date(strptime(x, fmt, tz)): Tage seit 1970-01-01 (float) oder NA_REAL; ``utc`` für tz = "GMT"
+    (mit format), sonst wie R die Systemzeitzone (tryFormats; nur für %z wirksam, Entscheidung 108)."""
+    if x is None or fmt is None:
+        return NA_REAL
+    if len(x) > 1000:
+        _error("input string is too long")
+    if len(fmt) > 1000:
+        _error("format string is too long")
+    tm = _TM()
+    st = [0.0, None]   # psecs, offset
+    if _strptime_w(x, 0, fmt, tm, st) < 0:
+        return NA_REAL
+    if tm.mday == 0:
+        tm.mday = None
+    if tm.mon is None or tm.mday is None or tm.year is None:
+        if not _glibc_fix(tm):
+            return NA_REAL
+    ptm = tm
+    if st[1] is not None:
+        tm2 = tm.copy()
+        if _validate_tm(tm2) < 0:
+            return NA_REAL
+        t0 = (tm2.sec + tm2.min * 60 + tm2.hour * 3600
+              + _days_from_civil(1900 + tm2.year, tm2.mon + 1, tm2.mday) * 86400)
+        if t0 == -1:
+            return NA_REAL
+        t0 -= st[1]
+        ptm = _TM()
+        if utc:
+            y, m, d = _civil_from_days(t0 // 86400)
+        else:   # localtime0(&t0, 1): Systemzeitzone (TZ wie in R)
+            import time as _time
+            try:
+                lt = _time.localtime(t0)
+            except (OverflowError, OSError, ValueError):
+                return NA_REAL
+            y, m, d = lt.tm_year, lt.tm_mon, lt.tm_mday
+        ptm.year, ptm.mon, ptm.mday = y - 1900, m - 1, d
+    if _validate_tm(tm) != 0:
+        return NA_REAL
+    if ptm is tm:
+        if _validate_tm(tm) < 0:
+            return NA_REAL
+    return float(_days_from_civil(1900 + ptm.year, ptm.mon + 1, ptm.mday))
+
+
+def _strptime_vec(xs, fmts, utc=True):
+    """as.Date(strptime(x, format)) mit Recycling wie do_strptime (Länge max(n, m), 0 bei n = 0)."""
+    n, m = len(xs), len(fmts)
+    if m == 0:
+        _error("invalid 'format' argument")
+    N = 0 if n == 0 else max(n, m)
+    return [_strptime1(xs[i % n], fmts[i % m], utc) for i in range(N)]
+
+
+def _strptime_secs(x, fmt):
+    """Sekunden von strptime(x, fmt) (lokal, fehlendes Datum heute) seit Mitternacht des heutigen Tags, für
+    as.difftime(x, format) gegen strptime("0:0:0", format); NA_REAL, wenn x nicht passt."""
+    if x is None:
+        return NA_REAL
+    tm = _TM()
+    if _strptime_w(x, 0, fmt, tm, [0.0, None]) < 0:
+        return NA_REAL
+    if tm.mon is None or tm.mday is None or tm.year is None:
+        if not _glibc_fix(tm):
+            return NA_REAL
+    if _validate_tm(tm) != 0:
+        return NA_REAL
+    t0 = _TM()
+    _glibc_fix(t0)
+    return float((_days_from_civil(1900 + tm.year, tm.mon + 1, tm.mday) - _days_from_civil(1900 + t0.year, t0.mon + 1,
+                                                                                            t0.mday)) * 86400
+                 + tm.hour * 3600 + tm.min * 60 + tm.sec)
+
+
+def _civil_from_days(z):
+    """Tage seit 1970-01-01 (ganze Zahl) → (Jahr, Monat, Tag), proleptisch gregorianisch."""
+    z += 719468
+    era = z // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    y = yoe + era * 400
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    d = doy - (153 * mp + 2) // 5 + 1
+    m = mp + 3 if mp < 10 else mp - 9
+    return y + (m <= 2), m, d
+
+
+_MISSING = object()
+
+
+def _ymd_fast(x, sep):
+    """``_strptime_ymd`` als Tag (float) oder NA_REAL, mit R's Längengrenze für den Text."""
+    if len(x) > 1000:
+        _error("input string is too long")
+    t = _strptime_ymd(x, sep)
+    return NA_REAL if t is None else float(t)
+
+
+def _fmt_list(f):
+    """Formatangabe für strptime: nur Text (NA wird wie in R als "NA" gelesen), sonst Fehler wie do_strptime."""
+    if not isinstance(f, CHR) or len(f) == 0:
+        _error("invalid 'format' argument")
+    return ["NA" if t is None else t for t in f]
+
+
+def _as_date_chr(v, fmt=_MISSING, try_formats=None, optional=None):
+    """as.Date.character wie R 4.3.3: mit ``format`` strptime je Element (Recycling), sonst charToDate: "" ist NA, das
+    erste Element ungleich NA bestimmt das Format aus ``try_formats`` (Standard "%Y-%m-%d", "%Y/%m/%d"), alle werden
+    damit gelesen; passt keines, Fehler oder mit ``optional = TRUE`` NA. Seit 1.6.4 mit format, tryFormats und optional
+    (C-002, Entscheidung 97; bis 1.6.3 nur die beiden Standardformate)."""
+    if fmt is not _MISSING:
+        return DAT(_strptime_vec(list(v), _fmt_list(fmt)))
+    xs = [None if (x is None or x == "") else x for x in v]
+    first = next((x for x in xs if x is not None), None)
+    if first is None:
+        return DAT([NA_REAL] * len(xs))
+    tf = CHR(["%Y-%m-%d", "%Y/%m/%d"]) if try_formats is None else try_formats
+    for ff in tf:
+        f1 = _fmt_list(_like(tf, [ff]))[0]
+        if f1 in ("%Y-%m-%d", "%Y/%m/%d"):   # schneller Weg, gleich strptime für diese Formate (C-021)
+            sep = f1[2]
+            t = _ymd_fast(first, sep)
+            if t == t:
+                return DAT([NA_REAL if x is None else _ymd_fast(x, sep) for x in xs])
+        elif _strptime1(first, f1) == _strptime1(first, f1):
+            return DAT(_strptime_vec(xs, [f1], utc=False))   # strptime(x, ff) ohne tz: Systemzeitzone
+    if optional is not None and _cond1(optional):
+        return DAT([NA_REAL] * len(xs))
+    _error("character string is not in a standard unambiguous format")
+
+
+def _as_date(v, what="x"):
+    """as.Date(v) wie R (Methode nach der Klasse): Datum bleibt, Text über as.Date.character, Zahlen unverändert als
+    Tage (seit 1.6.4 ohne Abrunden, C-003), logisch nur aus lauter NA (sonst der Fehler von as.Date.default mit
+    ``what`` als Ausdruck)."""
     if isinstance(v, DAT):
         return v
     if isinstance(v, CHR):
-        out = DAT()
-        for x in v:
-            if x is None:
-                out.append(None)
-                continue
-            d = _parse_date1(x.strip())
-            if d is None:
-                d = _parse_date1(x.strip().replace("/", "-"))
-                if d is None:
-                    _error("character string is not in a standard unambiguous format")
-            out.append(d)
-        return out
-    n = _as_num(v)
-    return DAT([None if x != x else int(math.floor(x)) for x in n])
+        return _as_date_chr(v)
+    if isinstance(v, LGL):
+        if any(x is not None for x in v):
+            _error("do not know how to convert '%s' to class \u201cDate\u201d" % what)
+        return DAT([NA_REAL] * len(v))
+    if isinstance(v, DIF):
+        _error("do not know how to convert '%s' to class \u201cDate\u201d" % what)
+    return DAT(_as_num(v))
+
+
+def _undate(v):
+    """unclass(<Date>), unclass(<difftime>): Tage als double mit den Namen (andere Vektoren unverändert)."""
+    return _cp(NUM, v) if isinstance(v, (DAT, DIF)) else v
 
 
 def _na_of(v):
-    return NA_REAL if isinstance(v, NUM) else None
+    return NA_REAL if isinstance(v, (NUM, DAT, DIF)) else None
 
 
 def _isna_el(x):
@@ -1469,15 +2363,59 @@ def _coerce(v, t):
 
 
 def _rclass(v):
-    return {LGL: "logical", INT: "integer", NUM: "numeric", CHR: "character", DAT: "Date"}[type(v)]
+    return {LGL: "logical", INT: "integer", NUM: "numeric", CHR: "character", DAT: "Date", DIF: "difftime"}[type(v)]
 
 
 def _rtypeof(v):
-    return {LGL: "logical", INT: "integer", NUM: "double", CHR: "character", DAT: "double"}[type(v)]
+    return {LGL: "logical", INT: "integer", NUM: "double", CHR: "character", DAT: "double", DIF: "double"}[type(v)]
 
 
 def _like(v, items):
     return type(v)(items)
+
+
+# seit 1.6.4 (C-006, Entscheidung 111): rep und die Konstruktoren füllen den Ergebnisvektor direkt, ohne zweite Liste
+# (bis dahin Liste und Kopie in die Klasse, also doppelter Speicher an der Spitze); dieselben Elemente
+def _rep_inplace(r, n):
+    r *= n
+    return r
+
+
+def _like_iter(v, it):
+    r = type(v)()
+    r.extend(it)
+    return r
+
+
+_REP_BLOCK = 1024     # Quellwerte je Teilliste
+_REP_TEIL = 65536     # höchstens so viele Werte je Teilliste, darüber itertools.repeat
+
+
+def _rep_each(x, k, each):
+    """x[0 … k-1], jeder Wert ``each``-mal hintereinander, als neuer Vektor vom Typ von x (ohne Namen); Teillisten
+    höchstens ``_REP_TEIL`` Werte (seit 1.6.4, Entscheidung 111)."""
+    r = type(x)()
+    if each <= 0 or k <= 0:
+        return r
+    if each * _REP_BLOCK <= _REP_TEIL:
+        for s in range(0, k, _REP_BLOCK):
+            r.extend([x[i] for i in range(s, min(k, s + _REP_BLOCK)) for _ in range(each)])
+    else:
+        r.extend(_itertools.chain.from_iterable(_itertools.repeat(x[i], each) for i in range(k)))
+    return r
+
+
+def _rep_counts(x, tn):
+    """x[i] je ``tn[i]``-mal hintereinander (tn ganze Zahlen >= 0, so lang wie x); Teillisten wie bei _rep_each."""
+    r = type(x)()
+    n = len(tn)
+    for s in range(0, n, _REP_BLOCK):
+        e = min(n, s + _REP_BLOCK)
+        if sum(tn[s:e]) <= _REP_TEIL:
+            r.extend([x[i] for i in range(s, e) for _ in range(tn[i])])
+        else:
+            r.extend(_itertools.chain.from_iterable(_itertools.repeat(x[i], tn[i]) for i in range(s, e)))
+    return r
 
 
 def _rec(v, i):
@@ -1495,10 +2433,7 @@ def _len2(a, b):
 
 
 def _scoll(a, b):
-    f = getattr(_stats, "str_collate", None)
-    if f is not None:
-        return f(a, b)
-    return -1 if a < b else (1 if a > b else 0)
+    return _stats.str_collate(a, b)   # stets vorhanden (stats.py; seit 1.6.4 ohne Rückfall, wie Julia)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1602,13 +2537,83 @@ def _pow(x, y):
             return _nanop(x, x)
         if x == 1.0 or y == 0.0:
             return 1.0
-        return _nanop(x, y)
+        return _nanop(y, x)   # seit 1.6.4 wie R_pow (T4-B2): der NaN von y gewinnt, sonst der von x
+    if x == -math.inf and 18446744073709551616.0 < y < math.inf:
+        # R_pow: (-Inf)^y mit ganzem y ruft myfmod(y, 2), das bei y > 2^64 warnt (seit 1.6.4, T4-R2)
+        _warn("probable complete loss of accuracy in modulus")
     return _base.r_pow(x, y)
 
 
+def _cls(v):
+    return "Date" if isinstance(v, DAT) else "difftime" if isinstance(v, DIF) else None
+
+
+def _ops_method(op, a, b):
+    """Methodenwahl von R's DispatchGroup für Ops mit Date und difftime (seit 1.6.4, Entscheidung 105): "Date",
+    "difftime" oder "internal" (unterschiedliche Methoden: Warnung „Incompatible methods“, dann die eingebaute
+    Rechnung; +.Date und -.Date gehen vor Ops.difftime wie in R)."""
+    ca, cb = _cls(a), _cls(b)
+    if ca == cb or cb is None:
+        return ca
+    if ca is None:
+        return cb
+    meth = lambda c: (("+.Date" if op == "+" else "-.Date" if op == "-" else "Ops.Date") if c == "Date" else  # noqa: E731
+                      ("*.difftime" if op == "*" else "/.difftime" if op == "/" else "Ops.difftime"))
+    lm, rm = meth(ca), meth(cb)
+    if rm == "Ops.difftime" and lm in ("+.Date", "-.Date"):
+        return "Date"
+    if lm == "Ops.difftime" and rm == "+.Date":
+        return "Date"
+    _warn('Incompatible methods ("%s", "%s") for "%s"' % (lm, rm, op))
+    return "internal"
+
+
+def _internal_cls(r, a, b):
+    """Klasse der eingebauten Rechnung wie R_binary: die des ersten Operanden mit der Länge des Ergebnisses."""
+    n = len(r)
+    for v in (a, b):
+        if len(v) == n and _cls(v) is not None:
+            return DAT(r) if isinstance(v, DAT) else DIF(r)
+        if len(v) == n:
+            return r
+    return r
+
+
+def _round0(v):
+    """as.vector(round(<difftime>)) von coerceTimeUnit in +.Date/-.Date (units = "days")."""
+    return NUM([float(_fmt.r_round(x, 0.0)) for x in v])
+
+
+def _difftime_ops(op, a, b):
+    """Ops.difftime, *.difftime und /.difftime (R 4.3.3, units = "days")."""
+    da, db = isinstance(a, DIF), isinstance(b, DIF)
+    if op == "*":
+        if da and db:
+            _error('both arguments of * cannot be "difftime" objects')
+        x, y = (a, b) if da else (b, a)
+        return DIF(_arith("*", _undate(y), _undate(x)))
+    if op == "/":
+        if db:
+            _error('second argument of / cannot be a "difftime" object')
+        return DIF(_arith("/", _undate(a), _undate(b)))
+    if op in ("+", "-"):
+        return DIF(_arith(op, _undate(a), _undate(b)))
+    _error("'%s' not defined for \"difftime\" objects" % op)
+
+
 def _arith(op, a, b):
-    if isinstance(a, DAT) or isinstance(b, DAT):
-        return _date_arith(op, a, b)
+    r = _arith0(op, a, b)
+    return _setnm(r, _binnames(a, b, len(r)))
+
+
+def _arith0(op, a, b):
+    if isinstance(a, (DAT, DIF)) or isinstance(b, (DAT, DIF)):
+        m = _ops_method(op, a, b)
+        if m == "Date":
+            return _date_arith(op, a, b)
+        if m == "difftime":
+            return _difftime_ops(op, a, b)
+        return _internal_cls(_arith(op, _undate(a), _undate(b)), a, b)
     if isinstance(a, CHR) or isinstance(b, CHR):
         _error("non-numeric argument to binary operator")
     isint = isinstance(a, (LGL, INT)) and isinstance(b, (LGL, INT))
@@ -1644,16 +2649,24 @@ def _arith(op, a, b):
 
 
 def _date_arith(op, a, b):
-    if op == "-" and isinstance(a, DAT) and isinstance(b, DAT):
-        return _arith("-", _as_num(a), _as_num(b))
-    if op not in ("+", "-"):
-        _error('%s not defined for "Date" objects' % op)
-    if isinstance(a, DAT) and isinstance(b, DAT):
-        _error('binary + is not defined for "Date" objects')
-    if isinstance(b, DAT) and op == "-":
-        _error('can only subtract from "Date" objects')
-    r = _arith(op, _as_num(a), _as_num(b))
-    return DAT([None if x != x else int(math.floor(x)) for x in r])
+    """``+.Date``, ``-.Date`` und Ops.Date wie R 4.3.3 (seit 1.6.4, C-003/C-004, Entscheidung 97): das Ergebnis ist die
+    Rechnung mit den Tagen als double ohne Abrunden; Text ist wie in R ein Fehler (bis 1.6.3 als Zahl gelesen).
+    Datum - Datum ergibt die Differenz in Tagen als Zahl (R: difftime mit units = "days")."""
+    da, db = isinstance(a, DAT), isinstance(b, DAT)
+    if op == "+":
+        if da and db:
+            _error('binary + is not defined for "Date" objects')
+        # difftime: as.vector(round(x)) (coerceTimeUnit, seit 1.6.4, Entscheidung 105)
+        ua = _round0(a) if isinstance(a, DIF) else _undate(a)
+        ub = _round0(b) if isinstance(b, DIF) else _undate(b)
+        return DAT(_arith("+", ua, ub))
+    if op == "-":
+        if not da:
+            _error('can only subtract from "Date" objects')
+        if db:
+            return DIF(_arith("-", _undate(a), _undate(b)))   # difftime(e1, e2, units = "days")
+        return DAT(_arith("-", _undate(a), _round0(b) if isinstance(b, DIF) else b))
+    _error('%s not defined for "Date" objects' % op)
 
 
 def _cmpres(op, c):
@@ -1671,10 +2684,20 @@ def _cmpres(op, c):
 
 
 def _compare(op, a, b):
-    if isinstance(a, DAT) or isinstance(b, DAT):
-        a = _as_date(a) if isinstance(a, CHR) else a
-        b = _as_date(b) if isinstance(b, CHR) else b
-        return _compare(op, _as_num(a), _as_num(b))
+    r = _compare0(op, a, b)
+    return _setnm(r, _binnames(a, b, len(r)))
+
+
+def _compare0(op, a, b):
+    if isinstance(a, (DAT, DIF)) or isinstance(b, (DAT, DIF)):
+        m = _ops_method(op, a, b)
+        if m == "Date":   # Ops.Date: Text wird Datum
+            a = _as_date(a) if isinstance(a, CHR) else a
+            b = _as_date(b) if isinstance(b, CHR) else b
+        elif m == "difftime" and isinstance(a, DIF) and isinstance(b, DIF):   # coerceTimeUnit: Sekunden
+            a = _arith("*", NUM([86400.0]), _undate(a))
+            b = _arith("*", NUM([86400.0]), _undate(b))
+        return _compare(op, _undate(a), _undate(b))
     n = _len2(a, b)
     r = LGL()
     if isinstance(a, CHR) or isinstance(b, CHR):
@@ -1723,8 +2746,18 @@ def _check_logic(v, op):
 
 
 def _logic(op, a, b):
-    if isinstance(a, DAT) or isinstance(b, DAT):
-        _error('%s not defined for "Date" objects' % op)
+    r = _logic0(op, a, b)
+    return _setnm(r, _binnames(a, b, len(r)))
+
+
+def _logic0(op, a, b):
+    if isinstance(a, (DAT, DIF)) or isinstance(b, (DAT, DIF)):
+        m = _ops_method(op, a, b)
+        if m == "Date":
+            _error('%s not defined for "Date" objects' % op)
+        if m == "difftime":
+            _error("'%s' not defined for \"difftime\" objects" % op)
+        a, b = _undate(a), _undate(b)
     A = _check_logic(a, op)
     B = _check_logic(b, op)
     n = _len2(A, B)
@@ -1740,32 +2773,27 @@ def _logic(op, a, b):
 
 
 def _scalar_lgl(v, op, which="x"):
-    if len(v) > 1:
-        _error("'length = %d' in coercion to 'logical(1)'" % len(v))
+    # seit 1.6.4 (C-089) wie R zuerst der Typ, dann die Länge (bis 1.6.3 bei c("x", "y") || FALSE die Längenmeldung)
     if v is _NULLV or isinstance(v, CHR):
         _error("invalid '%s' type in 'x %s y'" % (which, op))
+    if len(v) > 1:
+        _error("'length = %d' in coercion to 'logical(1)'" % len(v))
     if len(v) == 0:
         return None
     return _as_lgl(v)[0]
 
 
-def _match_eq(x, y):
-    """match(x, table) wie R: NA trifft nur NA, NaN nur NaN, -0 == 0."""
-    if x != x or y != y:
-        return x != x and y != y and isna_strict(x) == isna_strict(y)
-    return x == y
-
-
 def _in(a, b):
-    if isinstance(a, CHR) or isinstance(b, CHR):
+    # seit 1.6.4 wie R match/mtfrm (C-004): ein Datum wird als Text verglichen (as.character), auch gegen Zahlen
+    if isinstance(a, (CHR, DAT, DIF)) or isinstance(b, (CHR, DAT, DIF)):
         A = _as_chr(a)
         B = _as_chr(b)
         st = set(B)
         return LGL([x in st for x in A])
     A = _as_num(a)
     B = _as_num(b)
-    # über eine Menge (seit 1.6.3; bis 1.6.2 _match_eq gegen jedes Element): gleiche Regel wie _match_eq –
-    # NA trifft nur NA, NaN nur NaN, sonst == (-0 == 0)
+    # über eine Menge (seit 1.6.3; bis 1.6.2 _match_eq gegen jedes Element, seit 1.6.4 entfernt): wie match(x, table)
+    # in R – NA trifft nur NA, NaN nur NaN, sonst == (-0 == 0)
     st = {y for y in B if y == y}
     has_na = any(y != y and isna_strict(y) for y in B)
     has_nan = any(y != y and not isna_strict(y) for y in B)
@@ -1791,6 +2819,8 @@ def _colon(a, b):
     r = abs(n2 - n1)
     if r >= 4.503599627370496e15:
         _error("result would be too long a vector")
+    if math.floor(r + 1 + 1.1920928955078125e-07) > _MAX_LEN:   # seit 1.6.4 (C-006, Entscheidung 79)
+        _len_error()
 
     def inr(v):
         return -2147483648.0 < v <= 2147483647.0
@@ -1817,10 +2847,19 @@ def _colon(a, b):
 
 
 def _not(v):
+    r = _not0(v)
+    return r if r is v else _setnm(r, _nm(v))
+
+
+def _not0(v):
+    if isinstance(v, CHR) and len(v) == 0 and v is not _NULLV:   # seit 1.6.4 wie R lunary (C-025): logical(0)
+        return LGL()
     if isinstance(v, CHR) or v is _NULLV:
         _error("invalid argument type")
     if isinstance(v, DAT):
         _error('unary ! not defined for "Date" objects')
+    if isinstance(v, DIF):
+        _error("unary '!' not defined for \"difftime\" objects")
     if isinstance(v, LGL):
         return LGL([None if x is None else not x for x in v])
     if isinstance(v, INT):
@@ -1829,12 +2868,19 @@ def _not(v):
 
 
 def _unary(op, v):
+    r = _unary0(op, v)
+    return r if r is v else _setnm(r, _nm(v))
+
+
+def _unary0(op, v):
     if isinstance(v, CHR) or v is _NULLV:
         _error("invalid argument to unary operator")
     if isinstance(v, DAT):
         if op == "+":
             return v
         _error('unary - is not defined for "Date" objects')
+    if isinstance(v, DIF):   # Ops.difftime einstellig (seit 1.6.4, Entscheidung 105)
+        return v if op == "+" else DIF([-t for t in v])
     if isinstance(v, (LGL, INT)):
         x = _as_int(v)
         return INT([None if t is None else -t for t in x]) if op == "-" else x
@@ -1845,8 +2891,9 @@ def _unary(op, v):
 # Indizierung (subscript.c)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _subscript(s, nx):
-    """Index-Vektor (1-basiert, ``None`` = NA) für x[s] mit length(x) == nx."""
+def _subscript(s, nx, names=None):
+    """Index-Vektor (1-basiert, ``None`` = NA) für x[s] mit length(x) == nx; Text über ``names`` (erster Treffer,
+    "" und NA treffen nie; seit 1.6.4, C-001)."""
     if isinstance(s, LGL):
         ns = len(s)
         if ns == 0:
@@ -1861,7 +2908,13 @@ def _subscript(s, nx):
                 out.append(i + 1)
         return out
     if isinstance(s, CHR):
-        return [None for _ in s]
+        if names is None:
+            return [None for _ in s]
+        pos = {}
+        for i, nm in enumerate(names):
+            if nm is not None and nm != "" and nm not in pos:
+                pos[nm] = i + 1
+        return [None if (t is None or t == "") else pos.get(t) for t in s]
     if isinstance(s, INT):
         neg = False
         isna = False
@@ -1912,13 +2965,21 @@ def _subscript(s, nx):
 
 
 def _index(x, s):
+    if x is _NULLV:   # seit 1.6.4 wie R (C-025): NULL[...] ist NULL (bis 1.6.3 NA je Index)
+        return _NULLV
     nx = len(x)
-    idx = _subscript(s, nx)
+    xn = _nm(x)
+    idx = _subscript(s, nx, xn)
     na = _na_of(x)
-    return _like(x, [na if (i is None or i > nx) else x[i - 1] for i in idx])
+    r = _like(x, [na if (i is None or i > nx) else x[i - 1] for i in idx])
+    if xn is not None:
+        r.names = [None if (i is None or i > nx) else xn[i - 1] for i in idx]
+    return r
 
 
 def _index2(x, s):
+    if x is _NULLV:   # seit 1.6.4 wie R (C-025): NULL[[...]] ist NULL (bis 1.6.3 Fehler)
+        return _NULLV
     ls = len(s)
     if ls > 1:
         _error("attempt to select more than one element in vectorIndex")
@@ -1926,7 +2987,11 @@ def _index2(x, s):
         _error("attempt to select less than one element in get1index")
     nx = len(x)
     indx = -1
-    if isinstance(s, (LGL, INT)):
+    if isinstance(s, CHR):   # seit 1.6.4 über die Namen (genauer Treffer, C-001)
+        xn = _nm(x)
+        if xn is not None and s[0] is not None:
+            indx = next((i for i, nm in enumerate(xn) if nm == s[0]), -1)
+    elif isinstance(s, (LGL, INT)):
         i = None if s[0] is None else int(s[0])
         if i is not None:
             if i > 0:
@@ -1953,6 +3018,8 @@ def _index2(x, s):
                        "attempt to select more than one element in get1index <real>")
     if indx < 0 or indx >= nx:
         _error("subscript out of bounds")
+    if isinstance(x, DIF):   # kein [[.difftime: die Klasse fällt weg wie in R (Entscheidung 105)
+        return NUM([x[indx]])
     return _like(x, [x[indx]])
 
 
@@ -1977,8 +3044,8 @@ def _deparse(e):
             return "NA" if x is None else ("TRUE" if x else "FALSE")
         if isinstance(v, INT):
             return "NA_integer_" if x is None else "%dL" % x
-        if isinstance(v, CHR):
-            return "NA_character_" if x is None else _jl_repr(x)
+        if isinstance(v, CHR):   # seit 1.6.4 wie R deparse (C-089; bis 1.6.3 mit \$ wie Julia, ohne Steuerzeichen)
+            return "NA_character_" if x is None else _rformat.r_deparse_str(x)
         if isinstance(v, NUM):
             if x != x:
                 return "NA_real_" if isna_strict(x) else "NaN"
@@ -2001,25 +3068,6 @@ def _deparse(e):
             return _deparse(e.args[0]) + f + ", ".join(args[1:]) + cl
         return f + "(" + ", ".join(args) + ")"
     return _deparse(e.val) + "(" + ", ".join(args) + ")"
-
-
-def _jl_repr(s):
-    out = ['"']
-    for ch in s:
-        if ch == '"':
-            out.append('\\"')
-        elif ch == "\\":
-            out.append("\\\\")
-        elif ch == "\n":
-            out.append("\\n")
-        elif ch == "\t":
-            out.append("\\t")
-        elif ch == "$":
-            out.append("\\$")
-        else:
-            out.append(ch)
-    out.append('"')
-    return "".join(out)
 
 
 def _bind(fname, args, nms, exprs, formals):
@@ -2074,9 +3122,37 @@ def _missing_arg(nm):
 
 
 def _flag(v, dflt):
+    """``na.rm`` der Primitive (sum, min, max, any, all) wie R ``asLogical``: NA (auch Text ohne Wahrheitswert und
+    Länge 0) gilt als TRUE (seit 1.6.4, C-008; bis 1.6.3 als FALSE)."""
     if v is None:
         return dflt
-    return len(v) >= 1 and _as_lgl(v)[0] is True
+    x = _as_lgl(v)[0] if len(v) >= 1 else None
+    return True if x is None else x
+
+
+def _flag_pminmax(v):
+    """``na.rm`` von pmin/pmax wie R ``do_pmin``: NA ist ein Fehler (seit 1.6.4, C-008)."""
+    if v is None:
+        return False
+    x = _as_lgl(v)[0] if len(v) >= 1 else None
+    if x is None:
+        _error("invalid 'na.rm' value")
+    return x
+
+
+def _flag_istrue(v, dflt):
+    """``na.rm`` von mean wie R ``isTRUE(na.rm)`` (seit 1.6.4, C-008; z. B. 1 oder "TRUE" gelten nicht)."""
+    if v is None:
+        return dflt
+    return isinstance(v, LGL) and len(v) == 1 and v[0] is True
+
+
+def _flag_if(v, dflt):
+    """``na.rm`` von median, quantile, var, sd wie R ``if (na.rm)`` (seit 1.6.4, C-008: NA, Länge != 1 und Text
+    ohne Wahrheitswert sind ein Fehler)."""
+    if v is None:
+        return dflt
+    return bool(_cond1(v))
 
 
 def _nan_warn(x, r):
@@ -2094,10 +3170,32 @@ def _prim1(fname, args, nms):
     return a
 
 
+_DIF_MATH = ("abs", "sign", "floor", "ceiling", "trunc", "round", "signif")
+
+
+def _dif_math(fname, r):
+    """Math.difftime: abs, sign, floor, ceiling, trunc, round, signif behalten die Klasse, sonst Fehler wie R."""
+    if fname not in _DIF_MATH:
+        _error("'%s' not defined for \"difftime\" objects" % fname)
+    return DIF(r)
+
+
+def _date_math(fname):
+    """Math.Date (R 4.3.3): Funktionen der Gruppe Math sind für Datumswerte nicht definiert (seit 1.6.4, C-004; bis 1.6.3
+    "non-numeric argument to mathematical function")."""
+    _error('%s not defined for "Date" objects' % fname)
+
+
 def _math1(fname, f):
     def g(args, nms, ex):
         a = _prim1(fname, args, nms)
-        if isinstance(a, (CHR, DAT)):
+        if isinstance(a, DAT):
+            _date_math(fname)
+        if isinstance(a, DIF):
+            if fname not in _DIF_MATH:
+                _dif_math(fname, None)
+            return DIF(g([NUM(a)], nms, ex))
+        if isinstance(a, CHR) or a is _NULLV:   # NULL seit 1.6.4 wie R (T4-B3; bis dahin numeric(0))
             _error("non-numeric argument to mathematical function")
         x = _as_num(a)
         return _nan_warn(x, NUM([f(v) for v in x]))
@@ -2113,7 +3211,11 @@ def _sqrt(x):
 
 
 def _lm1(fname):
-    f = getattr(_libm, fname)
+    f = _libm._KERN[fname]   # Skalarkern ohne eigene Warnung (seit 1.6.4; RExpr warnt je Ausdruck, C-094)
+    if fname in ("log2", "log10"):
+        # seit 1.6.4 wie R (C-068, Entscheidung 101): log2/log10 laufen in R über math2/logbase, NA ergibt NA_real_,
+        # jedes andere NaN und x < 0 R_NaN (0x7FF8…); bis 1.6.3 NaN unverändert und x < 0 0xFFF8…
+        return lambda x: float(f(x))   # Kern _libm._log2/_log10 mit dieser Regel
 
     def g(x):
         if x != x:
@@ -2125,16 +3227,27 @@ def _lm1(fname):
     return g
 
 
+def _logbase_nan(x, b):
+    """NaN-Regel von R's math2 (arithmetic.c): NA in x oder base ergibt NA_real_, sonst ein NaN R_NaN."""
+    return NA_REAL if (isna_strict(x) or isna_strict(b)) else _R_NAN
+
+
+# seit 1.6.4 wie R (C-031, Entscheidung 100): das Vorzeichen der Null bleibt (C floor/ceil/trunc), z. B. ceiling(-0.5)
+# ist -0; bis 1.6.3 über math.floor/ceil/trunc (int) immer +0
+def _zsign(r, x):
+    return math.copysign(0.0, x) if r == 0 else r
+
+
 def _ffloor_(x):
-    return x if (x != x or math.isinf(x)) else float(math.floor(x))
+    return x if (x != x or math.isinf(x)) else _zsign(float(math.floor(x)), x)
 
 
 def _fceil_(x):
-    return x if (x != x or math.isinf(x)) else float(math.ceil(x))
+    return x if (x != x or math.isinf(x)) else _zsign(float(math.ceil(x)), x)
 
 
 def _ftrunc_(x):
-    return x if (x != x or math.isinf(x)) else float(math.trunc(x))
+    return x if (x != x or math.isinf(x)) else _zsign(float(math.trunc(x)), x)
 
 
 def _fsign_(x):
@@ -2143,9 +3256,52 @@ def _fsign_(x):
     return 1.0 if x > 0 else (-1.0 if x < 0 else 0.0)
 
 
+_TRUNC_UNITS = ["secs", "mins", "hours", "days", "months", "years"]
+
+
+def _f_trunc(args, nms, ex):
+    """trunc wie R: für Zahlen math1, für ein Datum trunc.Date (seit 1.6.4, C-004; bis 1.6.3 Fehler): Einheiten bis "days"
+    über round(x - 0.4999999), "months" und "years" der erste Tag des Monats bzw. Jahres."""
+    if args and isinstance(args[0], DAT) and (not nms or nms[0] in (None, "x")):
+        w, _, _ = _bind("trunc", args, nms, ex, ["x", "units", "..."])
+        x, u = w[0], w[1]
+        unit = "secs"
+        if u is not None:
+            if not isinstance(u, CHR):
+                _error("'arg' must be NULL or a character vector")
+            if list(u) == _TRUNC_UNITS:
+                unit = "secs"
+            elif len(u) != 1:
+                _error("'arg' must be of length 1")
+            else:
+                m = [c for c in _TRUNC_UNITS if u[0] is not None and c.startswith(u[0])]
+                if u[0] in _TRUNC_UNITS:
+                    m = [u[0]]
+                if len(m) != 1 or u[0] == "":
+                    _error("'arg' should be one of " + ", ".join("\u201c%s\u201d" % c for c in _TRUNC_UNITS))
+                unit = m[0]
+        if unit in ("months", "years"):
+            out = []
+            for t in x:
+                if math.isfinite(t):
+                    yy, mm, _ = _civil_from_days(int(math.floor(t)))
+                    out.append(float(_days_from_civil(yy, mm if unit == "months" else 1, 1)))
+                else:
+                    out.append(NA_REAL)
+            return DAT(out)
+        return DAT(_f_round([_arith("-", _undate(x), NUM([0.4999999]))], [None], ex))
+    if args and isinstance(args[0], DIF):   # Math.difftime: trunc(unclass(x), ...)
+        return DIF(_math1("trunc", _ftrunc_)([NUM(args[0])], [None], ex[:1]))
+    return _math1("trunc", _ftrunc_)(args, nms, ex)
+
+
 def _f_abs(args, nms, ex):
     a = _prim1("abs", args, nms)
-    if isinstance(a, (CHR, DAT)):
+    if isinstance(a, DAT):
+        _date_math("abs")
+    if isinstance(a, DIF):
+        return DIF(_f_abs([NUM(a)], nms, ex))
+    if isinstance(a, CHR) or a is _NULLV:   # NULL seit 1.6.4 wie R (T4-B3; bis dahin integer(0))
         _error("non-numeric argument to mathematical function")
     if isinstance(a, (LGL, INT)):
         return INT([None if x is None else abs(x) for x in _as_int(a)])
@@ -2155,8 +3311,8 @@ def _f_abs(args, nms, ex):
 def _log1(x):
     if x != x:
         return x
-    r = float(_libm.log(x))
-    return _DEFAULT_NAN if r != r else r
+    # ohne Warnung der libm (seit 1.6.4, C-094); x < 0 ergibt wie R_log R_NaN (seit 1.6.4, C-068; bis 1.6.3 0xFFF8…)
+    return float(_libm._KERN["log"](float(x)))
 
 
 def _f_log(args, nms, ex):
@@ -2164,22 +3320,37 @@ def _f_log(args, nms, ex):
     x, b = v
     if x is None:
         _missing_arg("x")
-    if isinstance(x, (CHR, DAT)):
+    if isinstance(x, DAT):
+        _date_math("log")
+    if isinstance(x, DIF):
+        _dif_math("log", None)
+    # NULL in x, Text oder NULL als base seit 1.6.4 wie R's math2 (T4-B3; bis dahin numeric(0) bzw. als Zahl gerechnet)
+    if isinstance(x, CHR) or x is _NULLV or (b is not None and (isinstance(b, CHR) or b is _NULLV)):
         _error("non-numeric argument to mathematical function")
     xn = _as_num(x)
     if b is None:
         r = NUM([_log1(t) for t in xn])
     else:
-        bb = _as_num(b)[0]
-        r = NUM([_logb(t, bb) for t in xn])
+        bb = list(_as_num(b))   # seit 1.6.4 wie R: base wird recycelt, Länge 0 ergibt numeric(0) (C-008)
+        if not bb or not xn:
+            return NUM()
+        n = max(len(xn), len(bb))
+        xn = [xn[i % len(xn)] for i in range(n)]
+        bb = [bb[i % len(bb)] for i in range(n)]
+        r = NUM([_logb(xn[i], bb[i]) for i in range(n)])
+        # Warnung wie math2 je Paar nach dem Recycling: nur wenn weder x noch base NaN ist (seit 1.6.4, T4-B4)
+        if any(r[i] != r[i] and xn[i] == xn[i] and bb[i] == bb[i] for i in range(n)):
+            _warn("NaNs produced")
+        return r
     return _nan_warn(xn, r)
 
 
 def _logb(x, b):
-    if x != x:
-        return x
-    r = float(_libm.log(x, b))
-    return _DEFAULT_NAN if r != r else r
+    # seit 1.6.4 wie R math2/logbase (C-068): NaN in x oder base nach _logbase_nan, sonst der Kern (R_log(x)/R_log(base)
+    # mit den NaN-Bits der Division; bis 1.6.3 NaN in x unverändert und jedes NaN-Ergebnis 0xFFF8…)
+    if x != x or b != b:
+        return _logbase_nan(x, b)
+    return float(_libm._logb(float(x), b))   # ohne Warnung der libm (seit 1.6.4, C-094)
 
 
 def _f_round(args, nms, ex, signif=False):
@@ -2187,32 +3358,45 @@ def _f_round(args, nms, ex, signif=False):
     x, d = v
     if x is None:
         _missing_arg("x")
-    if isinstance(x, (CHR, DAT)):
+    if isinstance(x, DIF):
+        return DIF(_f_round([NUM(x)] + list(args[1:]), nms, ex, signif=signif))
+    if isinstance(x, DAT):
+        if signif:
+            _date_math("signif")
+        # round.Date (seit 1.6.4, C-004): .Date(round(unclass(x), digits))
+        return DAT(_f_round([_undate(x), d], [None, "digits"], ex))
+    # seit 1.6.4 wie R's do_Math2/math2 (T4-B3): erst die Länge von digits, dann NULL bzw. Text in x oder digits (bis
+    # dahin numeric(0) bzw. digits als Zahl gerechnet)
+    if d is not None and len(d) == 0:
+        _error("invalid second argument of length 0")
+    if isinstance(x, CHR) or x is _NULLV or isinstance(d, CHR):
         _error("non-numeric argument to mathematical function")
     xn = _as_num(x)
-    dv = (6.0 if signif else 0.0) if d is None else _as_num(d)[0]
-    if signif:
-        return NUM([float(_fmt.signif(t, dv)) for t in xn])
-    return NUM([float(_fmt.r_round(t, dv)) for t in xn])
+    dv = [6.0 if signif else 0.0] if d is None else list(_as_num(d))
+    if not xn:
+        return NUM()
+    n = max(len(xn), len(dv))   # seit 1.6.4 wie R Math2: digits wird recycelt (C-008)
+    f = _fmt.signif if signif else _fmt.r_round
+    return NUM([float(f(xn[i % len(xn)], dv[i % len(dv)])) for i in range(n)])
 
 
 def _f_isna(args, nms, ex):
     v = _prim1("is.na", args, nms)
-    if isinstance(v, NUM):
+    if isinstance(v, (NUM, DAT, DIF)):   # DAT, DIF wie double (seit 1.6.4, C-004)
         return LGL([x != x for x in v])
     return LGL([x is None for x in v])
 
 
 def _f_isnan(args, nms, ex):
     v = _prim1("is.nan", args, nms)
-    if isinstance(v, NUM):
+    if isinstance(v, (NUM, DAT, DIF)):
         return LGL([x != x and not isna_strict(x) for x in v])
     return LGL([False for _ in v])
 
 
 def _f_isfinite(args, nms, ex):
     v = _prim1("is.finite", args, nms)
-    if isinstance(v, NUM):
+    if isinstance(v, (NUM, DAT, DIF)):   # seit 1.6.4 wie R (C-004; bis 1.6.3 für ein Datum immer FALSE)
         return LGL([math.isfinite(x) for x in v])
     if isinstance(v, (LGL, INT)):
         return LGL([x is not None for x in v])
@@ -2221,7 +3405,7 @@ def _f_isfinite(args, nms, ex):
 
 def _f_isinfinite(args, nms, ex):
     v = _prim1("is.infinite", args, nms)
-    if isinstance(v, NUM):
+    if isinstance(v, (NUM, DAT, DIF)):
         return LGL([math.isinf(x) for x in v])
     return LGL([False for _ in v])
 
@@ -2236,27 +3420,31 @@ def _f_ifelse(args, nms, ex):
     kind = 1
     ypos = [i for i in range(len(t)) if t[i] is True]
     npos = [i for i in range(len(t)) if t[i] is False]
+    # seit 1.6.4 (C-025) wie R rep(yes, length.out = len): ein leerer Vektor ergibt NA seines Typs, NULL eine Warnung
+    # und den Fehler von ans[ypos] <- NULL (bis 1.6.3 bei jedem leeren Wert der Fehler)
     if ypos:
         if yes is None:
             _missing_arg("yes")
-        if len(yes) == 0:
+        if yes is _NULLV:
+            _warn("'x' is NULL so the result will be NULL")
             _error("replacement has length zero")
         kind = max(kind, _rtype(yes))
         for i in ypos:
-            ans[i] = (yes, _rec(yes, i))
+            ans[i] = (yes, _rec(yes, i) if len(yes) else _na_of(yes))
     if npos:
         if no is None:
             _missing_arg("no")
-        if len(no) == 0:
+        if no is _NULLV:
+            _warn("'x' is NULL so the result will be NULL")
             _error("replacement has length zero")
         kind = max(kind, _rtype(no))
         for i in npos:
-            ans[i] = (no, _rec(no, i))
+            ans[i] = (no, _rec(no, i) if len(no) else _na_of(no))
 
     def el(a):
         if a is None:
             return None
-        return _coerce(_like(a[0], [a[1]]), kind)[0]
+        return _coerce(_undate(_like(a[0], [a[1]])), kind)[0]   # Datum als Zahl wie R (seit 1.6.4, C-004)
 
     if kind == 4:
         return CHR([el(a) for a in ans])
@@ -2269,25 +3457,133 @@ def _f_ifelse(args, nms, ex):
 
 def _f_pminmax(args, nms, ex, greater):
     narm = False
+    narm_raw = None
     xs = []
     for a, nm in zip(args, nms):
         if nm == "na.rm":
-            narm = _flag(a, False)
+            narm_raw = a
         elif a is not None:
             xs.append(a)
+    if narm_raw is not None and not any(isinstance(x, (DAT, DIF)) for x in xs):
+        narm = _flag_pminmax(narm_raw)
     if not xs:
         _error("no arguments")
-    if any(isinstance(x, (CHR, DAT)) for x in xs):
+    if any(isinstance(x, (DAT, DIF)) for x in xs):
+        return _pminmax_obj(xs, narm_raw, greater)
+    if any(isinstance(x, CHR) for x in xs):
+        # seit 1.6.4 wie R do_pmin für Text (C-008): Vergleich über die Kollation, NA-Regel wie bei Zahlen
+        cs = [_as_chr(x) for x in xs]
+        if any(len(c) == 0 for c in cs):
+            return CHR()
+        n = max(len(c) for c in cs)
+        out = [cs[0][i % len(cs[0])] for i in range(n)]
+        for c in cs[1:]:
+            for i in range(n):
+                a_, b_ = out[i], c[i % len(c)]
+                better = b_ is not None and a_ is not None and (_scoll(b_, a_) > 0 if greater else _scoll(b_, a_) < 0)
+                if (narm and a_ is None) or better or (not narm and b_ is None):
+                    out[i] = b_
+        return _setnm(CHR(out), _nm(xs[0]) if len(xs[0]) == n else None)
+    if any(isinstance(x, CHR) for x in xs):
         _error("invalid input type")
     kind = max(_rtype(x) for x in xs)
     if any(len(x) == 0 for x in xs):
         return NUM() if kind == 3 else INT()
     arrs = [np.array(_as_num(x), dtype=np.float64) for x in xs]
     r = _base.pmax(*arrs, na_rm=narm) if greater else _base.pmin(*arrs, na_rm=narm)
-    r = NUM([float(t) for t in np.atleast_1d(np.asarray(r, dtype=np.float64))])
-    if kind == 3:
-        return r
-    return INT([None if t != t else int(t) for t in r])
+    r = NUM(np.atleast_1d(np.asarray(r, dtype=np.float64)).tolist())   # tolist: dieselben float (seit 1.6.4, C-071)
+    if kind != 3:
+        r = INT([None if t != t else int(t) for t in r])
+    # mostattributes(mmm) <- attributes(elts[[1L]]): Namen des ersten Arguments bei gleicher Länge (seit 1.6.4, C-001)
+    return _setnm(r, _nm(xs[0]) if len(xs[0]) == len(r) else None)
+
+
+def _rep_len(v, n):
+    vn = _nm(v)
+    if not len(v):
+        return _setnm(_like(v, [_na_of(v)] * n), None if vn is None else [None] * n)
+    return _setnm(_like(v, [v[i % len(v)] for i in range(n)]), None if vn is None else [vn[i % len(v)] for i in range(n)])
+
+
+def _isna_vec(v):
+    return [_isna_el(x) for x in v]
+
+
+def _subassign(x, mask, value):
+    """``x[mask] <- value[mask]`` (value gleich lang oder Länge 1) wie R: in ein Datum über ``[<-.Date`` (Wert mit
+    as.Date), sonst über den höheren Typ."""
+    if isinstance(x, DAT):
+        if not any(mask):   # [<-.Date: if(!length(value)) return(x)
+            return x
+        vv = _as_date(value, "value")
+        out = list(x)
+        for i, m in enumerate(mask):
+            if m:
+                out[i] = vv[i % len(vv)]
+        return _setnm(DAT(out), _nm(x))
+    if isinstance(x, DIF):   # [<-.difftime: Werte als Zahl, Klasse bleibt
+        vv = _undate(value)
+        if isinstance(vv, CHR):
+            return _subassign(NUM(x), mask, vv)
+        vv = _as_num(vv)
+        out = list(x)
+        for i, m in enumerate(mask):
+            if m:
+                out[i] = vv[i % len(vv)]
+        return _setnm(DIF(out), _nm(x))
+    vv = _undate(value)
+    t = max(_rtype(x), _rtype(vv))
+    xx = _coerce(x, t)
+    vv = _coerce(vv, t)
+    out = list(xx)
+    for i, m in enumerate(mask):
+        if m:
+            out[i] = vv[i % len(vv)]
+    return _setnm(type(xx)(out), _nm(x))
+
+
+def _pminmax_obj(xs, narm, greater):
+    """pmin/pmax mit einem Datum wie R 4.3.3 (Zweig für Objekte in pmax.R, seit 1.6.4, C-004; bis 1.6.3 Fehler):
+    Recycling mit Warnung „an argument will be fractionally recycled“, Vergleich über Ops.Date (Text wird Datum),
+    Ergebnis mit der Klasse des ersten Arguments."""
+    mmm = xs[0]
+    has_na = False
+    for each in xs[1:]:
+        l1, l2 = len(each), len(mmm)
+        if l2 and (l2 < l1 or not l1):
+            if l1 % l2:
+                _warn("an argument will be fractionally recycled")
+            mmm = _rep_len(mmm, l1)
+        elif l1 and (l1 < l2 or not l2):
+            if l2 % l1:
+                _warn("an argument will be fractionally recycled")
+            each = _rep_len(each, l2)
+        na_m = _isna_vec(mmm)
+        na_e = _isna_vec(each)
+        if has_na or any(na_m) or any(na_e):
+            has_na = True
+            if any(na_m):
+                mmm = _subassign(mmm, na_m, each)
+            if any(na_e):
+                each = _subassign(each, na_e, mmm)
+        ch = _compare("<" if greater else ">", mmm, each)
+        mmm = _subassign(mmm, [c is True for c in ch], each)
+        if has_na:   # if (has.na && !na.rm) mmm[na.m | na.e] <- NA
+            keep_na = _scalar_lgl(_not(LGL([False]) if narm is None else narm), "&&", "y")
+            if keep_na is None:
+                _error("missing value where TRUE/FALSE needed")
+            if keep_na:
+                mmm = _subassign(mmm, [a or b for a, b in zip(na_m, na_e)], LGL([None]))
+        # mostattributes(mmm) <- attributes(elts[[1L]]): Namen nur bei gleicher Länge
+        mmm = _setnm(type(mmm)(mmm), _nm(xs[0]) if len(xs[0]) == len(mmm) else None)
+    return mmm
+
+
+def _dif_summary(vals):
+    """Argumente von Summary.difftime: alle müssen difftime sein (sonst wie R der Fehler des Einheitenvergleichs)."""
+    if not all(isinstance(v, DIF) for v in vals):
+        _error("comparison of these types is not implemented")
+    return [NUM(v) for v in vals]
 
 
 def _summary_args(args, nms):
@@ -2307,10 +3603,13 @@ def _f_anyall(args, nms, ex, isany):
     vals, narm = _summary_args(args, nms)
     res = not isany
     sawna = False
+    # Summary.Date nur, wenn das erste Argument ein Datum ist (R wählt die Methode nach dem ersten; seit 1.6.4, C-004)
+    if vals and isinstance(vals[0], DAT):
+        _error('%s not defined for "Date" objects' % ("any" if isany else "all"))
+    if vals and isinstance(vals[0], DIF):
+        _error("'%s' not defined for \"difftime\" objects" % ("any" if isany else "all"))
     for v in vals:
         if isinstance(v, (CHR, NUM, DAT)):
-            if isinstance(v, DAT):
-                _error('%s not defined for "Date" objects' % ("any" if isany else "all"))
             if len(v):
                 _warn("coercing argument of type '%s' to logical" % _rtypeof(v))
         for x in _as_lgl(v):
@@ -2324,11 +3623,14 @@ def _f_anyall(args, nms, ex, isany):
 
 def _f_sum(args, nms, ex):
     vals, narm = _summary_args(args, nms)
+    if vals and isinstance(vals[0], DAT):   # Summary.Date nach dem ersten Argument (seit 1.6.4, C-004)
+        _error('sum not defined for "Date" objects')
+    if vals and isinstance(vals[0], DIF):   # Summary.difftime (Entscheidung 105)
+        return DIF(_f_sum(_dif_summary(vals) + [LGL([narm])], [None] * len(vals) + ["na.rm"], ex))
+    vals = [_undate(v) for v in vals]
     for v in vals:
         if isinstance(v, CHR):
             _error("invalid 'type' (character) of argument")
-        if isinstance(v, DAT):
-            _error('sum not defined for "Date" objects')
     real = any(isinstance(v, NUM) for v in vals)
     anstype = 3 if real else 2
     icum = 0
@@ -2391,9 +3693,13 @@ def _str_upd(scum, stmp, empty, ismax):
 
 def _f_minmax(args, nms, ex, ismax):
     vals, narm = _summary_args(args, nms)
-    if vals and all(isinstance(v, DAT) for v in vals):
-        r = _f_minmax([_as_num(v) for v in vals] + [LGL([narm])], [None] * len(vals) + ["na.rm"], ex, ismax)
-        return _as_date(r) if isinstance(r, NUM) else r
+    if vals and isinstance(vals[0], DIF):   # Summary.difftime (Entscheidung 105)
+        return DIF(_f_minmax(_dif_summary(vals) + [LGL([narm])], [None] * len(vals) + ["na.rm"], ex, ismax))
+    if vals and isinstance(vals[0], DAT):
+        # Summary.Date (seit 1.6.4, C-004): Methode nach dem ersten Argument, .Date(NextMethod()) über alle Argumente
+        # (bis 1.6.3 nur, wenn alle Argumente Datumswerte waren); mit Text bleibt das Ergebnis Text (R: Datum mit Text)
+        r = _f_minmax([_undate(v) for v in vals] + [LGL([narm])], [None] * len(vals) + ["na.rm"], ex, ismax)
+        return DAT(_as_num(r)) if not isinstance(r, CHR) else r
     anstype = 2
     icum = -_IMAX - 1 if ismax else _IMAX
     icum_na = False
@@ -2401,7 +3707,7 @@ def _f_minmax(args, nms, ex, ismax):
     scum = None
     empty = True
     for v in vals:
-        if isinstance(v, DAT):
+        if isinstance(v, (DAT, DIF)):
             v = _as_num(v)
         if len(v) == 0:
             if isinstance(v, CHR):
@@ -2506,13 +3812,14 @@ def _f_mean(args, nms, ex):
     x = v[0]
     if x is None:
         _missing_arg("x")
-    if isinstance(x, DAT):
-        r = _f_mean([_as_num(x), v[1], v[2]], [None, "trim", "na.rm"], ex)
-        return _as_date(r)
+    if isinstance(x, DIF):   # mean.difftime (Entscheidung 105)
+        return DIF(_f_mean([_as_num(x), v[1], v[2]], [None, "trim", "na.rm"], ex))
+    if isinstance(x, DAT):   # mean.Date: .Date(mean(unclass(x), ...)) (seit 1.6.4 ohne Abrunden, C-003)
+        return DAT(_f_mean([_as_num(x), v[1], v[2]], [None, "trim", "na.rm"], ex))
     if isinstance(x, CHR) or x is _NULLV:
         _warn("argument is not numeric or logical: returning NA")
         return NUM([NA_REAL])
-    narm = _flag(v[2], False)
+    narm = _flag_istrue(v[2], False)
     if v[1] is None:
         trim = 0.0
     elif len(v[1]) == 1 and not isinstance(v[1], CHR):
@@ -2546,10 +3853,11 @@ def _f_median(args, nms, ex):
     x = v[0]
     if x is None:
         _missing_arg("x")
-    narm = _flag(v[1], False)
-    if isinstance(x, DAT):
-        r = _f_median([_as_num(x), v[1]], [None, "na.rm"], ex)
-        return _as_date(r)
+    narm = _flag_if(v[1], False)
+    if x is _NULLV:   # seit 1.6.4 wie R (T4-B3): median(NULL) ist x[NA_integer_], also NULL (bis dahin NA)
+        return _NULLV
+    if isinstance(x, (DAT, DIF)):   # median.default mit Datum bzw. difftime (seit 1.6.4 ohne Abrunden, C-003)
+        return type(x)(_f_median([_as_num(x), v[1]], [None, "na.rm"], ex))
     if narm:
         x = _drop_na(x)
     elif any(_isna_el(t) for t in x):
@@ -2582,11 +3890,13 @@ def _f_var(args, nms, ex):
     x = v[0]
     if x is None:
         _missing_arg("x")
-    if v[1] is not None:
+    narm = _flag_if(v[2], False)
+    if x is _NULLV:   # seit 1.6.4 wie R's C_cov (T4-B3; bis dahin NA), auch mit y (K43 RS)
+        _error("'x' is NULL")
+    # y = NULL ist R's Vorgabe, also wie ohne y (seit 1.6.4, K43 RS, Entscheidung 60; bis dahin „nicht unterstützt“)
+    if v[1] is not None and v[1] is not _NULLV:
         _error("RExpr: var(x, y) wird nicht unterstützt")
-    narm = _flag(v[2], False)
-    if isinstance(x, DAT):
-        _error("is.atomic(x) is not TRUE")
+    # ein Datum wie double (R 4.3.3 var(<Date>); seit 1.6.4, C-004, bis 1.6.3 Fehler "is.atomic(x) is not TRUE")
     return NUM([float(_stats.var(_num_arg(x), na_rm=narm))])
 
 
@@ -2595,7 +3905,7 @@ def _f_sd(args, nms, ex):
     x = v[0]
     if x is None:
         _missing_arg("x")
-    narm = _flag(v[1], False)
+    narm = _flag_if(v[1], False)
     return NUM([float(_stats.sd(_num_arg(x), na_rm=narm))])
 
 
@@ -2605,8 +3915,9 @@ def _f_quantile(args, nms, ex):
     if x is None:
         _missing_arg("x")
     probs = [0.0, 0.25, 0.5, 0.75, 1.0] if v[1] is None else list(_as_num(v[1]))
-    narm = _flag(v[2], False)
-    typ = 7 if v[4] is None else int(_as_num(v[4])[0])
+    narm = _flag_if(v[2], False)
+    # seit 1.6.4 type wie R (C-028): Text, Wahrheitswert, NA, gebrochene Zahl über _stats.quantile_type
+    typ = 7 if v[4] is None else (list(v[4]) if isinstance(v[4], CHR) else [float(t) for t in _as_num(v[4])])
     if isinstance(x, CHR):
         xn = CHR([t for t in x if t is not None]) if narm else x
         if any(t is None for t in xn):
@@ -2615,23 +3926,145 @@ def _f_quantile(args, nms, ex):
     xv = np.array(_as_num(x), dtype=np.float64)
     r = _stats.quantile(xv, np.array(probs, dtype=np.float64), na_rm=narm, names=False, type=typ)
     r = NUM([float(t) for t in np.atleast_1d(np.asarray(r, dtype=np.float64))])
-    return _as_date(r) if isinstance(x, DAT) else r
+    if isinstance(x, DAT):
+        _quantile_date_check(xv, probs, narm, typ)
+        r = DAT(r)
+    elif isinstance(x, DIF):   # *.difftime rechnet; Klasse bleibt (Entscheidung 105)
+        r = DIF(r)
+    # seit 1.6.4 wie R (C-001): names = TRUE gibt die Wahrscheinlichkeiten als Namen ("25%", format_perc)
+    nmv = LGL([True]) if v[3] is None else v[3]
+    use = _scalar_lgl(nmv, "&&")
+    if use is None and len(nmv):
+        _error("missing value where TRUE/FALSE needed")
+    if use and probs:
+        dg = NUM([7.0]) if v[5] is None else v[5]
+        if not isinstance(dg, (NUM, INT, DAT, DIF)) or isinstance(dg, DAT):
+            _error("is.numeric(digits) is not TRUE")
+        if not all(t is not None and t == t and t >= 1 for t in _as_num(dg)):
+            _error("digits >= 1 is not TRUE")
+        r = _setnm(r, _format_perc(probs, _as_num(dg)[0]))
+    return r
+
+
+def _format_perc(probs, digits):
+    """format_perc von R 4.3.3: formatC(100 * p, format = "fg", width = 1, digits) bei weniger als 100 Werten, sonst
+    format(…, trim = TRUE, digits); NA ergibt ""."""
+    x = np.array([100.0 * p for p in probs], dtype=np.float64)
+    if len(probs) < 100:
+        txt = _fmt.formatC(x, format="fg", width=1, digits=int(digits))
+    else:
+        txt = _fmt.format(x, trim=True, digits=int(digits))
+    txt = [txt] if isinstance(txt, str) else list(txt)
+    return ["" if p != p else t + "%" for p, t in zip(probs, txt)]
+
+
+def _quantile_date_check(xv, probs, narm, typ):
+    """quantile.default mit einem Datum (R 4.3.3, seit 1.6.4, C-004): Typ 7 rechnet immer (1 - h) * x, die übrigen
+    Typen nur bei Zwischenwerten; dort meldet Ops.Date "* not defined for \"Date\" objects" (bis 1.6.3 gerechnet)."""
+    t = typ[0] if isinstance(typ, list) and typ else typ
+    try:
+        t = int(float(t))
+    except (TypeError, ValueError):
+        return
+    if t == 7:
+        _error('* not defined for "Date" objects')
+    x = sorted(v for v in xv.tolist() if not (narm and v != v))
+    n = len(x)
+    xp = ([x[0]] * 2 if n else [math.nan] * 2) + x + ([x[-1]] * 2 if n else [math.nan] * 2)
+    fuzz = 4 * 2.220446049250313e-16
+    for p in probs:
+        pok = p == p
+        if t <= 3:
+            nppm = n * p - 0.5 if t == 3 else n * p
+            if not pok:
+                h = math.nan if t == 2 else 1.0
+                j = None
+            else:
+                j = math.floor(nppm)
+                h = ((nppm > j) + 1) / 2 if t == 2 else 0.0
+        else:
+            a, b = {4: (0.0, 1.0), 5: (0.5, 0.5), 6: (0.0, 0.0), 8: (1 / 3, 1 / 3), 9: (3 / 8, 3 / 8)}.get(t, (0.0, 0.0))
+            nppm = a + p * (n + 1 - a - b)
+            j = math.floor(nppm + fuzz) if pok else None
+            h = nppm - j if pok else math.nan
+            if pok and abs(h) < fuzz:
+                h = 0.0
+        if j is None:
+            other = None if (h != h or 0 < h < 1) else False
+        else:
+            j = int(j)
+            lo, hi = xp[j + 1] if 0 <= j + 1 < len(xp) else math.nan, xp[j + 2] if 0 <= j + 2 < len(xp) else math.nan
+            ne = None if (lo != lo or hi != hi) else lo != hi
+            other = False if not (0 < h < 1) else ne
+        if other is None or other:
+            _error('* not defined for "Date" objects')
+
+
+def _c_names(args, nms):
+    """Namen von c() wie R (bind.c NewExtractNames): Argumentname und innere Namen als "a.x", ohne inneren Namen "a1",
+    "a2" (bei Länge 1 "a"); ohne Argumentname die inneren Namen bzw. "". None, wenn nichts benannt ist."""
+    if not any(nm is not None for a, nm in zip(args, nms) if a is not None and len(a)) and \
+            not any(_nm(a) is not None for a in args if a is not None):
+        return None
+    out = []
+    for a, tag in zip(args, nms):
+        if a is None or len(a) == 0:
+            continue
+        inner = _nm(a)
+        m = len(a)
+        for j in range(m):
+            vn = None if inner is None else inner[j]
+            if tag:
+                if vn is not None and vn != "":
+                    out.append(tag + "." + vn)
+                elif inner is not None and vn is None:
+                    out.append(tag + ".NA")
+                else:
+                    out.append(tag if m == 1 else "%s%d" % (tag, j + 1))
+            else:
+                out.append("" if inner is None else vn)
+    return out
 
 
 def _f_c(args, nms, ex):
+    return _setnm(_f_c0(args, nms, ex), _c_names(args, nms))
+
+
+def _f_c0(args, nms, ex):
     vals = [a for a in args if a is not None and not (isinstance(a, LGL) and len(a) == 0)]
     if not vals:
         return _NULLV
-    if isinstance(args[0], DAT):
+    if isinstance(args[0], DAT):   # c.Date: unclass(as.Date(e)) je Argument (seit 1.6.4 ohne Abrunden, C-003)
         out = DAT()
         for a in vals:
-            out.extend(_as_date(a))
+            out.extend(_as_date(a, "e"))
+        return out
+    if isinstance(args[0], DIF):   # c.difftime: as.difftime(e, units = "days") je Argument (Entscheidung 105)
+        out = DIF()
+        for a in vals:
+            out.extend(_as_difftime(a))
         return out
     kind = max(_rtype(v) for v in vals)
     out = []
     for v in vals:
         out.extend(_coerce(_as_num(v) if isinstance(v, DAT) else v, kind))
     return {1: LGL, 2: INT, 3: NUM, 4: CHR}[kind](out)
+
+
+def _as_difftime(v):
+    """as.difftime(v, units = "days") für c.difftime: Zahlen bleiben, Text über strptime(v, "%X") gegen 0:0:0 (wie R,
+    Zeit des Tages als Bruchteil eines Tages), sonst der Fehler von as.difftime."""
+    if isinstance(v, DIF):
+        return v
+    if isinstance(v, (NUM, INT)):
+        return DIF(_as_num(v))
+    if isinstance(v, CHR):
+        out = DIF()
+        for x in v:
+            t = _strptime_secs(x, "%X")
+            out.append(_arith("-", NUM([t]), NUM([0.0]))[0] if t != t else t / 86400.0)
+        return out
+    _error("'tim' is not character or numeric")
 
 
 def _f_length(args, nms, ex):
@@ -2673,38 +4106,65 @@ def _f_nchar(args, nms, ex):
 
 def _f_asnum(args, nms, ex):
     v, _, _ = _bind("as.numeric", args, nms, ex, ["x", "..."])
-    return NUM() if v[0] is None else _as_num(v[0])
+    return NUM() if v[0] is None else _strip(_as_num(v[0]))
 
 
 def _f_asint(args, nms, ex):
     v, _, _ = _bind("as.integer", args, nms, ex, ["x", "..."])
-    return INT() if v[0] is None else _as_int(v[0])
+    return INT() if v[0] is None else _strip(_as_int(v[0]))
 
 
 def _f_aslgl(args, nms, ex):
     v, _, _ = _bind("as.logical", args, nms, ex, ["x", "..."])
-    return LGL() if v[0] is None else _as_lgl(v[0])
+    return LGL() if v[0] is None else _strip(_as_lgl(v[0]))
 
 
 def _f_aschr(args, nms, ex):
     v, _, _ = _bind("as.character", args, nms, ex, ["x", "..."])
-    return CHR() if v[0] is None else _as_chr(v[0])
+    return CHR() if v[0] is None else _strip(_as_chr(v[0]))
 
 
 def _f_asdate(args, nms, ex):
+    """as.Date wie R 4.3.3 mit den Methoden für Text (format, tryFormats, optional), Zahlen (origin) und den Rest (seit
+    1.6.4, C-002, Entscheidung 97; bis 1.6.3 fielen die weiteren Argumente still weg)."""
     v, _, _ = _bind("as.Date", args, nms, ex, ["x", "..."])
     x = v[0]
     if x is None:
         _missing_arg("x")
-    if isinstance(x, (CHR, DAT)):
-        return _as_date(x)
+    if isinstance(x, DAT):
+        return x
+    if isinstance(x, CHR):
+        w, _, _ = _bind("as.Date", args, nms, ex, ["x", "format", "tryFormats", "optional", "..."])
+        r = _as_date_chr(x, _MISSING if w[1] is None else w[1], w[2], w[3])
+        xn = _nm(x)   # strptime behält die Namen, bei längerem format wiederholt (seit 1.6.4, C-001)
+        return _setnm(r, None if xn is None or not len(x) else [xn[i % len(x)] for i in range(len(r))])
+    if isinstance(x, (NUM, INT)):
+        # as.Date.numeric(x, origin, ...): ohne origin .Date(x), sonst as.Date(origin, ...) + x
+        idx = [None if a is None else INT([i]) for i, a in enumerate(args)]
+        w, rest, _ = _bind("as.Date", idx, nms, ex, ["x", "origin", "..."])
+        if w[1] is None:
+            return _setnm(DAT(_as_num(x)), _nm(x))
+        ri = [t[0] for t in rest]
+        o = _f_asdate([args[w[1][0]]] + [args[i] for i in ri], [None] + [nms[i] for i in ri],
+                      [Node("sym", "origin")] + [ex[i] for i in ri])
+        return _arith("+", o, x)
+    # as.Date.default: logisch nur aus lauter NA, NULL ergibt ein leeres Datum
     if isinstance(x, LGL) and all(t is None for t in x):
-        return DAT([None for _ in x])
-    return _as_date(_as_num(x))
+        return DAT([NA_REAL] * len(x))
+    i = next((k for k, nm in enumerate(nms) if nm == "x"), None)
+    if i is None:
+        i = next((k for k, nm in enumerate(nms) if nm is None), 0)
+    _error("do not know how to convert '%s' to class \u201cDate\u201d" % _deparse(ex[i]))
 
 
 def _f_cumsum(args, nms, ex):
     x = _prim1("cumsum", args, nms)
+    if isinstance(x, DAT):
+        _date_math("cumsum")
+    if isinstance(x, DIF):
+        _dif_math("cumsum", None)
+    if x is _NULLV:   # seit 1.6.4 wie R (C-025): cumsum(NULL) ist numeric(0)
+        return NUM()
     if isinstance(x, (LGL, INT)):
         out = INT([None] * len(x))
         s = 0.0
@@ -2720,18 +4180,9 @@ def _f_cumsum(args, nms, ex):
     xs = np.array(_as_num(x), dtype=np.float64)
     if xs.size == 0:
         return NUM()
-    r = [float(t) for t in _base.r_cumsum(xs)]
-    if r[-1] != r[-1]:
-        # handleNaN (cum.c): ab dem ersten NaN/NA NA, sobald ein NA vorkam, sonst NaN
-        hasna = hasnan = False
-        for i, t in enumerate(xs.tolist()):
-            hasnan = hasnan or t != t
-            hasna = hasna or (hasnan and isna_strict(t))
-            if hasna:
-                r[i] = NA_REAL
-            elif hasnan:
-                r[i] = _DEFAULT_NAN
-    return NUM(r)
+    # seit 1.6.4 wie R (C-068, Entscheidung 101): die Bits kommen allein vom Kern (long double wie cum.c); bis 1.6.3
+    # setzte ein Nachlauf ab dem ersten NaN 0xFFF8… bzw. NA_REAL
+    return NUM([float(t) for t in _base.r_cumsum(xs)])
 
 
 def _f_xor(args, nms, ex):
@@ -2742,7 +4193,7 @@ def _f_xor(args, nms, ex):
         _missing_arg("y")
     a = _logic("|", v[0], v[1])
     b = _logic("&", v[0], v[1])
-    return LGL([None if (p is None or q is None) else (p and not q) for p, q in zip(a, b)])
+    return _setnm(LGL([None if (p is None or q is None) else (p and not q) for p, q in zip(a, b)]), _nm(a))
 
 
 def _f_istf(args, nms, ex, val):
@@ -2760,14 +4211,46 @@ def _f_identity(args, nms, ex):
     return v[0]
 
 
+def _vec_size(v):
+    """Länge für ``vector(mode, length)`` wie R's do_makevector mit asVecSize (seit 1.6.4, T4-B5; bis dahin jede
+    Zahl außer NA/NaN, auch logisch, und Fehler „invalid 'length' argument“ für NA und negative Werte): Länge des
+    Arguments ≠ 1 oder logisch: „invalid 'length' argument“; ganzzahliges NA: „vector size cannot be NA“; Zahl oder Text
+    (Text mit der Warnung der Umwandlung): NaN „… NA/NaN“, ±Inf „… infinite“, über R_XLEN_T_MAX „… too large“, dann zur
+    Null hin abgeschnitten; danach < 0 wieder „invalid 'length' argument“."""
+    if len(v) != 1 or isinstance(v, LGL):
+        _error("invalid 'length' argument")
+    if isinstance(v, INT):
+        if v[0] is None:
+            _error("vector size cannot be NA")
+        n = v[0]
+    else:
+        d = _as_num(v)[0]   # Text mit Warnung wie asReal
+        if d != d:
+            _error("vector size cannot be NA/NaN")
+        if math.isinf(d):
+            _error("vector size cannot be infinite")
+        if d > 4503599627370496.0:   # R_XLEN_T_MAX
+            _error("vector size specified is too large")
+        n = int(math.trunc(d))
+    if n < 0:
+        _error("invalid 'length' argument")
+    return n
+
+
 def _f_vector(fname, mk):
     def g(args, nms, ex):
         v, _, _ = _bind(fname, args, nms, ex, ["length"])
-        n = NUM([0.0]) if v[0] is None else _as_num(v[0])
-        if len(n) != 1 or n[0] != n[0] or n[0] < 0:
-            _error("invalid 'length' argument")
-        return mk(int(math.trunc(n[0])))
+        n = 0 if v[0] is None else _vec_size(v[0])
+        if n > _MAX_LEN:   # seit 1.6.4 (C-006, Entscheidung 79)
+            _len_error()
+        return mk(n)
     return g
+
+
+def _first(a):
+    """Erstes Element von a als Vektor gleichen Typs (leer bleibt leer), wie R's asReal/asInteger nur das erste Element
+    umwandeln (Warnung der Umwandlung nur dafür)."""
+    return a if len(a) <= 1 else type(a)(a[:1])
 
 
 def _f_rep(args, nms, ex):
@@ -2775,63 +4258,198 @@ def _f_rep(args, nms, ex):
     x = v[0]
     if x is None:
         return LGL()
-    each = 1
-    if v[3] is not None:
-        e = _as_num(v[3])
-        each = 1 if (not e or e[0] != e[0]) else int(math.trunc(e[0]))
-    if each < 0:
-        _error("invalid 'each' argument")
-    if each != 1:
-        x = _like(x, [t for t in x for _ in range(each)])
+    # seit 1.6.4 in der Reihenfolge von R do_rep (K43 RS, Entscheidungen 60 und 157): erst length.out, dann each, je mit
+    # „first element used of '…' argument“, wenn die Länge nicht 1 ist (auch NULL); umgewandelt wird nur das erste
+    # Element (bis dahin each vor length.out, ohne die Warnung, ganzer Vektor umgewandelt)
+    lx = len(x)
     lo = None
     if v[2] is not None:
-        lv = _as_num(v[2])
-        lo = None if (not lv or lv[0] != lv[0]) else int(math.trunc(lv[0]))
+        lv = _as_num(_first(v[2]))
+        # seit 1.6.4 wie R do_rep (C-008, C-025): NA und ±Inf gelten als fehlend, eine endliche Länge wird
+        # abgeschnitten (-0.5 ergibt 0), unter 0 ist sie ein Fehler (bis 1.6.3 außerhalb von int als fehlend)
+        if lv and math.isfinite(lv[0]):
+            lo = int(math.trunc(lv[0]))
+            if lo < 0:
+                _error("invalid 'length.out' argument")
+        if len(v[2]) != 1:
+            _warn("first element used of 'length.out' argument")
+    each = 1
+    if v[3] is not None:
+        e = _as_num(_first(v[3]))
+        # seit 1.6.4 wie R (C-025): NA und ±Inf gelten als 1 (bis 1.6.3 OverflowError bei Inf)
+        each = 1 if (not e or not math.isfinite(e[0])) else int(math.trunc(e[0]))
+        if len(v[3]) != 1:
+            _warn("first element used of 'each' argument")
+    if each < 0:
+        _error("invalid 'each' argument")
+    # seit 1.6.4 wie R (K43 RS, Entscheidungen 60 und 157): bei leerem x prüft R times nicht; NULL bleibt NULL (mit
+    # length.out > 0 die Warnung von R), sonst x, mit length.out > 0 auf diese Länge mit NA aufgefüllt (Namen "")
+    # (bis dahin „invalid 'times' argument“ bzw. logical(0) für NULL)
+    if lx == 0:
+        if x is _NULLV:
+            if lo is not None and lo > 0:
+                _warn("'x' is NULL so the result will be NULL")
+            return _NULLV
+        if lo is not None and lo > 0:
+            if lo > _MAX_LEN:
+                _len_error()
+            return _rep_inplace(_like(x, [_na_of(x)]), lo)
+        return _like(x, [])
+    # seit 1.6.4 (C-006, Entscheidung 79): Ergebnislänge vor dem Anlegen geprüft; x wird erst ausgedehnt, wenn das
+    # Ergebnis höchstens _MAX_LEN Werte hat (mit length.out ohne Ausdehnen, wie R)
     if lo is not None:
-        if len(x) == 0:
-            return _like(x, [_na_of(x)] * lo)
-        return _like(x, [x[i % len(x)] for i in range(lo)])
+        if lo > _MAX_LEN:
+            _len_error()
+        m = lx * each
+        if m == 0:   # each = 0: wie R ein Fehler, wenn length.out > 0 (seit 1.6.4, K43 RS; bis dahin NA aufgefüllt)
+            if lo > 0:
+                _error("invalid 'each' argument")
+            return _like(x, [])
+        if lo == 0:
+            return _like(x, [])
+        if m <= lo:   # Ergebnis = ausgedehntes x im Kreis, im Vektor selbst verlängert
+            r = _rep_each(x, lx, each)
+            q, rest = divmod(lo, m)
+            r *= q
+            r.extend(_itertools.islice(r, rest))
+            return r
+        if each == 1:
+            return _like_iter(x, _itertools.islice(x, lo))
+        k = -(-lo // each)   # Werte x[0 … k-1], der letzte seltener
+        r = _rep_each(x, k - 1, each)
+        r.extend(_itertools.repeat(x[k - 1], lo - (k - 1) * each))
+        return r
     tn = _as_num(INT([1]) if v[1] is None else v[1])
+    # seit 1.6.4 wie R do_rep (C-025): times endlich mit -1 < times < 2^52 + 1, abgeschnitten (-0.5 ergibt 0);
+    # bis 1.6.3 OverflowError bei Inf und Fehler bei -1 < times < 0
+    ok_t = lambda t: -1.0 < t < 4503599627370497.0   # noqa: E731 (NaN ist nicht im Bereich)
     if len(tn) == 1:
-        if tn[0] != tn[0] or tn[0] < 0:
+        if not ok_t(tn[0]):
             _error("invalid 'times' argument")
-        return _like(x, list(x) * int(math.trunc(tn[0])))
-    if len(tn) != len(x):
+        t = int(math.trunc(tn[0]))
+        if lx * each * t > _MAX_LEN:
+            _len_error()
+        if t == 0:
+            return _like(x, [])
+        if each != 1:   # x ausgedehnt ist schon ein eigener Vektor ohne Namen
+            return _rep_inplace(_rep_each(x, lx, each), t)
+        return _rep_inplace(_like(x, x), t)
+    if len(tn) != lx * each:
         _error("invalid 'times' argument")
-    if any(t != t or t < 0 for t in tn):
+    if each != 1:
+        x = _rep_each(x, lx, each)
+    if not all(ok_t(t) for t in tn):
         _error("invalid 'times' argument")
-    return _like(x, [x[i] for i in range(len(x)) for _ in range(int(math.trunc(tn[i])))])
+    if sum(int(math.trunc(t)) for t in tn) > _MAX_LEN:
+        _len_error()
+    return _rep_counts(x, [int(math.trunc(t)) for t in tn])
+
+
+def _argpos(fname, args, nms, ex, formals):
+    """Positionen der gebundenen Formalen (None, wenn nicht angegeben)."""
+    idx = [None if a is None else INT([i]) for i, a in enumerate(args)]
+    w, _, _ = _bind(fname, idx, nms, ex, formals)
+    return [None if t is None else args[t[0]] for t in w]
+
+
+def _kn_x(fname, formals=("x",)):
+    """Namen des Arguments x behalten (Math-Gruppe, is.na & Co., cumsum, nchar; seit 1.6.4, C-001)."""
+    def deco(f):
+        def g(args, nms, ex):
+            r = f(args, nms, ex)
+            if r is _NULLV or _nm(r) is not None:
+                return r
+            x = args[0] if (len(formals) == 1 or not any(nms)) and args else \
+                _argpos(fname, args, nms, ex, list(formals))[0]
+            xn = _nm(x) if x is not None else None
+            if xn is not None and r is not x and len(r) == len(x):
+                r = _setnm(r, xn)
+            return r
+        return g
+    return deco
+
+
+def _kn_math2(fname, second):
+    """Namen wie R's math2 (round, signif, log mit base): die von x bei gleicher Länge, sonst die des zweiten."""
+    def deco(f):
+        def g(args, nms, ex):
+            r = f(args, nms, ex)
+            if r is _NULLV or _nm(r) is not None:
+                return r
+            x, y = _argpos(fname, args, nms, ex, ["x", second])
+            n = len(r)
+            nm = None
+            if x is not None and _nm(x) is not None and len(x) == n:
+                nm = _nm(x)
+            elif y is not None and _nm(y) is not None and len(y) == n:
+                nm = _nm(y)
+            return _setnm(r, nm)
+        return g
+    return deco
+
+
+def _kn_ifelse(f):
+    """ifelse: das Ergebnis trägt die Namen von test (R: ans <- test)."""
+    def g(args, nms, ex):
+        r = f(args, nms, ex)
+        t = _argpos("ifelse", args, nms, ex, ["test", "yes", "no"])[0]
+        return _setnm(r, _nm(t)) if (t is not None and _nm(t) is not None and len(t) == len(r)) else r
+    return g
+
+
+def _kn_rep(f):
+    """rep: Namen werden mit den Werten wiederholt (rep.int nicht)."""
+    def g(args, nms, ex):
+        r = f(args, nms, ex)
+        idx = [None if a is None else INT([i]) for i, a in enumerate(args)]
+        w, _, _ = _bind("rep", idx, nms, ex, ["x", "times", "length.out", "each"])
+        if w[0] is None:
+            return r
+        x = args[w[0][0]]
+        xn = _nm(x)
+        if xn is None:
+            return r
+        a2 = list(args)
+        a2[w[0][0]] = INT(range(1, len(x) + 1))
+        with warnings.catch_warnings():   # seit 1.6.4 (K43 RS): die Warnungen nur einmal (aus dem ersten Aufruf)
+            warnings.simplefilter("ignore")
+            ri = f(a2, nms, ex)
+        # NA nur beim Auffüllen eines leeren x mit length.out: Name "" wie R (seit 1.6.4, K43 RS; bis dahin NA)
+        return _setnm(r, ["" if i is None else xn[i - 1] for i in ri])
+    return g
 
 
 _FUNS = {
-    "logical": _f_vector("logical", lambda n: LGL([False] * n)),
-    "integer": _f_vector("integer", lambda n: INT([0] * n)),
-    "numeric": _f_vector("numeric", lambda n: NUM([0.0] * n)),
-    "double": _f_vector("double", lambda n: NUM([0.0] * n)),
-    "character": _f_vector("character", lambda n: CHR([""] * n)),
-    "rep": _f_rep,
-    "abs": _f_abs, "sqrt": _math1("sqrt", _sqrt),
-    "exp": _math1("exp", _lm1("exp")), "expm1": _math1("expm1", _lm1("expm1")),
-    "log1p": _math1("log1p", _lm1("log1p")), "log2": _math1("log2", _lm1("log2")),
-    "log10": _math1("log10", _lm1("log10")),
-    "sin": _math1("sin", _lm1("sin")), "cos": _math1("cos", _lm1("cos")),
-    "tan": _math1("tan", _lm1("tan")), "tanh": _math1("tanh", _lm1("tanh")),
-    "atan": _math1("atan", _lm1("atan")),
-    "floor": _math1("floor", _ffloor_), "ceiling": _math1("ceiling", _fceil_), "trunc": _math1("trunc", _ftrunc_),
-    "sign": _math1("sign", _fsign_),
-    "log": _f_log, "round": _f_round, "signif": lambda a, n, e: _f_round(a, n, e, signif=True),
-    "is.na": _f_isna, "is.nan": _f_isnan, "is.finite": _f_isfinite, "is.infinite": _f_isinfinite,
-    "ifelse": _f_ifelse,
+    "logical": _f_vector("logical", lambda n: _rep_inplace(LGL([False]), n)),
+    "integer": _f_vector("integer", lambda n: _rep_inplace(INT([0]), n)),
+    "numeric": _f_vector("numeric", lambda n: _rep_inplace(NUM([0.0]), n)),
+    "double": _f_vector("double", lambda n: _rep_inplace(NUM([0.0]), n)),
+    "character": _f_vector("character", lambda n: _rep_inplace(CHR([""]), n)),
+    "rep": _kn_rep(_f_rep),
+    "abs": _kn_x("abs")(_f_abs), "sqrt": _kn_x("sqrt")(_math1("sqrt", _sqrt)),
+    "exp": _kn_x("exp")(_math1("exp", _lm1("exp"))), "expm1": _kn_x("expm1")(_math1("expm1", _lm1("expm1"))),
+    "log1p": _kn_x("log1p")(_math1("log1p", _lm1("log1p"))), "log2": _kn_x("log2")(_math1("log2", _lm1("log2"))),
+    "log10": _kn_x("log10")(_math1("log10", _lm1("log10"))),
+    "sin": _kn_x("sin")(_math1("sin", _lm1("sin"))), "cos": _kn_x("cos")(_math1("cos", _lm1("cos"))),
+    "tan": _kn_x("tan")(_math1("tan", _lm1("tan"))), "tanh": _kn_x("tanh")(_math1("tanh", _lm1("tanh"))),
+    "atan": _kn_x("atan")(_math1("atan", _lm1("atan"))),
+    "floor": _kn_x("floor")(_math1("floor", _ffloor_)), "ceiling": _kn_x("ceiling")(_math1("ceiling", _fceil_)), "trunc": _kn_x("trunc", ("x", "..."))(_f_trunc),
+    "sign": _kn_x("sign")(_math1("sign", _fsign_)),
+    "log": _kn_math2("log", "base")(_f_log), "round": _kn_math2("round", "digits")(_f_round),
+    "signif": _kn_math2("signif", "digits")(lambda a, n, e: _f_round(a, n, e, signif=True)),
+    "is.na": _kn_x("is.na")(_f_isna), "is.nan": _kn_x("is.nan")(_f_isnan),
+    "is.finite": _kn_x("is.finite")(_f_isfinite), "is.infinite": _kn_x("is.infinite")(_f_isinfinite),
+    "ifelse": _kn_ifelse(_f_ifelse),
     "pmin": lambda a, n, e: _f_pminmax(a, n, e, False), "pmax": lambda a, n, e: _f_pminmax(a, n, e, True),
     "min": lambda a, n, e: _f_minmax(a, n, e, False), "max": lambda a, n, e: _f_minmax(a, n, e, True),
     "sum": _f_sum, "mean": _f_mean, "median": _f_median, "var": _f_var, "sd": _f_sd,
     "quantile": _f_quantile,
     "any": lambda a, n, e: _f_anyall(a, n, e, True), "all": lambda a, n, e: _f_anyall(a, n, e, False),
-    "length": _f_length, "c": _f_c, "nchar": _f_nchar, "xor": _f_xor,
+    "length": _f_length, "c": _f_c, "nchar": _kn_x("nchar", ("x", "type", "allowNA", "keepNA"))(_f_nchar), "xor": _f_xor,
     "isTRUE": lambda a, n, e: _f_istf(a, n, e, True), "isFALSE": lambda a, n, e: _f_istf(a, n, e, False),
     "as.numeric": _f_asnum, "as.double": _f_asnum, "as.integer": _f_asint,
     "as.logical": _f_aslgl, "as.character": _f_aschr, "as.Date": _f_asdate,
-    "cumsum": _f_cumsum, "identity": _f_identity,
+    "cumsum": _kn_x("cumsum")(_f_cumsum), "identity": _f_identity,
 }
 
 
@@ -2906,7 +4524,7 @@ def _cond1(v):
         _error("the condition has length > 1")
     cond = None
     if n > 0:
-        cond = _lgl_str(v[0]) if isinstance(v, CHR) else _as_lgl(v)[0]
+        cond = _as_lgl(v)[0]
     if cond is None:
         _error("argument is of length zero" if n == 0 else
                ("missing value where TRUE/FALSE needed" if isinstance(v, LGL) else
@@ -2998,13 +4616,16 @@ def _ev(e, c):
             _error("missing subscript")
         return _index2(x, _ev(subs[0], c))
     if f == "$":
-        _ev(a[0], c)
+        if _ev(a[0], c) is _NULLV:   # seit 1.6.4 wie R (C-025): NULL$x ist NULL
+            return _NULLV
         _error("$ operator is invalid for atomic vectors")
     if f == "@":
         x = _ev(a[0], c)
         _error('no applicable method for `@` applied to an object of class "%s"' % _rclass(x))
     if f in _UNSUPPORTED:
         _error("RExpr: '%s' wird in Ausdrücken nicht unterstützt" % f)
+    if f == "ifelse":
+        return _ev_ifelse(e, c)
     fn = _FUNS.get(f)
     if fn is not None:
         if f in _PRIMS:
@@ -3025,10 +4646,32 @@ def _ev(e, c):
     _error('could not find function "%s"' % f)
 
 
+def _ev_ifelse(e, c):
+    """``ifelse`` als Sonderform (seit 1.6.4, T4-B6; bis dahin wurden yes und no immer ausgewertet): Argumente wie R
+    gebunden, dann test ausgewertet; ein Datum bzw. eine Zeitdifferenz als test ist der Fehler von R's ``!test``
+    (Ops.Date bzw. Ops.difftime); yes nur, wenn ein Wert von test TRUE ist, no nur, wenn einer FALSE ist (R wertet die
+    Versprechen erst dann aus). Der Rest wie bisher in _f_ifelse."""
+    a = e.args
+    idx = [None if x.head == "empty" else INT([i]) for i, x in enumerate(a)]
+    w, _, _ = _bind("ifelse", idx, e.names, a, ["test", "yes", "no"])
+    pos = [None if t is None else t[0] for t in w]
+    if pos[0] is None:
+        _missing_arg("test")
+    test = _ev(a[pos[0]], c)
+    if isinstance(test, (DAT, DIF)):
+        _not0(test)
+    t = _as_lgl(test)
+    yes = _ev(a[pos[1]], c) if (pos[1] is not None and any(x is True for x in t)) else None
+    no = _ev(a[pos[2]], c) if (pos[2] is not None and any(x is False for x in t)) else None
+    return _FUNS["ifelse"]([test, yes, no], [None, None, None], [None if p is None else a[p] for p in pos])
+
+
 class _LazyCols:
     """Spalten von ``data`` als R-Vektoren, erst beim ersten Zugriff umgewandelt (seit 1.6.3; bis 1.6.2 alle
-    Spalten vorab). Gleiche Sicht wie vorher: dieselben Spaltenobjekte (zu Beginn gemerkt), dieselbe Umwandlung
-    ``from_python``, Spalten ohne Daten (``None``) fehlen; ``from_python`` meldet nichts."""
+    Spalten vorab): dieselben Spaltenobjekte (zu Beginn gemerkt), dieselbe Umwandlung ``from_python``. Seit 1.6.4
+    (C-007) wie R: bei gleichem Namen gilt die erste Spalte, und eine Spalte, die RExpr nicht darstellen kann
+    (``from_python`` ergibt ``None``, z. B. gemischte, komplexe oder Zeitdauer-Werte), ist beim Zugriff ein Fehler (bis
+    1.6.3 fiel sie weg, und der Name kam still aus ``env``)."""
     __slots__ = ("raw", "done")
 
     def __init__(self, raw):
@@ -3038,21 +4681,21 @@ class _LazyCols:
     def _get(self, name):
         if name in self.done:
             return self.done[name]
-        r = None
-        for v in reversed(self.raw.get(name, ())):   # gleicher Name mehrfach (str(k)): der letzte mit Daten
-            r = from_python(v)
-            if r is not None:
-                break
+        vs = self.raw.get(name, ())
+        r = from_python(vs[0]) if vs else None
         self.done[name] = r
         return r
 
     def __contains__(self, name):
-        return self._get(name) is not None
+        return name in self.raw
 
     def __getitem__(self, name):
+        if name not in self.raw:
+            raise KeyError(name)
         r = self._get(name)
         if r is None:
-            raise KeyError(name)
+            from .._meldungen import EINGABE
+            _error(EINGABE["sp.rexpr_spalte"] % name)
         return r
 
 
@@ -3061,8 +4704,9 @@ def _columns(data):
     if data is None:
         return d
     if isinstance(data, pd.DataFrame):
-        for k in data.columns:
-            d.setdefault(str(k), []).append(data[k])
+        # seit 1.6.4 je Spalte über die Stelle (C-007: bei doppelten Namen lieferte data[k] eine Tabelle)
+        for j, k in enumerate(data.columns):
+            d.setdefault(str(k), []).append(data.iloc[:, j])
         return _LazyCols(d)
     if isinstance(data, Mapping):
         for k, v in data.items():

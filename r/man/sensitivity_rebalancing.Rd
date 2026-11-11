@@ -16,7 +16,7 @@ sensitivity_rebalancing(
   include_none = TRUE,
   sim_args = list(),
   metrics = bootstrap_study_metrics,
-  cores = 1L
+  cores = "auto"
 )
 }
 \arguments{
@@ -29,23 +29,27 @@ sensitivity_rebalancing(
 Einheiten zwischen den Terminen (\code{unit} und
 \code{span} von \code{\link{rebalance_plan}()}). Standard: monatlich,
 zweimonatlich, quartalsweise, viermonatlich, halbjaehrlich, jaehrlich
-(Namen monthly, bimonthly, quarterly, four_monthly, semiannual, yearly).}
+(Namen monthly, bimonthly, quarterly, four_monthly, semiannual, yearly).
+Seit 1.6.4 geprueft: benannte Liste, je Eintrag Einheit und Abstand.}
 
 \item{offsets}{Numerischer Vektor: Kalendertage vor dem Ende des Monats,
 Dreimonatsblocks bzw. Jahres, in dem der Termin liegt (0 = letzter Tag;
 \code{rebalance_plan(anchor = "end", days = offset + 1)}).
-\code{NULL} (Standard) rebalanciert am Periodenanfang.}
+\code{NULL} (Standard) rebalanciert am Periodenanfang.
+Seit 1.6.4 ganze Zahlen >= 0.}
 
 \item{bands}{Toleranzbaender in Prozent (5 = 5 Prozent); \code{NA} (Standard) =
 an jedem Termin rebalancieren. Mehrere Werte, auch gemischt mit \code{NA},
-sind moeglich.}
+sind moeglich.
+Seit 1.6.4 Werte >= 0 oder NA.}
 
 \item{band_type}{"absolute" (Standard; Prozentpunkte Abweichung vom
 Zielgewicht) oder "relative" (Prozent des Zielgewichts), siehe
 \code{thresh_type} von \code{\link{rebalance_plan}()}.}
 
 \item{include_none}{Logisch (Standard \code{TRUE}): zusaetzlich einen Lauf
-ohne Rebalancing (Zeile \code{frequency = "none"}).}
+ohne Rebalancing (Zeile \code{frequency = "none"}).
+Seit 1.6.4 nur TRUE oder FALSE.}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
 (Standard \code{list()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
@@ -60,9 +64,29 @@ Versatz und Band setzt die Funktion je Lauf ueber die Pfade \code{"rebalance.uni
 setzt \code{rebalance = NULL}.}
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
-(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).}
+(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).
+Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und duerfen keiner festen
+Spalte des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).}
 
-\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Fork auf Unix, PSOCK auf Windows):
+\code{"auto"} (Standard seit 1.6.4; bis 1.6.3 1) oder eine ganze Zahl >= 1.
+Mit \code{"auto"} rechnet SimLev die ersten Einheiten nacheinander, misst ihre Rechenzeit und waehlt
+dann die Zahl der Prozesse und der Kern-Threads je Prozess selbst (Planer, gleiche Regel in R,
+Python und Julia): hoechstens Zahl der freien Prozessoren (Prozessoren minus andere laufende Prozesse gleicher oder hoeherer Prioritaet), so
+viele, wie der freie Speicher traegt, und
+nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
+einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
+erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
+Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
+Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
+rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+mehr wird mit einem Hinweis begrenzt.
+Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
+\code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
+der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
+Das Ergebnis haengt nicht von cores ab.
+Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).}
 }
 \value{
 data.frame der Klasse \code{SimLevSensitivity} mit den Spalten

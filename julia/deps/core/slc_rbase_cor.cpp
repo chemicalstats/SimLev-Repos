@@ -168,25 +168,28 @@ done:
     return st;
 }
 
+/* 1/sqrt der Diagonale wie R's cov2cor (sqrt(1/d), NaN bei d <= 0 oder NA) */
+static double c2c_is(const double *v, int64_t p, int64_t i)
+{
+    const double d = v[i + i * p];
+    return (!isnan(d) && d > 0) ? sqrt(1.0 / d) : SLR_NAN;
+}
+
 void sl_r_cov2cor(int64_t p, const double *v, double *out, int *warn)
 {
     int64_t i, j;
     double *is = (double *) malloc((size_t) (p > 0 ? p : 1) * sizeof(double));
     *warn = 0;
-    if (!is) return;
     for (i = 0; i < p; i++) {
-        double d = v[i + i * p];
-        if (!isnan(d) && d > 0) {
-            is[i] = sqrt(1.0 / d);
-            if (!isfinite(is[i])) *warn = 1;
-        } else {
-            is[i] = SLR_NAN;
-            *warn = 1;
-        }
+        const double s = c2c_is(v, p, i);
+        if (!isfinite(s)) *warn = 1;
+        if (is) is[i] = s;
     }
+    /* seit 1.6.4 (C-014): ohne Speicher fuer die Hilfsspalte dieselben Werte je Element neu (bis 1.6.3 blieb out dann
+     * unbeschrieben und die Huellen gaben zufaelligen Speicher zurueck) */
     for (j = 0; j < p; j++)
         for (i = 0; i < p; i++) {
-            double a = v[i + j * p], r = (is[i] * a) * is[j];
+            double a = v[i + j * p], r = is ? (is[i] * a) * is[j] : (c2c_is(v, p, i) * a) * c2c_is(v, p, j);
             if (slr_is_na(a)) r = SLR_NA;
             else if (isnan(r)) r = SLR_NAN;
             out[i + j * p] = r;

@@ -18,12 +18,15 @@ Anteil (0.01 = 1 \%; nicht endliche Werte werden entfernt),
 \code{SimLevResult} aus \code{\link[=simulation]{simulation()}} (bereinigter Wertindex aus
 \code{\link[=result_index]{result_index()}}) oder \code{data.frame} mit \code{date} und einer
 Wertspalte (\code{value}, sonst erste numerische Spalte; Niveaus). Die
-beiden letzten werden in Renditen der \code{frequency} umgerechnet.}
+beiden letzten werden in Renditen der \code{frequency} umgerechnet.
+Seit 1.6.4 mindestens zwei endliche Renditen, die nicht alle gleich sind (sonst Fehler, in allen
+Sprachen wie bisher in R).}
 
 \item{target}{Vergleichs-Sharpe-Ratio \eqn{SR^*} p. a. (Standard 0);
 intern durch \eqn{\sqrt{ppy}} geteilt.}
 
-\item{prob}{Geforderte Sicherheit als Anteil (Standard 0.95 = 95 \%).}
+\item{prob}{Geforderte Sicherheit als Anteil (Standard 0.95 = 95 \%).
+Seit 1.6.4 eine Zahl > 0 und < 1.}
 
 \item{frequency}{Periodenlaenge \code{"week"} (Standard, ISO-Wochen),
 \code{"day"} oder \code{"month"}: bei \code{SimLevResult} und
@@ -32,7 +35,8 @@ den Standardwert von \code{ppy}.}
 
 \item{ppy}{Perioden je Jahr. \code{NULL} (Standard) = bei Vektoren 252
 (\code{"day"}), 52 (\code{"week"}) bzw. 12 (\code{"month"}); sonst
-geschaetzt als (Anzahl Renditen - 1) / (Zeitspanne in Tagen / 365.25).}
+geschaetzt als (Anzahl Renditen - 1) / (Zeitspanne in Tagen / 365.25).
+Seit 1.6.4 eine Zahl > 0.}
 }
 \value{
 Benannter numerischer Vektor: \code{sharpe} (Sharpe Ratio p. a.),

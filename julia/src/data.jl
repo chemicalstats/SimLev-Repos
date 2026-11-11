@@ -41,17 +41,6 @@ function _ftake!(fr::_Frame, idx::AbstractVector{Int})
     return fr
 end
 _fis_numeric(fr::_Frame, name) = get(fr.kinds, name, :none) == :numeric
-function _fr_class(fr::_Frame, name)
-    k = get(fr.kinds, name, :other)
-    k == :numeric && return "numeric"
-    k == :logical && return "logical"
-    k == :character && return "character"
-    k == :factor && return "factor"
-    k == :date && return "Date"
-    k == :posixct && return "POSIXct"
-    return "list"
-end
-
 "is.na() für einen Spalteneintrag."
 const _isna_val = _isna   # r/rnum.jl (seit 1.6.3)
 _isna_vec(v::AbstractVector{Float64}) = BitVector(isnan.(v))
@@ -79,6 +68,8 @@ end
 "Eine Spalte in (Art, Vektor) umwandeln."
 function _column(v)
     v isa RVector && (v = v.values)
+    # Kategorie (R-Faktor) als eigene Art wie in R (seit 1.6.4, Entscheidung 15; bis 1.6.3 still als Text)
+    v isa RFmt.RFactor && return (:factor, Union{Missing,String}[x for x in v])
     v isa AbstractVector || (v = [v])
     T = eltype(v)
     S = Base.nonmissingtype(T)
@@ -86,7 +77,7 @@ function _column(v)
         return (:logical, Vector{Union{Missing,Bool}}(v))
     elseif S <: Real && S !== Union{}
         return (:numeric, Float64[x === missing ? NA : Float64(x) for x in v])
-    elseif S <: AbstractString
+    elseif S <: AbstractString && S !== Union{}   # seit 1.6.4 Vector{Missing} wie R NA (logisch, Entscheidungen 14 und 42)
         return (:character, Union{Missing,String}[x === missing ? missing : String(x) for x in v])
     elseif S === Date
         return (:date, Float64[x === missing ? NA : _dday(x) for x in v])

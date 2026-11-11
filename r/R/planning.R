@@ -38,6 +38,7 @@
 #'   Skalar (gilt fuer alle \code{columns}) oder benannter Vektor mit einem
 #'   Eintrag je Spalte aus \code{columns} (z. B. \code{c(us = 5, eu = 5)});
 #'   fehlt eine Spalte, bricht die Funktion ab.
+#'   Werte endlich und > -100.
 #' @param type Art der Spalten: \code{"returns"} (Standard; Brutto-Renditen je
 #'   Zeile, z. B. 1.001 fuer +0,1 %, wie fuer [bootstrap()]) oder
 #'   \code{"prices"} (Kursniveaus; die Verschiebung wird dann als
@@ -45,6 +46,7 @@
 #' @param ppy Renditen (Zeilen) je Jahr. \code{NULL} (Standard): bei einem
 #'   data.frame mit \code{date} Anzahl der Renditen geteilt durch die Spanne
 #'   von \code{date} in Jahren (Tage / 365.25), sonst 252.
+#'   Angegeben eine Zahl > 0.
 #' @return \code{data} mit angepassten Spalten. Attribut \code{shift}:
 #'   benannter Vektor der angewendeten Verschiebung je Spalte in Prozent p. a.
 #'   (geometrisch; negativ = Rendite abgesenkt). Fehlende Werte werden bei der
@@ -59,21 +61,29 @@
 #' attr(d2, "shift")
 #' @export
 series_shift_return <- function(data, columns, target, type = c("returns", "prices"), ppy = NULL) {
+  fn <- "series_shift_return"
+  .e3_choice(type, c("returns", "prices"), fn, "type")   # Pruefung (Meldung auswahl)
   type <- match.arg(type)
-  if (!is.data.frame(data)) stop("data muss ein data.frame sein.")
+  # Eingaben vor der Rechnung pruefen (seit 1.6.4): Tabelle, Spaltennamen, Zahlenspalten, target endlich > -100,
+  # ppy > 0
+  chk_df(data, fn, "data")
+  .e3_names(columns, fn, "columns")
   miss <- setdiff(columns, names(data))
-  if (length(miss)) stop(sprintf("Spalte(n) nicht in data: %s.", paste(miss, collapse = ", ")))
-  if (!is.numeric(target) || anyNA(target)) stop("target muss numerisch sein (Prozent p. a., z. B. 4).")
+  if (length(miss)) chk_stop("spalten", fn, paste0("'", miss, "'", collapse = ", "))
+  for (k in columns) .e3_numcol(data, k, fn)
+  if ("date" %in% names(data)) .e3_datecol(data, fn)
+  if (!is.numeric(target) || anyNA(target)) chk_stop("ut2.target_zahlen", fn)
+  if (any(!is.finite(target) | target <= -100)) chk_stop("e3.werte_bereich", fn, "target", chk_range_text(lo = -100, lo_open = TRUE))
+  chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE, null_ok = TRUE)
   if (length(target) == 1 && is.null(names(target))) target <- stats::setNames(rep(target, length(columns)), columns)
   else if (is.null(names(target)) || length(setdiff(columns, names(target))))
-    stop(sprintf("target braucht einen Skalar oder einen benannten Eintrag je Spalte aus columns; fehlt f\u00fcr: %s.",
-                 paste(if (is.null(names(target))) columns else setdiff(columns, names(target)), collapse = ", ")))
+    chk_stop("rs.target_spalten", fn, paste(if (is.null(names(target))) columns else setdiff(columns, names(target)), collapse = ", "))
   n <- nrow(data)
   # Reihenfolge der Zeilen: bei Kursniveaus zaehlt die zeitliche Abfolge (nach date, falls vorhanden)
   dd <- if ("date" %in% names(data)) .to_date(data$date, "series_shift_return: data$date") else NULL
   o <- if (!is.null(dd)) order(dd) else seq_len(n)
   if (type == "prices" && !is.null(dd) && anyDuplicated(dd))
-    stop("type = 'prices': date enth\u00e4lt doppelte Daten; Kursniveaus brauchen eine eindeutige Zeitfolge.")
+    chk_stop("rs.preise_doppelt", fn)
   if (is.null(ppy)) ppy <- if (!is.null(dd))
     (n - (type == "prices")) / (as.numeric(max(dd, na.rm = TRUE) - min(dd, na.rm = TRUE)) / 365.25) else 252
   shift <- stats::setNames(numeric(length(columns)), columns)
@@ -93,11 +103,10 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 #' Periodenrenditen aus Kursreihen
 #' @keywords internal
 #' @noRd
-.period_gross <- function(df, columns, frequency) {
+.period_gross <- function(df, columns, frequency, fn = NULL, land = NULL) {
   d <- .to_date(df$date, "data$date")
-  key <- switch(frequency, month = format(d, "%Y-%m"), quarter = paste(format(d, "%Y"), (as.integer(format(d, "%m")) - 1) %/% 3),
-                year = format(d, "%Y"))
-  end <- which(c(key[-1] != key[-length(key)], TRUE))
+  if (!is.null(fn)) .e3_dates_sorted(d, fn, land)                  # seit 1.6.4: aufsteigend, ohne NA
+  end <- .period_ends(d, frequency)   # withdrawal.R (seit 1.6.4 eine Fassung)
   V <- vapply(columns, function(k) .fill_na(as.numeric(df[[k]]), "locf", keep_leading = TRUE)[end], numeric(length(end)))
   if (!is.matrix(V)) V <- matrix(V, ncol = length(columns), dimnames = list(NULL, columns))
   G <- V[-1, , drop = FALSE] / V[-nrow(V), , drop = FALSE]
@@ -129,6 +138,7 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 #'   \code{columns} (Total-Return-Niveaus, keine Renditen) und ggf. der
 #'   Preisindex-Spalte aus \code{inflation}. Jedes Land braucht mindestens
 #'   2 vollstaendige Periodenrenditen.
+#'   Die Spalte \code{date} muss aufsteigend sortiert sein und darf kein NA enthalten; Kurs- und Preisindex-Spalten sind Zahlenspalten.
 #' @param columns Zeichenvektor der Kursspalten (in allen Laendern gleich benannt).
 #' @param weights Vektor der Portfolio-Gewichte (>= 0) mit einem Eintrag je
 #'   Spalte aus \code{columns}: benannt mit genau diesen Spaltennamen oder
@@ -141,21 +151,27 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 #'   vorhanden ist. Sie wird im selben Block wie die Kurse gezogen.
 #' @param frequency Periodenlaenge: \code{"year"} (Standard), \code{"quarter"}
 #'   oder \code{"month"}.
-#' @param n Anzahl simulierter Pfade (Standard 1000).
+#' @param n Anzahl simulierter Pfade (ganze Zahl >= 1, Standard 1000).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param years Laenge jedes Pfads in Jahren (Standard 30); ergibt
-#'   \code{years} x Perioden je Jahr (1, 4 bzw. 12) Perioden.
+#'   \code{years} x Perioden je Jahr (1, 4 bzw. 12) Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
+#'   \code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze Perioden ergab).
 #' @param L Mittlere Blocklaenge in Perioden der gewaehlten \code{frequency}
 #'   (Blocklaenge = 1 + geometrisch verteilte Zahl mit Mittel \code{L} - 1).
 #'   \code{NULL} (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw.
 #'   120 Monate.
+#'   Angegeben eine Zahl >= 1, seit 1.6.4 hoechstens 100 Jahre (100 Jahre, 400 Quartale bzw. 1200 Monate).
 #' @param country_weights Numerischer Vektor der Ziehungswahrscheinlichkeiten
 #'   je Land in der Reihenfolge von \code{datasets} (wird auf Summe 1
 #'   normiert). \code{NULL} (Standard) = alle Laender gleich wahrscheinlich.
+#'   Werte >= 0 mit Summe > 0; ein benannter Vektor wird den Laendern nach Namen zugeordnet.
 #' @param target Optional Renditeannahmen in Prozent p. a. (geometrisch):
 #'   Skalar fuer alle \code{columns} oder benannter Vektor je Spalte. Die
 #'   Verschiebung wird ueber die gepoolten Renditen aller Laender bestimmt und
 #'   fuer alle Laender gleich angewendet (wie [series_shift_return()]).
 #'   \code{NULL} (Standard) = historische Renditen.
+#'   Werte endlich und > -100; Namen nur aus \code{columns} (bzw. \code{inflation}).
+#'   Benannt auch fuer die Spalte aus inflation (seit 1.6.4 dokumentiert).
 #' @param seed Startwert der Ziehung (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 #'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
 #'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
@@ -195,20 +211,59 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL,
                              frequency = c("year", "quarter", "month"), n = 1000L, years = 30L, L = NULL,
                              country_weights = NULL, target = NULL, seed = NULL) {
+  fn <- "bootstrap_pooled"
+  .e3_choice(frequency, c("year", "quarter", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
-  if (is.null(names(datasets)) || any(names(datasets) == "")) stop("datasets muss eine benannte Liste sein (Land -> data.frame).")
+  if (!is.list(datasets) || is.data.frame(datasets) || is.null(names(datasets)) || any(names(datasets) == ""))
+    chk_stop("ut2.datasets", fn)   # seit 1.6.4 auch ohne Liste bzw. als Tabelle
+  # Eingaben vor der Rechnung pruefen (seit 1.6.4): je Land eine Tabelle mit date und den Spalten, Anzahlen,
+  # Blocklaenge, Laendergewichte, Renditeannahmen
+  .e3_names(columns, fn, "columns")
+  chk_nofactor(inflation, fn, "inflation")
+  chk_name1(inflation, fn, "inflation", null_ok = TRUE)
+  for (k in names(datasets)) {
+    df <- datasets[[k]]
+    chk_df(df, fn, sprintf("datasets[['%s']]", k))
+    miss <- setdiff(c("date", columns, inflation), names(df))
+    if (length(miss)) chk_stop("e3.spalten_land", fn, paste0("'", miss, "'", collapse = ", "), k)
+    for (cl in c(columns, inflation)) .e3_numcol(df, cl, fn)
+    .e3_datecol(df, fn)
+  }
   ppy <- .wd_ppy(frequency)
+  chk_int1(n, fn, "n", lo = 1)
+  chk_max(n, SL_MAX_N, fn, "n")        # seit 1.6.4 (Entscheidung 16)
+  # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; vorher
+  # Baustein e3.jahre_perioden: jede Zahl > 0, die ganze Perioden ergab)
+  chk_jahre(years, fn, "years")
+  chk_num1(L, fn, "L", lo = 1, null_ok = TRUE)
+  if (!is.null(L)) chk_max(L, SL_MAX_JAHRE * ppy, fn, "L")   # seit 1.6.4 hoechstens 100 Jahre in Perioden (K43 T2-N1)
+  if (!is.null(country_weights)) {
+    nc0 <- length(datasets); cw0 <- country_weights
+    if (!(is.numeric(cw0) && length(cw0) == nc0 && all(is.finite(cw0)) && all(cw0 >= 0) && sum(cw0) > 0))
+      chk_stop("e3.gewichte", fn, "country_weights", sprintf("Land aus datasets (%d)", nc0))
+    if (!is.null(names(cw0))) {                                   # benannt: nach den Namen der Laender (wie weights)
+      if (anyDuplicated(names(cw0)) || !setequal(names(cw0), names(datasets)))
+        chk_stop("e3.namen_passen", fn, "country_weights", "datasets")
+      country_weights <- unname(cw0[names(datasets)])
+    }
+  }
+  if (!is.null(target)) {
+    if (!is.numeric(target) || !length(target)) chk_stop("zahlen", fn, "target")
+    if (any(!is.finite(target) | target <= -100)) chk_stop("e3.werte_bereich", fn, "target", chk_range_text(lo = -100, lo_open = TRUE))
+    tn <- names(target)
+    if (if (is.null(tn)) length(target) != 1L else (anyDuplicated(tn) || !all(tn %in% c(columns, inflation)))) chk_stop("e3.ziel", fn)
+  }
   if (!is.null(weights)) {
     if (!is.numeric(weights) || length(weights) != length(columns) || anyNA(weights) || any(weights < 0) || sum(weights) <= 0)
-      stop(sprintf("weights muss je Spalte aus columns (%d) ein Gewicht >= 0 enthalten (Summe > 0).", length(columns)))
+      chk_stop("e3.gewichte", fn, "weights", sprintf("Spalte aus columns (%d)", length(columns)))
     if (is.null(names(weights))) names(weights) <- columns
     else if (!setequal(names(weights), columns))
-      stop(sprintf("Namen von weights (%s) passen nicht zu columns (%s).", paste(names(weights), collapse = ", "),
-                   paste(columns, collapse = ", ")))
+      chk_stop("rs.weights_namen", fn, paste(names(weights), collapse = ", "), paste(columns, collapse = ", "))
   }
   cols <- c(columns, inflation)
-  G <- lapply(datasets, function(df) .period_gross(df, cols, frequency))
-  if (any(vapply(G, nrow, 0L) < 2)) stop("Ein Land hat zu wenige Perioden.")
+  G <- lapply(names(datasets), function(k) .period_gross(datasets[[k]], cols, frequency, fn, k))
+  names(G) <- names(datasets)
+  if (any(vapply(G, nrow, 0L) < 2)) chk_stop("rs.land_kurz", fn)
   if (!is.null(target)) {
     tg <- if (length(target) == 1 && is.null(names(target))) stats::setNames(rep(target, length(columns)), columns) else target
     for (k in names(tg)) {
@@ -220,15 +275,17 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
   L <- L %||% (10 * ppy)
   nper <- as.integer(years * ppy); nc <- length(G)
   cw <- country_weights %||% rep(1 / nc, nc); cw <- cw / sum(cw)
-  S <- .sl_main_stream(seed)                                    # Hauptstrom
+  S <- .sl_main_stream(seed, "bootstrap_pooled")                                    # Hauptstrom
   draw <- lapply(seq_len(n), function(i) {
     ctry <- integer(nper); row <- integer(nper); t <- 1L
     while (t <= nper) {
       cidx <- .sl_sample(nc, 1L, prob = cw, stream = S); len <- 1L + .sl_rgeom(1L, 1 / L, stream = S)
       nr <- nrow(G[[cidx]]); st <- .sl_sample(nr, 1L, stream = S)
-      idx <- ((st - 1L + seq_len(len) - 1L) %% nr) + 1L
+      # seit 1.6.4 (K43 T2-N1) Indizes nur fuer die genutzte Laenge take (wie Python und Julia; bis dahin fuer die
+      # ganze gezogene Blocklaenge, bei L = 1e6 1,9 s statt 0,02 s), gleiche Indizes
       take <- seq_len(min(len, nper - t + 1L))
-      ctry[t - 1L + take] <- cidx; row[t - 1L + take] <- idx[take]; t <- t + length(take)
+      idx <- ((st - 1L + take - 1L) %% nr) + 1L
+      ctry[t - 1L + take] <- cidx; row[t - 1L + take] <- idx; t <- t + length(take)
     }
     list(c = ctry, r = row)
   })
@@ -258,11 +315,13 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
 #'
 #' @param data data.frame mit Spalte \code{date} und allen in
 #'   \code{candidates} genannten Kursspalten (Niveaus).
+#'   Die Spalte \code{date} muss aufsteigend sortiert sein und darf kein NA enthalten.
 #' @param candidates Liste von benannten Gewichtsvektoren (Namen =
 #'   Kursspalten; je Kandidat auf Summe 1 normiert), z. B. aus
 #'   \code{lapply(seq(0, 1, 0.1), function(a) c(aktien = a, anleihen = 1 - a))}.
 #'   Die Listennamen werden Spaltennamen des Ergebnisses; ohne Namen
 #'   \code{"P1"}, \code{"P2"}, ...
+#'   Gewichte endlich mit Summe > 0 (einzelne negative Gewichte erlaubt).
 #' @param frequency Periodenlaenge und Rebalancing-Rhythmus: \code{"year"}
 #'   (Standard), \code{"quarter"} oder \code{"month"}.
 #' @return Numerische Matrix Perioden x Kandidaten mit Brutto-Renditen (z. B.
@@ -280,9 +339,26 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
 #' round(portfolio_returns(d, cand), 3)
 #' @export
 portfolio_returns <- function(data, candidates, frequency = c("year", "quarter", "month")) {
+  fn <- "portfolio_returns"
+  .e3_choice(frequency, c("year", "quarter", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
+  # Eingaben vor der Rechnung pruefen (seit 1.6.4): Tabelle; Kandidaten als benannte Gewichtsvektoren mit endlichen
+  # Werten und positiver Summe (einzelne negative Gewichte bleiben erlaubt); Spalten vorhanden und numerisch
+  chk_df(data, fn, "data")
+  ok <- is.list(candidates) && !is.data.frame(candidates) && length(candidates) > 0L &&
+    all(vapply(candidates, function(w) is.numeric(w) && length(w) >= 1L && !is.null(names(w)) && !anyNA(names(w)) &&
+                 all(nzchar(names(w))), TRUE))
+  if (!ok) chk_stop("e3.kandidaten", fn)
+  cnm <- names(candidates) %||% paste0("P", seq_along(candidates))
+  for (i in seq_along(candidates)) {
+    w <- candidates[[i]]
+    if (any(!is.finite(w)) || sum(w) <= 0) chk_stop("e3.kandidat_summe", fn, cnm[i])
+  }
   a <- unique(unlist(lapply(candidates, names)))
-  G <- .period_gross(data, a, frequency)
+  chk_cols(data, c("date", a), fn)
+  for (k in a) .e3_numcol(data, k, fn)
+  .e3_datecol(data, fn)
+  G <- .period_gross(data, a, frequency, fn)
   M <- vapply(candidates, function(w) drop(G[, names(w), drop = FALSE] %m% (w / sum(w))), numeric(nrow(G)))
   if (!is.matrix(M)) M <- matrix(M, ncol = length(candidates))
   colnames(M) <- names(candidates) %||% paste0("P", seq_along(candidates))
@@ -341,6 +417,7 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
 #'   wie die Zeilen von \code{returns}, z. B. Jahre bei Jahresrenditen).
 #'   Nicht zu verwechseln mit \code{horizon} in [withdrawal_simulation()]
 #'   (Objekt aus [withdrawal_horizon()] oder Jahre).
+#'   Seit 1.6.4 hoechstens 36600 Perioden (wie path_length: 100 Jahre in Tagen).
 #' @param contributions Zahlung je Periode als Geldbetrag (Standard 0):
 #'   Skalar oder Vektor (wird mit \code{rep_len()} auf \code{horizon}
 #'   Perioden gebracht); positiv = Einzahlung, negativ = Entnahme, jeweils
@@ -348,8 +425,11 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
 #' @param n_grid Anzahl Punkte des logarithmischen Vermoegensrasters
 #'   (Standard 301, mindestens 2; dazu Ziel und Startwert); mehr Punkte =
 #'   genauer, aber langsamer.
+#'   Ganze Zahl.
+#'   Seit 1.6.4 hoechstens 10^6.
 #' @param n_sim Anzahl Pfade der Vorwaertssimulation der optimalen Politik
-#'   (Standard 5000).
+#'   (ganze Zahl, Standard 5000).
+#'   Seit 1.6.4 hoechstens 10^8.
 #' @param seed Startwert fuer die Vorwaertssimulation (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
 #'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
 #'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
@@ -401,17 +481,21 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
                           n_sim = 5000L, seed = NULL) {
   R <- as.matrix(returns); K <- ncol(R); S <- nrow(R)
   num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
-  fmt <- function(v) paste(format(v), collapse = ", ")
   if (!is.numeric(R) || !S || !K || any(!is.finite(R)) || any(R < 0))
-    stop("returns muss eine Matrix (Szenarien x Kandidaten) endlicher Brutto-Renditen >= 0 ohne NA sein (z. B. 1.05).")
-  if (!num1(start_value) || start_value <= 0) stop(sprintf("start_value muss ein Geldbetrag > 0 sein (erhalten: %s).", fmt(start_value)))
-  if (!num1(goal) || goal < 0) stop(sprintf("goal muss ein Geldbetrag >= 0 sein (erhalten: %s).", fmt(goal)))
+    chk_stop("ut2.goal_returns", "planning_goal")
+  # Meldungen ohne den Eingabewert (seit 1.6.4, Entscheidung 8); n_grid und n_sim seit 1.6.4 ganzzahlig
+  if (!num1(start_value) || start_value <= 0) chk_stop("ut2.geldbetrag_gt0", "planning_goal", "start_value")
+  if (!num1(goal) || goal < 0) chk_stop("ut2.geldbetrag_ge0", "planning_goal", "goal")
   if (!num1(horizon) || horizon < 1 || horizon != round(horizon))
-    stop(sprintf("horizon muss eine ganze Zahl >= 1 sein (Anzahl Perioden; erhalten: %s).", fmt(horizon)))
-  if (!num1(n_grid) || n_grid < 2) stop(sprintf("n_grid muss eine ganze Zahl >= 2 sein (erhalten: %s).", fmt(n_grid)))
-  if (!num1(n_sim) || n_sim < 1) stop(sprintf("n_sim muss eine ganze Zahl >= 1 sein (erhalten: %s).", fmt(n_sim)))
+    chk_stop("ganz", "planning_goal", "horizon", "1")
+  if (!num1(n_grid) || n_grid < 2 || n_grid != round(n_grid)) chk_stop("ganz", "planning_goal", "n_grid", "2")
+  if (!num1(n_sim) || n_sim < 1 || n_sim != round(n_sim)) chk_stop("ganz", "planning_goal", "n_sim", "1")
+  # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46; horizon in Perioden wie path_length: 36 600 = 100 Jahre in Tagen)
+  chk_max(horizon, SL_MAX_TAGE, "planning_goal", "horizon")
+  chk_max(n_grid, SL_MAX_GITTER, "planning_goal", "n_grid")
+  chk_max(n_sim, SL_MAX_N, "planning_goal", "n_sim")
   if (!is.numeric(contributions) || !length(contributions) || any(!is.finite(contributions)))
-    stop("contributions muss ein endlicher Geldbetrag oder Vektor von Geldbetr\u00e4gen sein.")
+    chk_stop("ut2.contributions", "planning_goal")
   horizon <- as.integer(horizon)
   if (is.null(colnames(R))) colnames(R) <- paste0("P", seq_len(K))
   cf <- rep_len(contributions, horizon)
@@ -424,14 +508,14 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
   # 1(W >= goal) am Ende; dazwischen Interpolation linear in log(W) auf der Probit-Skala (Wahrscheinlichkeiten der
   # Form Phi((log W - a) / b) werden exakt getroffen), unter wmin 0 (bei goal = 0 Wert bei wmin); E[V(base * R_k)]
   # je Rasterpunkt; Gleichstand (innerhalb 1e-9): Kandidat mit der geringsten Streuung der Log-Renditen
-  risk_rank <- rank(apply(log(pmax(R, 1e-300)), 2, stats::sd), ties.method = "first")
+  risk_rank <- rank(apply(log(pmax(R, 1e-300)), 2, .sl_sd), ties.method = "first")
   dp <- .goal_dp(R, grid, cf, goal, wmin, wmax, start_value, K + 1 - risk_rank)
   for (i in seq_len(dp$collapsed))                          # wie stats::approx bei gleichen log(grid)-Werten
     warning(simpleWarning("collapsing to unique 'x' values", quote(regularize.values(x, y, ties, missing(ties), na.rm = na.rm))))
   static <- stats::setNames(dp$static, colnames(R))
   pol <- dp$policy; Vt <- lapply(seq_len(horizon + 1L), function(t) dp$value[, t]); p_dp <- dp$p_dp
   sim <- {
-    st <- .sl_main_stream(seed)                                 # Hauptstrom
+    st <- .sl_main_stream(seed, "planning_goal")                                 # Hauptstrom
     W <- rep(start_value, n_sim); choice <- matrix(NA_integer_, horizon, n_sim); ruined <- rep(FALSE, n_sim)
     for (t in seq_len(horizon)) {
       base <- W + cf[t]; alive <- base > 0 & !ruined; ruined <- ruined | !alive

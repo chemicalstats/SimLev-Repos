@@ -1,0 +1,17 @@
+# Toleranzstufe des Stufenmodells (SimLev-Entwicklung Teil I Abschnitt 2; Entscheidungen 124 und 152, seit 1.6.4).
+# Gelesen von tests/lib/reftree.py (Python) und tests/lib/faelle.jl (Julia) beim Vergleich der Referenzfälle (Modulformat).
+#
+# Je Zeile eine Regel: fall, pfad, funktion, toleranz (durch Tabulator getrennt; Zeilen mit # und Leerzeilen zählen nicht).
+#   fall      Kennung <modul>/<id> des Falls (Tabellenzeile: <modul>/<id>/<zeile>); * steht für beliebige Zeichen
+#   pfad      Ergebnispfad wie in den Abweichungsmeldungen (result, result$teil$feld, result[[2]]); * wie oben. Die Regel
+#             gilt für diesen Knoten und alles darunter.
+#   funktion  freigegebene Funktion (nur zur Erklärung; R-Name, in Python und Julia gilt dieselbe Freigabe)
+#   toleranz  relative Toleranz gegen den R-Wert: |x - r| <= toleranz * |r|
+# In einer Regel: Zahlen mit dieser Toleranz, NA und NaN immer getrennt, +0 = -0 (SIMLEV_LAX_NA und SIMLEV_STRICT_ZERO
+# gelten hier nicht); Text, logische Werte, Datum, Namen und alle Druck-, Konsolen- und Warnungsausgaben bleiben
+# zeichengleich. Alles, was keine Regel trifft, bleibt bitgleich (NA != NaN, +0 != -0, Schalter wie bisher).
+# Neue Zeilen nur nach Freigabe durch den Nutzer (Liste je Funktion).
+fall	pfad	funktion	toleranz
+engine/*	result$zusammenfassung	summary.SimLevResult	1e-12
+overfitting/sharpe_korrekturen	result$psr_def	sharpe_probabilistic	1e-12
+overfitting/psr_*	result	sharpe_probabilistic	1e-12

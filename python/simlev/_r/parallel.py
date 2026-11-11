@@ -17,11 +17,11 @@ Verhalten (siehe ``python/DEVELOPING.md``; Zufall seit 1.0.0):
   bei ``cores = 1``. Zufällige Einheiten bekommen ihren Strom als Argument; das Ergebnis hängt
   damit nicht von ``cores`` ab. Die frühere Sicherung und Wiederherstellung des
   R-Zufallszustands je Element entfällt.
-- Ergebnisse in der Reihenfolge von ``X``; Warnungen der Elemente gehen wie in Kindprozessen
-  verloren; was ein Element auf ``sys.stdout``/``sys.stderr`` schreibt, erscheint im
-  Elternprozess in der Reihenfolge der Elemente (R: Reihenfolge der Fertigstellung).
+- Ergebnisse in der Reihenfolge von ``X``; was ein Element auf ``sys.stdout``/``sys.stderr`` schreibt und welche
+  Warnungen es auslöst, erscheint im Elternprozess in der Reihenfolge der Elemente wie mit ``cores = 1`` (seit 1.6.4,
+  Entscheidung 133, auch bei fester Zahl; bis dahin gingen Warnungen bei fester Zahl ≥ 2 verloren).
 - Fehler: Ausgaben der Elemente davor, dann der erste Fehler in Elementreihenfolge (wie die
-  sequentielle Fassung; R liefert stattdessen ein ``try-error``-Element mit Warnung).
+  sequentielle Fassung).
 
 Echte Parallelität gibt es nur mit ``fork`` (Linux und andere Unix-Systeme außer macOS): je
 Kern ein Kindprozess über ``multiprocessing`` (Kontext ``"fork"``), dynamische Zuteilung wie
@@ -29,7 +29,7 @@ Kern ein Kindprozess über ``multiprocessing`` (Kontext ``"fork"``), dynamische 
 ``_JOB``; an die Kinder gehen nur Indizes, zurück kommen gepickelte Ergebnisse (bitgleich, auch
 NA mit Nutzlast 1954 und -0). Lässt sich ein Ergebnis nicht pickeln (z. B. weil es eine Closure
 enthält), rechnet der Elternprozess dieses Element selbst. Auf Plattformen ohne Fork (Windows,
-macOS mit Standard ``spawn``) rechnet ``par_lapply`` sequentiell mit derselben Semantik.
+macOS mit Standard ``spawn``) rechnet ``par_lapply`` nacheinander wie mit ``cores = 1``.
 """
 from __future__ import annotations
 
@@ -43,6 +43,8 @@ __all__ = ["par_lapply", "fork_available"]
 
 # Auftrag für die Kindprozesse: (X, FUN), gesetzt vor dem Fork.
 _JOB = None
+# letzter Plan von cores = "auto" (seit 1.6.4; intern, für Proben)
+_PAR_LAST = [None]
 
 
 def fork_available() -> bool:
@@ -70,30 +72,80 @@ def _ncores(cores) -> int:
 
 
 def par_lapply(X, FUN, cores=1):
-    """Gegenstück zu ``.par_lapply(X, FUN, cores)`` in R; Ergebnis als Liste."""
+    """Gegenstück zu ``.par_lapply(X, FUN, cores)`` in R; Ergebnis als Liste. ``cores = "auto"`` (seit 1.6.4):
+    :func:`_auto`. Eine feste Zahl ≥ 2 verteilt seit 1.6.4 (Entscheidung 133) über denselben Weg wie ``"auto"``, nur
+    ohne Messung: :func:`_forked` mit min(cores, Elemente) Kindern; ohne ``fork`` nacheinander wie ``cores = 1`` (bis
+    dahin ``_sequential``: Warnungen verworfen)."""
     X = list(X)
+    if isinstance(cores, str) and cores == "auto":
+        return _auto(X, FUN)
     if cores is None or cores <= 1 or len(X) <= 1:
         return [_unit(FUN, x) for x in X]
     n = min(_ncores(cores), len(X))
-    if n < 2:                                   # mclapply: cores < 2 -> lapply
+    if n < 2 or not fork_available():           # mclapply: cores < 2 -> lapply
         return [_unit(FUN, x) for x in X]
-    if not fork_available():
-        return _sequential(X, FUN)
     return _forked(X, FUN, n)
 
 
-def _sequential(X, FUN):
-    """Fork-Semantik nacheinander (Warnungen der Elemente gehen verloren)."""
-    out = []
-    for x in X:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            out.append(_unit(FUN, x))
-    return out
+def _auto(X, FUN):
+    """``cores = "auto"`` (seit 1.6.4, Entscheidungen 41b/41c; wie R ``.par_lapply_auto``). Ergebnis, Ausgaben,
+    Warnungen und Fehler wie ``cores = 1``:
+
+    - Messen: die ersten Einheiten laufen nacheinander im Elternprozess, bis die Startzeit eines weiteren Laufs
+      (:func:`simlev._lib.par_probe`) vergangen ist (mindestens zwei Einheiten); Rechenzeit je Einheit = Mittel ohne
+      die erste (Anlaufkosten), bei nur einer Einheit deren Zeit; Ergebnisgröße je Einheit aus ``pickle`` von
+      höchstens 8 gleichmäßig verteilten gemessenen Einheiten (seit K43 T2-B1).
+    - Planen: :func:`simlev._lib.par_plan` (Kern ``sl_par_plan``) wählt Läufe c und Kern-Threads je Lauf; c = 1: der
+      Rest nacheinander.
+    - Verteilen (c > 1, nur mit ``fork``): :func:`_forked` mit Mitschnitt der Warnungen; die Kinder
+      zeigen Warnungen nicht, der Elternprozess gibt sie mit Ausgaben in Elementreihenfolge wieder
+      (``warnings.warn_explicit`` mit dem Register des auslösenden Moduls, also mit denselben Filtern und derselben
+      Unterdrückung von Wiederholungen wie nacheinander).
+    - Ohne ``fork`` (Windows, macOS) oder mit einem Prozessor: nacheinander.
+    """
+    import time
+    from .. import _lib
+    n = len(X)
+    _PAR_LAST[0] = (n, 1, None)            # letzter Plan (gemessene Elemente, Läufe, Threads; intern, für Proben)
+    if n <= 1 or _lib.nprocs() < 2 or not fork_available():
+        return [_unit(FUN, x) for x in X]
+    probe = _lib.par_probe(1)
+    res = []
+    k, t_first, t_rest = 0, 0.0, 0.0
+    while True:
+        t0 = time.perf_counter()
+        res.append(_unit(FUN, X[k]))
+        dt = time.perf_counter() - t0
+        k += 1
+        if k == 1:
+            t_first = dt
+        else:
+            t_rest += dt
+        if k >= n or (k >= 2 and t_first + t_rest >= probe):
+            break
+    if k >= n:
+        return res
+    u = t_rest / (k - 1) if k >= 2 else t_first
+    # Ergebnisgröße je Einheit aus höchstens 8 gleichmäßig verteilten gemessenen Einheiten (seit 1.6.4, K43 T2-B1; bis
+    # dahin aus allen gemessenen, bei vielen leichten Einheiten bis +51 % Laufzeit); ändert höchstens den Plan
+    sel = res if k <= 8 else [res[(j * (k - 1)) // 7] for j in range(8)]
+    try:
+        ub = len(pickle.dumps(sel, protocol=pickle.HIGHEST_PROTOCOL)) / len(sel)
+    except Exception:  # noqa: BLE001 - nicht pickelbar: Größe unbekannt
+        ub = 0.0
+    c, cap = _lib.par_plan(n - k, u, ub, 1)
+    _PAR_LAST[0] = (k, c, cap)
+    if c < 2:
+        res.extend(_unit(FUN, x) for x in X[k:])
+        return res
+    res.extend(_forked(X[k:], FUN, c, cap=cap))
+    return res
 
 
 class _Rec:
-    """Ausgaben eines Elements als Folge (Strom, Text), Strom 1 = stdout, 2 = stderr."""
+    """Ausgaben eines Elements als Folge (Strom, Text), Strom 1 = stdout, 2 = stderr; seit 1.6.4
+    Strom 3 = Warnungen als Tupel (Warnung, Kategorie, Datei, Zeile), 4 = Hinweis zu SIMLEV_THREADS (Merker),
+    5 = Änderung der Warnungsfilter (``warnings._filters_mutated``, etwa durch ``catch_warnings``)."""
 
     def __init__(self):
         self.chunks = []
@@ -105,7 +157,7 @@ class _Rec:
             self.chunks.append((k, [s]))
 
     def result(self):
-        return [(k, "".join(p)) for k, p in self.chunks]
+        return [(k, p if k in (3, 5) else "".join(p)) for k, p in self.chunks]
 
 
 class _Stream(io.TextIOBase):
@@ -132,8 +184,32 @@ class _Stream(io.TextIOBase):
         pass
 
 
+def _warn_again(w) -> None:
+    """Warnung eines Kinds im Elternprozess auslösen wie am Ort im Kind: Modul und Register aus der Datei
+    (seit 1.6.4)."""
+    message, category, filename, lineno = w
+    mod = None
+    for m in list(sys.modules.values()):
+        if getattr(m, "__file__", None) == filename:
+            mod = m
+            break
+    if mod is None:
+        warnings.warn_explicit(message, category, filename, lineno)
+    else:
+        reg = mod.__dict__.setdefault("__warningregistry__", {})
+        warnings.warn_explicit(message, category, filename, lineno, module=mod.__name__, registry=reg)
+
+
 def _replay(chunks) -> None:
     for k, s in chunks:
+        if k == 3:
+            for w in s:
+                _warn_again(w)
+            continue
+        if k == 5:                  # Filter im Kind geändert: Register der Wiederholungen wie dort leeren
+            for _ in s:
+                warnings._filters_mutated()
+            continue
         (sys.stdout if k == 1 else sys.stderr).write(s)
     if chunks:
         for f in (sys.stdout, sys.stderr):
@@ -144,14 +220,28 @@ def _replay(chunks) -> None:
 
 
 def _run_one(X, FUN, i):
-    """Ein Element im Kind: (ok, Wert oder Ausnahme, Ausgaben)."""
+    """Ein Element im Kind: (ok, Wert oder Ausnahme, Ausgaben). Seit 1.6.4 schneidet das Kind die Warnungen nach seinen
+    Filtern (vom Elternprozess geerbt) mit, statt sie zu verwerfen (seit Entscheidung 133 auch bei fester Zahl)."""
     rec = _Rec()
     old = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = _Stream(rec, 1, old[0]), _Stream(rec, 2, old[1])
     try:
+        # catch_warnings leert beim Eintritt die Register der Wiederholungen im Kind; das Kind zeigt danach
+        # nur Wiederholungen innerhalb des Elements nicht (wie nacheinander), Änderungen der Filter im Element
+        # (Strom 5) gibt der Elternprozess an derselben Stelle weiter
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            val, ok = _unit(FUN, X[i]), True
+            warnings.showwarning = (lambda message, category, filename, lineno, file=None, line=None:
+                                    rec.add(3, (message, category, filename, lineno)))
+            mutated = warnings._filters_mutated
+
+            def _mutated():
+                rec.add(5, "")
+                mutated()
+            warnings._filters_mutated = _mutated
+            try:
+                val, ok = _unit(FUN, X[i]), True
+            finally:
+                warnings._filters_mutated = mutated
     except BaseException as e:  # noqa: BLE001 - wird im Elternprozess erneut geworfen
         val, ok = e, False
     finally:
@@ -183,10 +273,22 @@ def _plain_error(e):
     return RuntimeError(str(e))
 
 
-def _worker(conn) -> None:
+def _worker(conn, parent, others) -> None:
     """Kindprozess: Block (erster Index, Anzahl) empfangen, Elemente der Reihe nach rechnen (nach einem Fehler im
-    Block keine weiteren), Ergebnisse als eine Nachricht senden (seit 1.6.3; bis 1.6.2 je Element eine)."""
+    Block keine weiteren), Ergebnisse als eine Nachricht senden (seit 1.6.3; bis 1.6.2 je Element eine).
+
+    Seit 1.6.4 (K43 T2-B4): das Kind endet mit dem Elternprozess ``parent`` (Kern ``sl_child_guard``, Linux), und es
+    schließt die geerbten Elternenden ``others`` der Verbindungen (eigene und die der früher gestarteten Geschwister),
+    damit kein Kind das Ende eines anderen offen hält."""
+    from .. import _ext
+    for q in others:
+        try:
+            q.close()
+        except OSError:
+            pass
+    _ext.slc_child_guard(int(parent))
     X, FUN = _JOB
+    from .. import _lib
     try:
         while True:
             blk = conn.recv()
@@ -195,7 +297,10 @@ def _worker(conn) -> None:
             i0, m = blk
             parts = []
             for i in range(i0, i0 + m):
+                hint0 = _lib._THREADS_HINT[0]
                 ok, val, chunks = _run_one(X, FUN, i)
+                if not hint0 and _lib._THREADS_HINT[0]:
+                    chunks = chunks + [(4, "")]       # Merker: Hinweis zu SIMLEV_THREADS in diesem Element
                 parts.append(_dumps(i, ok, val, chunks))
                 if not ok:
                     break
@@ -206,14 +311,26 @@ def _worker(conn) -> None:
         conn.close()
 
 
-def _forked(X, FUN, n):
+def _forked(X, FUN, n, cap=None):
+    """Elemente auf ``n`` Kindprozesse (Fork), dynamisch in Blöcken zugeteilt; Wiedergabe in Elementreihenfolge. Seit
+    1.6.4 für ``"auto"`` und feste Zahlen gleich (Entscheidung 133): Warnungen mitgeschnitten und im Elternprozess
+    wieder ausgelöst, der Hinweis zu SIMLEV_THREADS an der Stelle wie nacheinander; bis dahin verwarf eine feste Zahl
+    die Warnungen (Schalter ``record``). ``cap``: Kern-Threads je Kind (Plan von ``"auto"``), sonst
+    Prozessoren // n."""
     global _JOB
     import multiprocessing as mp
     from multiprocessing.connection import wait as _wait
 
+    from .. import _lib
+    from .._meldungen import EINGABE
     ctx = mp.get_context("fork")
     prev = _JOB
     _JOB = (X, FUN)
+    # Kern-Threads je Kind (seit 1.6.4, Entscheidung 41c): Prozessoren // Kinder, mindestens 1 (cores = "auto": aus dem
+    # Plan); der Hinweis zu SIMLEV_THREADS erscheint höchstens einmal je Sitzung, bei der Wiedergabe an der Stelle wie
+    # nacheinander (_replay_unit)
+    prev_cap = _lib._THREAD_CAP[0]
+    _lib._THREAD_CAP[0] = _lib.unit_threads(n) if cap is None else int(cap)
     procs, active = [], {}
     nx = len(X)
     nxt = 0
@@ -224,15 +341,16 @@ def _forked(X, FUN, n):
     first_err = nx              # kleinster Index mit Fehler
     done = False
     try:
-        with warnings.catch_warnings():
-            # Python >= 3.12 warnt bei fork() in einem Prozess mit Threads (etwa BLAS)
-            warnings.simplefilter("ignore", DeprecationWarning)
-            for _ in range(n):
-                pc, cc = ctx.Pipe(duplex=True)
-                p = ctx.Process(target=_worker, args=(cc,), daemon=False)
-                p.start()
-                cc.close()
-                procs.append((p, pc))
+        # Python >= 3.12 warnt bei fork() in einem Prozess mit Threads (etwa BLAS); ohne catch_warnings, das die
+        # Register der Wiederholungen im Elternprozess leeren würde (die Standardfilter zeigen DeprecationWarning aus
+        # multiprocessing ohnehin nicht; seit 1.6.4 auch bei fester Zahl, bis dahin dort unterdrückt)
+        parent = os.getpid()
+        for _ in range(n):
+            pc, cc = ctx.Pipe(duplex=True)
+            p = ctx.Process(target=_worker, args=(cc, parent, [q for _, q in procs] + [pc]), daemon=False)
+            p.start()
+            cc.close()
+            procs.append((p, pc))
         # Blöcke aufeinanderfolgender Elemente (seit 1.6.3): etwa 8 Blöcke je Kern, höchstens 16 Elemente je
         # Block; Zuteilung weiter dynamisch, Reihenfolge, Ausgaben und Fehlerregel wie je Element
         bs = max(1, min(16, nx // (8 * n)))
@@ -255,8 +373,12 @@ def _forked(X, FUN, n):
                 try:
                     data = pc.recv_bytes()
                 except (EOFError, OSError):
-                    raise RuntimeError("par_lapply: Prozess %d endete ohne Ergebnis (Element %d)"
-                                       % (p.pid or -1, i + 1)) from None
+                    # Kind ohne Ergebnis (seit 1.6.4, K43 T2-R4): Fehler am Anfang seines Blocks, gemeldet in
+                    # Elementreihenfolge wie die übrigen Fehler (frühere zuerst), Text aus der Tabelle wie in R (bis
+                    # dahin sofort "par_lapply: Prozess <pid> endete ohne Ergebnis (Element k)")
+                    state[i], res[i], outs[i] = 2, RuntimeError(EINGABE["ut2.prozess"] % "par_lapply"), []
+                    first_err = min(first_err, i)
+                    continue
                 for part in pickle.loads(data):
                     j, ok, val, chunks = pickle.loads(part)
                     if ok is None:
@@ -273,16 +395,17 @@ def _forked(X, FUN, n):
                 if state[emitted] == 3:
                     res[emitted] = _in_parent(X, FUN, emitted)
                 else:
-                    _replay(outs[emitted])
+                    _replay_unit(outs[emitted])
                     outs[emitted] = None
                 emitted += 1
             if emitted == first_err and first_err < nx:
-                _replay(outs[first_err])
+                _replay_unit(outs[first_err])
                 raise res[first_err]
         done = True
         return res
     finally:
         _JOB = prev
+        _lib._THREAD_CAP[0] = prev_cap
         for p, pc in procs:
             try:
                 pc.close()
@@ -295,7 +418,25 @@ def _forked(X, FUN, n):
 
 
 def _in_parent(X, FUN, i):
-    """Element im Elternprozess rechnen (Ergebnis nicht pickelbar), wie im Kind."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        return _unit(FUN, X[i])
+    """Element im Elternprozess rechnen (Ergebnis nicht pickelbar), mit Warnungen wie nacheinander."""
+    return _unit(FUN, X[i])
+
+
+def _replay_unit(chunks) -> None:
+    """Ausgaben eines Elements wiedergeben; der Hinweis zu SIMLEV_THREADS (Merker 4 des Kinds) höchstens einmal je
+    Sitzung wie nacheinander."""
+    if chunks and chunks[-1][0] == 4:
+        from .. import _lib
+        from .._meldungen import EINGABE
+        chunks = chunks[:-1]
+        if _lib._THREADS_HINT[0]:
+            hint = EINGABE["hinweis.prozessoren"] % ("SIMLEV_THREADS", _lib.nprocs()) + "\n"
+            out, done = [], False
+            for k, s in chunks:
+                if not done and k == 2 and hint in s:
+                    s, done = s.replace(hint, "", 1), True
+                out.append((k, s))
+            chunks = out
+        else:
+            _lib._THREADS_HINT[0] = True
+    _replay(chunks)

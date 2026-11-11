@@ -31,13 +31,15 @@ simulation(
 }
 \arguments{
   \item{data}{
-    \code{data.frame} mit täglichen Marktdaten. Pflichtfelder: \code{date}
+    \code{data.frame} mit täglichen Marktdaten (nur Tabellen; eine Liste von
+    Spalten vorher mit \code{as.data.frame()} umwandeln). Pflichtfelder: \code{date}
     (Klasse \code{Date}, aufsteigend) und je eine Kursspalte pro Asset (Niveaus,
     keine Renditen; Name muss mit dem Asset-Namen in \code{strategy}
     übereinstimmen; für Fonds-Wrapper die Spalten der inneren Strategie, siehe Abschnitt
     \dQuote{Fonds-Wrapper}). Optionale Spalten: Basiszins in Prozent (Spaltenname in
-    \code{tax_profile(base_rate = )}), logische Signalspalten (für
-    \code{trading = "signal"}), Risk-Free-Reihe in Prozent p.a. (Name in
+    \code{tax_profile(base_rate = )}), Signalspalten (für
+    \code{trading = "signal"}; \code{TRUE}/\code{FALSE} oder \code{0}/\code{1},
+    \code{NA} erlaubt, andere Zahlen sind ein Fehler), Risk-Free-Reihe in Prozent p.a. (Name in
     \code{risk_free}), logische Trigger- und numerische Gewichtsspalten für
     \code{rebalance_plan(event_col, event_weight)}.
     Fehlende Kalendertage werden automatisch per LOCF aufgefüllt (logische
@@ -54,7 +56,7 @@ simulation(
     Eingabeprüfung: \code{date} als Text im Format \code{"JJJJ-MM-TT"} (oder
     Faktor) wird mit Hinweis in \code{Date} umgewandelt; unsortierte Zeilen
     werden mit Hinweis aufsteigend sortiert; doppelte Daten und doppelte
-    Spaltennamen führen zu einem Fehler. Kurse müssen positiv sein (\code{<= 0} oder unendlich: Fehler).
+    Spaltennamen führen zu einem Fehler. Kurse müssen positiv sein (\code{<= 0} oder unendlich: Fehler) und seit 1.6.4 zwischen 1e-100 und 1e100 liegen (sonst Fehler; Kurse dann in einer passenden Einheit angeben).
     Einzelne fehlende Kurse (\code{NA}) werden mit Hinweis per LOCF gefüllt;
     sind in einer Zeile alle Kurse \code{NA}, gilt der Tag als aufgefüllt.
     Hat ein Asset erst ab einem späteren Tag Kurse (führende \code{NA}, etwa
@@ -62,7 +64,8 @@ simulation(
     \code{start} = erster Kurstag behandelt. Mindestens ein Asset muss
     am ersten Tag handelbar sein. Andere data.frame-Klassen (z. B. tibble)
     werden in einen \code{data.frame} umgewandelt.
-  }
+  
+Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
   \item{strategy}{
     Benannte Liste von Asset-Konfigurationen, idealerweise erzeugt mit
     \code{\link{create_strategy}} und \code{\link{asset_config}}. Direkte
@@ -114,7 +117,8 @@ simulation(
     Numerisch oder Character. Annualisierte risikolose Rendite
     \strong{in Prozent} (z. B. \code{3} = 3 \% p.a.) oder Name einer
     Spalte in \code{data} mit einer täglichen, annualisierten Zeitreihe in
-    Prozent (z. B. SOFR als \code{5.31}). \code{NULL} und \code{0} sind
+    Prozent (z. B. SOFR als \code{5.31}; nur Zahlenspalten, Text-, logische und
+    Faktorspalten sind ein Fehler). \code{NULL} und \code{0} sind
     äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent umgerechnet und
     von der jeweiligen Tagesrendite abgezogen; Sharpe und Sortino werden auf
     den Überschussrenditen berechnet. LOCF-aufgefüllte Tage werden konsistent

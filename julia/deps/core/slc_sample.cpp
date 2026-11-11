@@ -139,6 +139,8 @@ int sl_sample(sl_ctx *cx, sl_rng *r, int64_t n, int64_t size, int replace,
         if (cum == NULL || w == NULL) { free(cum); free(w); return sl_fail(cx, SL_ENOMEM, "sample: kein Speicher"); }
         for (i = 0; i < n; i++) w[i] = prob[i];
         cumsum_neumaier(n, w, cum);
+        /* seit 1.6.4 (A-067): Summe der Gewichte endlich (bis 1.6.3 zog der Kern dann immer dasselbe Element) */
+        if (!isfinite(cum[n - 1])) { free(cum); free(w); return sl_fail(cx, SL_EARG, "sample: Summe der Gewichte ist nicht endlich"); }
         for (i = 0; i < size; i++) {
             double total = cum[n - 1];
             int64_t k = search_cum(n, cum, w, sl_unif01(r) * total);
@@ -164,10 +166,22 @@ static void fill_nan_warn(sl_ctx *cx, int64_t n, double *out, const char *fn)
     if (n > 0) sl_warn(cx, "%s: NaN erzeugt", fn);
 }
 
+/* Ränder seit 1.6.4 wie R's rnorm (A-093, Entscheidung 89): mu NaN, sd nicht endlich oder < 0: NaN; mu = ±Inf (sd
+ * endlich >= 0): mu ohne Ziehung (bis 1.6.3 NaN); sd = 0: mu (mit Vorzeichen der Null; bis 1.6.3 mu + 0 z), der Strom
+ * zieht dabei wie bisher je Wert eine Zahl. */
 int sl_rnorm(sl_ctx *cx, sl_rng *r, int64_t n, double mu, double sd, double *out)
 {
     int64_t i;
-    if (!(isfinite(mu) && isfinite(sd) && sd >= 0)) { fill_nan_warn(cx, n, out, "rnorm"); return SL_OK; }
+    if (isnan(mu) || !isfinite(sd) || sd < 0) { fill_nan_warn(cx, n, out, "rnorm"); return SL_OK; }
+    if (!isfinite(mu)) { for (i = 0; i < n; i++) out[i] = mu; return SL_OK; }
+    if (sd == 0) {
+        for (i = 0; i < n; i++) {
+            (void) sl_unif01(r);
+            out[i] = mu;
+            SL_POLL(cx, i);
+        }
+        return SL_OK;
+    }
     for (i = 0; i < n; i++) {
         out[i] = mu + sd * slc_qnorm_std(sl_unif01(r), 1);
         SL_POLL(cx, i);
@@ -227,13 +241,26 @@ static double gamma_draw(sl_rng *r, double alpha)
     }
 }
 
+/* Ränder seit 1.6.4 wie R's rgamma (A-093, Entscheidung 89), ohne Ziehung: NaN-Parameter NaN; shape oder scale <= 0:
+ * 0, wenn einer von beiden 0 ist, sonst NaN; shape oder scale = Inf: Inf (bis 1.6.3 überall NaN). */
+static int gamma_edge(sl_ctx *cx, int64_t n, double shape, double scale, double *out, const char *fn)
+{
+    int64_t i;
+    double v;
+    if (isnan(shape) || isnan(scale)) { fill_nan_warn(cx, n, out, fn); return 1; }
+    if (shape <= 0 || scale <= 0) {
+        if (scale == 0 || shape == 0) v = 0.0;
+        else { fill_nan_warn(cx, n, out, fn); return 1; }
+    } else if (!isfinite(shape) || !isfinite(scale)) v = INFINITY;
+    else return 0;
+    for (i = 0; i < n; i++) out[i] = v;
+    return 1;
+}
+
 int sl_rgamma(sl_ctx *cx, sl_rng *r, int64_t n, double shape, double scale, double *out)
 {
     int64_t i;
-    if (!(shape > 0 && isfinite(shape) && scale > 0 && isfinite(scale))) {
-        fill_nan_warn(cx, n, out, "rgamma");
-        return SL_OK;
-    }
+    if (gamma_edge(cx, n, shape, scale, out, "rgamma")) return SL_OK;
     for (i = 0; i < n; i++) {
         out[i] = scale * gamma_draw(r, shape);
         SL_POLL(cx, i);
@@ -244,7 +271,9 @@ int sl_rgamma(sl_ctx *cx, sl_rng *r, int64_t n, double shape, double scale, doub
 int sl_rchisq(sl_ctx *cx, sl_rng *r, int64_t n, double df, double *out)
 {
     int64_t i;
-    if (!(df > 0 && isfinite(df))) { fill_nan_warn(cx, n, out, "rchisq"); return SL_OK; }
+    /* seit 1.6.4 wie R's rchisq (A-093): df nicht endlich oder < 0 NaN, df = 0 ergibt 0 ohne Ziehung (bis 1.6.3 NaN) */
+    if (!isfinite(df) || df < 0) { fill_nan_warn(cx, n, out, "rchisq"); return SL_OK; }
+    if (df == 0) { for (i = 0; i < n; i++) out[i] = 0.0; return SL_OK; }
     for (i = 0; i < n; i++) {
         out[i] = 2.0 * gamma_draw(r, 0.5 * df);
         SL_POLL(cx, i);

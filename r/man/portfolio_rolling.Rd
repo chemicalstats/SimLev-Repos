@@ -24,7 +24,7 @@ Renditematrix ist hier nicht moeglich.}
 \item{method}{Verfahren wie in \code{\link[=portfolio_optimize]{portfolio_optimize()}} (Zeichenkette,
 Standard \code{"min_variance"}).}
 
-\item{window}{Fensterlaenge in Jahren (Standard 3).}
+\item{window}{Fensterlaenge in Jahren (Standard 3). Seit 1.6.4 eine ganze Zahl von 1 bis 100 (Jahre).}
 
 \item{every}{Entscheidungsrhythmus: \code{"month"} (Standard),
 \code{"quarter"} oder \code{"year"}.}

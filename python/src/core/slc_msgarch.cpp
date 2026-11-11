@@ -6,7 +6,8 @@
  *             den Hamilton-Filter (Hamilton 1989): h[1,k] = h1, h[t,k] = omega_k + (alpha_k +
  *             gamma_k 1{y_{t-1} < 0}) y_{t-1}^2 + beta_k h[t-1,k], f_t = sum_k pred[t,k] phi_k,
  *             filt = pred phi / f_t, pred[t+1,j] = sum_i P[i,j] filt[t,i], loglik = sum log f_t.
- *             Der Filter ist der eigene Kern simlev_ms_garch_filter (r/src/ms_garch_impl.c),
+ *             Der Filter ist der frühere eigene Kern simlev_ms_garch_filter (r/src/ms_garch_impl.c, nicht
+ *             mehr vorhanden),
  *             Zeile für Zeile als C-ABI überführt (gleiche Rechenfolge und Klammerung); die
  *             Zielfunktion rechnet dieselben Schritte ohne die n x K-Felder.
  *             Umparametrisierung, stationäre Verteilung, Startwerte und Ablauf wie die eigene
@@ -29,7 +30,7 @@
  *             Varianz, letzter Filterlauf, Mischungsvarianz und Viterbi-Pfad (Viterbi 1967; wie
  *             .hmm_viterbi, erstes Maximum). Ein nicht endlicher Wert der Zielfunktion zählt als
  *             +Inf (statt des Strafwerts 1e10 in R).
- *             HMM: skalierter Vorwärts-Rückwärts-Schritt wie der eigene Kern hmm_forward_backward
+ *             HMM: skalierter Vorwärts-Rückwärts-Schritt wie der eigene Kern hmm_fb_raw
  *             (r/src/research_core_impl.h); M-Schritt mit gewichteten Mitteln und Varianzen
  *             (plus ridge), Abbruch bei |l - l_alt| < tol (1 + |l|).
  *             Quantile Typ 7 nach der dokumentierten Formel (1 - g) x_j + g x_{j+1}
@@ -60,7 +61,7 @@
  *             Golub, G. H., Van Loan, C. F. (2013). Matrix Computations, 4. Aufl., Johns Hopkins
  *               University Press. Alg. 3.4.1 (LU mit Spaltenpivotsuche, Ableitung der stationären
  *               Verteilung).
- *             Eigener SimLev-Code: r/R/ms_garch.R, r/src/ms_garch_impl.c, r/R/regimes.R (.hmm_em,
+ *             Eigener SimLev-Code: r/R/ms_garch.R, früher r/src/ms_garch_impl.c, r/R/regimes.R (.hmm_em,
  *               .hmm_init_rank, .hmm_init_cl, .hmm_viterbi, .ldmvn), hmm_forward_backward und
  *               roll_mean_core (r/src/research_core_impl.h).
  * Konstanten: 2 pi wie im eigenen Filter (2.0 * pi, pi aus slc_constants.h); Verfahrensparameter
@@ -77,6 +78,7 @@
 #include "slc_la_internal.h"
 #include "slc_opt.h"
 #include "slc_constants.h"
+#include "slc_prep.h"   /* sl_nprocs (seit 1.6.4) */
 
 #include <stdlib.h>
 #include <string.h>
@@ -88,7 +90,7 @@
 
 static double var_c(int n, const double *x);
 
-/* ── Filter (überführt aus ms_garch_impl.c) ─────────────────────────────── */
+/* ── Filter (überführt aus dem früheren ms_garch_impl.c) ──────────────── */
 
 static void filter_run(const double *y, int n, int K, const double *omega, const double *alpha,
                        const double *beta, const double *gamma, const double *P, const double *xi0,
@@ -245,8 +247,9 @@ void sl_msgarch_stat(int K, const double *P, double *pi)
 {
     double p2[64], *q = K <= 64 ? p2 : (double *) malloc((size_t) K * sizeof(double));
     int it, i, j, k;
+    /* seit 1.6.4 (B-031): ohne Speicher NaN statt still der Gleichverteilung (nur K > 64) */
+    if (q == NULL) { for (k = 0; k < K; k++) pi[k] = NAN; return; }
     for (k = 0; k < K; k++) pi[k] = 1.0 / K;
-    if (q == NULL) return;
     for (it = 0; it < 1000; it++) {
         double mx = 0.0;
         for (j = 0; j < K; j++) {
@@ -740,15 +743,16 @@ int sl_msgarch_fit_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, int ns
     nt = nthreads < 1 ? 1 : nthreads;
     if (nt > nstart) nt = nstart;
 #ifdef SLC_THREADS
-    if (nt > 1) {
-        pthread_t th[64];
+    if (nt > sl_nprocs()) nt = sl_nprocs();   /* seit 1.6.4 Sicherheitsgrenze Zahl der Prozessoren (Entscheidung 41b) */
+    pthread_t *th = nt > 1 ? (pthread_t *) malloc((size_t) nt * sizeof(pthread_t)) : NULL;
+    if (th != NULL) {
         int nw = 0;
-        if (nt > 64) nt = 64;
         pthread_mutex_init(&p.mu, NULL);
         for (i = 0; i < nt - 1; i++) if (pthread_create(&th[nw], NULL, pool_thread, &p) == 0) nw++;
         pool_work(&p, 1);
         for (i = 0; i < nw; i++) pthread_join(th[i], NULL);
         pthread_mutex_destroy(&p.mu);
+        free(th);
     } else
 #endif
         pool_work(&p, 1);
@@ -780,25 +784,11 @@ int sl_msgarch_fit(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstar
 
 /* ── kleine Hilfen ───────────────────────────────────────────────────────── */
 
-static double mean_c(int n, const double *x)
-{
-    slc_acc a;
-    int i;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) slc_acc_add(&a, x[i]);
-    return slc_acc_val(&a) / n;
-}
-
+/* Stichprobenvarianz um das eigene Mittel (slc_mean, slc_var_m aus slc_la_internal.h, seit 1.6.4) */
 static double var_c(int n, const double *x)
 {
-    slc_acc a;
-    double m;
-    int i;
     if (n < 2) return NAN;
-    m = mean_c(n, x);
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) { double d = x[i] - m; slc_acc_add(&a, d * d); }
-    return slc_acc_val(&a) / (n - 1);
+    return slc_var_m(n, x, slc_mean(n, x));
 }
 
 /* stabile Reihenfolge (wie order): idx 0-basiert */
@@ -832,7 +822,9 @@ static void fix_P(int K, double *P)
 #define MS_NG_S 3
 #define MS_NG_G 5
 #define MS_NG(gjr) ((gjr) ? MS_NG_G : MS_NG_S)
-static void best_start(const ms_data *d, const double *s2k, const double *P0, double *out, double *rest)
+/* Rueckgabe 0, ohne Speicher -1 (seit 1.6.4, B-031: bis 1.6.3 kehrte best_start still zurueck und der Aufrufer
+ * zaehlte den nicht beschriebenen Start mit) */
+static int best_start(const ms_data *d, const double *s2k, const double *P0, double *out, double *rest)
 {
     static const double gs[MS_NG_S][3] = {{0.05, 0.0, 0.90}, {0.10, 0.0, 0.85}, {0.03, 0.0, 0.95}};
     static const double gg[MS_NG_G][3] = {{0.03, 0.06, 0.90}, {0.05, 0.10, 0.82}, {0.02, 0.04, 0.94},
@@ -842,7 +834,7 @@ static void best_start(const ms_data *d, const double *s2k, const double *P0, do
     double om[64], al[64], be[64], ga[64], P99[64 * 64], best = INFINITY;
     double *all = (double *) malloc(2 * (size_t) ng * (size_t) np * sizeof(double));
     int pst, g, k, i, j, have = 0, ib = 0, c = 0, r = 0;
-    if (all == NULL) return;
+    if (all == NULL) return -1;
     for (i = 0; i < K; i++) for (j = 0; j < K; j++) P99[i + K * j] = (i == j) ? 0.99 : 0.01 / (K - 1);
     for (pst = 0; pst < 2; pst++) for (g = 0; g < ng; g++) {
         double v, *th = all + (size_t) np * c;
@@ -858,6 +850,7 @@ static void best_start(const ms_data *d, const double *s2k, const double *P0, do
     memcpy(out, all + (size_t) np * ib, (size_t) np * sizeof(double));
     for (c = 0; c < 2 * ng; c++) if (c != ib) memcpy(rest + (size_t) np * r++, all + (size_t) np * c, (size_t) np * sizeof(double));
     free(all);
+    return 0;
 }
 
 /* ── univariates Gauß-HMM (wie .hmm_em, .hmm_init_rank, .hmm_viterbi) ───── */
@@ -977,9 +970,11 @@ static double estep(int n, int K, const double *x, const double *mu, const doubl
     for (j = 0; j < K; j++) {
         const double L = sqrt(S[j]);
         if (!(L > 0.0) || !isfinite(L)) return NAN;
+        /* seit 1.6.4 log(L) und 0.5 log(2 pi) einmal je Regime (B-104; bis 1.6.3 je Beobachtung, gleiche Werte) */
+        const double lL = log(L), lc = 0.5 * 1.0 * log(TWO_PI);
         for (t = 0; t < n; t++) {
             const double z = (x[t] - mu[j]) / L;
-            lB[t + (size_t) n * j] = -0.5 * (z * z) - log(L) - 0.5 * 1.0 * log(TWO_PI);
+            lB[t + (size_t) n * j] = -0.5 * (z * z) - lL - lc;
         }
     }
     slc_acc_init(&a2, 0.0);
@@ -1134,6 +1129,8 @@ static double q7(int n, const double *xs, double p)
     return qs;
 }
 
+int sl_msgarch_maxstart(void) { return SL_MSGARCH_MAXSTART; }
+
 int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double h1, int all_pts,
                       int *nstart, double *starts)
 {
@@ -1170,7 +1167,10 @@ int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double
                 for (k = 0; k < K; k++) s2k[k] = S[ord[k]];
                 for (i = 0; i < K; i++) for (j = 0; j < K; j++) P0[i + K * j] = A[ord[i] + K * ord[j]];
                 fix_P(K, P0);
-                best_start(&d, s2k, P0, starts + (size_t) np * ns, rest + (size_t) np * nr);
+                if (best_start(&d, s2k, P0, starts + (size_t) np * ns, rest + (size_t) np * nr) != 0) {
+                    st = sl_fail(cx, SL_ENOMEM, "MS-GARCH: kein Speicher");
+                    goto out;
+                }
                 ns++; nr += 2 * MS_NG(gjr) - 1;
             }
         }
@@ -1202,7 +1202,10 @@ int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double
         for (k = 0; k < K; k++) tmp[k] = s2k[k];
         order_k(K, tmp, ord);
         for (k = 0; k < K; k++) s2k[k] = tmp[ord[k]];
-        best_start(&d, s2k, P0, starts + (size_t) np * ns, rest + (size_t) np * nr);
+        if (best_start(&d, s2k, P0, starts + (size_t) np * ns, rest + (size_t) np * nr) != 0) {
+            st = sl_fail(cx, SL_ENOMEM, "MS-GARCH: kein Speicher");
+            goto out;
+        }
         ns++; nr += 2 * MS_NG(gjr) - 1;
     }
     /* danach die übrigen Rasterpunkte beider Familien (BFGS von denselben Starts findet

@@ -50,7 +50,9 @@ def garch11_nll(e, par, gjr=False, s2_init=None):
     """NLL an par = (mu, omega, alpha, beta[, gamma]); s2_init None: Stichprobenvarianz."""
     p = np.zeros(5)
     pv = _vec(par)
-    p[:min(5, pv.size)] = pv[:5]
+    if pv.size not in (4, 5):                   # seit 1.6.4 wie R (B-095)
+        raise ValueError("garch11_nll: par muss 4 oder 5 Werte haben (mu, omega, alpha, beta[, gamma]).")
+    p[:pv.size] = pv
     return _ext.slc_garch11_nll(_vec(e), p, bool(gjr), math.nan if s2_init is None else float(s2_init))
 
 
@@ -211,7 +213,11 @@ def ms_garch_fitstarts(y, K, model, starts, h1=None):
 
 
 def _threads(cores):
-    """Zahl der Threads aus ``cores`` wie ``.sl_threads`` (ganze Zahl; ungültig oder < 1 -> 1)."""
+    """Zahl der Threads aus ``cores`` wie ``.sl_threads`` (ganze Zahl; ungültig oder < 1 -> 1; seit 1.6.4 ``"auto"``:
+    Kern-Threads wie außerhalb paralleler Einheiten, :func:`simlev._lib.auto_threads`)."""
+    if isinstance(cores, str) and cores == "auto":
+        from ._lib import auto_threads
+        return auto_threads()
     try:
         nt = int(float(np.asarray(cores, dtype=float).ravel()[0]))
     except (TypeError, ValueError, IndexError, OverflowError):

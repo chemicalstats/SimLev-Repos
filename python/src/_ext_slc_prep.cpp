@@ -236,6 +236,42 @@ static PyObject *tdist_mt(PyObject *args, tmt_fn f)
 static PyObject *slc_qt_mt(PyObject *s, PyObject *a) { (void) s; return tdist_mt(a, sl_qt_mt); }
 static PyObject *slc_pt_mt(PyObject *s, PyObject *a) { (void) s; return tdist_mt(a, sl_pt_mt); }
 
+/* slc_nprocs(): Zahl der Prozessoren, mindestens 1 (seit 1.6.4; Höchstwert für cores und Threads; simlev/_lib.py) */
+static PyObject *slc_nprocs(PyObject *s, PyObject *a) { (void) s; (void) a; return PyLong_FromLong(sl_nprocs()); }
+
+/* slc_mem_avail(): freier Arbeitsspeicher in Bytes (-1 unbekannt); slc_par_plan(sys, nprocs, max_runs, env, n, unit_s,
+ * unit_bytes, mem, self_bytes, running) -> (Laeufe, Kern-Threads je Lauf) (seit 1.6.4, Planer fuer cores = "auto"; simlev/_lib.py par_plan) */
+static PyObject *slc_mem_avail(PyObject *s, PyObject *a) { (void) s; (void) a; return PyFloat_FromDouble(sl_mem_avail()); }
+static PyObject *slc_mem_self(PyObject *s, PyObject *a) { (void) s; (void) a; return PyFloat_FromDouble(sl_mem_self()); }
+static PyObject *slc_load_running(PyObject *s, PyObject *a) { (void) s; (void) a; return PyFloat_FromDouble(sl_load_running()); }
+/* slc_child_guard(parent_pid): Kindprozess nach dem Fork schuetzen (seit 1.6.4, K43 T2-B4; simlev/_r/parallel.py) */
+static PyObject *slc_child_guard(PyObject *s, PyObject *a)
+{
+    long pp;
+    (void) s;
+    if (!PyArg_ParseTuple(a, "l", &pp)) return NULL;
+    return PyLong_FromLong(sl_child_guard(pp));
+}
+static PyObject *slc_par_probe(PyObject *s, PyObject *a)
+{
+    int sys;
+    double self_b;
+    (void) s;
+    if (!PyArg_ParseTuple(a, "id", &sys, &self_b)) return NULL;
+    return PyFloat_FromDouble(sl_par_probe(sys, self_b));
+}
+
+static PyObject *slc_par_plan(PyObject *self, PyObject *args)
+{
+    int sys, np, mr, env, th = 1, c;
+    long long n;
+    double us, ub, mem, self_b, run;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "iiiiLddddd", &sys, &np, &mr, &env, &n, &us, &ub, &mem, &self_b, &run)) return NULL;
+    c = sl_par_plan(sys, np, mr, env, (int64_t) n, us, ub, mem, self_b, run, &th);
+    return Py_BuildValue("(ii)", c, th);
+}
+
 /* slc_tcop_fit(u, v, nthreads) -> (th, nu, obj) oder None (der Host rechnet wie bisher) */
 static PyObject *slc_tcop_fit(PyObject *self, PyObject *args)
 {
@@ -333,6 +369,13 @@ PyMethodDef simlev_ext_slc_prep_methods[] = {
      "slc_boot_path_src(n_src, k, src, idx, aux, aux_ratio, aux_start, level, letf, start, P, lv) -> gueltig (ret = src[idx - 1])"},
     {"slc_qt_mt", slc_qt_mt, METH_VARARGS, "slc_qt_mt(p, out, df, lower, nthreads)"},
     {"slc_pt_mt", slc_pt_mt, METH_VARARGS, "slc_pt_mt(q, out, df, lower, nthreads)"},
+    {"slc_nprocs", slc_nprocs, METH_NOARGS, "slc_nprocs(): Zahl der Prozessoren, mindestens 1"},
+    {"slc_mem_avail", slc_mem_avail, METH_NOARGS, "slc_mem_avail(): freier Arbeitsspeicher in Bytes (-1 unbekannt)"},
+    {"slc_load_running", slc_load_running, METH_NOARGS, "slc_load_running(): laufende Prozesse laut System (-1 unbekannt)"},
+    {"slc_child_guard", slc_child_guard, METH_VARARGS, "slc_child_guard(parent_pid): Kindprozess schuetzen (Linux PR_SET_PDEATHSIG)"},
+    {"slc_mem_self", slc_mem_self, METH_NOARGS, "slc_mem_self(): Arbeitsspeicher des eigenen Prozesses in Bytes (-1 unbekannt)"},
+    {"slc_par_probe", slc_par_probe, METH_VARARGS, "slc_par_probe(sys, self_bytes): Messzeit vor dem Plan in Sekunden"},
+    {"slc_par_plan", slc_par_plan, METH_VARARGS, "slc_par_plan(sys, nprocs, max_runs, env, n, unit_s, unit_bytes, mem, self_bytes, running) -> (Laeufe, Threads)"},
     {"slc_tcop_fit", slc_tcop_fit, METH_VARARGS, "slc_tcop_fit(u, v, nthreads) -> (th, nu, obj) oder None"},
     {"slc_tcop_nu", slc_tcop_nu, METH_VARARGS, "slc_tcop_nu(U, Ri, k, ldR, lower, upper, tol, nthreads) -> nu oder None"},
     {"slc_fmin_init", slc_fmin_init, METH_VARARGS, "slc_fmin_init(ws, ax, bx, tol)"},

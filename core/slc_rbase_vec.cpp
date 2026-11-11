@@ -38,7 +38,9 @@ void sl_r_bincode(int64_t n, const double *x, int64_t nb, const double *b, int r
         double xi = x[i];
         int64_t lo = 0, hi = nb1;
         out[i] = SLR_NA;
-        if (isnan(xi) || nb1 < 1) continue;
+        /* seit 1.6.5 (CR2-D-14) wie R .bincode auch mit einer Grenze (include.lowest trifft sie; bis 1.6.4 dort NA);
+         * ohne Grenze NA */
+        if (isnan(xi) || nb1 < 0) continue;
         if (xi < b[lo] || b[hi] < xi || (xi == b[lft ? hi : lo] && !include_lowest)) continue;
         while (hi - lo >= 2) {
             int64_t mid = (hi + lo) / 2;

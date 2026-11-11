@@ -34,7 +34,7 @@ _cabi_layout_check()
 "Länge eines flachen Eingabefelds für den Kern prüfen (Gegenstück zu _CABI_LAYOUT)."
 @inline _flat_len(x, n::Int, what) = length(x) == n || _flat_len_fail(what, length(x), n)
 @noinline _flat_len_fail(what, got, n) =
-    error("SimLev: flaches Feld $what hat $got statt $n Werte (julia/src/sim_engine.jl, _CABI_LAYOUT)")
+    chk_stop("a.m_cabi_layout_check", what, got, n)
 
 _engine_fee(f::Nothing) = (0.0, 0.0, 0.0, 0.0, 0.0)
 _engine_fee(f::FeeSpec) = (1.0, f.fixed, f.percent, f.min, f.max)
@@ -59,9 +59,10 @@ function _harvest_md(harvest_day)
     return isempty(ok) ? 9999 : minimum(ok)
 end
 
-"Vorbereitung, Phasen 4 und 5 über den C++-Kern: Termine, Flags, Startgewichte, Tagesschleife und Abschluss des letzten Jahres."
-function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, split_thresh, balance_dca,
-                          harvest_loss_pot, stopp_date::Int, harvest_day)
+"""Eingabe der Tagesengine (seit 1.6.5 eigene Funktion, Paket E: der Studienkern sim_prepared.jl merkt sie sich je
+Strategie und tauscht je Pfad nur Kurse und Signale); setzt fl.tax_regimes."""
+function _sim_engine_input(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, split_thresh, balance_dca,
+                           harvest_loss_pot, stopp_date::Int, harvest_day)
     @nospecialize
     fl, cfg = R.fl, R.cfg
     n = length(fl.flag_date)
@@ -94,7 +95,6 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
     starts = Float64[sim.assets[a].start for a in 1:na]
     filled = any(fl.flag_filled) ? Int32.(fl.flag_filled) : Int32[]
     event = fl.flag_event === nothing ? Int32[] : Int32.(fl.flag_event)
-    flags_out = zeros(Int32, n)
     T = sim.totals
     tot0 = Float64[T.total_taxes, T.loss_capital_gains, T.loss_private_sales, T.private_sale_gains_ytd,
                    T.private_sale_losses_ytd, T.sparer_pauschbetrag_annual, T.sparer_pauschbetrag_remaining,
@@ -121,28 +121,58 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
                  cfg.sparer_pauschbetrag, cfg.soli_factor_income, cfg.church_k,
                  lo, hi,
                  env !== nothing && env.zve_all !== nothing ? env.zve_all : 0.0]
-    fees = Float64[_engine_fee(cfg.fee_order)..., _engine_fee(cfg.fee_dca)...]
+    fees = Float64[_engine_fee(cfg.fee_order)..., _engine_fee(cfg.fee_dca)..., _engine_fee(cfg.fee_cust)...]   # seit 1.6.5 15 Werte
     L = _CABI_LAYOUT
     _flat_len(ai, L.AI_N * na, "ai"); _flat_len(ad, L.AD_N * na, "ad"); _flat_len(ci, L.CI_N, "ci")
     _flat_len(cd, L.CD_N, "cd"); _flat_len(tot0, L.TT_N, "tot0"); _flat_len(pint, L.PI_N, "pint")
     _flat_len(pdbl, L.PD_N, "pdbl")
+    return (n = n, na = na, person = person, env = env, day = day, ew = ew, ai = ai, ad = ad, ci = ci, cd = cd,
+            fees = fees, tot0 = tot0, tariff_par = tariff_par, zve = zve, pint = pint, pdbl = pdbl, starts = starts,
+            filled = filled, event = event, has_ew = event_weight !== nothing)
+end
+
+"Vorbereitung, Phasen 4 und 5 über den C++-Kern: Termine, Flags, Startgewichte, Tagesschleife und Abschluss des letzten Jahres."
+function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, split_thresh, balance_dca,
+                          harvest_loss_pot, stopp_date::Int, harvest_day)
+    @nospecialize
+    E = _sim_engine_input(R, sim, fr, liquidate, event_weight, split_thresh, balance_dca, harvest_loss_pot, stopp_date,
+                          harvest_day)
     h = ccall((:simlev_c_engine_new, LIBSLC), Ptr{Cvoid}, ())
     h == C_NULL && throw(OutOfMemoryError())
     try
-        GC.@preserve sim day ew ai ad ci cd fees tot0 tariff_par zve pint pdbl starts filled event fl flags_out begin
-            prices = Ptr{Float64}[pointer(sim.market[a].asset_price) for a in 1:na]
-            sb = Ptr{Float64}[_sig_ptr(sim.market[a].signal_buy.v) for a in 1:na]
-            ss = Ptr{Float64}[_sig_ptr(sim.market[a].signal_sell.v) for a in 1:na]
-            ewp = event_weight === nothing ? Ptr{Ptr{Float64}}(C_NULL) :
-                  Ptr{Float64}[ew[a] === nothing ? Ptr{Float64}(C_NULL) : pointer(ew[a]) for a in 1:na]
-            brp = person ? Ptr{Float64}[pointer(sim.market[a].base_rates) for a in 1:na] : Ptr{Ptr{Float64}}(C_NULL)
-            reps = Ptr{Float64}[]
-            for a in 1:na
-                r = sim.report[a]
-                append!(reps, (pointer(r.worth), pointer(r.money), pointer(r.flows), pointer(r.total), pointer(r.share)))
-            end
-            GC.@preserve prices sb ss ewp brp reps begin
-                dd, dc, bd, bc = fl.dca[3], fl.dca[4], fl.balance[3], fl.balance[4]
+        flags_out = zeros(Int32, E.n)
+        rc = _engine_ccall(h, C_NULL, E, sim, R.fl, flags_out, nothing)
+        _sim_engine_output!(h, rc, R, sim, E, flags_out)
+    finally
+        ccall((:simlev_c_engine_free, LIBSLC), Cvoid, (Ptr{Cvoid},), h)
+    end
+    return nothing
+end
+
+"""Aufruf des Kerns mit der Eingabe E und den Zeigern auf Kurse, Signale, Basiszins und Report von sim: ohne ev
+`simlev_c_engine_run`, mit ev (Teile der Auswertung, Studienkern seit 1.6.5) `simlev_c_run_prepared` mit dem
+Auswertungsobjekt he; Rückgabe des Kerns."""
+function _engine_ccall(h::Ptr{Cvoid}, he::Ptr{Cvoid}, E, sim::Sim, fl::Flags, flags_out::Vector{Int32}, ev)
+    @nospecialize
+    n, na, person = E.n, E.na, E.person
+    day, ew, ai, ad, ci, cd, fees, tot0 = E.day, E.ew, E.ai, E.ad, E.ci, E.cd, E.fees, E.tot0
+    tariff_par, zve, pint, pdbl, starts, filled, event = E.tariff_par, E.zve, E.pint, E.pdbl, E.starts, E.filled, E.event
+    rc = Cint(0)
+    GC.@preserve sim day ew ai ad ci cd fees tot0 tariff_par zve pint pdbl starts filled event fl flags_out ev begin
+        prices = Ptr{Float64}[pointer(sim.market[a].asset_price) for a in 1:na]
+        sb = Ptr{Float64}[_sig_ptr(sim.market[a].signal_buy.v) for a in 1:na]
+        ss = Ptr{Float64}[_sig_ptr(sim.market[a].signal_sell.v) for a in 1:na]
+        ewp = !E.has_ew ? Ptr{Ptr{Float64}}(C_NULL) :
+              Ptr{Float64}[ew[a] === nothing ? Ptr{Float64}(C_NULL) : pointer(ew[a]) for a in 1:na]
+        brp = person ? Ptr{Float64}[pointer(sim.market[a].base_rates) for a in 1:na] : Ptr{Ptr{Float64}}(C_NULL)
+        reps = Ptr{Float64}[]
+        for a in 1:na
+            r = sim.report[a]
+            append!(reps, (pointer(r.worth), pointer(r.money), pointer(r.flows), pointer(r.total), pointer(r.share)))
+        end
+        GC.@preserve prices sb ss ewp brp reps begin
+            dd, dc, bd, bc = fl.dca[3], fl.dca[4], fl.balance[3], fl.balance[4]
+            if ev === nothing
                 rc = ccall((:simlev_c_engine_run, LIBSLC), Cint,
                            (Ptr{Cvoid}, Int64, Int64, Ptr{Float64}, Ptr{Ptr{Float64}}, Ptr{Ptr{Float64}},
                             Ptr{Ptr{Float64}}, Ptr{Ptr{Float64}}, Ptr{Ptr{Float64}}, Ptr{Int32}, Ptr{Float64},
@@ -154,81 +184,103 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
                            isempty(filled) ? Ptr{Int32}(C_NULL) : pointer(filled),
                            fl.flag_event === nothing ? Ptr{Int32}(C_NULL) : pointer(event),
                            length(dd), dd, dc, length(bd), bd, bc, flags_out)
+            else
+                rc = ccall((:simlev_c_run_prepared, LIBSLC), Cint,
+                           (Ptr{Cvoid}, Ptr{Cvoid}, Int64, Int64, Ptr{Float64}, Ptr{Ptr{Float64}}, Ptr{Ptr{Float64}},
+                            Ptr{Ptr{Float64}}, Ptr{Ptr{Float64}}, Ptr{Ptr{Float64}}, Ptr{Int32}, Ptr{Float64},
+                            Ptr{Int32}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Int64, Ptr{Float64},
+                            Int64, Ptr{Ptr{Float64}}, Ptr{Int32}, Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Int32},
+                            Int64, Ptr{Float64}, Ptr{Int32}, Int64, Ptr{Float64}, Ptr{Int32}, Ptr{Int32},
+                            Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Float64}, Int64, Int32, Ptr{Int64}),
+                           h, he, n, na, day, prices, sb, ss, ewp, brp, ai, ad, ci, cd, fees, tot0, tariff_par,
+                           length(tariff_par), zve, length(zve) ÷ 2, reps, pint, pdbl, starts,
+                           isempty(filled) ? Ptr{Int32}(C_NULL) : pointer(filled),
+                           fl.flag_event === nothing ? Ptr{Int32}(C_NULL) : pointer(event),
+                           length(dd), dd, dc, length(bd), bd, bc, flags_out,
+                           ev.day, isempty(ev.filled) ? Ptr{Int32}(C_NULL) : pointer(ev.filled), ev.sc,
+                           ev.rf_ok ? pointer(ev.rf) : Ptr{Float64}(C_NULL), ev.rf_ok ? length(ev.rf) : 0,
+                           Int32(ev.rf_ok), ev.cnt)
             end
         end
-        rc == 0 || rc == 6 || CAbi.check(rc)
-        fl.flag_harvest = BitVector((flags_out .& Int32(128)) .!= 0)
-        status = zeros(8na); tv = zeros(13); nlots = zeros(Int64, na); nsells = zeros(Int64, na)
-        ntaxes = zeros(Int64, na); pxc = zeros(Int32, na); cnt = zeros(Int64, 5); scal = zeros(2)
-        err = zeros(Int32, 1); err_d0 = Ref{Float64}(0.0)
-        ccall((:simlev_c_engine_counts, LIBSLC), Cvoid,
-              (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int32}, Ptr{Int64},
-               Ptr{Float64}, Ptr{Int32}, Ref{Float64}),
-              h, status, tv, nlots, nsells, ntaxes, pxc, cnt, scal, err, err_d0)
-        for a in 1:na
-            o = 8 * (a - 1)
-            sim.status[a].money = status[o+4]   # Status je Asset: gelesen wird nur money (wie R seit 1.6.3)
-            tr = sim.trades[a]
-            L = zeros(7 * nlots[a])
-            ccall((:simlev_c_engine_lots, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, L)
-            empty!(tr.buys)
-            for j in 0:(nlots[a] - 1)
-                push!(tr.buys, Lot(Int(L[7j+1]), L[7j+2], L[7j+3], L[7j+4], L[7j+5], L[7j+6]))
-            end
-            S = zeros(8 * nsells[a])
-            ccall((:simlev_c_engine_sells, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, S)
-            empty!(tr.sells)
-            for j in 0:(nsells[a] - 1)
-                rg = Int(S[8j+6])
-                push!(tr.sells, SellEntry(Int(S[8j+1]), S[8j+2], S[8j+3], rg == 0 ? NA : S[8j+4], rg == 0 ? NA : S[8j+5],
-                                          rg == 0 ? nothing : _ENGINE_REGIME_NAME[rg], rg == 3,
-                                          S[8j+8] != 0 ? S[8j+7] : NA))
-            end
-            X = zeros(8 * ntaxes[a])
-            ccall((:simlev_c_engine_taxes, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, X)
-            empty!(tr.taxes)
-            for j in 0:(ntaxes[a] - 1)
-                if Int(X[8j+1]) == 1
-                    push!(tr.taxes, TaxEntry(Int(X[8j+2]), Int(X[8j+3]), "Vorabpauschale", X[8j+4], X[8j+5], X[8j+6],
-                                             X[8j+7], X[8j+8]))
-                else
-                    push!(tr.taxes, TaxEntry(Int(X[8j+2]), 0, "Private sale tax", NA, NA, NA, NA, X[8j+8]))
-                end
-            end
-            if pxc[a] != 0
-                P = zeros(n)
-                ccall((:simlev_c_engine_prices, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, P)
-                sim.market[a].asset_price = P
-            end
-        end
-        T.total_taxes, T.loss_capital_gains, T.loss_private_sales = tv[1], tv[2], tv[3]
-        T.private_sale_gains_ytd, T.private_sale_losses_ytd = tv[4], tv[5]   # gelesen: tax_report next_year private_sale_net
-        T.sparer_pauschbetrag_annual, T.sparer_pauschbetrag_remaining, T.sparer_pauschbetrag_used_total = tv[6], tv[7], tv[8]
-        T.current_year = Int(tv[9])
-        T.cgt_base_taxed_ytd, T.cgt_loss_added_ytd, T.cgt_loss_used_ytd, T.cgt_pool_start_ytd = tv[10], tv[11], tv[12], tv[13]
-        if env !== nothing   # Tarifweg: Jahreszeilen (wie _tariff_close), KiSt-Salden, Erstattung
-            nr, nk = Int(cnt[3]), Int(cnt[4])
-            rows = zeros(25 * nr); ks = zeros(2 * nk)
-            ccall((:simlev_c_engine_rows, LIBSLC), Cvoid, (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}), h, rows, ks)
-            for i in 0:(nr - 1)
-                x = rows[25i+1:25i+25]
-                push!(env.rows, RList(Pair{String,Any}[f => (f == "year" ? Int(x[k]) : f == "guenstiger" ? x[k] != 0 : x[k])
-                                                       for (k, f) in enumerate(_ENGINE_ROWS)]...))
-            end
-            for i in 0:(nk - 1)
-                env.ks[string(Int(ks[2i+1]))] = ks[2i+2]
-            end
-        end
-        nev = Int(cnt[1])
-        evi = zeros(Int32, 9 * nev); evd = zeros(2 * nev); evy = zeros(Int32, Int(cnt[2])); evv = zeros(Int(cnt[5]))
-        ccall((:simlev_c_engine_events, LIBSLC), Cvoid, (Ptr{Cvoid}, Ptr{Int32}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}),
-              h, evi, evd, evy, evv)
-        R.fee_paid = scal[1]
-        R.tax_unpaid_total = scal[2]
-        _sim_engine_signal(R, fl, evi, evd, evy, evv, rc == 6, Int(err[1]), err_d0[])
-    finally
-        ccall((:simlev_c_engine_free, LIBSLC), Cvoid, (Ptr{Cvoid},), h)
     end
+    return rc
+end
+
+"Ergebnis der Tagesengine (Objekt h nach dem Lauf, Rückgabe rc) in sim, fl, Tarifjahre, Gebühren und Meldungen übernehmen."
+function _sim_engine_output!(h::Ptr{Cvoid}, rc, R::Run, sim::Sim, E, flags_out::Vector{Int32})
+    @nospecialize
+    fl, n, na, T = R.fl, E.n, E.na, sim.totals
+    env = E.person ? R.cfg.tariff_env : nothing   # Tarifzustand dieses Laufs (Studienkern: eigene Kopie)
+    rc == 0 || rc == 6 || CAbi.check(rc)
+    fl.flag_harvest = BitVector((flags_out .& Int32(128)) .!= 0)
+    status = zeros(8na); tv = zeros(13); nlots = zeros(Int64, na); nsells = zeros(Int64, na)
+    ntaxes = zeros(Int64, na); pxc = zeros(Int32, na); cnt = zeros(Int64, 5); scal = zeros(2)
+    err = zeros(Int32, 1); err_d0 = Ref{Float64}(0.0)
+    ccall((:simlev_c_engine_counts, LIBSLC), Cvoid,
+          (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int32}, Ptr{Int64},
+           Ptr{Float64}, Ptr{Int32}, Ref{Float64}),
+          h, status, tv, nlots, nsells, ntaxes, pxc, cnt, scal, err, err_d0)
+    for a in 1:na
+        o = 8 * (a - 1)
+        sim.status[a].money = status[o+4]   # Status je Asset: gelesen wird nur money (wie R seit 1.6.3)
+        tr = sim.trades[a]
+        L = zeros(7 * nlots[a])
+        ccall((:simlev_c_engine_lots, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, L)
+        empty!(tr.buys)
+        for j in 0:(nlots[a] - 1)
+            push!(tr.buys, Lot(Int(L[7j+1]), L[7j+2], L[7j+3], L[7j+4], L[7j+5], L[7j+6]))
+        end
+        S = zeros(8 * nsells[a])
+        ccall((:simlev_c_engine_sells, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, S)
+        empty!(tr.sells)
+        for j in 0:(nsells[a] - 1)
+            rg = Int(S[8j+6])
+            push!(tr.sells, SellEntry(Int(S[8j+1]), S[8j+2], S[8j+3], rg == 0 ? NA : S[8j+4], rg == 0 ? NA : S[8j+5],
+                                      rg == 0 ? nothing : _ENGINE_REGIME_NAME[rg], rg == 3,
+                                      S[8j+8] != 0 ? S[8j+7] : NA))
+        end
+        X = zeros(8 * ntaxes[a])
+        ccall((:simlev_c_engine_taxes, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, X)
+        empty!(tr.taxes)
+        for j in 0:(ntaxes[a] - 1)
+            if Int(X[8j+1]) == 1
+                push!(tr.taxes, TaxEntry(Int(X[8j+2]), Int(X[8j+3]), "Vorabpauschale", X[8j+4], X[8j+5], X[8j+6],
+                                         X[8j+7], X[8j+8]))
+            else
+                push!(tr.taxes, TaxEntry(Int(X[8j+2]), 0, "Private sale tax", NA, NA, NA, NA, X[8j+8]))
+            end
+        end
+        if pxc[a] != 0
+            P = zeros(n)
+            ccall((:simlev_c_engine_prices, LIBSLC), Cvoid, (Ptr{Cvoid}, Int64, Ptr{Float64}), h, a - 1, P)
+            sim.market[a].asset_price = P
+        end
+    end
+    T.total_taxes, T.loss_capital_gains, T.loss_private_sales = tv[1], tv[2], tv[3]
+    T.private_sale_gains_ytd, T.private_sale_losses_ytd = tv[4], tv[5]   # gelesen: tax_report next_year private_sale_net
+    T.sparer_pauschbetrag_annual, T.sparer_pauschbetrag_remaining, T.sparer_pauschbetrag_used_total = tv[6], tv[7], tv[8]
+    T.current_year = Int(tv[9])
+    T.cgt_base_taxed_ytd, T.cgt_loss_added_ytd, T.cgt_loss_used_ytd, T.cgt_pool_start_ytd = tv[10], tv[11], tv[12], tv[13]
+    if env !== nothing   # Tarifweg: Jahreszeilen (wie _tariff_close), KiSt-Salden, Erstattung
+        nr, nk = Int(cnt[3]), Int(cnt[4])
+        rows = zeros(25 * nr); ks = zeros(2 * nk)
+        ccall((:simlev_c_engine_rows, LIBSLC), Cvoid, (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}), h, rows, ks)
+        for i in 0:(nr - 1)
+            x = rows[25i+1:25i+25]
+            push!(env.rows, RList(Pair{String,Any}[f => (f == "year" ? Int(x[k]) : f == "guenstiger" ? x[k] != 0 : x[k])
+                                                   for (k, f) in enumerate(_ENGINE_ROWS)]...))
+        end
+        for i in 0:(nk - 1)
+            env.ks[string(Int(ks[2i+1]))] = ks[2i+2]
+        end
+    end
+    nev = Int(cnt[1])
+    evi = zeros(Int32, 9 * nev); evd = zeros(2 * nev); evy = zeros(Int32, Int(cnt[2])); evv = zeros(Int(cnt[5]))
+    ccall((:simlev_c_engine_events, LIBSLC), Cvoid, (Ptr{Cvoid}, Ptr{Int32}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}),
+          h, evi, evd, evy, evv)
+    R.fee_paid = scal[1]
+    R.tax_unpaid_total = scal[2]
+    _sim_engine_signal(R, fl, evi, evd, evy, evv, rc == 6, Int(err[1]), err_d0[])
     return nothing
 end
 
@@ -236,7 +288,8 @@ end
 const _ENGINE_REASONS = Tuple(_MELD_ENGINE_REASON[string(k)] for k in 0:length(_MELD_ENGINE_REASON)-1)
 
 "Bezeichnung einer Steuerzahlung (.pay_tax label): Vorabpauschale, § 23-Steuer oder Veranlagung der Jahre."
-_engine_label(aux::Int, ints) = aux < 2 ? _MELD_ENGINE_LABEL[string(aux)] :
+_engine_label(aux::Int, ints) = aux == 3 ? chk_msg("a.label_depot") :   # 3 (Depotgebühr) seit 1.6.5
+                                aux < 2 ? _MELD_ENGINE_LABEL[string(aux)] :
                                 r_sprintf(_MELD_ENGINE_LABEL["2"], join(string.(ints), "/"))
 
 "Warnungen, details-Ausgaben und Abbruch des Kerns mit den Texten von R 1.3.0 auslösen (Reihenfolge des Protokolls);
@@ -260,10 +313,15 @@ function _sim_engine_signal(R::Run, fl::Flags, evi::Vector{Int32}, evd::Vector{F
             @warn r_sprintf(m["3"], nm, d0)
         elseif code == 4
             @warn m["4"]
+        elseif code == 5 && aux == 3   # seit 1.6.5 (Paket E): nicht gedeckte Depotgebühr als offene Gebühr
+            @warn chk_msg("e.gebuehr_ungedeckt", _engine_label(aux, ints), r_sprintf("%.2f", d0), fmt_date(fl.flag_date[day]),
+                          r_sprintf("%.2f", d1), nm)
         elseif code == 5
             @warn r_sprintf(m["5"], _engine_label(aux, ints), d0, fmt_date(fl.flag_date[day]), d1, nm)
         elseif code == 6
             @warn r_sprintf(m["6"], d0, d1) * m["6.rest"]
+        elseif code == 7   # seit 1.6.5 (CR2-G-6, K36): Hinweis zu unbrauchbaren event_weight an Ereignistagen
+            _message(chk_msg("a.event_gewicht", string(Int(d0)), fmt_date(fl.flag_date[day])))
         else
             error(r_sprintf(m["unbekannt"], Int(code)))
         end
@@ -333,6 +391,10 @@ function _sim_engine_detail(R::Run, fl::Flags, code::Int, name::AbstractString, 
         out(sp(m["223"], v[1], name))
     elseif code == 224
         out(sp(m["224"], name, v[1], ds))
+    elseif code == 225 && Int(aux) == 3   # seit 1.6.5 (Entscheidung 194): Depotgebühr mit Präfix „Depotgebühr:“
+        out(chk_msg("a.dt_gebuehr_zahlung", sp("%.2f", v[1]), name, ds))
+    elseif code == 226 && Int(aux) == 3
+        out(chk_msg("a.dt_gebuehr_teil", sp("%.2f", v[1]), ds))
     elseif code == 225
         out(sp(m["225"], _engine_label(aux, ints), v[1], name, ds))
     elseif code == 226
@@ -350,6 +412,11 @@ function _sim_engine_detail(R::Run, fl::Flags, code::Int, name::AbstractString, 
         out(sp(m["231"], v[1], ds))
     elseif code == 232
         out(sp(m["232"], name, fmt_date(Int(v[1])), v[2], v[3], v[4], v[5], ds))
+    elseif code == 233   # seit 1.6.5: Zahlung aus dem Geld eines anderen Assets (MA1-2)
+        out(Int(aux) == 3 ? chk_msg("a.dt_gebuehr_anderes", sp("%.2f", v[1]), fl.flag_assets[Int(v[2])+1], name, ds) :
+            chk_msg("a.dt_zahlung_anderes", _engine_label(aux, ints), sp("%.2f", v[1]), fl.flag_assets[Int(v[2])+1], name, ds))
+    elseif code == 234   # seit 1.6.5: Depotgebühr (Entscheidung 150)
+        out(chk_msg("a.dt_depot", sp("%.2f", v[1]), sp("%.2f", v[2]), sp("%.4f", v[3]), ds))
     elseif code == 240
         out(m["240.1"])
         out(sp(m["240.2"], Int(v[1]), Int(v[2])))

@@ -25,18 +25,18 @@
 #   Schritt" wie bei optim; kein Aufrufer im Paket uebergibt 0.
 .sl_opt_control <- function(control, m, n) {
   known <- c("maxit", "maxfev", "reltol", "factr", "pgtol", "gtol", "xtol", "fnscale", "parscale", "trace")
-  if (!is.list(control)) stop("optim: control muss eine Liste sein", call. = FALSE)
+  if (!is.list(control)) chk_stop("c.m_sl_opt_control")
   bad <- setdiff(names(control), known)
   if (length(bad)) stop(sprintf("optim: unbekannte Steuerwerte %s", paste0("'", bad, "'", collapse = ", ")), call. = FALSE)
   num1 <- function(k, def) {
     v <- control[[k]]
     if (is.null(v)) return(def)
-    if (!is.numeric(v) || length(v) != 1L || is.na(v)) stop(sprintf("optim: Steuerwert %s muss eine Zahl sein", k), call. = FALSE)
+    if (!is.numeric(v) || length(v) != 1L || is.na(v)) chk_stop("c.m_num1", k)
     as.double(v)
   }
   eps <- .Machine$double.eps
   if (!is.null(control$factr) && !is.null(control$reltol))
-    stop("optim: factr und reltol nicht zugleich angeben", call. = FALSE)
+    chk_stop("c.m_num1_2")
   if (m == 3L) {
     maxfev <- num1("maxfev", num1("maxit", 500))
     maxit <- 0
@@ -54,7 +54,7 @@
   ctrl <- c(maxit, maxfev, reltol, gtol, num1("xtol", eps), num1("fnscale", 1))
   ps <- control$parscale
   if (!is.null(ps)) {
-    if (!is.numeric(ps) || !(length(ps) %in% c(1L, n))) stop("optim: Steuerwert parscale passt nicht zu par", call. = FALSE)
+    if (!is.numeric(ps) || !(length(ps) %in% c(1L, n))) chk_stop("c.m_num1_3")
     ps <- rep_len(as.double(ps), n)
   }
   list(ctrl = ctrl, parscale = ps, trace = isTRUE(control$trace))
@@ -71,7 +71,7 @@
                       lower = -Inf, upper = Inf, control = list()) {
   method <- match.arg(method)
   m <- .sl_opt_methods[[method]]
-  if (!is.numeric(par) || !length(par)) stop("optim: par muss ein nichtleerer Zahlenvektor sein", call. = FALSE)
+  if (!is.numeric(par) || !length(par)) chk_stop("c.m_sl_optim")
   nms <- names(par)
   x0 <- as.double(par)
   n <- length(x0)
@@ -82,7 +82,7 @@
   if (m == 2L) {
     lo <- rep_len(as.double(lower), n); hi <- rep_len(as.double(upper), n)
   } else if (any(is.finite(lower)) || any(is.finite(upper))) {
-    stop(sprintf("optim: Schranken nur mit L-BFGS-B bzw. PBFGS (nicht %s)", method), call. = FALSE)
+    chk_stop("c.m_fn1", method)
   }
   ws <- .Call(C_sl_opt_init, m, x0, lo, hi, ct$ctrl, ct$parscale, as.integer(!is.null(gr1)))
   tr_x <- list(); tr_f <- numeric(0); tr_k <- integer(0)

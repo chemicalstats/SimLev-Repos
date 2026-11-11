@@ -188,6 +188,10 @@ PyObject* w_tariff_compact(PyObject*, PyObject* args) {
     if (N < 0 || nkeep < 0 || !ext::get(oM, bM, 'd', false, fn, "M", (Py_ssize_t) N * simlev::TR_N) ||
         !ext::get(oo, bo, 'd', true, fn, "out", (Py_ssize_t) nkeep * (simlev::TR_N + 1)))
         return nullptr;
+    if (ny < 0) {   // seit 1.6.5 (CR1-Y9-1): bis 1.6.4 Division durch 0 im Kern (Prozess beendet)
+        PyErr_Format(PyExc_ValueError, "%s: Abmessungen passen nicht", fn);
+        return nullptr;
+    }
     if (simlev::wd_tariff_count(N, bM.d()) != nkeep) {
         PyErr_Format(PyExc_ValueError, "%s: Zahl der Zeilen passt nicht", fn);
         return nullptr;

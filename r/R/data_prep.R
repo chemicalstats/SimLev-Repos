@@ -23,24 +23,31 @@
 #' POSIXct/POSIXlt ergeben den Kalendertag in ihrer eigenen Zeitzone (nicht
 #' UTC wie [as.Date()]), Text nur die Formate "JJJJ-MM-TT" und
 #' "JJJJ/MM/TT" mit vierstelliger Jahreszahl am Anfang (jedes Jahr zulaessig;
-#' so wird z. B. "31-12-2024" nicht als Jahr 31 gelesen); numerische Werte
+#' so wird z. B. "31-12-2024" nicht als Jahr 31 gelesen), danach seit 1.6.5 nur
+#' das Ende oder eine Uhrzeit ("2024-01-05 10:30", "2024-01-05T10:30:00Z");
+#' numerische Werte (ausser nur NA, seit 1.6.5 NA)
 #' und (seit 1.6.4) Faktoren werden abgelehnt. Mit \code{strict = TRUE} Fehler fuer nicht lesbare Werte,
 #' sonst NA. Leere Eintraege ergeben NA.
 #' @keywords internal
 #' @noRd
+.DATE_RX <- "^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}([ T][0-9]{1,2}:[0-9]{2}.*)?$"
 .to_date <- function(x, what = "date", strict = TRUE) {
   if (inherits(x, "Date")) return(x)
   if (inherits(x, "POSIXt")) return(as.Date(format(x, "%Y-%m-%d")))
   if (is.factor(x)) chk_stop("e5.datum_faktor", what)   # seit 1.6.4 (Entscheidung 61; bis 1.6.3 still als Text)
   # seit 1.6.4 ohne Eingabewert in der Meldung (Entscheidung 8; bis 1.6.3 "z. B. <Wert>")
-  if (is.numeric(x)) stop(sprintf("%s: Datum ist numerisch; erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'.", what))
+  # seit 1.6.5 (CR2-C-3): ein Zahlenvektor nur aus NA ergibt NA wie in Python und Julia (bis 1.6.4 Fehler)
+  if (is.numeric(x) && !(length(x) && all(is.na(x))))
+    stop(chk_msg("a.m_to_date", what))
   s <- trimws(as.character(x)); s[!is.na(s) & s == ""] <- NA
   d <- as.Date(s, format = "%Y-%m-%d"); i <- is.na(d) & !is.na(s)
   if (any(i)) d[i] <- as.Date(s[i], format = "%Y/%m/%d")
-  bad <- which((is.na(d) | !grepl("^[0-9]{4}[-/]", s)) & !is.na(s))   # vierstellige Jahreszahl vorn (kein "TT-MM-JJJJ")
+  # vierstellige Jahreszahl vorn (kein "TT-MM-JJJJ"); seit 1.6.5 (CR2-C-3, Entscheidung 185 K27) nach dem Tag nur
+  # das Ende oder eine Uhrzeit (Leerzeichen oder "T", dann Stunde:Minute ...; bis 1.6.4 wurde "2024-01-011" still als
+  # 01.01.2024 gelesen)
+  bad <- which((is.na(d) | !grepl(.DATE_RX, s)) & !is.na(s))
   if (length(bad) && strict)
-    stop(sprintf("%s: %d Datumswerte nicht als 'JJJJ-MM-TT' lesbar (erstmals in Zeile %d). Andere Formate vorher umwandeln, z. B. as.Date(x, format = \"%%d.%%m.%%Y\") f\u00fcr '31.12.2024' oder format = \"%%d-%%m-%%Y\".",
-                 what, length(bad), bad[1]))
+    stop(chk_msg("e.datum_format", what, length(bad), bad[1]))   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
   d[bad] <- NA
   d
 }
@@ -148,8 +155,7 @@
 #' @noRd
 .num_text_stop <- function(x, cols, name) {
   # seit 1.6.4 ohne Beispielwert aus den Daten (Entscheidung 8)
-  stop(sprintf("'%s': Spalte %s enth\u00e4lt Zahlen als Text bzw. Faktor, vermutlich mit Dezimalkomma. Vorher umwandeln, z. B. mit read.csv2() oder as.numeric(sub(\",\", \".\", x, fixed = TRUE)).",
-               name, paste0("'", cols, "'", collapse = ", ")), call. = FALSE)
+  chk_stop("e.zahl_text", name, paste0("'", cols, "'", collapse = ", "))   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
 }
 
 #' Eine Quelle in data.frame(date, ...) mit numerischen Spalten wandeln
@@ -157,14 +163,14 @@
 #' @noRd
 .dp_frame <- function(x, name, fn = NULL) {
   if (is.numeric(x) && !is.null(names(x))) x <- data.frame(date = .to_date(names(x), sprintf("'%s' (Namen)", name)), value = unname(x))
-  if (!is.data.frame(x)) stop(sprintf("'%s' muss ein data.frame mit Spalte 'date' sein.", name))
+  if (!is.data.frame(x)) stop(chk_msg("a.m_dp_frame", name))
   dcol <- if ("date" %in% names(x)) "date" else {
     dc <- names(x)[vapply(x, function(v) inherits(v, c("Date", "POSIXt")), TRUE)]   # Datumsspalte bevorzugt
     if (length(dc)) dc[1] else names(x)[1]
   }
   if (!is.null(fn) && is.factor(x[[dcol]])) chk_stop("spalte_faktor", fn, dcol)   # seit 1.6.4 (Entscheidung 15)
   if (is.numeric(x[[dcol]]))
-    stop(sprintf("'%s': keine Datumsspalte; Spalte '%s' ist numerisch (z. B. Zeilennummern aus write.csv). Spalte 'date' (Date oder 'JJJJ-MM-TT') angeben.", name, dcol))
+    stop(chk_msg("a.m_dp_frame_2", name, dcol))
   num <- setdiff(names(x)[vapply(x, is.numeric, TRUE)], dcol)
   rn <- num[num == "X" & vapply(num, function(k) isTRUE(all(x[[k]] == seq_len(nrow(x)))), TRUE)]
   if (length(rn) && length(num) > 1L) {
@@ -173,10 +179,13 @@
   }
   txt <- .num_text_cols(x, dcol)
   if (length(txt)) .num_text_stop(x, txt, name)
-  if (!length(num)) stop(sprintf("'%s': keine numerische Spalte.", name))
+  if (!length(num)) stop(chk_msg("a.m_dp_frame_3", name))
   out <- data.frame(date = .to_date(x[[dcol]], sprintf("'%s': Spalte '%s'", name, dcol)), x[num], check.names = FALSE)
   if (length(num) == 1L) names(out)[2] <- name
   out <- out[!is.na(out$date), , drop = FALSE]
+  # seit 1.6.5 (CR2-I-5): eine Quelle ohne Zeilen mit Meldung (bis 1.6.4 Rohfehler "missing value where TRUE/FALSE
+  # needed")
+  if (!nrow(out) && !is.null(fn)) chk_stop("zeilen_keine", fn, sprintf("'%s'", name))
   out <- out[order(out$date), , drop = FALSE]
   dup <- duplicated(out$date, fromLast = TRUE)
   if (any(dup)) { message(sprintf("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet.", name, sum(dup)))
@@ -289,7 +298,7 @@ series_align <- function(..., calendar = c("day", "union", "intersect"), range =
   first <- do.call(c, lapply(fr, function(f) f$date[1])); last <- do.call(c, lapply(fr, function(f) f$date[nrow(f)]))
   lo <- if (range == "common") max(first) else min(first); hi <- if (range == "common") min(last) else max(last)
   if (!is.null(start)) lo <- max(lo, .to_date(start, "series_align: start")); if (!is.null(end)) hi <- min(hi, .to_date(end, "series_align: end"))
-  if (lo > hi) stop("series_align: Die Quellen \u00fcberlappen sich nicht.")
+  if (lo > hi) stop(chk_msg("a.m_series_align"))
   dates <- switch(calendar,
     day = seq.Date(lo, hi, by = "day"),
     union = sort(unique(do.call(c, lapply(fr, `[[`, "date")))),
@@ -301,7 +310,7 @@ series_align <- function(..., calendar = c("day", "union", "intersect"), range =
   mi <- match(as.numeric(dates), as.numeric(f$date))             # seit 1.6.4 einmal je Quelle (B-110)
   in_life <- dates >= f$date[1] & dates <= f$date[nrow(f)]
   for (k in setdiff(names(f), "date")) {
-    if (k %in% names(out)) stop(sprintf("series_align: Spaltenname '%s' kommt mehrfach vor.", k))
+    if (k %in% names(out)) stop(chk_msg("a.m_series_align_2", k))
     v <- f[[k]][mi]
     obs <- !is.na(v)
     if (fill != "none" && any(obs)) {
@@ -330,7 +339,8 @@ series_align <- function(..., calendar = c("day", "union", "intersect"), range =
 #' data.frame mit Spalte `date` und Kursspalten (Niveaus, keine Renditen),
 #' z. B. aus [series_align()]. Gemeldet werden: fehlende oder nicht lesbare
 #' Daten (z. B. Leerzeile am Dateiende), doppelte oder unsortierte
-#' Daten, Kalenderluecken ueber 5 Tage, fehlende Werte innerhalb der
+#' Daten, Kalenderluecken (seit 1.6.5 ueber max(5, 1,5 x Median der Datumsabstaende) Tage, also bei
+#' Tagesdaten ueber 5, bei Wochendaten ueber 10,5, bei Monatsdaten ueber rund 46 Tage), fehlende Werte innerhalb der
 #' Laufzeit, Spruenge, wahrscheinliche Splits (Sprung nahe einem
 #' ganzzahligen Verhaeltnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne Ruecklauf),
 #' Spikes (Sprung mit sofortigem Ruecklauf, typischer Datenfehler), Werte
@@ -366,7 +376,7 @@ series_align <- function(..., calendar = c("day", "union", "intersect"), range =
 #'       (bei Spruengen die Veraenderung in Prozent, bei Kalenderluecken die
 #'       Tage, bei stehenden Kursen die Zeilen).}
 #'     \item{settings}{benannter Vektor \code{jump}, \code{stale},
-#'       \code{revert}.}
+#'       \code{revert} und (seit 1.6.5) \code{gap} (verwendete Schwelle der Kalenderluecke in Tagen).}
 #'   }
 #'   \code{print()} zeigt die Zusammenfassung und die ersten
 #'   \code{max_issues} (Standard 25) Funde.
@@ -400,15 +410,22 @@ series_check <- function(data, columns = NULL, jump = 20, stale = 10, revert = 0
   chk_num1(revert, fn, "revert", lo = 0)
   d <- .to_date(data$date, "series_check: date", strict = FALSE)
   columns <- columns %||% setdiff(names(data)[vapply(data, is.numeric, TRUE)], "date")
-  issues <- list()
-  add <- function(col, i, type, value, info = NA_real_)
-    issues[[length(issues) + 1L]] <<- data.frame(column = col, date = d[i], type = type, value = value, info = info,
-                                                 stringsAsFactors = FALSE)
+  # seit 1.6.5 (CR2-B-5): Funde in Vektoren sammeln, ein data.frame am Ende (bis 1.6.4 je Fund ein data.frame und
+  # rbind, bei vielen Funden 55- bis 270-mal langsamer); value immer als Zahl
+  ic <- character(0); ii <- integer(0); it <- character(0); iv <- numeric(0); ifo <- numeric(0)
+  add <- function(col, i, type, value, info = NA_real_) {
+    ic[length(ic) + 1L] <<- col; ii[length(ii) + 1L] <<- i; it[length(it) + 1L] <<- type
+    iv[length(iv) + 1L] <<- as.numeric(value); ifo[length(ifo) + 1L] <<- as.numeric(info)
+  }
   for (i in utils::head(which(is.na(d)), 20)) add("date", i, sprintf("Datum fehlt oder nicht lesbar (Zeile %d)", i), NA)
   okd <- which(!is.na(d)); dd <- d[okd]                      # Datumspruefungen nur auf vorhandenen Daten
   if (any(duplicated(dd))) for (i in okd[duplicated(dd)]) add("date", i, "doppeltes Datum", NA)
   if (is.unsorted(dd)) add("date", okd[which(diff(as.numeric(dd)) < 0)[1] + 1L], "Datum nicht sortiert", NA)
-  dg <- diff(as.numeric(dd)); big <- which(dg > 5)
+  # seit 1.6.5 (CR2-B-6, Entscheidung 185 K24): Kalenderluecke, wenn der Abstand groesser ist als
+  # max(5, 1.5 * Median der positiven Abstaende) Tage (Tagesdaten 5 wie bisher, Wochen 10.5, Monate rund 46)
+  dg <- diff(as.numeric(dd)); dpos <- dg[!is.na(dg) & dg > 0]
+  gap <- if (length(dpos)) max(5, 1.5 * stats::median(dpos)) else 5
+  big <- which(dg > gap)
   for (i in big) add("date", okd[i + 1L], "Kalenderl\u00fccke (Tage)", dg[i])
   summ <- lapply(columns, function(k) {
     v <- as.numeric(data[[k]]); ok <- which(!is.na(v))
@@ -446,13 +463,14 @@ series_check <- function(data, columns = NULL, jump = 20, stale = 10, revert = 0
                jumps = length(setdiff(J, skip)), spikes = n_spike, splits = n_split, stale_max = smax, nonpositive = length(np))
   })
   S <- do.call(rbind, summ)
-  I <- if (length(issues)) do.call(rbind, issues) else data.frame(column = character(0), date = as.Date(character(0)),
-                                                                   type = character(0), value = numeric(0), info = numeric(0))
-  structure(list(summary = S, issues = I, settings = c(jump = jump, stale = stale, revert = revert)), class = "SimLevDataCheck")
+  I <- data.frame(column = ic, date = d[ii], type = it, value = iv, info = ifo, stringsAsFactors = FALSE)
+  structure(list(summary = S, issues = I, settings = c(jump = jump, stale = stale, revert = revert, gap = gap)),
+            class = "SimLevDataCheck")
 }
 
 #' @export
 print.SimLevDataCheck <- function(x, max_issues = 25L, ...) {
+  chk_int1(max_issues, "print", "max_issues", lo = 0)   # seit 1.6.5 (CR2-W1-2), vor der ersten Ausgabe
   cat("SimLev-Datenpr\u00fcfung\n\n")
   print(x$summary, row.names = FALSE)
   n <- nrow(x$issues)
@@ -601,11 +619,11 @@ series_convert_currency <- function(data, columns, fx, method = c("divide", "mul
   .e5_names(columns, fn, "columns")
   chk_text1(suffix, fn, "suffix", null_ok = TRUE)
   miss <- setdiff(columns, names(data))
-  if (length(miss)) stop(sprintf("series_convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s).",
-                                 paste0("'", miss, "'", collapse = ", "), paste(names(data), collapse = ", ")))
+  if (length(miss)) stop(chk_msg("a.m_series_convert_currency", paste0("'", miss, "'", collapse = ", "), paste(names(data), collapse = ", ")))
   .e5_numcols(data, columns, fn)
   chk_nofactor(fx, fn, "fx")
   if (is.character(fx) && length(fx) == 1L && fx %in% names(data)) .e5_numcols(data, fx, fn)
+  .step_start_warn(fx, data, fn, "fx")   # seit 1.6.5 (CR2-V3-4 Punkt 4, Entscheidung 189)
   f <- .resolve_series(fx, data, "fx")
   bad <- which(!is.finite(f) | f <= 0)
   if (length(bad)) stop(sprintf("series_convert_currency: Wechselkurs fx muss positiv sein; %d Zeilen ung\u00fcltig (erstmals Zeile %d).",
@@ -676,12 +694,15 @@ index_total_return <- function(price, dividends = NULL, yield = NULL, withholdin
   if (!is.null(dates)) chk_nofactor(dates, fn, "dates")
   p <- as.numeric(price); n <- length(p); w <- withholding / 100
   if (anyNA(p)) p <- .fill_na(p, "locf")
+  # seit 1.6.5 (CR2-I-4, Entscheidung 189): Kurse endlich und > 0 (bis 1.6.4 still NaN bzw. sinnlose Werte)
+  bad <- which(!is.na(p) & (is.infinite(p) | p <= 0))
+  if (length(bad)) chk_stop("a.werte_positiv", fn, "price", bad[1])
   D <- if (is.null(dividends)) rep(0, n) else { x <- as.numeric(dividends); x[is.na(x)] <- 0; x }
   y <- if (is.null(yield)) rep(0, n) else rep_len(as.numeric(yield), n)
   if (!is.null(dates)) {
     dates <- .to_date(dates, "index_total_return: dates")
     if (length(dates) != n) stop(sprintf("index_total_return: dates hat L\u00e4nge %d, price %d.", length(dates), n))   # Laengen, keine Eingabewerte
-    if (anyNA(dates) || is.unsorted(dates)) stop("index_total_return: dates m\u00fcssen vollst\u00e4ndig und aufsteigend sortiert sein (wie price).")
+    if (anyNA(dates) || is.unsorted(dates)) stop(chk_msg("a.m_index_total_return"))
   }
   dt <- if (is.null(dates)) rep(1, n) else c(0, diff(as.numeric(dates)))
   r <- c(0, (p[-1] + D[-1] * (1 - w)) / p[-n] - 1 + y[-1] / 100 * (1 - w) * dt[-1] / 365.25)
@@ -740,15 +761,18 @@ series_deflate <- function(data, columns, cpi, base_date = NULL, suffix = "_real
   if (is.character(cpi) && length(cpi) == 1L && cpi %in% names(data)) .e5_numcols(data, cpi, fn)
   base_date <- chk_date1(base_date, fn, "base_date", null_ok = TRUE)
   chk_text1(suffix, fn, "suffix")
+  if (!nzchar(suffix)) chk_stop("name", fn, "suffix")   # seit 1.6.5 (CR2-V1-4; bis 1.6.4 ueberschrieb "" die Spalten)
   dts <- .to_date(data$date, "series_deflate: data$date")
   c0 <- .cpi_level(cpi, data, dts, "cpi")
+  # seit 1.6.5 (CR2-V1-4): Preisindex endlich und > 0 (bis 1.6.4 Inf bzw. negatives Vorzeichen ohne Meldung)
+  bad <- which(!is.na(c0) & (is.infinite(c0) | c0 <= 0))
+  if (length(bad)) chk_stop("a.werte_positiv", fn, "cpi", bad[1])
   known <- which(!is.na(c0))
-  if (!length(known)) stop("series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
+  if (!length(known)) stop(chk_msg("a.m_series_deflate"))
   if (known[1] > 1L) message(sprintf("Hinweis: series_deflate: Preisindex erst ab %s bekannt; %d Zeilen davor bleiben NA.",
                                      format(dts[known[1]]), known[1] - 1L))
   b <- if (is.null(base_date)) known[1] else which.min(abs(as.numeric(dts - .to_date(base_date, "base_date"))))
-  if (is.na(c0[b])) stop(sprintf("series_deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen.",
-                                 format(dts[b]), format(dts[known[1]])))
+  if (is.na(c0[b])) stop(chk_msg("a.m_series_deflate_2", format(dts[b]), format(dts[known[1]])))
   for (k in columns) data[[paste0(k, suffix)]] <- as.numeric(data[[k]]) / c0 * c0[b]
   data
 }
@@ -758,18 +782,38 @@ series_deflate <- function(data, columns, cpi, base_date = NULL, suffix = "_real
 #' @noRd
 .cpi_level <- function(cpi, data, dts, what) {
   if (is.character(cpi) && length(cpi) == 1L) {
-    if (!cpi %in% names(data)) stop(sprintf("%s: Spalte '%s' fehlt im Datensatz.", what, cpi))
-    return(.fill_na(as.numeric(data[[cpi]]), "locf", keep_leading = TRUE))
+    if (!cpi %in% names(data)) stop(chk_msg("a.m_cpi_level", what, cpi))
+    v0 <- as.numeric(data[[cpi]])
+    ok <- which(!is.na(v0))
+    .cpi_end_warn(if (length(ok)) dts[max(ok)], dts, what)
+    return(.fill_na(v0, "locf", keep_leading = TRUE))
   }
   # seit 1.6.4 zuerst .resolve_series: lehnt fehlende Daten ab (Entscheidung 147), bevor min() ueber lauter NA warnt
   v <- .resolve_series(cpi, data.frame(date = dts), what)
-  first <- if (is.data.frame(cpi)) {
+  first <- last <- NULL
+  if (is.data.frame(cpi)) {
     dcol <- if ("date" %in% names(cpi)) "date" else names(cpi)[1]
-    min(.to_date(cpi[[dcol]], sprintf("%s: Datum", what)), na.rm = TRUE)
+    fd <- .to_date(cpi[[dcol]], sprintf("%s: Datum", what))
+    first <- min(fd, na.rm = TRUE); last <- max(fd, na.rm = TRUE)
   } else if (is.numeric(cpi) && !is.null(names(cpi)) &&
-             all(!is.na(suppressWarnings(as.Date(names(cpi), optional = TRUE))))) min(as.Date(names(cpi))) else NULL
+             all(!is.na(suppressWarnings(as.Date(names(cpi), optional = TRUE))))) {
+    nd <- as.Date(names(cpi)); first <- min(nd); last <- max(nd)
+  }
   if (!is.null(first)) v[dts < first] <- NA_real_
+  .cpi_end_warn(last, dts, what)
   v
+}
+
+# Preisindex endet mehr als 92 Tage vor dem letzten Datum der Reihe: Warnung, danach gilt sein letzter Stand (seit 1.6.5,
+# CR2-X5-1, Entscheidung 189; Preisindizes erscheinen mit Verzug, darunter still)
+.cpi_end_warn <- function(last, dts, what) {
+  if (is.null(last) || !length(dts) || all(is.na(dts))) return(invisible(NULL))
+  d1 <- max(dts, na.rm = TRUE)
+  gap <- as.numeric(d1) - as.numeric(last)
+  if (is.finite(gap) && gap > 92)
+    warning(chk_msg("e.preisindex_ende", what, format(as.Date(last)), sprintf("%.0f", gap), format(as.Date(d1))),
+            call. = FALSE)
+  invisible(NULL)
 }
 
 #' Reihen verketten (Proxy -> Index -> Fonds)
@@ -825,7 +869,7 @@ series_splice <- function(..., dates = NULL) {
   if (length(src) < 2 || is.null(names(src)) || any(names(src) == "")) stop("series_splice: mindestens zwei benannte Reihen.")
   # seit 1.6.4 (K42 E5): Vektoren numerisch und gleich lang wie dates (B-047; bis 1.6.3 recycelte R mit Warnung)
   if (!all(vapply(src, is.data.frame, TRUE))) {
-    if (is.null(dates)) stop("series_splice: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
+    if (is.null(dates)) stop(chk_msg("a.m_series_splice"))
     chk_nofactor(dates, fn, "dates")
     for (k in names(src)) {
       chk_nofactor(src[[k]], fn, k); .e5_numvec(src[[k]], fn, k)
@@ -834,6 +878,10 @@ series_splice <- function(..., dates = NULL) {
     }
   }
   Fl <- NULL
+  # seit 1.6.5 (CR2-C-5): je Reihe mindestens eine Zeile (bis 1.6.4 Rohfehler "missing value where TRUE/FALSE needed")
+  if (all(vapply(src, is.data.frame, TRUE))) {
+    for (k in names(src)) if (!nrow(src[[k]])) chk_stop("zeilen_keine", fn, sprintf("'%s'", k))
+  } else if (!length(dates)) chk_stop("zeilen_keine", fn, "dates")
   if (all(vapply(src, is.data.frame, TRUE))) {
     al <- do.call(series_align, c(src, list(range = "all")))
     # Quelle mit mehreren Wertspalten: series_align benennt sie nicht nach der Quelle (seit 1.6.4 eigene Meldung in
@@ -842,10 +890,16 @@ series_splice <- function(..., dates = NULL) {
     dates <- al$date; V <- as.matrix(al[, names(src)])
     Fl <- attr(al, "filled")[, names(src), drop = FALSE]       # per LOCF gefuellte Tage (keine echten Werte)
   } else {
-    if (is.null(dates)) stop("series_splice: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
+    if (is.null(dates)) stop(chk_msg("a.m_series_splice"))
     V <- do.call(cbind, lapply(src, as.numeric)); colnames(V) <- names(src)
   }
   n <- nrow(V)
+  # seit 1.6.5 (CR2-C-5): Werte endlich und > 0 oder NA (bis 1.6.4 ungeprueft verkettet, z. B. Inf im Ergebnis)
+  for (j in seq_len(ncol(V))) {
+    bad <- which(!is.na(V[, j]) & (is.infinite(V[, j]) | V[, j] <= 0))
+    if (length(bad)) chk_stop("a.werte_positiv_datum", fn, sprintf("'%s'", colnames(V)[j]),
+                              format(.to_date(dates, "series_splice: dates")[bad[1]]))
+  }
   Rm <- rbind(NA, V[-1, , drop = FALSE] / V[-n, , drop = FALSE] - 1)
   p <- V[, 1]
   if (!is.null(Fl)) {                                         # Luecken der ersten Reihe mit Renditen der naechsten fuellen
@@ -861,7 +915,7 @@ series_splice <- function(..., dates = NULL) {
   pick <- rep(NA_integer_, n); for (j in rev(seq_len(ncol(Rm)))) pick[is.finite(Rm[, j])] <- j
   r <- Rm[cbind(seq_len(n), ifelse(is.na(pick), 1L, pick))]; r[is.na(pick)] <- NA
   a <- which(!is.na(p))[1]
-  if (is.na(a)) stop("series_splice: Die erste Reihe hat keine Werte.")
+  if (is.na(a)) stop(chk_msg("a.m_series_splice_2"))
   lv <- rep(NA_real_, n); lv[a] <- p[a]
   if (a < n) for (t in (a + 1L):n) lv[t] <- if (!is.na(p[t])) p[t] else if (!is.na(r[t])) lv[t - 1L] * (1 + r[t]) else lv[t - 1L]
   if (a > 1L) for (t in a:2L) { if (is.na(r[t])) break; lv[t - 1L] <- lv[t] / (1 + r[t]) }
@@ -890,9 +944,9 @@ series_splice <- function(..., dates = NULL) {
 #'   in Prozent). Ein unbenannter einzelner Wert gilt fuer alle Assets;
 #'   benannte Vektoren werden je Asset zugeordnet, auch mit einem einzigen
 #'   Element wie \code{partial_exemption = c(aktien = 30)} (fehlende Assets
-#'   behalten den Standardwert, Namen ohne passendes Asset werden
-#'   ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
-#'   ist, gilt fuer alle Assets.
+#'   behalten den Standardwert). Seit 1.6.5 sind Namen, die kein Asset sind,
+#'   und doppelte Namen ein Fehler (bis 1.6.4 still uebergangen; ein einzelner
+#'   benannter Wert mit fremdem Namen galt fuer alle Assets).
 #'   Seit 1.6.4 ist ein unbekanntes Argument oder share (setzt die Funktion aus weights) ein Fehler mit einheitlicher
 #'   Meldung.
 #'
@@ -924,14 +978,15 @@ series_splice <- function(..., dates = NULL) {
 #' sapply(st, function(a) !is.null(a$wrapper))
 #' @export
 strategy_from_weights <- function(weights, ...) {
-  if (is.null(names(weights)) || any(is.na(names(weights)) | names(weights) == "")) stop("weights muss benannt sein.")
+  if (is.null(names(weights)) || any(is.na(names(weights)) | names(weights) == "")) stop(chk_msg("a.m_strategy_from_weights"))
   if (anyDuplicated(names(weights)))
     stop(sprintf("weights: doppelte Namen %s; jedes Asset nur einmal angeben.",
                  paste0("'", unique(names(weights)[duplicated(names(weights))]), "'", collapse = ", ")))
   chk_numvec(weights, "strategy_from_weights", "weights")   # seit 1.6.4 (bis 1.6.3: Text in Python als Zahl, in R Rohfehler)
-  if (anyNA(weights) || any(weights <= 0)) stop("Gewichte m\u00fcssen positiv sein (Assets mit Gewicht 0 weglassen).")
+  if (anyNA(weights) || any(weights <= 0)) stop(chk_msg("a.m_strategy_from_weights_2"))
+  # seit 1.6.5 (CR2-E-6) mit 8 Stellen (bis 1.6.4 %.4f: "1.0000" bei einer Abweichung von 2e-06)
   if (abs(sum(weights) - 1) > 1e-6)
-    stop(sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", sum(weights)))
+    stop(sprintf("Gewichte summieren sich zu %.8g; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", sum(weights)))
   extra <- list(...)
   # seit 1.6.4 (Entscheidung 21): Argumente fuer asset_config() vor dem Aufruf pruefen (bis 1.6.3 Meldung des
   # R-Interpreters "unused argument" bzw. "matched by multiple actual arguments"); share setzt die Funktion selbst
@@ -944,8 +999,21 @@ strategy_from_weights <- function(weights, ...) {
     wmap <- .sfw_wrappers(extra[[iw]], names(weights))
     extra <- extra[-iw]
   }
-  # Benannt und Name eines Assets -> je Asset (auch bei einem Element); sonst ein Wert fuer alle
-  per_asset <- function(v) !is.null(names(v)) && (length(v) > 1 || names(v) %in% names(weights))
+  # Benannt -> je Asset (auch bei einem Element); unbenannt ein Wert fuer alle. Seit 1.6.5 (CR2-E-5, Entscheidung
+  # 185 K30) sind Namen, die kein Asset sind, und doppelte Namen ein Fehler (bis 1.6.4 still uebergangen bzw. der
+  # erste; ein einzelner benannter Wert mit fremdem Namen galt fuer alle)
+  per_asset <- function(v) !is.null(names(v))
+  for (k in names(extra)) {
+    v <- extra[[k]]
+    if (!per_asset(v)) next
+    nv <- names(v); nv[is.na(nv)] <- "NA"
+    if (anyDuplicated(nv))
+      chk_stop("a.sfw_doppelt", "strategy_from_weights", k, paste0("'", unique(nv[duplicated(nv)]), "'", collapse = ", "))
+    unk <- setdiff(nv, names(weights))
+    if (length(unk))
+      chk_stop("a.sfw_fremd", "strategy_from_weights", k, paste0("'", unk, "'", collapse = ", "),
+               paste(names(weights), collapse = ", "))
+  }
   assets <- lapply(names(weights), function(nm) {
     a <- lapply(extra, function(v) if (per_asset(v)) unname(v[nm]) else v)
     a <- a[!vapply(a, function(v) length(v) == 1 && is.na(v), TRUE)]
@@ -993,7 +1061,7 @@ strategy_from_weights <- function(weights, ...) {
                  paste(assets, collapse = ", ")), call. = FALSE)
   for (k in nm)
     if (!inherits(w[[k]], "SimLevWrapperConfig"))
-      stop(sprintf("wrapper: Eintrag '%s' muss ein Objekt aus wrapper_config() sein.", k), call. = FALSE)
+      chk_stop("a.m_sfw_wrappers", k)
   w
 }
 
@@ -1058,23 +1126,21 @@ strategy_from_weights <- function(weights, ...) {
 #' @export
 portfolio_template <- function(name = NULL, map = NULL, ...) {
   if (is.null(name)) {
-    if (!is.null(map) || ...length()) stop("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name liefert portfolio_template() die Liste der Vorlagen.")
+    if (!is.null(map) || ...length()) stop(chk_msg("a.m_portfolio_template"))
     return(do.call(rbind, lapply(names(.portfolio_templates), function(n)
       data.frame(template = n, role = names(.portfolio_templates[[n]]), weight = unname(.portfolio_templates[[n]])))))
   }
   chk_name1(name, "portfolio_template", "name")   # seit 1.6.4 (K42 E5)
   w <- .portfolio_templates[[name]]
-  if (is.null(w)) stop(sprintf("Unbekannte Vorlage '%s'. Verf\u00fcgbar: %s", name, paste(names(.portfolio_templates), collapse = ", ")))
+  if (is.null(w)) stop(chk_msg("a.m_portfolio_template_2", name, paste(names(.portfolio_templates), collapse = ", ")))
   if (!is.null(map)) {
-    if (!is.character(map) || anyNA(map) || any(map == "") || is.null(names(map)) || anyNA(names(map)) || any(names(map) == "")) stop("map muss benannt sein: Rolle -> Spaltenname, z. B. c(stocks = \"msci_world\").")
+    if (!is.character(map) || anyNA(map) || any(map == "") || is.null(names(map)) || anyNA(names(map)) || any(names(map) == "")) stop(chk_msg("a.m_portfolio_template_3"))
     unk <- setdiff(names(map), names(w))
-    if (length(unk)) stop(sprintf("map: unbekannte Rolle(n) %s f\u00fcr Vorlage '%s'; Rollen: %s.",
-                                  paste0("'", unk, "'", collapse = ", "), name, paste(names(w), collapse = ", ")))
+    if (length(unk)) stop(chk_msg("a.m_portfolio_template_4", paste0("'", unk, "'", collapse = ", "), name, paste(names(w), collapse = ", ")))
     names(w) <- ifelse(names(w) %in% names(map), map[names(w)], names(w))
     if (anyDuplicated(names(w))) {
       dup <- unique(names(w)[duplicated(names(w))])
-      stop(sprintf("map: mehrere Rollen zeigen auf dieselbe Spalte %s; je Spalte nur eine Rolle (Gewichte sonst selbst zusammenfassen und strategy_from_weights() verwenden).",
-                   paste0("'", dup, "'", collapse = ", ")))
+      stop(chk_msg("a.m_portfolio_template_5", paste0("'", dup, "'", collapse = ", ")))
     }
   }
   strategy_from_weights(w, ...)

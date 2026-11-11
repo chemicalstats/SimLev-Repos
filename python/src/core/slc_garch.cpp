@@ -39,6 +39,8 @@
  *             Ganze Stufe sl_garch11_estimate wie die eigene R-Funktion .fit_garch11
  *             (r/R/bootstrap.R) ohne die Übernahme: Varianz < 1e-16 "konstant", sonst ML,
  *             Rückfall Momente (ohne Nelder-Mead-Stufe), Filter, standardisierte Residuen.
+ *             Filterstart seit 1.6.5 nach ML die Stichprobenvarianz wie in der Likelihood (CR1-3), nach
+ *             Momenten omega / (1 - Persistenz).
  *             Nur Punktschätzer: keine Standardfehler, keine Hesse-Matrix.
  * Quellen:    Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity.
  *               Journal of Econometrics 31(3), 307–327.
@@ -840,9 +842,16 @@ int sl_garch11_estimate(sl_ctx *cx, int n, const double *e, int gjr, double *par
     eps = (double *) malloc((size_t) n * sizeof(double));
     if (eps == NULL) return sl_fail(cx, SL_ENOMEM, "GARCH: kein Speicher");
     for (t = 0; t < n; t++) eps[t] = e[t] - mu;
-    v0 = 1.0 - al - be - ga / 2.0;
-    if (!(v0 > 1e-6)) v0 = 1e-6;
-    v0 = om / v0;
+    /* seit 1.6.5 (CR1-3, Entscheidung 185 K1): nach der ML-Schaetzung startet der Filter mit derselben Varianz wie die
+       Likelihood (Stichprobenvarianz der Reihe, sl_garch11_fit), damit Varianzen und Residuen der ersten Tage zu den
+       geschaetzten Parametern gehoeren; bis 1.6.4 omega / (1 - Persistenz). Moment-Schaetzer wie bisher. */
+    if (*method == SL_GARCH_ML) {
+        v0 = sv;
+    } else {
+        v0 = 1.0 - al - be - ga / 2.0;
+        if (!(v0 > 1e-6)) v0 = 1e-6;
+        v0 = om / v0;
+    }
     st = sl_garch11_filter(cx, n, eps, om, al, be, ga, v0, s2);
     if (st != SL_OK) { free(eps); return st; }
     for (t = 0; t < n; t++) {

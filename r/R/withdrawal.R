@@ -294,11 +294,13 @@ withdrawal_rule <- function(type = names(.wd_rules), rate = 4,
   chk <- function(x, arg, lo = -Inf, hi = Inf, what, inf_ok = FALSE, null_ok = FALSE) {
     if (is.null(x) && null_ok) return(invisible(NULL))
     if (!is.numeric(x) || length(x) != 1L || is.na(x) || (!inf_ok && !is.finite(x)) || x < lo || x > hi)
-      stop(sprintf("withdrawal_rule: %s muss %s sein.", arg, what), call. = FALSE)
+      chk_stop("b1.m_chk", arg, what)
   }
   if (!is.numeric(rate) || length(rate) != 1L || !is.finite(rate) || rate < 0 || rate > 100)
-    stop("withdrawal_rule: rate muss zwischen 0 und 100 Prozent liegen (z. B. 4).", call. = FALSE)
-  if (rate > 0 && rate < 0.2 && type %in% c("constant", "percent", "vanguard", "guyton_klinger"))
+    chk_stop("b1.m_chk_2")
+  # seit 1.6.5 (CR2-B-9, Entscheidung 185 K25) fuer alle Regeln, die rate nutzen (bis 1.6.4 nur die ersten vier)
+  if (rate > 0 && rate < 0.2 && type %in% c("constant", "percent", "vanguard", "guyton_klinger", "floor_ceiling",
+                                            "clyatt", "ratchet", "endowment", "sensible"))
     warning("rate wirkt wie eine Dezimalzahl. PROZENT-KONVENTION: 4 bedeutet 4 %.")
   chk(ceiling, "ceiling", 0, what = "NULL oder eine Zahl >= 0 in Prozent (z. B. 20)", null_ok = TRUE)
   chk(floor, "floor", 0, 100, what = "NULL oder eine Zahl von 0 bis 100 in Prozent (z. B. 20)", null_ok = TRUE)
@@ -308,7 +310,7 @@ withdrawal_rule <- function(type = names(.wd_rules), rate = 4,
   chk_max(cpr_years, SL_MAX_JAHRE, "withdrawal_rule", "cpr_years")   # seit 1.6.4 (K43 T2-N2; Entscheidung 46 sinngemaess)
   chk(inflation_cap, "inflation_cap", 0, what = "eine Zahl >= 0 in Prozent oder Inf (unbegrenzt)", inf_ok = TRUE)
   if (!is.logical(skip_inflation) || length(skip_inflation) != 1L || is.na(skip_inflation))
-    stop("withdrawal_rule: skip_inflation muss TRUE oder FALSE sein.", call. = FALSE)
+    chk_stop("b1.m_chk_3")
   chk(smoothing, "smoothing", 0, 100, what = "NULL oder eine Zahl von 0 bis 100 in Prozent (z. B. 70)", null_ok = TRUE)
   chk(exp_return, "exp_return", -99.99, what = "NULL oder eine Zahl in Prozent p. a. \u00fcber -100 (z. B. 3.5)", null_ok = TRUE)
   chk(stock_share, "stock_share", 0, 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 60)")
@@ -327,14 +329,16 @@ withdrawal_rule <- function(type = names(.wd_rules), rate = 4,
   chk(min_real, "min_real", 0, what = "ein Geldbetrag >= 0")
   chk(max_real, "max_real", 0, what = "ein Geldbetrag >= 0 oder Inf", inf_ok = TRUE)
   if (min_real > max_real)
-    stop("withdrawal_rule: min_real darf nicht gr\u00f6\u00dfer als max_real sein.", call. = FALSE)
+    chk_stop("b1.m_chk_4")
   chk(max_rate, "max_rate", 0, 100, what = "eine Zahl von 0 bis 100 in Prozent (z. B. 100)")
   if (type == "vpw" && max_rate == 0)
-    stop("withdrawal_rule('vpw'): max_rate = 0 erlaubt keine Entnahme; H\u00f6chstsatz in Prozent > 0 angeben (z. B. 100).", call. = FALSE)
+    chk_stop("b1.m_chk_5")
   # Schranken in Prozent: Werte zwischen 0 und 0,2 sind vermutlich Anteile (0.05 statt 5)
+  # seit 1.6.5 (CR2-B-9, K25): auch cape_a; smoothing und floor95 schon bei Werten > 0 und <= 1 (0.75 statt 75 %)
   frac <- c(ceiling = ceiling %||% NA, floor = floor %||% NA, cut = cut, raise = raise, smoothing = smoothing %||% NA,
-            inflation_cap = inflation_cap, extra = extra, floor95 = floor95, max_rate = max_rate)
-  frac <- frac[!is.na(frac) & frac > 0 & frac < 0.2]
+            inflation_cap = inflation_cap, extra = extra, floor95 = floor95, max_rate = max_rate, cape_a = cape_a)
+  hi <- ifelse(names(frac) %in% c("smoothing", "floor95"), 1, 0.2)
+  frac <- frac[!is.na(frac) & frac > 0 & (frac < hi | (hi == 1 & frac == 1))]
   if (length(frac))
     warning(sprintf("withdrawal_rule: %s wirkt wie ein Anteil; PROZENT-KONVENTION: 5 bedeutet 5 %% (gemeint vermutlich %s).",
                     paste(sprintf("%s = %s", names(frac), format(frac)), collapse = ", "),
@@ -370,16 +374,20 @@ print.withdrawal_rule <- function(x, ...) {
     floor_ceiling = sprintf("  Korridor:  -%.0f %% / +%.0f %% um reale Erstentnahme\n", x$floor, x$ceiling),
     endowment = sprintf("  Gl\u00e4ttung:  %.0f %%\n", x$smoothing),
     hebeler = sprintf("  Gl\u00e4ttung:  %.0f %%, erwartete Realrendite %.2f %%\n", x$smoothing, x$exp_return),
-    vpw = sprintf("  Alter %d bis %d, erwartete Realrendite %.2f %%\n", as.integer(x$age), as.integer(x$max_age), x$exp_return),
+    vpw = sprintf("  Alter %s bis %s, erwartete Realrendite %.2f %%\n", .wd_fmt_betrag(x$age), .wd_fmt_betrag(x$max_age), x$exp_return),
     abw = sprintf("  Erwartete Realrendite %.2f %%, Zielverm\u00f6gen %.0f\n", x$exp_return, x$fv),
     cape = sprintf("  Rate = %.2f %% + %.2f / CAPE\n", x$cape_a, x$cape_b),
     ratchet = sprintf("  +%.0f %% bei Depot > %.2f x Start, alle %d Jahre\n", x$raise, x$ratchet_threshold, as.integer(x$ratchet_gap)),
     sensible = sprintf("  Zusatz: %.0f %% des realen Vorjahresgewinns\n", x$extra),
     clyatt = sprintf("  Mindestens %.0f %% der Vorjahresentnahme\n", x$floor95), "")
   cat(extra)
-  if (x$min_real > 0 || is.finite(x$max_real)) cat(sprintf("  Grenzen:   %.0f bis %s (real)\n", x$min_real, format(x$max_real)))
+  # seit 1.6.5 (CR2-X6-3, CR2-W4-3): Grenzen und Alter ohne Exponent und ohne Rundung auf ganze Zahlen (bis 1.6.4
+  # "1e+05", min_real 2.5 als "2", max_age ab 2^31 als "NA")
+  if (x$min_real > 0 || is.finite(x$max_real))
+    cat(sprintf("  Grenzen:   %s bis %s (real)\n", .wd_fmt_betrag(x$min_real), .wd_fmt_betrag(x$max_real)))
   invisible(x)
 }
+.wd_fmt_betrag <- function(v) if (is.finite(v) && v == round(v) && abs(v) < 1e15) sprintf("%.0f", v) else sprintf("%.15g", v)
 
 #' Parametervektor fuer den C++-Kern (Reihenfolge = enum P_* in core/withdrawal_core_impl.h)
 #' @keywords internal
@@ -393,8 +401,19 @@ print.withdrawal_rule <- function(x, ...) {
     as.numeric(isTRUE(r$skip_inflation)), r$max_rate / 100)
 }
 
+# periods (seit 1.6.5, Entscheidung 173): NULL oder ganze Zahl >= 1 (hoechstens 100 Jahre in Monaten); ausschliessend
+# zu years (null_years = TRUE: years ist NULL ohne Angabe; sonst gilt years nur mit dem Standardwert default_years)
+.chk_periods <- function(years, periods, fn, null_years = FALSE, default_years = 30, ppy = 12L) {
+  if (is.null(periods)) return(invisible(NULL))
+  chk_int1(periods, fn, "periods")
+  chk_max(periods, SL_MAX_JAHRE * ppy, fn, "periods")
+  if (if (null_years) !is.null(years) else !identical(as.numeric(years), as.numeric(default_years)))
+    chk_stop("b1.years_periods", fn)
+  invisible(NULL)
+}
+
 .wd_ppy <- function(frequency) switch(frequency, year = 1L, quarter = 4L, month = 12L,
-                                      stop("frequency muss 'year', 'quarter' oder 'month' sein."))
+                                      stop(chk_msg("b1.m_wd_ppy")))
 
 #' Perioden-Kennzahl aus einer Tagesreihe ueber Kalendergrenzen
 #' @keywords internal
@@ -441,6 +460,10 @@ print.withdrawal_rule <- function(x, ...) {
 #'   12 x \code{years} Monate). Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
 #'   \code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze
 #'   Perioden ergab, z. B. 2.5).
+#' @param periods Seit 1.6.5: Kohortenlaenge in Perioden der gewaehlten \code{frequency}
+#'   (ganze Zahl von 1 bis 100 x Perioden je Jahr) statt \code{years}; erlaubt Laengen, die keine
+#'   ganzen Jahre sind (z. B. 30 Monate). \code{years} muss dann beim Standard 30 bleiben, sonst
+#'   Fehler. \code{NULL} (Standard) = \code{years} gilt.
 #' @param frequency Periodenlaenge der Entnahme-Simulation: \code{"year"}
 #'   (Standard), \code{"quarter"} oder \code{"month"}.
 #' @param step Abstand der Kohortenstarts: \code{"month"} (Standard; jede
@@ -496,7 +519,7 @@ print.withdrawal_rule <- function(x, ...) {
 withdrawal_cohorts <- function(data, price = "value", inflation = NULL, years = 30,
                                frequency = c("year", "quarter", "month"),
                                step = c("month", "year"), wrap = FALSE,
-                               cape = NULL, base_rate = NULL, inflation_type = c("level", "rate_pa")) {
+                               cape = NULL, base_rate = NULL, inflation_type = c("level", "rate_pa"), periods = NULL) {
   fn <- "withdrawal_cohorts"
   it_given <- !missing(inflation_type)
   .e3_choice(frequency, c("year", "quarter", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
@@ -550,6 +573,10 @@ withdrawal_cohorts <- function(data, price = "value", inflation = NULL, years = 
                         "aber nach %s folgt %s%s."), format(mdates[gap[1]]), format(mdates[gap[1] + 1L]),
                  if (stats::median(diff(mi)) >= 12) paste0(" (Jahresdaten? Dann Jahresrenditen als Matrix Jahre x Kohorten ",
                                                            "an withdrawal_simulation() \u00fcbergeben)") else ""))
+  # seit 1.6.5 (CR2-A-6): verwendete Monatsendkurse und Preisindexwerte endlich und > 0 (bis 1.6.4 still Inf/NaN bzw.
+  # negative Renditen, Fehler erst in withdrawal_simulation() unter anderem Namen)
+  .wd_check_level(mpx, mdates, price, fn)
+  if (is.character(inflation) && !infl_rate) .wd_check_level(.fill_na(as.numeric(data[[inflation]]), "locf")[ends], mdates, inflation, fn)
   cpi <- if (is.null(inflation)) rep(1, length(ends))
          else if (infl_rate) {                             # Rate in Prozent p. a. ueber die Kalendertage
            v <- .fill_na(as.numeric(data[[inflation]]), "locf")
@@ -569,7 +596,9 @@ withdrawal_cohorts <- function(data, price = "value", inflation = NULL, years = 
   # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; bis 1.6.3
   # jede Zahl > 0, die ganze Perioden ergab, z. B. 2.5 bei Monaten)
   chk_jahre(years, fn, "years")
-  len_m <- as.integer(round(years * 12))
+  # seit 1.6.5 (Entscheidung 173): Kohortenlaenge wahlweise in Perioden von frequency (periods; years dann nur 30)
+  .chk_periods(years, periods, fn, ppy = ppy)
+  len_m <- if (is.null(periods)) as.integer(round(years * 12)) else as.integer(periods * mpp)
   # seit 1.6.4 (K43 T2-N4) ohne volle Monatsrendite auch bei step = "year" die Meldung unten (bis dahin R-Rohfehler
   # "wrong sign in 'by' argument" von seq)
   starts <- if (step == "month") seq_len(nm) else if (nm >= 1L) seq(1L, nm, by = 12L) else integer(0)
@@ -590,6 +619,13 @@ withdrawal_cohorts <- function(data, price = "value", inflation = NULL, years = 
                  cape = pick_start(capev), base_rate = pick_start(brv),
                  frequency = frequency, start_dates = mdates[starts], historical = TRUE, wrap = wrap,
                  source = price), class = "withdrawal_paths")
+}
+
+# Kurs- bzw. Indexniveaus: vorhandene Werte endlich und > 0, sonst Fehler mit Spalte und erstem Datum (seit 1.6.5)
+.wd_check_level <- function(v, dates, col, fn) {
+  b <- which(!is.na(v) & (!is.finite(v) | v <= 0))
+  if (length(b)) chk_stop("b1.niveau", fn, col, format(dates[b[1]]))
+  invisible(TRUE)
 }
 
 #' Zeitgewichteter Wertindex eines Simulationsergebnisses
@@ -628,7 +664,9 @@ result_index <- function(x, base = 100) {
   chk_num1(base, "result_index", "base", lo = 0, lo_open = TRUE)   # Startwert des Index (seit 1.6.4 geprueft)
   w <- as.numeric(x$worth)
   fl <- vapply(x$report, function(a) as.numeric(a$flows), numeric(length(w)))
-  fl <- if (is.matrix(fl)) rowSums(fl) else as.numeric(fl)
+  # seit 1.6.5 (CR2-O-3): ein Tag mit mehreren Assets ergibt einen Vektor je Asset; Summe wie bei mehreren Tagen
+  # (bis 1.6.4 eine Zeile je Asset)
+  fl <- if (is.matrix(fl)) rowSums(fl) else if (length(w) == 1L) sum(fl) else as.numeric(fl)
   if (length(x$twr_index) == length(w)) {
     idx <- as.numeric(x$twr_index)              # zeitgewichteter Index der Engine (bitgleich zu ttwror)
   } else {
@@ -941,9 +979,12 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
   if (core$status == 2L)
     stop(sprintf(paste0("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 ",
                         "f\u00fcr +5 %%, nicht 0.05 (Nettorendite: 1 + r \u00fcbergeben)."), format(stats::median(R), digits = 4)))
-  if (core$status == 3L) stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns m\u00fcssen >= 0 sein (0 = Totalverlust).")
+  if (core$status == 3L) stop(chk_msg("b1.m_withdrawal_perfect_rate"))
   if (!lg_ok)
-    stop("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 % des Startverm\u00f6gens).")
+    stop(chk_msg("e.legacy_anteil"))   # seit 1.6.5 aus der Tabelle (193, Paket E)
+  # seit 1.6.5 (CR2-M-8): Totalverlust im letzten Jahr mit legacy > 0: Erbe nicht erreichbar, PWR NA mit Hinweis
+  na_ <- if (legacy > 0) sum(R[nrow(R), ] == 0) else 0L
+  if (na_) message(chk_msg("b1.pwr_legacy", "withdrawal_perfect_rate", na_))
   stats::setNames(core$pwr, colnames(R))                  # wie apply(R, 2, ...): Namen der Spalten
 }
 
@@ -996,14 +1037,20 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
     # Cash-Lot mehr (A-062, Entscheidungen 87 und 104), sondern vom ersten Verkauf abgezogen: der aelteste Lot des
     # wertgroessten Assets wird um den Fehlbetrag gemindert (reicht er nicht, die naechsten Lots dieses Assets),
     # Basis und Vorabpauschale anteilig; auf diesen Rest wird keine Steuer gerechnet
+    # seit 1.6.5 (CR2-X7-3): reicht das wertgroesste Asset nicht, die naechstgroesseren (bis 1.6.4 blieb der Rest stehen,
+    # Summe der Lots != Startwert); Gruppen danach lueckenlos
     keep <- rep(TRUE, length(n)); rest <- -cash
-    for (j in which(group == which.max(wvs) - 1L)) {
+    for (ga in order(-wvs)) {
+      for (j in which(group == ga - 1L)) {
+        if (!(rest > 0)) break
+        take <- min(n[j], rest); f <- (n[j] - take) / n[j]
+        n[j] <- n[j] - take; basis[j] <- basis[j] * f; vp[j] <- vp[j] * f; rest <- rest - take
+        if (!(n[j] > 0)) keep[j] <- FALSE
+      }
       if (!(rest > 0)) break
-      take <- min(n[j], rest); f <- (n[j] - take) / n[j]
-      n[j] <- n[j] - take; basis[j] <- basis[j] * f; vp[j] <- vp[j] * f; rest <- rest - take
-      if (!(n[j] > 0)) keep[j] <- FALSE
     }
     n <- n[keep]; basis <- basis[keep]; vp <- vp[keep]; group <- group[keep]
+    group <- match(group, unique(group)) - 1L
   }
   list(n = n, basis = basis, vp = vp, group = group)
 }
@@ -1379,6 +1426,11 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #'   werden immer alle Pfade; \code{plot()} zeichnet den Vermoegensfaecher dann
 #'   nur aus den behaltenen Pfaden (Titel mit \dQuote{erste k von n Pfaden}).
 #'   Bei historischen Kohorten sind das die fruehesten Starts.
+#' @param periods Seit 1.6.5: Kuerzung auf die ersten \code{periods} Zeilen (Perioden der Daten,
+#'   ganze Zahl von 1 bis 1200) statt \code{years}; erlaubt Laengen, die keine ganzen Jahre sind
+#'   (z. B. 10 Quartale; das letzte Planjahr ist dann unvollstaendig). Nur eines von \code{years} und
+#'   \code{periods} angeben, sonst Fehler. Bei einem \code{SimLevResult} zugleich die Kohortenlaenge in
+#'   Perioden. \code{NULL} (Standard) = \code{years} gilt.
 #' @param horizon Optional Laufzeit je Pfad: Objekt aus [withdrawal_horizon()]
 #'   (zufaellige Laufzeit in Jahren je Pfad) oder eine Zahl > 0 = feste Laufzeit in
 #'   Jahren. \code{NULL} (Standard) = volle Pfadlaenge. Dann gilt ein Pfad als
@@ -1474,7 +1526,8 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
                                   years = NULL, timing = c("start", "end"), income = NULL, tax = NULL,
                                   partial_exemption = 30, base_rate = 3.20,
                                   vorabpauschale = TRUE, sale_cost = 0, cost_basis = 100,
-                                  loss_carryforward = 0, gamma = 2, keep_paths = TRUE, horizon = NULL) {
+                                  loss_carryforward = 0, gamma = 2, keep_paths = TRUE, horizon = NULL,
+                                  periods = NULL) {
   fn <- "withdrawal_simulation"
   .e3_choice(timing, c("start", "end"), fn, "timing")   # Pruefung (Meldung auswahl)
   timing <- match.arg(timing)
@@ -1500,8 +1553,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   sparer_pauschbetrag <- if (is.null(tax)) 1000 else tax$sparer_pauschbetrag
   if (!is.null(horizon) && !inherits(horizon, "SimLevHorizon")) {
     if (!is.numeric(horizon) || length(horizon) != 1L || !is.finite(horizon) || horizon <= 0)
-      stop("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren > 0 sein.",
-           call. = FALSE)
+      chk_stop("b1.m_withdrawal_simulation")
     chk_jahre(horizon, fn, "horizon")     # seit 1.6.4 ganze Jahre bis 100 (Entscheidungen 19 und 46; bis 1.6.3 still abgeschnitten)
     horizon <- withdrawal_horizon("fixed", years = horizon)
   }
@@ -1510,12 +1562,11 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   # Steuer- und Prozentargumente wie in simulation() pruefen (einzelne endliche Zahl im Bereich)
   .chk <- function(x, arg, what, lo = 0, hi = Inf) {
     if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < lo || x > hi)
-      stop(sprintf("withdrawal_simulation: '%s' muss %s sein.", arg, what), call. = FALSE)
+      chk_stop("b1.m_chk_6", arg, what)
   }
   .frac <- function(x, arg, hi = 1, unit = "%") {
     if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
-      warning(sprintf("withdrawal_simulation: %s = %s wird als %s %s gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                      arg, format(x), format(x), unit, format(x * 100)), call. = FALSE)
+      warning(chk_msg("b1.m_frac", arg, format(x), format(x), unit, format(x * 100)), call. = FALSE)
   }
   .chk(partial_exemption, "partial_exemption", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)", 0, 100); .frac(partial_exemption, "partial_exemption")
   .chk(sale_cost, "sale_cost", "eine Zahl von 0 bis unter 100 in Prozent (z. B. 0.1)", 0, 99.999)
@@ -1523,7 +1574,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   .chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
   .chk(gamma, "gamma", "eine Zahl >= 0 (relative Risikoaversion, z. B. 2)")
   if (!is.logical(vorabpauschale) || length(vorabpauschale) != 1L || is.na(vorabpauschale))
-    stop("withdrawal_simulation: 'vorabpauschale' muss TRUE oder FALSE sein.", call. = FALSE)
+    chk_stop("b1.m_frac_2")
   kp <- .keep_count(keep_paths, Inf, "withdrawal_simulation")   # Anzahl behaltener Pfade, begrenzt nach ncol(R)
   if (is.numeric(inflation) && !is.matrix(inflation) && length(inflation) == 1L) {
     .chk(inflation, "inflation", "eine Zahl in Prozent p. a. \u00fcber -100 (z. B. 2) oder eine Matrix", -99.999)
@@ -1533,6 +1584,9 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; bis 1.6.3
   # jede Zahl > 0, die ganze Perioden ergab)
   chk_jahre(years, fn, "years", null_ok = TRUE)
+  # seit 1.6.5 (Entscheidung 173): Laufzeit wahlweise als ganze Zahl von Perioden der Daten (periods), ausschliessend zu
+  # years; erlaubt z. B. 10 Quartale (2,5 Jahre, letztes Planjahr unvollstaendig)
+  .chk_periods(years, periods, fn, null_years = TRUE)
   if (if (is.matrix(base_rate)) !is.numeric(base_rate) else (!is.numeric(base_rate) || length(base_rate) != 1L || !is.finite(base_rate)))
     chk_stop("ut2.base_rate", "withdrawal_simulation")
   # einzelnes Einkommen list(start, end, amount) automatisch in eine Liste verpacken
@@ -1549,8 +1603,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     sv <- utils::tail(acc$worth, 1)
     if (!is.finite(sv) || sv <= 0) {
       debt <- start_value$tax_report$open_tax_debt %||% 0
-      stop(sprintf("start_value: Endwert der Ansparphase (SimLevResult) ist %s EUR; withdrawal_simulation() braucht ein positives Startverm\u00f6gen%s.",
-                   sprintf("%.2f", sv), if (is.finite(debt) && debt > 0)
+      stop(chk_msg("b1.m_frac_3", sprintf("%.2f", sv), if (is.finite(debt) && debt > 0)
                      sprintf(" (offene, nicht gedeckte Steuerschuld der Ansparphase: %s EUR, tax_report$open_tax_debt)", sprintf("%.2f", debt)) else ""))
     }
     # offene Lots am letzten Tag (nur Ergebnisse mit tax_mode = "person"; aeltere Ergebnisse ohne)
@@ -1657,10 +1710,12 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   if (inherits(x, "SimLevResult")) {
     src_taxed <- isTRUE(x$tax_report$total_taxes_paid > 0)
     if (!is.numeric(inflation) || length(inflation) != 1L) chk_stop("rs.infl_prozent", "withdrawal_simulation", "SimLevResult")
-    x <- withdrawal_cohorts(x, inflation = inflation, years = years %||% 30, frequency = frequency)
+    x <- withdrawal_cohorts(x, inflation = inflation, years = if (is.null(periods)) years %||% 30 else 30, frequency = frequency,
+                            periods = periods)
   } else if (inherits(x, "SimLevWrapperNav")) {   # Anteilswert eines Fonds-Wrappers (wrapper_nav()) als Kursreihe
     if (!is.numeric(inflation) || length(inflation) != 1L) chk_stop("rs.infl_prozent", "withdrawal_simulation", "SimLevWrapperNav")
-    x <- withdrawal_cohorts(x, price = "nav", inflation = inflation, years = years %||% 30, frequency = frequency)
+    x <- withdrawal_cohorts(x, price = "nav", inflation = inflation, years = if (is.null(periods)) years %||% 30 else 30, frequency = frequency,
+                            periods = periods)
   } else if (is.data.frame(x) && "date" %in% names(x)) {   # Kurstabelle, z. B. Ausschnitt aus wrapper_nav()
     stop(paste0("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gew\u00f6hnliche ",
                 "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln ",
@@ -1671,8 +1726,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     x <- withdrawal_paths(x, strategy = strategy, inflation = inflation, frequency = frequency)
   }
   if (src_taxed && tax_mode == "person" && isTRUE(vorabpauschale))
-    warning("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); ",
-            "vorabpauschale = FALSE oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelz\u00e4hlung.")
+    warning(chk_msg("b1.m_quelle_steuer"))
   if (!inherits(x, "withdrawal_paths")) {
     R <- if (is.null(x)) NULL else as.matrix(x)                  # NULL: seit 1.6.4 Meldung (bisher R-Rohfehler)
     # Feld mit mehr als zwei Dimensionen: seit 1.6.4 abgelehnt (bisher von as.matrix still zu einer Spalte gemacht)
@@ -1698,14 +1752,14 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   if (!identical(dim(I), dim(R))) chk_stop("rs.infl_passt", "withdrawal_simulation", nrow(I), ncol(I), nrow(R), ncol(R))
   if (is.matrix(base_rate) && is.null(x$base_rate) && !identical(dim(base_rate), dim(R)))
     chk_stop("rs.base_dim", "withdrawal_simulation", nrow(R), ncol(R), nrow(base_rate), ncol(base_rate))
-  if (!is.null(years)) {                                     # ganze Jahre (oben geprueft): ganze Zahl von Perioden
-    keep_rows <- seq_len(min(nrow(R), round(years * ppy)))
+  if (!is.null(years) || !is.null(periods)) {               # ganze Jahre (oben geprueft): ganze Zahl von Perioden
+    keep_rows <- seq_len(min(nrow(R), if (is.null(periods)) round(years * ppy) else periods))
     R <- R[keep_rows, , drop = FALSE]; I <- I[keep_rows, , drop = FALSE]
     if (!is.null(x$cape)) x$cape <- x$cape[keep_rows, , drop = FALSE]
     if (!is.null(x$base_rate)) x$base_rate <- x$base_rate[keep_rows, , drop = FALSE]
     if (is.matrix(base_rate)) base_rate <- base_rate[keep_rows, , drop = FALSE]
   }
-  if (nrow(R) %% ppy != 0) warning("Periodenzahl ist kein Vielfaches eines Jahres; letztes Planjahr unvollst\u00e4ndig.")
+  if (nrow(R) %% ppy != 0) warning(chk_msg("b1.m_num1"))
   ny <- ceiling(nrow(R) / ppy)
   nfy <- nrow(R) %/% ppy                                    # volle Planjahre (ohne Rumpfjahr)
   if (rule$type == "cape" && is.null(x$cape)) chk_stop("rs.cape", "withdrawal_simulation")
@@ -1728,7 +1782,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     # seit 1.6.4 ganze Planjahre (Entscheidung 19; bis 1.6.3 start auf- und end abgerundet), end auch Inf
     # (start ist nach der ersten Pruefung ein ganzes Planjahr >= 1; seit 1.6.4 K43 T2-N8 prueft die zweite nur end)
     if (!is.numeric(e0) || length(e0) != 1L || is.na(e0) || e0 < s0 || (is.finite(e0) && e0 != trunc(e0)))
-      stop("income: start und end m\u00fcssen Planjahre mit start <= end sein.")
+      stop(chk_msg("b1.m_num1_2"))
     s1 <- max(1, ceiling(s0)); e1 <- min(ny, floor(e0))
     if (s1 <= e1) inc[s1:e1] <- inc[s1:e1] + e$amount      # Einkommen nach Pfadende wirkt nicht
   }
@@ -1750,6 +1804,16 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
                        lots$n %||% numeric(0), lots$basis %||% numeric(0), lots$vp %||% numeric(0), lots$group %||% integer(0),
                        if (spb_used1 > 0) max(0, sparer_pauschbetrag - spb_used1) else -1, !is.null(horizon),
                        tariff_par, zve)
+  # seit 1.6.5 (CR2-1): withdrawal_max_rate braucht ab dem zweiten Suchschritt nur die Erfolge je Pfad und die Gewichte;
+  # Kennzahlen und PWR (bis 1.6.4 in jedem Schritt, rund die Haelfte der Zeit) entfallen dort
+  if (isTRUE(.wd_reuse$fast)) {
+    succ <- core$failed == 0
+    if (!is.null(horizon)) {
+      H <- pmin(.draw_horizon(horizon, ncol(R)), ny); dy <- ceiling(core$depletion_period / ppy)
+      succ <- is.na(dy) | dy > H
+    }
+    return(list(paths = data.frame(success = succ), weights = x$weights %||% rep(1, ncol(R))))
+  }
   sp <- core$spending
   w0 <- sp[1, ]
   # Konsumkennzahlen je Pfad im Kern (wd_metrics): je Jahr nur ueber volle Planjahre (ein Rumpfjahr zaehlt nicht
@@ -1871,15 +1935,14 @@ withdrawal_max_rate <- function(x, rule = withdrawal_rule("constant"), success =
   chk_dots(names(list(...)) %||% character(0), .wmr_args, "withdrawal_max_rate", taken = "keep_paths")
   if (!inherits(rule, "withdrawal_rule")) chk_stop("klasse", "withdrawal_max_rate", "rule", "withdrawal_rule()")
   if (rule$type %in% c("one_over_n", "vpw", "abw", "cape", "hebeler"))
-    stop(sprintf("withdrawal_max_rate: Die Regel '%s' nutzt rate nicht; eine Suche \u00fcber rate ist daf\u00fcr nicht m\u00f6glich.", rule$type))
+    stop(chk_msg("b1.m_withdrawal_max_rate", rule$type))
   num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
   if (!num1(success) || success <= 0 || success > 1)
-    stop(sprintf("withdrawal_max_rate: success muss ein Anteil mit 0 < success <= 1 sein (0.95 = 95 %%)%s.",
-                 if (num1(success) && success > 1 && success <= 100) "; Prozentangaben durch 100 teilen" else ""))
+    stop(chk_msg("e.success_anteil", if (num1(success) && success > 1 && success <= 100) "; Prozentangaben durch 100 teilen" else ""))
   if (!num1(lower) || !num1(upper) || lower < 0 || upper > 100 || lower >= upper)
-    stop("withdrawal_max_rate: lower und upper m\u00fcssen Raten in Prozent mit 0 <= lower < upper <= 100 sein.")
+    stop(chk_msg("b1.m_num1_3"))
   if (!num1(tol) || tol <= 0)
-    stop("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005).")
+    stop(chk_msg("b1.m_num1_4"))
   # Ein Horizont mit seed = NULL wird einmal zu k aufgeloest; alle
   # Suchschritte ziehen damit dieselben Laufzeiten
   hz <- list(...)[["horizon"]]
@@ -1889,7 +1952,7 @@ withdrawal_max_rate <- function(x, rule = withdrawal_rule("constant"), success =
   } else function(x, rl, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, ...)
   # Seit 1.6.3 bereitet nur der erste Suchschritt die Renditequelle auf (withdrawal_paths/withdrawal_cohorts aus einer
   # Studie bzw. einem Ergebnis); die weiteren rechnen mit dieser Aufbereitung (gleiche Renditen, Inflation, Gewichte)
-  on.exit({ .wd_reuse$on <- FALSE; .wd_reuse$x <- NULL }, add = TRUE)
+  on.exit({ .wd_reuse$on <- FALSE; .wd_reuse$x <- NULL; .wd_reuse$fast <- FALSE }, add = TRUE)
   first <- TRUE   # Hinweise und Warnungen (gleiche Eingaben) nur beim ersten Suchschritt
   f <- function(rate) {
     rl <- rule; rl$rate <- rate
@@ -1900,14 +1963,25 @@ withdrawal_max_rate <- function(x, rule = withdrawal_rule("constant"), success =
       if (!is.null(.wd_reuse$x)) x <<- .wd_reuse$x
       .wd_reuse$x <- NULL
       s1
-    } else suppressWarnings(suppressMessages(sim(x, rl, ...)))
+    } else {
+      .wd_reuse$fast <- TRUE   # seit 1.6.5 (CR2-1): nur Erfolge je Pfad
+      s2 <- suppressWarnings(suppressMessages(sim(x, rl, ...)))
+      .wd_reuse$fast <- FALSE
+      s2
+    }
     first <<- FALSE
     stats::weighted.mean(s$paths$success, s$weights)
   }
   s_lo <- f(lower)                                  # jede Rate nur einmal simulieren
   if (s_lo < success) return(structure(NA_real_, success = s_lo))
   s_up <- f(upper)
-  if (s_up >= success) return(structure(upper, success = s_up))
+  if (s_up >= success) {
+    # seit 1.6.5 (CR2-F-10, Entscheidung 185 K22): Hinweis, dass das Ergebnis die Suchgrenze ist
+    nie <- rule$type == "percent" || (rule$type == "endowment" && rule$min_real == 0)
+    warning(chk_msg("b1.wmr_grenze", "withdrawal_max_rate", chk_fmt(upper),
+                    if (nie) chk_msg("b1.wmr_nie", rule$type) else ""), call. = FALSE)
+    return(structure(upper, success = s_up))
+  }
   while (upper - lower > tol) {
     mid <- (lower + upper) / 2
     # seit 1.6.4 (A-007): Ende, wenn die Mitte keine neue Zahl mehr ist (tol unter dem Abstand benachbarter Zahlen,
@@ -2004,7 +2078,7 @@ print.summary.SimLevWithdrawal <- function(x, ...) {
   # Bytes zaehlt (der Gedankenstrich hat in UTF-8 drei)
   q <- function(v, pct = FALSE) paste(vapply(v, function(z) if (is.na(z)) paste0(strrep(" ", 9L), "\u2013")
                                              else if (pct) sprintf("%9.2f%%", z) else sprintf("%10.0f", z), ""), collapse = "")
-  hdr <- paste(sprintf("%10s", sprintf("q%02d", round(100 * x$probs))), collapse = "")
+  hdr <- paste(sprintf("%10s", .q_names(x$probs)), collapse = "")   # seit 1.6.5 ohne Rundung (CR2-W4-3 wie S-3)
   cat("\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")
   cat("                 SimLev Entnahme-Simulation                    \n")
   cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n")
@@ -2135,6 +2209,11 @@ withdrawal_horizon <- function(type = c("fixed", "uniform", "discrete", "normal"
   given <- list(years = years, prob = prob, min = min, max = max, mean = mean, sd = sd, mode = mode)
   miss <- need[vapply(need, function(k) is.null(given[[k]]), TRUE)]
   if (length(miss)) stop(sprintf("withdrawal_horizon('%s') braucht: %s", type, paste(miss, collapse = ", ")))
+  # seit 1.6.5 (CR2-E-4): Argumente, die der Typ nicht nutzt, mit Warnung und ohne Pruefung (bis 1.6.4 teils geprueft,
+  # z. B. min > max bei "fixed" ein Fehler, teils still uebergangen)
+  unused <- setdiff(names(given)[!vapply(given, is.null, TRUE)], need)
+  if (length(unused))
+    warning(chk_msg("b1.hz_unbenutzt", sprintf("withdrawal_horizon('%s')", type), paste(unused, collapse = ", "), type), call. = FALSE)
   for (k in need) {
     v <- given[[k]]; multi <- k %in% c("prob") || (k == "years" && type %in% c("discrete", "sample"))
     if (!is.numeric(v) || !length(v) || any(!is.finite(v)) || (!multi && length(v) != 1L))
@@ -2151,8 +2230,9 @@ withdrawal_horizon <- function(type = c("fixed", "uniform", "discrete", "normal"
     chk_max(given[[k]], SL_MAX_JAHRE, fnt, k)
   }
   if (type == "discrete" && (length(years) != length(prob) || any(prob < 0) || sum(prob) <= 0))
-    stop("withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
-  if (!is.null(min) && !is.null(max) && min > max) chk_stop("rs.min_max", fnt)
+    stop(chk_msg("b1.m_withdrawal_horizon"))
+  if (all(c("min", "max") %in% need) && min > max) chk_stop("rs.min_max", fnt)
+  if (type == "normal" && (mean < min || mean > max)) warning(chk_msg("b1.hz_mean", fnt), call. = FALSE)   # seit 1.6.5
   if (type == "triangular" && (mode < min || mode > max))
     chk_stop("ut2.mode", "withdrawal_horizon('triangular')")
   if (type == "normal" && sd < 0) chk_stop("ut2.sd", "withdrawal_horizon('normal')")
@@ -2182,6 +2262,13 @@ withdrawal_horizon <- function(type = c("fixed", "uniform", "discrete", "normal"
 #' @rdname SimLevWithdrawal-methods
 #' @export
 print.SimLevHorizon <- function(x, ...) {
+  # seit 1.6.5 (CR2-E-3, Entscheidung 185 K32): mit seed = NULL zieht die Anzeige aus dem Zufallszustand von SimLev und
+  # setzt ihn danach zurueck (bis 1.6.4 verbrauchte schon das Anzeigen Zufallszahlen; angezeigte Zahlen unveraendert)
+  if (is.null(x$seed) && !identical(x$type, "fixed")) {
+    .sl_global_check()
+    old <- .sl_state$rng
+    on.exit(.sl_state$rng <- old, add = TRUE)
+  }
   d <- .draw_horizon(x, 20000)
   cat(sprintf("Laufzeit der Entnahmephase (%s): Mittel %.1f Jahre, Median %g, 90 %%-Quantil %g, Bereich %g bis %g\n",
               x$type, mean(d), stats::median(d), stats::quantile(d, 0.9, names = FALSE), min(d), max(d)))
@@ -2200,12 +2287,11 @@ print.SimLevHorizon <- function(x, ...) {
 .wd_tax_mode <- function(tax) {
   if (is.null(tax)) return("none")
   if (!inherits(tax, "SimLevTaxProfile"))
-    stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein.", call. = FALSE)
+    chk_stop("b1.m_wd_tax_mode")
   un <- c(private_sale_threshold = !identical(as.numeric(tax$private_sale_threshold), 1000),
           base_rate = !is.null(tax$base_rate), harvest = !is.null(tax$harvest))
   if (any(un))
-    stop(sprintf("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() oder income_tariff() (Basiszins \u00fcber base_rate von withdrawal_simulation()).",
-                 paste(names(un)[un], collapse = ", ")), call. = FALSE)
+    chk_stop("b1.m_wd_tax_mode_2", paste(names(un)[un], collapse = ", "))
   "person"
 }
 
@@ -2261,8 +2347,7 @@ print.SimLevHorizon <- function(x, ...) {
                  who, length(x), ny, form), call. = FALSE)
   }
   if (is.null(year1))
-    stop(sprintf("%s: taxable_income (income_tariff()) nach Kalenderjahren l\u00e4sst sich nur mit einem SimLevResult als start_value auf Planjahre abbilden (Planjahr 1 = tax_report$next_year$year); erwartet wird %s.",
-                 who, form), call. = FALSE)
+    chk_stop("b1.m_wd_zve", who, form)
   zv <- .check_taxable_income(x, seq.int(year1, length.out = ny), who = who)
   unname(zv$by_year[as.character(seq.int(year1, length.out = ny + 1L))])
 }

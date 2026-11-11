@@ -44,6 +44,16 @@ Rendite des jeweiligen Tages, in Jahren). Seit 1.6.4 geschlossen gerechnet,
 \eqn{D = -\mathrm{expm1}(-n \log(1 + i)) / (i m)} mit \eqn{i = y/m}, \eqn{n = M m}
 (bei \eqn{i = 0} die Laufzeit), auf alle Stellen genau; bis 1.6.3 ueber zentrale
 Differenzen (relativer Fehler bis etwa 2e-6 bei 30 Jahren).
+Seit 1.6.5 zusaetzlich Attribut \code{convexity} (Konvexitaet der Par-Anleihe
+zur Rendite des jeweiligen Tages, in Jahren^2), geschlossen
+\eqn{C = 2 (a - n v^{n+1}) / (i m^2)} mit \eqn{a = -\mathrm{expm1}(-n L) / i},
+\eqn{v^{n+1} = \exp(-(n+1) L)}, \eqn{L = \log(1 + i)}, fuer kleine
+\eqn{|i| (n + 1) < 0.05} ueber eine Reihe (wie beim Verfahren "duration").
+Seit 1.6.5 muss \code{date} aufsteigend und ohne NA sein (sonst Fehler); der
+Kurs wird ueber \eqn{L} ohne Ausloeschung bei sehr kleinen Renditen gerechnet
+(Abzinsung \eqn{\exp(-n L)}, Rentenbarwert \eqn{-\mathrm{expm1}(-n L) / i};
+Aenderung in den letzten Stellen); eine Stufentabelle als \code{yield}, die erst
+nach dem ersten Datentag beginnt, ergibt eine Warnung (davor gilt ihr erster Wert).
 }
 \description{
 Bildet einen Total-Return-Index einer Staatsanleihe mit konstanter
@@ -69,6 +79,7 @@ d$y10 <- 2 + cumsum(rnorm(400, 0, 0.03))
 b <- index_bond(d, "y10", maturity = 10, coupon_frequency = 1)
 tail(b, 1)
 head(attr(b, "duration"), 3)
+head(attr(b, "convexity"), 3)
 b2 <- index_bond(d, "y10", method = "duration")
 tail(b2, 1)
 }

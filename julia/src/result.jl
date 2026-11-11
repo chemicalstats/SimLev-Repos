@@ -42,7 +42,7 @@ Base.propertynames(x::SimLevResult, private::Bool = false) = Tuple(Symbol.(keys(
 Base.setindex!(x::SimLevResult, v, k::AbstractString) = (getfield(x, :data)[String(k)] = v; x)
 Base.setindex!(x::SimLevResult, v, k::Symbol) = setindex!(x, v, String(k))
 function Base.setproperty!(x::SimLevResult, s::Symbol, v)
-    s in (:data, :trades) && error("SimLevResult: Feld $s ist nicht änderbar")
+    s in (:data, :trades) && chk_stop("a.m_base_setproperty", s)
     getfield(x, :data)[String(s)] = v
 end
 Base.delete!(x::SimLevResult, k::AbstractString) = (delete!(getfield(x, :data), k); x)
@@ -113,6 +113,8 @@ function format_result(x)
     ln("  Serenity:         " * fr(s["serenity"]))
     ln("  Martin Ratio:     " * fr(s["martin_ratio"]))
     ext && ln("  (Calmar, Serenity, Martin mit TTWROR)")
+    # seit 1.6.5 (FB-6, Entscheidung 197): Hinweis bei Auswertungen über weniger als ein Jahr
+    length(x["worth"]) < 365 && ln("  " * chk_msg("e.kurz_jahr", _n_tage(length(x["worth"]))))
     ln("")
     ln("  Verteilung"); ln(_SUBRULE)
     ln(r_sprintf("  Mittel je Tag:    %+.4f%%", s["mean"] * 100))
@@ -153,7 +155,9 @@ function _summary_result(object)
     res["start_capital"] = invested !== nothing ?
         invested[1] - r_sum(Float64[rp["flows"][1] for (_, rp) in object["report"]]; na_rm = true) : NA
     res["end_value"] = worth[end]
-    res["total_return_twr"] = ext ? twr[end] / twr[1] - 1 : (worth[end] / worth[1]) - 1
+    # seit 1.6.5 (M4): Bezug start_value plus Rate des Starttags (Kaufkosten am Starttag zählen)
+    res["total_return_twr"] = ext ? twr[end] - 1 :
+        (worth[end] / (invested !== nothing ? invested[1] : worth[1])) - 1
     res["return_on_invested"] = NA
     res["total_return"] = NA
     res["invested"] = invested !== nothing ? invested[end] : worth[1]
@@ -211,6 +215,7 @@ function format_summary(x)
         ln("  " * rpad(k, 16) * " " * v)
     end
     ext && ln("  (Drawdowns zeitgewichtet; Calmar, Serenity, Martin mit TTWROR)")
+    n_days < 365 && ln("  " * chk_msg("e.kurz_jahr", _n_tage(n_days)))   # seit 1.6.5 (FB-6, Entscheidung 197)
     ln("")
     print(io, _RULE)
     return String(take!(io))

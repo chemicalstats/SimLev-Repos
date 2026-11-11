@@ -26,8 +26,11 @@ from ._r.rlist import RList
 from ._r.rnum import r_colsums, r_cummax, r_cumsum, r_cumprod, r_rowsums, r_sd, r_sum
 from ._util import _is_num_scalar, _match_arg
 from ._util import _cov2cor
+from ._util import _message
+from ._pruefen import chk_choice, chk_msg, chk_stop
 
-__all__ = ["view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "scenario_copula", "scenario_risk",
+__all__ = ["view_mean", "view_prob", "view_vol", "view_cor", "view_rank", "scenario_entropy_pooling", "scenario_copula",
+           "scenario_risk",
            "scenario_crisis", "SimLevScenarios"]
 
 _NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA)
@@ -45,8 +48,19 @@ def _view_value(value, what, lo=-math.inf, hi=math.inf):
             rng = _fmt.sprintf(" >= %g", lo)
         else:
             rng = ""
-        raise ValueError("%s: value muss eine endliche Zahl%s sein." % (what, rng))   # seit 1.6.4 ohne Wert
-    return value
+        chk_stop("c.m_view_value", what, rng)   # seit 1.6.4 ohne Wert
+    # seit 1.6.5 (CR2-V3-2): ein Element einer Liste bzw. eines Feldes als Zahl (wie Julia; bis 1.6.4 unverändert
+    # weitergereicht, danach Rohfehler)
+    v = a[0]
+    return v if isinstance(value, (int, float)) and not isinstance(value, bool) else float(v)
+
+
+def _view_op(op, fn):
+    """``.view_op`` (seit 1.6.5, CR2-V3-4 Punkt 2): genau einer von "=", "<=", ">="."""
+    if isinstance(op, tuple) and op == ("=", "<=", ">="):
+        return "="
+    chk_choice(op, fn, "op", ["=", "<=", ">="])
+    return op
 
 
 def view_mean(var, value, *, op=("=", "<=", ">=")):
@@ -85,7 +99,7 @@ def view_mean(var, value, *, op=("=", "<=", ">=")):
     """
     var = _dep.chk_name1(var, "view_mean", "var")              # seit 1.6.4 (K42 E4)
     v = _view_value(value, "view_mean")
-    return {"type": "mean", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
+    return {"type": "mean", "var": var, "value": v, "op": _view_op(op, "view_mean")}
 
 
 def view_prob(expr, value, *, op=("=", "<=", ">=")):
@@ -128,7 +142,7 @@ def view_prob(expr, value, *, op=("=", "<=", ">=")):
     if not callable(expr):                                     # Python: auch eine Funktion (wie bisher)
         expr = _dep.chk_name1(expr, "view_prob", "expr")       # seit 1.6.4 (K42 E4)
     v = _view_value(value, "view_prob", 0, 1)
-    return {"type": "prob", "expr": expr, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
+    return {"type": "prob", "expr": expr, "value": v, "op": _view_op(op, "view_prob")}
 
 
 def view_vol(var, value, *, op=("=", "<=", ">=")):
@@ -167,7 +181,55 @@ def view_vol(var, value, *, op=("=", "<=", ">=")):
     """
     var = _dep.chk_name1(var, "view_vol", "var")               # seit 1.6.4 (K42 E4)
     v = _view_value(value, "view_vol", 0)
-    return {"type": "vol", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
+    op = _view_op(op, "view_vol")
+    if v == 0:                                                 # seit 1.6.5 (CR2-V3-4 Punkt 1)
+        _message(chk_msg("c.view_vol0", "view_vol"))
+    return {"type": "vol", "var": var, "value": v, "op": op}
+
+
+def view_cor(var1, var2, value, *, op=("=", "<=", ">=")):
+    """Annahme an die Korrelation zweier Spalten (seit 1.6.5, E-T3-3; Meucci 2008).
+
+    Umgesetzt als Bedingung an E[(x_1 - m_1)(x_2 - m_2)] = value · s_1 · s_2 mit festen Mitteln m und
+    Standardabweichungen s: aus Annahmen ``view_mean``/``view_vol`` mit ``op = "="`` für dieselbe Spalte, sonst aus
+    der Ausgangsverteilung. Seit der Prüfrunde 1.6.5 (Entscheidung 199) hält ``scenario_entropy_pooling()`` dazu Mittel
+    und Standardabweichung beider Spalten als Gleichungen fest (Mittel m, zweites Moment um m gleich s²), damit die
+    Korrelation nach der Umgewichtung die Annahme trifft. Eigene Annahmen gehen vor: kein festes Mittel für eine Spalte
+    mit ``view_mean`` oder ``view_rank``, keine feste Streuung für eine Spalte mit ``view_vol``; verschieben diese
+    Mittel oder Streuung, kann die Korrelation danach abweichen.
+
+    Args:
+        var1, var2: zwei verschiedene Spaltennamen der Szenario-Tabelle.
+        value: Korrelation zwischen -1 und 1.
+        op: Art der Bedingung: ``"="`` (Standard), ``"<="`` oder ``">="``.
+
+    Returns:
+        Liste mit ``type`` (``"cor"``), ``var`` (beide Namen), ``value`` und ``op``.
+    """
+    fn = "view_cor"
+    var1 = _dep.chk_name1(var1, fn, "var1")
+    var2 = _dep.chk_name1(var2, fn, "var2")
+    if var1 == var2:
+        _dep.chk_stop("c.view_gleich", fn)
+    return {"type": "cor", "var": [var1, var2], "value": _view_value(value, fn, -1, 1), "op": _view_op(op, fn)}
+
+
+def view_rank(vars):  # noqa: A002 - Name wie in R
+    """Annahme an die Rangfolge der Erwartungswerte (seit 1.6.5, E-T3-3; Meucci 2008).
+
+    ``vars[0] >= vars[1] >= ...``: je benachbartes Paar eine Ungleichung an die Mittel.
+
+    Args:
+        vars: mindestens zwei Spaltennamen der Szenario-Tabelle, absteigend nach Erwartungswert.
+
+    Returns:
+        Liste mit ``type`` (``"rank"``), ``var`` (die Namen), ``value`` (0) und ``op`` (``">="``).
+    """
+    fn = "view_rank"
+    vs = _dep._e4_names(vars, fn, "vars", no_date=False)
+    if len(vs) < 2:
+        _dep.chk_stop("c.view_rang", fn)
+    return {"type": "rank", "var": vs, "value": 0.0, "op": ">="}
 
 
 def _scen_frame(x, assets, states, frequency, fn):
@@ -187,6 +249,9 @@ def _scen_frame(x, assets, states, frequency, fn):
             _dep._e4_numcol(x, k, fn)
     elif not (isinstance(x, np.ndarray) and x.ndim == 2 and x.dtype.kind in "fiu"):
         _dep.chk_stop("e4.szenarien", fn)
+    else:                                                      # seit 1.6.5: Matrix ohne Namen hat V1, V2, ... (wie R)
+        _dep.chk_cols(pd.DataFrame(np.zeros((0, x.shape[1])), columns=["V%d" % (j + 1) for j in range(x.shape[1])]),
+                      cols, fn)
     if isinstance(x, pd.DataFrame) and "date" in x.columns:
         if len(x) < 2:
             _dep.chk_stop("e4.wenige", fn)                         # seit 1.6.4 (0 oder 1 Zeile)
@@ -198,10 +263,15 @@ def _scen_frame(x, assets, states, frequency, fn):
             _dep.chk_stop("e4.wenige", fn)
         return rd.loc[ok]
     if isinstance(x, pd.DataFrame):
-        return x
-    # sonst eine Zahlenmatrix (geprüft oben; seit 1.6.4 K43 T3-N10 ohne die unerreichbaren Zweige für dict und Vektor)
-    a = np.asarray(x)
-    return pd.DataFrame(a, columns=["V%d" % (j + 1) for j in range(a.shape[1])])
+        S = x
+    else:
+        # sonst eine Zahlenmatrix (geprüft oben; seit 1.6.4 K43 T3-N10 ohne die unerreichbaren Zweige für dict und Vektor)
+        a = np.asarray(x)
+        S = pd.DataFrame(a, columns=["V%d" % (j + 1) for j in range(a.shape[1])])
+    for k in cols:                                             # seit 1.6.5 (CR2-P-6): nur endliche Werte
+        if not np.isfinite(S[k].to_numpy(dtype=np.float64)).all():
+            _dep.chk_stop("e3.werte", fn, "Spalte '%s'" % k)
+    return S
 
 
 def _eval_expr(expr, S, env=None):
@@ -251,7 +321,7 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
     """Entropy Pooling: Szenarien auf eigene Annahmen umgewichten.
 
     Sucht die Szenario-Wahrscheinlichkeiten q, die alle Annahmen erfüllen und dabei der Ausgangsverteilung p
-    (Standard: gleichgewichtete Historie) am nächsten kommen, min_q Σ_j q_j log(q_j / p_j)quadu. d. N. Aq = b, Gq
+    (Standard: gleichgewichtete Historie) am nächsten kommen, min_q Σ_j q_j log(q_j / p_j) u. d. N. Aq = b, Gq
     ≤ h, Σ q = 1. Gelöst über das duale Problem (projizierter BFGS der C-Bibliothek von SimLev). Damit lassen sich
     Fragen stellen wie: "Wie sieht die gemeinsame Verteilung von Aktien und Anleihen aus, wenn die Inflation im
     Mittel 5 % beträgt?" - alle Abhängigkeiten bleiben aus der Historie erhalten, nur die Gewichte der Szenarien
@@ -303,7 +373,8 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
     frequency = _match_arg(frequency, ("week", "day", "month"))
     fn = "scenario_entropy_pooling"
     if not (isinstance(views, (list, tuple)) and all(isinstance(v, Mapping) and isinstance(v.get("type"), str)
-                                                     and v.get("type") in ("mean", "prob", "vol") for v in views)):
+                                                     and v.get("type") in ("mean", "prob", "vol", "cor", "rank")
+                                                     for v in views)):
         _dep.chk_stop("e4.views", fn)                          # seit 1.6.4 (K42 E4)
     S = _scen_frame(x, assets, states, frequency, fn)
     assets = _dep._as_names(assets)
@@ -327,14 +398,58 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
     cols = {v: S[v].to_numpy(dtype=np.float64) for v in vars_}
     m0 = {v: r_sum(p * cols[v]) for v in vars_}
     mean_view = {}
+    vol_view = {}
     views = list(views) if views is not None else []
+    views0 = views
     for v in views:
         if v["type"] == "mean" and v["op"] == "=":
             mean_view[v["var"]] = v["value"]
+        if v["type"] == "vol" and v["op"] == "=":
+            vol_view[v["var"]] = v["value"]
+
+    # seit 1.6.5 (E-T3-3): Korrelation mit festen Mitteln und Standardabweichungen, Rangfolge als Ungleichungen
+    def mu_of(k):
+        return float(mean_view[k]) if k in mean_view else m0[k]
+
+    def sd_of(k):
+        if k in vol_view:
+            return float(vol_view[k])
+        d = cols[k] - mu_of(k)
+        return math.sqrt(r_sum(p * (d * d)))
+    ex = []
+    for v in views:
+        if v["type"] == "rank":
+            vv = list(v["var"])
+            ex += [{"type": "rank", "var": vv[j:j + 2], "value": 0.0, "op": ">="} for j in range(len(vv) - 1)]
+        else:
+            ex.append(v)
+    views = ex
+    for v in views:
+        if v["type"] in ("cor", "rank"):
+            miss = [k for k in v["var"] if k not in vars_]
+            if miss:
+                chk_stop("c.m_sd_of", miss[0])
+    # seit 1.6.5 (PR2-2, Entscheidung 199): view_cor hält Mittel und Streuung beider Spalten fest (Gleichungen an das
+    # Mittel mu_of und das zweite Moment um mu_of mit sd_of wie in der Korrelationsbedingung); eigene Annahmen gehen
+    # vor (Mittel: view_mean oder view_rank mit der Spalte, Streuung: view_vol); Reihenfolge wie R
+    cv = []
+    for v in views:
+        if v["type"] == "cor":
+            cv += [k for k in v["var"] if k not in cv]
+    if cv:
+        own_m = {k for v in views if v["type"] in ("mean", "rank") for k in ([v["var"]] if isinstance(v["var"], str) else v["var"])}
+        own_v = {v["var"] for v in views if v["type"] == "vol"}
+        views = (views + [{"type": "mean", "var": k, "value": mu_of(k), "op": "="} for k in cv if k not in own_m]
+                 + [{"type": "vol", "var": k, "value": sd_of(k), "op": "="} for k in cv if k not in own_v])
     rows = []
     for v in views:
         t = v["type"]
-        if t == "mean":
+        if t == "cor":
+            a1, a2 = v["var"]
+            f = (cols[a1] - mu_of(a1)) * (cols[a2] - mu_of(a2))
+        elif t == "rank":
+            f = cols[v["var"][0]] - cols[v["var"][1]]
+        elif t == "mean":
             f = S[v["var"]].to_numpy(dtype=np.float64) if v["var"] in S.columns else None
         elif t == "prob":
             f = _eval_expr(v["expr"], S, env)
@@ -351,11 +466,12 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
         else:
             raise ValueError("Unbekannter View-Typ.")
         if f is None or len(f) != Tn:
-            raise ValueError("View '%s' passt nicht zu den Szenarien." % (v.get("var") if v.get("var") is not None else
-                                                                          "<Funktion>" if callable(v.get("expr")) else v.get("expr")))
+            chk_stop("c.m_sd_of", v.get("var") if v.get("var") is not None else
+                                                                          "<Funktion>" if callable(v.get("expr")) else v.get("expr"))
         if t == "vol" and not (_is_num_scalar(v["value"]) and v["value"] >= 0):
-            raise ValueError("view_vol: Standardabweichung muss >= 0 sein.")
-        val = float(v["value"]) * float(v["value"]) if t == "vol" else float(v["value"])
+            chk_stop("c.m_sd_of_2")
+        val = (float(v["value"]) * float(v["value"]) if t == "vol" else
+               float(v["value"]) * sd_of(v["var"][0]) * sd_of(v["var"][1]) if t == "cor" else float(v["value"]))
         sg = {"=": 0, "<=": 1, ">=": -1}[v["op"]]
         rows.append((-f if sg == -1 else f, -val if sg == -1 else val, sg != 0))
     la = _dep._sl()                        # slc-Matrixprodukt
@@ -409,8 +525,19 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
     Xa = S[assets].to_numpy(dtype=np.float64)
     mu = r_colsums(Xa * q.reshape(-1, 1))
     C = np.asarray(la.crossprod((Xa - mu.reshape(1, -1)) * np.sqrt(q).reshape(-1, 1)), dtype=np.float64)
-    Cc = np.asarray(_dep._stats().cov2cor(C), dtype=np.float64)
-    Cc[np.isnan(Cc)] = np.nan               # arithmetisch entstanden: NaN (nicht NA) wie in R
+    # seit 1.6.5 (CR2-V3-4 Punkt 1): Varianz 0 als NA ohne die Rohwarnung von cov2cor (R scenario_entropy_pooling)
+    dv = np.diag(C)
+    okv = np.isfinite(dv) & (dv > 0)
+    if okv.all():
+        Cc = np.asarray(_dep._stats().cov2cor(C), dtype=np.float64)
+        Cc[np.isnan(Cc)] = np.nan           # arithmetisch entstanden: NaN (nicht NA) wie in R
+    else:
+        Cc = np.full(C.shape, _NAN)
+        if okv.any():
+            ix = np.flatnonzero(okv)
+            sub = np.asarray(_dep._stats().cov2cor(C[np.ix_(ix, ix)]), dtype=np.float64)
+            sub[np.isnan(sub)] = np.nan
+            Cc[np.ix_(ix, ix)] = sub
     qp = q[q > 0]
     out = SimLevScenarios()
     out["scenarios"] = S
@@ -418,7 +545,7 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
     out["prior"] = p
     out["assets"] = assets
     out["states"] = states
-    out["views"] = views
+    out["views"] = views0
     out["effective_n"] = _libm.exp(-r_sum(qp * _libm.log(qp)))
     out["summary"] = summ
     out["correlation"] = pd.DataFrame(Cc, index=assets, columns=assets)
@@ -477,6 +604,10 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
         stress: Optional benannte Liste von Quantilbändern je Anlage als Anteile ``[von, bis]`` mit 0 <= von < bis
             <= 1, z. B. ``{"aktien": [0, 0.05]}`` (schlechteste 5 % der Perioden). Unbenannte Einträge, unbekannte
             Anlagen und ungültige Bänder sind ein Fehler. ``None`` (Standard) = unbedingte Simulation.
+            Die Randverteilungen sind empirisch und enden am historischen Minimum bzw. Maximum: Stress-Szenarien
+            werden nie schlechter als die schlechteste beobachtete Periode, und ein Band unter 1/T häuft sich auf
+            diesem Wert. Reicht ein Band unter 1/T bzw. über 1 - 1/T (T = Anzahl Perioden), kommt seit 1.6.5 ein
+            Hinweis.
         frequency: Renditefrequenz bei Kursdaten: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
         seed: Startwert der Ziehung. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und
             der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal ein Startwert aus dem
@@ -555,7 +686,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
     qmarg = [_approx_fn(grid, np.sort(X[:, j])) for j in range(k)]
     if stress is not None:
         if (not isinstance(stress, Mapping) or not len(stress) or any(str(nm_) == "" for nm_ in stress.keys())):
-            raise ValueError("stress: benannte Liste von Quantilbändern je Anlage erwartet, z. B. list(aktien = c(0, 0.05)).")
+            chk_stop("c.m_ll_t")
         unk = [a for a in stress.keys() if a not in assets]
         if unk:
             raise ValueError("stress: unbekannte Anlage(n) %s; vorhanden: %s." % (", ".join("'%s'" % u for u in unk), ", ".join(assets)))
@@ -564,8 +695,12 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             good = (ba.size == 2 and all(_is_num_scalar(v) for v in ba) and all(math.isfinite(float(v)) for v in ba)
                     and float(ba[0]) >= 0 and float(ba[1]) <= 1 and float(ba[0]) < float(ba[1]))
             if not good:
-                raise ValueError("stress: Band für '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine "
-                                 "Prozent)." % a)   # seit 1.6.4 ohne Wert
+                chk_stop("c.m_ll_t_2", a)   # seit 1.6.4 ohne Wert
+        # seit 1.6.5 (K20, CR2-3): Hinweis, wenn ein Band in den äußersten Rand reicht (R scenario_copula)
+        for a, b in stress.items():
+            ba = np.atleast_1d(np.asarray(b, dtype=object))
+            if float(ba[0]) < 1 / Tn or float(ba[1]) > 1 - 1 / Tn:
+                _message(chk_msg("c.copula_rand", fn, a, Tn))
     rng = _dep._sl()
 
     def draw(rs):
@@ -597,9 +732,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
                 if nz >= n:
                     break
                 if drawn >= 5e7:
-                    raise ValueError("stress: Bänder gemeinsam zu unwahrscheinlich (Trefferquote %s bei %s Ziehungen); "
-                                     "Bänder erweitern oder weniger Anlagen stressen."
-                                     % (_fmt.sprintf("%.1e", nz / drawn), _fmt.sprintf("%.0e", drawn)))
+                    chk_stop("c.m_draw", _fmt.sprintf("%.1e", nz / drawn), _fmt.sprintf("%.0e", drawn))
                 m = int(min(1e6, max(1e5, math.ceil(1.2 * (n - nz) / max(nz / drawn, 1e-7)))))
             Zs = np.vstack(parts)
             Z[:, st] = Zs[:n, :]
@@ -707,16 +840,16 @@ def scenario_risk(x, weights, *, alpha=0.05):
         print(simlev.scenario_risk(ep, {"aktien": 0.6, "anleihen": 0.4}))
     """
     if not isinstance(x, SimLevScenarios):
-        raise ValueError("x muss ein SimLevScenarios sein.")
+        chk_stop("c.m_scenario_risk")
     av = np.atleast_1d(np.asarray(alpha, dtype=object))
     if not (av.size == 1 and _is_num_scalar(av[0]) and math.isfinite(float(av[0])) and 0 < float(av[0]) < 1
             and not _dep.chk_is_factor(alpha)):                # seit 1.6.4 ohne Wert
-        raise ValueError("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.")
+        chk_stop("c.m_scenario_risk_2")
     alpha = float(av[0])
     names, vals = _named_weights(weights)
     if (not _isnum_arr(vals) or names is None or not names or any(nm_ == "" for nm_ in names)
             or _dep.chk_is_factor(weights)):                   # seit 1.6.4 auch leer wie R (B-016)
-        raise ValueError("scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).")
+        chk_stop("c.m_scenario_risk_3")
     if not np.isfinite(np.asarray(vals, dtype=np.float64)).all():
         _dep.chk_stop("e3.werte", "scenario_risk", "weights")   # seit 1.6.4 (B-026)
     if len(set(names)) < len(names):
@@ -736,7 +869,7 @@ def scenario_risk(x, weights, *, alpha=0.05):
     cw = r_cumsum(qo)   # C-Kern (cumsum in long double wie R)
 
     def qf(a):
-        h = np.nonzero(cw >= a)[0]
+        h = np.nonzero(cw >= a - 4 * 2.220446049250313e-16 * a)[0]   # seit 1.6.5 (CR2-4) mit Toleranz wie R
         return float(ro[h[0]]) if h.size else _NAN
     var_a = -qf(alpha)
     prev = np.concatenate([[0.0], cw[:-1]])
@@ -785,6 +918,12 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
         Kaufen-und-Halten-Wert des Portfolios (auch bei ``rebalance = True``) wieder den Wert bei Fensterbeginn
         erreicht; 0 = am Fensterende nicht darunter; ``NA`` = nicht erholt bzw. Daten enden) und je Anlage deren
         Rendite im Fenster in Prozent.
+        Seit 1.6.5: ``days_to_recover`` auch, wenn das Fenster an der letzten Datenzeile endet (0, wenn der Wert dort
+        nicht unter dem Start liegt); mit ``rebalance = True`` zusätzlich die Spalte ``days_to_recover_rebalanced``
+        (Erholung des täglich umgeschichteten Portfolios, nach dem Fenster mit denselben Umschichtungen fortgeschrieben,
+        E-T3-1). Eine Anlage, die wie eine Ergebnisspalte heißt, ist ein Fehler; liegt eine Krise nur teilweise in den
+        Daten (Beginn bzw. Ende mehr als 7 Tage daneben), kommt ein Hinweis; Anlagen mit Gewicht 0 brauchen keinen
+        Startkurs.
 
     Details:
         Eingebaute Krisen (``crises = None``): Ölkrise 1973/74 (1973-01-11 bis 1974-10-03), Schwarzer Montag 1987
@@ -806,14 +945,14 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
     if crises is None:
         crises = _DEFAULT_CRISES
     if not isinstance(data, pd.DataFrame) or "date" not in data.columns:
-        raise ValueError("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
+        chk_stop("c.m_scenario_crisis")
     if not isinstance(crises, pd.DataFrame) or not all(c in crises.columns for c in ("crisis", "start", "end")):
-        raise ValueError("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+        chk_stop("c.m_scenario_crisis_2")
     fn = "scenario_crisis"
     names, vals = _named_weights(weights)
     if (not _isnum_arr(vals) or names is None or not names or any(nm_ == "" for nm_ in names) or _dep.chk_is_factor(weights)
             or not np.isfinite(np.asarray(vals, dtype=np.float64)).all()):
-        raise ValueError("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+        chk_stop("c.m_scenario_crisis_3")
     if len(set(names)) < len(names):
         _dep.chk_stop("e2.doppelt", fn, "weights")             # seit 1.6.4 (B-052)
     unk = [nm_ for nm_ in names if nm_ not in [c for c in data.columns if c != "date"]]
@@ -830,6 +969,12 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
     sw = r_sum(wv)
     if sw <= 0:
         _dep.chk_stop("ut3.krise_summe", fn)                   # seit 1.6.4 ohne Wert und Zusatz (Entscheidung 8, T3-B2)
+    # seit 1.6.5 (K31, CR2-E-1): Anlage mit dem Namen einer Ergebnisspalte ist ein Fehler
+    res_cols = ["crisis", "start", "end", "portfolio", "max_drawdown", "days_to_recover"] + \
+        (["days_to_recover_rebalanced"] if rebalance else [])
+    kol = [k for k in dict.fromkeys(names) if k in res_cols]
+    if kol:
+        _dep.chk_stop("c.krise_name", fn, ", ".join("'%s'" % k for k in kol))
     data = _dep._dep_sort_dates(data)
     d = _dep._dates_arr(data["date"].to_numpy())
     dd = _dep._days(d)
@@ -846,33 +991,43 @@ def scenario_crisis(data, weights, *, crises=None, rebalance=False):
         if not s_.size or not e_.size:
             continue
         s, e = int(s_[0]), int(e_[-1])
-        if e <= s or np.isnan(P[s, :]).any():
+        nz = w != 0                                            # seit 1.6.5 (CR2-E-2): Gewicht 0 rechnet nicht mit
+        if e <= s or np.isnan(P[s, nz]).any():
             continue
+        if dd[s] - cs[i] > 7 or ce[i] - dd[e] > 7:             # seit 1.6.5 (CR2-E-2): angeschnittene Krise
+            _message(chk_msg("c.krise_teil", fn, str(crises["crisis"].iloc[i]), str(np.datetime64(int(dd[s]), "D")),
+                             str(np.datetime64(int(dd[e]), "D")), str(np.datetime64(int(cs[i]), "D")),
+                             str(np.datetime64(int(ce[i]), "D"))))
         rel = P[s:e + 1, :] / P[s, :].reshape(1, -1)
+        Pw = P[:, nz]
+        wn = w[nz].reshape(-1, 1)
+        relw = rel[:, nz]
         if rebalance:
-            g = _matprod(rel[1:, :] / rel[:-1, :], w.reshape(-1, 1)).ravel()
+            g = _matprod(relw[1:, :] / relw[:-1, :], wn).ravel()
             port = r_cumprod(np.concatenate([[1.0], g]))
         else:
-            port = _matprod(rel, w.reshape(-1, 1)).ravel()
+            port = _matprod(relw, wn).ravel()
         cm = r_cummax(port)   # C-Kern; ohne NaN bitgleich zu np.maximum.accumulate (seit 1.6.4 ein Weg)
         ddn = _dep._rmin(port / cm - 1)
-        if e < nd - 1:
-            relx = P[e:, :] / P[s, :].reshape(1, -1)
-            px = _matprod(relx, w.reshape(-1, 1)).ravel()
-            kk = np.nonzero(px >= 1)[0]
-            after = float(dd[e + kk[0]] - dd[e]) if kk.size else _NAN
-        else:
-            after = _NAN
+        # seit 1.6.5 (CR2-E-2) auch, wenn das Fenster an der letzten Datenzeile endet
+        relx = Pw[e:, :] / Pw[s, :].reshape(1, -1)
+        px = _matprod(relx, wn).ravel()
+        kk = np.nonzero(px >= 1)[0]
+        after = float(dd[e + kk[0]] - dd[e]) if kk.size else _NAN
         row = {"crisis": crises["crisis"].iloc[i], "start": d[s], "end": d[e], "portfolio": 100 * (port[-1] - 1),
                "max_drawdown": 100 * ddn, "days_to_recover": after}
+        if rebalance:                                          # seit 1.6.5 (E-T3-1): Erholung umgeschichtet
+            gx = _matprod(Pw[e + 1:, :] / Pw[e:nd - 1, :], wn).ravel() if e < nd - 1 else np.zeros(0)
+            pr = port[-1] * r_cumprod(np.concatenate([[1.0], gx]))
+            kr = np.nonzero(pr >= 1)[0]
+            row["days_to_recover_rebalanced"] = float(dd[e + kr[0]] - dd[e]) if kr.size else _NAN
         last = 100 * (rel[-1, :] - 1)
         for j, a in enumerate(names):
             row[a] = float(last[j])
         rows.append(row)
     if not rows:
-        raise ValueError("Keine Krise liegt im Datenzeitraum.")
-    out = pd.DataFrame(rows, columns=["crisis", "start", "end", "portfolio", "max_drawdown", "days_to_recover"] +
-                       list(dict.fromkeys(names)))
+        _dep.chk_stop("c.krise_keine", fn)                     # seit 1.6.5 mit Funktionsnamen (CR2-E-2)
+    out = pd.DataFrame(rows, columns=res_cols + list(dict.fromkeys(names)))
     out["start"] = out["start"].to_numpy(dtype="datetime64[D]")
     out["end"] = out["end"].to_numpy(dtype="datetime64[D]")
     return out

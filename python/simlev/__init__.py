@@ -99,7 +99,8 @@ _LAZY = {
                    "tail_regression", "tail_covar", "dependence_validate", "regime_subset",
                    "SimLevDependence", "SimLevTailRegression", "SimLevCoVaR"),
     "regimes": ("regime_hmm", "regime_states", "SimLevHMM"),
-    "scenarios": ("view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "scenario_copula",
+    "scenarios": ("view_mean", "view_prob", "view_vol", "view_cor", "view_rank", "scenario_entropy_pooling",
+                  "scenario_copula",
                   "scenario_risk", "scenario_crisis", "SimLevScenarios"),
     "optimize": ("portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "portfolio_risk_contributions",
                  "portfolio_cpcv", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV",
@@ -184,7 +185,7 @@ _LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULE
 def __dir__():
     return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
 
-__version__ = "1.6.4"
+__version__ = "1.6.5"
 
 __all__ = [
     "AssetConfig",
@@ -295,6 +296,8 @@ __all__ = [
     "view_mean",
     "view_prob",
     "view_vol",
+    "view_cor",
+    "view_rank",
     "scenario_entropy_pooling",
     "scenario_copula",
     "scenario_risk",
@@ -399,7 +402,8 @@ def export_dashboard(x, *, filename: str = "dashboard.svg", width: float = 14, h
           ``start_value`` von ``simulation``, berechnet als ``invested[1]`` minus Einzahlungen des Starttags;
           ``NA`` ohne ``invested``), ``end_value``, ``invested`` (EUR; Startwert plus Einzahlungen, brutto),
           ``total_return_twr`` (zeitgewichtete Gesamtrendite: mit Sparplan letzter Wert von ``twr_index`` minus 1,
-          sonst Endwert / Depotwert am Starttag - 1), ``return_on_invested`` ((Endwert - Eingezahlt) /
+          sonst Endwert / ``invested[1]`` - 1, also Bezug Startkapital plus Rate des Starttags brutto; seit 1.6.5
+          zählen die Kaufkosten am Starttag mit), ``return_on_invested`` ((Endwert - Eingezahlt) /
           Eingezahlt), ``total_return`` (gleichwertiger Alias für ``total_return_twr``), ``cagr``, ``ttwror``
           (Anteile; mit Sparplan ist ``cagr`` geldgewichtet), den Kennzahlen aus ``statistics`` (``sharpe``,
           ``sortino``, ``calmar``, ``omega``, ``gain_to_pain``, ``serenity``, ``martin_ratio``, ``max_drawdown``,
@@ -464,6 +468,16 @@ def summary(object, *args, **kwargs):  # noqa: A002 - R-Name
     """Generisches ``summary()`` wie in R: ruft die Methode ``object.summary()`` auf."""
     meth = getattr(type(object), "summary", None)
     if callable(meth):
+        # seit 1.6.5 (CR2-O-7): Schlüsselwörter, die die Methode nicht kennt, werden wie in R (...) übergangen, wie
+        # die Hilfe sagt (bis 1.6.4 roher TypeError)
+        if kwargs:
+            import inspect
+            try:
+                ps = inspect.signature(meth).parameters
+            except (TypeError, ValueError):
+                ps = None
+            if ps is not None and not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in ps.values()):
+                kwargs = {k: v for k, v in kwargs.items() if k in ps}
         return meth(object, *args, **kwargs)
     from ._pruefen import chk_stop
     chk_stop("e5.methode", "summary")   # seit 1.6.4 ohne Typ (Entscheidung 8)

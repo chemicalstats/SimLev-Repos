@@ -23,12 +23,11 @@
   }
   if (is.data.frame(x)) {
     if (!"date" %in% names(x))
-      stop(sprintf("'%s': data.frame braucht eine Spalte 'date' (vorhanden: %s)%s.", name, paste(names(x), collapse = ", "),
-                   if (ncol(x) == 1L) "; nur eine Spalte: Trennzeichen pr\u00fcfen, Semikolon-Dateien mit read.csv2() einlesen" else ""))
+      stop(chk_msg("c.m_da_series", name, paste(names(x), collapse = ", "), if (ncol(x) == 1L) "; nur eine Spalte: Trennzeichen pr\u00fcfen (Semikolon-Dateien mit Semikolon als Trennzeichen und Dezimalkomma einlesen)" else ""))   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
     vc <- if ("value" %in% names(x)) "value" else {
       txt <- .num_text_cols(x, "date"); if (length(txt)) .num_text_stop(x, txt, name)
       num <- setdiff(names(x)[vapply(x, is.numeric, TRUE)], "date")
-      if (!length(num)) stop(sprintf("'%s': keine numerische Wertspalte gefunden.", name))
+      if (!length(num)) stop(chk_msg("c.m_da_series_2", name))
       if (length(num) > 1L) message(sprintf("Hinweis: '%s': Wertspalte '%s' verwendet (weitere numerische Spalten: %s).",
                                             name, num[1], paste(num[-1], collapse = ", ")))
       num[1]
@@ -36,7 +35,7 @@
     if (is.factor(x[[vc]])) chk_stop("spalte_faktor", "result_analysis", vc)   # Entscheidung 15
     if (!is.numeric(x[[vc]])) {
       if (length(.num_text_cols(x[vc]))) .num_text_stop(x, vc, name)
-      stop(sprintf("'%s': Wertspalte '%s' ist nicht numerisch.", name, vc))   # seit 1.6.4 ohne Klasse
+      stop(chk_msg("c.m_da_series_3", name, vc))   # seit 1.6.4 ohne Klasse
     }
     if (is.factor(x$date)) chk_stop("spalte_faktor", "result_analysis", "date")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 Text)
     v <- as.numeric(x[[vc]]); d <- .to_date(x$date, sprintf("'%s': Spalte 'date'", name))
@@ -44,24 +43,31 @@
     j <- if (is.matrix(fm) && nrow(fm) == length(v)) { if (vc %in% colnames(fm)) vc else if (ncol(fm) == 1L) 1L else NULL } else NULL
     fl <- if (is.null(j)) rep(FALSE, length(v)) else as.logical(fm[, j]) %in% TRUE
     idx <- which(!is.na(d)); idx <- idx[order(d[idx])]          # Zeilen ohne Datum weg, nach Datum sortieren
+    # seit 1.6.5 (CR2-D-10): Hinweis auf Zeilen ohne Datum
+    if (length(idx) < length(d)) message(chk_msg("c.da_ohne_datum", name, length(d) - length(idx)))
     d <- d[idx]; v <- v[idx]; fl <- fl[idx]
     dup <- duplicated(d, fromLast = TRUE)
     if (any(dup)) {
       message(sprintf("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet.", name, sum(dup)))
-      d <- d[!dup]; v <- v[!dup]; fl <- fl[!dup]
+      # seit 1.6.5 (CR2-D-10): je Datum der letzte vorhandene Wert (bis 1.6.4 die letzte Zeile, auch mit NA)
+      g <- cumsum(!duplicated(d)); sel <- which(!dup)
+      okv <- which(!is.na(v)); lo <- tapply(okv, g[okv], max)
+      m <- match(g[sel], as.integer(names(lo))); sel[!is.na(m)] <- lo[m[!is.na(m)]]
+      d <- d[sel]; v <- v[sel]; fl <- fl[sel]
     }
     has <- which(!is.na(v))
-    if (!length(has)) stop(sprintf("'%s': Wertspalte '%s' hat keine Werte.", name, vc))
+    if (!length(has)) stop(chk_msg("c.m_da_series_4", name, vc))
     r <- has[1]:has[length(has)]                              # fuehrende und nachlaufende NA abschneiden
     d <- d[r]; v <- v[r]; fl <- fl[r]
     if (anyNA(v)) { fl <- fl | is.na(v); v <- .fill_na(v, "locf") }   # innere Luecken: LOCF, als gefuellt markiert
     bad <- which(!is.finite(v) | v <= 0)
-    if (length(bad)) stop(sprintf("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexst\u00e4nde, keine Renditen); %d Werte <= 0, z. B. am %s.",
+    # seit 1.6.5 (CR2-D-10) "nicht endlich oder <= 0" (bis 1.6.4 "<= 0" auch fuer Inf)
+    if (length(bad)) stop(sprintf("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexst\u00e4nde, keine Renditen); %d Werte nicht endlich oder <= 0, z. B. am %s.",
                                   name, vc, length(bad), format(d[bad[1]])))   # seit 1.6.4 ohne den Wert
-    if (length(v) < 2L) stop(sprintf("'%s': mindestens zwei Daten mit Wert n\u00f6tig.", name))
+    if (length(v) < 2L) stop(chk_msg("c.m_da_series_5", name))
     return(list(name = name, date = d, value = v, filled = fl, worth = NULL, flows = NULL, result = NULL))
   }
-  stop(sprintf("'%s' muss ein SimLevResult oder ein data.frame(date, value) sein.", name))
+  stop(chk_msg("c.m_da_series_6", name))
 }
 
 #' Risikoloser Zins je ausgewerteter Rendite
@@ -85,7 +91,8 @@
 #' @keywords internal
 #' @noRd
 .da_deflate <- function(s, inflation) {
-  cpi <- if (is.numeric(inflation) && length(inflation) == 1L) (1 + inflation / 100)^(as.numeric(s$date - s$date[1]) / 365.25)
+  # seit 1.6.5 (CR2-X5-2): benannter Vektor (Datumsnamen) ist auch mit Laenge 1 ein Preisindex (wie Julia)
+  cpi <- if (is.numeric(inflation) && length(inflation) == 1L && is.null(names(inflation))) (1 + inflation / 100)^(as.numeric(s$date - s$date[1]) / 365.25)
          else .cpi_level(inflation, data.frame(date = s$date), s$date, "inflation")
   if (anyNA(cpi)) stop(sprintf("inflation: Preisindex erst ab %s bekannt, die Reihe '%s' beginnt am %s.",
                                format(s$date[which(!is.na(cpi))[1]]), s$name, format(s$date[1])))
@@ -123,7 +130,8 @@
 #' gleiche Konvention und gleiches Verfahren wie die Engine (simulation()$cagr): mit
 #' Einzahlungen nach dem Starttag XIRR ueber .xirr_rate() (Startbetrag brutto, Kalendertage /
 #' 365,25, adaptive Klammer, auch bei Beinahe-Totalverlust und sehr hohen Renditen), sonst die
-#' CAGR aus dem Depotwert am Starttag.
+#' CAGR aus dem Startbetrag brutto (seit 1.6.5, Entscheidung 200: Kaufkosten am Starttag zaehlen
+#' wie in simulation(); bis dahin aus dem Depotwert am Starttag), ohne invested aus dem Depotwert.
 #' @noRd
 .da_mwrr <- function(s) {
   if (is.null(s$worth)) return(NA_real_)
@@ -131,9 +139,9 @@
   t <- as.numeric(s$date - s$date[1]) / 365.25; horizon <- t[n]
   fl <- as.numeric(s$flows); if (length(fl) != n) fl <- numeric(n); fl[is.na(fl)] <- 0
   fi <- which(seq_len(n) > 1L & fl != 0)
-  if (!length(fi))
-    return(if (s$worth[1] > 0 && horizon > 0 && s$worth[n] >= 0) .cagr_q(s$worth[n] / s$worth[1], horizon) else NA_real_)
   start <- if (length(s$start_gross)) s$start_gross else s$worth[1]   # Start brutto wie cagr der Engine
+  if (!length(fi))
+    return(if (start > 0 && horizon > 0 && s$worth[n] >= 0) .cagr_q(s$worth[n] / start, horizon) else NA_real_)
   .xirr_rate(c(0, t[fi]), c(start, fl[fi]), s$worth[n], horizon)
 }
 
@@ -170,10 +178,18 @@
   r <- vk[-1] / vk[-length(vk)] - 1                           # Renditen von echtem zu echtem Wert
   rfl <- .da_rf(s$date, rate, kk, s$defl); rf <- rfl$r
   yrs <- as.numeric(s$date[length(s$date)] - s$date[1]) / 365.25
-  cagr <- .cagr_q(s$value[length(s$value)] / s$value[1], yrs)
+  # seit 1.6.5 (Entscheidung 200, M4): bei einem Ergebnis von simulation() Bezug auf den Indexstand vor den
+  # Kaufkosten des Starttags (Basis 100 von result_index(), wie ttwror bzw. cagr der Engine); bis dahin value[1]
+  b0 <- if (!is.null(s$result)) 100 else s$value[1]
+  tot <- s$value[length(s$value)] / b0 - 1
+  cagr <- .cagr_q(s$value[length(s$value)] / b0, yrs)
   vol <- .sl_sd(r) * sqrt(ppy)
   ex <- r - rf
   down <- ex[ex < 0]
+  # seit 1.6.5 (CR2-I-6, Entscheidungen 186 M7, 187): Streuung im Rundungsrauschen gilt als 0 wie im Kern
+  # (sd <= 16 sqrt(N) eps (1 + max|x|)); Sharpe dann NA mit Hinweis (bis 1.6.4 um 1e13)
+  sdx <- .sl_sd(ex)
+  zero_vol <- !isTRUE(sdx > 16 * sqrt(length(ex)) * .Machine$double.eps * (1 + max(abs(ex))))
   peak <- cummax(s$value); dd <- 1 - s$value / peak
   mdd <- max(dd)
   ulcer <- sqrt(mean(dd^2))
@@ -195,15 +211,15 @@
   rf_ann <- rfl$ann
   out <- c(
     start_value = s$value[1], end_value = s$value[length(s$value)],
-    years = yrs, total_return = s$value[length(s$value)] / s$value[1] - 1,
+    years = yrs, total_return = tot,
     cagr = cagr, mwrr = .da_mwrr(s), volatility = vol,
-    sharpe = if (isTRUE(.sl_sd(ex) > 0)) mean(ex) * ppy / (.sl_sd(ex) * sqrt(ppy)) else NA_real_,
+    sharpe = if (!zero_vol) mean(ex) * ppy / (.sl_sd(ex) * sqrt(ppy)) else NA_real_,
     sortino = if (length(down)) mean(ex) * ppy / (sqrt(mean(pmin(ex, 0)^2)) * sqrt(ppy)) else NA_real_,
     calmar = if (mdd > 0) cagr / mdd else NA_real_,
     max_drawdown = mdd, avg_drawdown = if (nrow(ddt)) mean(-ddt$depth) else 0,
     ulcer_index = ulcer, upi = if (ulcer > 0) (cagr - rf_ann) / ulcer else NA_real_,
     longest_drawdown_days = if (nrow(ddt)) max(ddt$days_total) else 0,
-    recovery_factor = if (mdd > 0) (s$value[length(s$value)] / s$value[1] - 1) / mdd else NA_real_,
+    recovery_factor = if (mdd > 0) tot / mdd else NA_real_,
     required_to_recover = if (dd[length(dd)] > 0) 1 / (1 - dd[length(dd)]) - 1 else 0,
     skewness = calculate_skewness(r), excess_kurtosis = calculate_kurtosis(r),
     best_day = max(r), worst_day = min(r), best_month = max(mr), worst_month = min(mr),
@@ -468,14 +484,14 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
                           var_levels = c(0.01, 0.05, 0.10), top_drawdowns = 10, inflation = NULL) {
   on.exit(rm(list = ls(.da_ym_last), envir = .da_ym_last), add = TRUE)   # Datumszerlegung nicht ueber den Aufruf hinaus
   if (inherits(x, "SimLevResult") || is.data.frame(x)) x <- list(Strategie = x)
-  if (!is.list(x) || !length(x)) stop("x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.")
+  if (!is.list(x) || !length(x)) stop(chk_msg("c.m_result_analysis"))
   if (is.null(names(x)) || any(names(x) == "")) names(x) <- paste0("S", seq_along(x))
   fn <- "result_analysis"
   if (!is.numeric(rolling_years) || length(rolling_years) != 1L || is.na(rolling_years) || round(12 * rolling_years) < 2)
-    stop("rolling_years muss mindestens 2/12 (zwei Monate) betragen.")   # seit 1.6.4 ohne Eingabewert
+    stop(chk_msg("c.m_result_analysis_2"))   # seit 1.6.4 ohne Eingabewert
   chk_num1(rolling_years, fn, "rolling_years")   # seit 1.6.4 endlich (Inf lief still ohne rollierende Kennzahlen)
   if (!is.numeric(var_levels) || !length(var_levels) || anyNA(var_levels) || any(var_levels <= 0 | var_levels >= 1))
-    stop("var_levels: Wahrscheinlichkeiten als Anteile zwischen 0 und 1, z. B. c(0.01, 0.05).")
+    stop(chk_msg("c.m_result_analysis_3"))
   # seit 1.6.4 (B-052, B-045, B-012): var_levels ohne doppelte Werte (doppelte Kennzahlnamen), top_drawdowns eine
   # ganze Zahl >= 0 oder Inf (alle; bis 1.6.3 schnitt R gebrochene Werte ab und nahm -2 als "alle bis auf zwei"),
   # risk_free und inflation als einzelne Zahl endlich (inflation > -100)
@@ -497,11 +513,11 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
   if (!is.null(benchmark)) {
     if (is.character(benchmark)) {
       if (length(benchmark) != 1L || !benchmark %in% names(ser))
-        stop(sprintf("benchmark muss ein Name aus x sein (%s).", paste(names(ser), collapse = ", ")))
+        stop(chk_msg("c.m_result_analysis_4", paste(names(ser), collapse = ", ")))
       bname <- benchmark; bser <- ser[[benchmark]]
     } else {
       bname <- "Benchmark"
-      if (bname %in% names(ser)) stop("x enth\u00e4lt bereits eine Reihe 'Benchmark'; benchmark = \"Benchmark\" w\u00e4hlen oder die Reihe in x umbenennen.")
+      if (bname %in% names(ser)) stop(chk_msg("c.m_result_analysis_5"))
       bser <- .da_series(benchmark, bname); ser[[bname]] <- bser
     }
   }
@@ -532,6 +548,8 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
   f_met <- function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels, dd_memo)
   met <- if (quiet) matrix(c(m1, vapply(ser[-1], f_met, m1)), nrow = length(m1), dimnames = list(names(m1), names(ser)))
          else vapply(ser, function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels, dd_memo), m1)
+  # seit 1.6.5 (CR2-I-6): Hinweis je Reihe mit Sharpe NA bei bestimmter Volatilitaet (Ueberrendite ohne Schwankung)
+  for (nm in colnames(met)) if (is.na(met["sharpe", nm]) && !is.na(met["volatility", nm])) message(chk_msg("c.da_sharpe", nm))
   bm <- NULL
   if (!is.null(bser)) {
     others <- setdiff(names(ser), bname)
@@ -668,7 +686,9 @@ summary.SimLevAnalysis <- function(object, ...) {
   print(round(100 * object$annual, 2))
   for (nm in names(object$drawdowns)) {
     cat(sprintf("\n  Gr\u00f6\u00dfte Drawdowns: %s\n", nm))
-    d <- object$drawdowns[[nm]]; d$depth <- sprintf("%.2f %%", 100 * d$depth)
+    d <- object$drawdowns[[nm]]
+    if (!nrow(d)) { cat("  (keine Drawdowns)\n"); next }      # seit 1.6.5 (CR2-X10-2) statt der leeren Tabelle
+    d$depth <- sprintf("%.2f %%", 100 * d$depth)
     print(utils::head(d, 5), row.names = FALSE)
   }
   invisible(list(metrics = object$metrics, benchmark = object$benchmark_metrics, annual = object$annual,
@@ -680,13 +700,16 @@ summary.SimLevAnalysis <- function(object, ...) {
 plot.SimLevAnalysis <- function(x, type = c("overview", "growth", "drawdown", "rolling", "annual", "monthly"),
                                 series = 1, metric = "cagr", ...) {
   type <- match.arg(type)
-  if (type == "monthly" && (length(series) != 1L || (is.character(series) && !series %in% names(x$monthly)) ||
-                            (is.numeric(series) && !(series >= 1 && series <= length(x$monthly)))))
-    stop(sprintf("series: Name oder Nummer einer Reihe (%s).", paste(names(x$monthly), collapse = ", ")))
+  # seit 1.6.5 (CR2-C-4): genau ein Name oder eine ganze Zahl 1..k, in allen drei Sprachen gleich geprueft
+  if (type == "monthly" && !(length(series) == 1L && !is.na(series) &&
+                             ((is.character(series) && series %in% names(x$monthly)) ||
+                              (is.numeric(series) && !is.factor(series) && series == trunc(series) &&
+                               series >= 1 && series <= length(x$monthly)))))
+    stop(chk_msg("c.m_plot_simlevanalysis", paste(names(x$monthly), collapse = ", ")))
   if (type %in% c("overview", "rolling") && !metric %in% c("cagr", "volatility", "sharpe", "max_drawdown", "beta", "excess_cagr"))
-    stop("metric: 'cagr', 'volatility', 'sharpe', 'max_drawdown', 'beta' oder 'excess_cagr'.")
+    stop(chk_msg("c.m_plot_simlevanalysis_2"))
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
-  cols <- c("#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C", "#4A4A4A")[seq_along(x$series)]
+  cols <- rep_len(c("#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C", "#4A4A4A"), length(x$series))   # seit 1.6.5 (CR2-M-10)
   nms <- names(x$series)
   base_par <- function() graphics::par(mar = c(3.6, 4.4, 2.4, 1), mgp = c(2.5, 0.6, 0), las = 1, cex.axis = 0.85)
   p_growth <- function() {

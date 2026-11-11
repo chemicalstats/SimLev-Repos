@@ -50,10 +50,12 @@ from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 from ._util import _match_arg
 from .data_prep import _e5_choice, _to_date
+from .data_prep import _is_numeric_col as _dp_is_numeric_col
 from ._pruefen import (chk_bool1, chk_cores, chk_date1, chk_int1, chk_max, chk_msg, chk_name1, chk_num1,  # seit 1.6.4
-                       chk_nofactor, chk_scalar, chk_stop)
+                       chk_nofactor, chk_scalar, chk_stop, chk_choice, chk_fmt)
 from ._pruefen import SL_MAX_N, SL_MAX_TAGE  # seit 1.6.4 (Entscheidung 46)
 from ._util import _stats
+from ._util import _days as _days_of
 from ._util import _fmt1, _is_strategy, _message, _pow_rec, _unique as _uniq
 from ._r.rformat import _is_num
 
@@ -400,7 +402,8 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
     cross = _match_arg(cross, ("ratio", "joint"))
     input = _match_arg(input, ("returns", "prices"))  # noqa: A001
     inames = _names(indices)
-    if inames is None or any(n == "" for n in inames):
+    # seit 1.6.5 (CR2-A-2): leere indices wie R mit der Meldung (bis 1.6.4 Rohfehler "list index out of range")
+    if inames is None or not len(inames) or any(n == "" for n in inames):
         chk_stop("ut2.indices", "bootstrap_config")
     index_names = inames
     ivals = [chk_scalar(v) for v in _values(indices)]   # seit 1.6.4 Länge 1 wie Einzelwert (Entscheidung 4)
@@ -463,7 +466,16 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
             chk_stop("ut2.zahl_oder_aux", "bootstrap_config", "letfs[[%d]]$%s" % (i, nm))
 
     letf_list = []
+    letf_felder = ("base", "leverage", "finance", "expense", "spread", "days", "rate_basis", "ter_basis", "name")
     for i, lt in enumerate(list(letfs or []), start=1):
+        # seit 1.6.5 (CR2-A-2, Entscheidung 185 K21): nur die neun Felder (bis 1.6.4 unbekannte still übergangen)
+        if isinstance(lt, Mapping):
+            for k in lt.keys():
+                if not isinstance(k, str) or k == "":
+                    chk_stop("e2.benannt", "bootstrap_config", "letfs[[%d]]" % i)
+            for k in lt.keys():
+                if k not in letf_felder:
+                    chk_stop("b1.letf_feld", "bootstrap_config", k, i)
         lt = {k: chk_scalar(v) for k, v in lt.items()} if isinstance(lt, Mapping) else {}   # Länge 1 (seit 1.6.4)
         base = lt.get("base")
         if base is None:
@@ -649,7 +661,9 @@ def _extract_returns(data, config, who="bootstrap"):
             if len(b):
                 _stop("aux_type: Zusatzreihe '%s' (Spalte '%s') ist als 'level' gekennzeichnet und muss positiv und "
                       "endlich sein; Zeile %d von data hat den Wert %s."
-                      % (a, str(aux_cols[j]), int(rows[b[0]]), _fmt1(float(v[b[0]]))))
+                      % (a, str(aux_cols[j]), int(rows[b[0]]),
+                         # seit 1.6.5 (CR2-G-2): fehlender Wert als "NA" wie R und Julia (bis 1.6.4 "NaN")
+                         "NA" if math.isnan(float(v[b[0]])) else _fmt1(float(v[b[0]]))))
         nf = ~np.isfinite(prev1)
         prev1[nf] = aux[0, nf]
         den = np.vstack([prev1[None, :], aux[:-1, :]])
@@ -658,15 +672,45 @@ def _extract_returns(data, config, who="bootstrap"):
     if (ret <= 0).any():
         chk_stop("rs.rendite_null", who)
     if r_median(np.abs(ret - 1).ravel(order="F")) > 0.5:
-        _warn("Renditen sehen nicht wie Brutto-Tagesrenditen aus (Median |R - 1| > 0.5). input = 'prices' vergessen?")
-    return {"ret": ret, "aux": aux, "aux_ratio": aux_ratio, "aux_start": aux_start}
+        _warn(chk_msg("b1.m_get_col"))
+    # seit 1.6.5: Zeile von data (1-basiert) je Renditezeile (Regime-Fenster in Kalendertagen, E-T2-6)
+    src_rows = np.flatnonzero(ok) + (2 if config["input"] == "prices" else 1)
+    return {"ret": ret, "aux": aux, "aux_ratio": aux_ratio, "aux_start": aux_start, "src_rows": src_rows}
 
 
+# seit 1.6.5: L und block_length Standard "auto" (Entscheidung 178; bis 1.6.4 fest 20), vol_unit neu (E-T2-6)
 _PARAM_DEFAULTS = (
-    ("L", 20), ("block_length", 20), ("wild_type", 0), ("n_regimes", 2), ("vol_window", 20),
+    ("L", "auto"), ("block_length", "auto"), ("wild_type", 0), ("n_regimes", 2), ("vol_window", 20),
+    ("vol_unit", "rows"),
     ("tail_prob", 0.05), ("both_tails", True), ("p_break", 0.02), ("garch_order", [1, 1]),
     ("ms_n_regimes", 2), ("ms_garch_model", "gjrGARCH"), ("ms_ar_n_regimes", 2),
     ("ms_ar_garch_model", "gjrGARCH"), ("tvtp_n_regimes", 2), ("tvtp_garch_model", "gjrGARCH"))
+
+
+_METHOD_PARAMS = {
+    "block": ("block_length",), "circular": ("block_length",), "stationary": ("L",), "wild": ("wild_type",),
+    "regime": ("n_regimes", "vol_window", "vol_unit"), "evt": ("tail_prob", "both_tails"), "tails": ("tail_prob",),
+    "reset": ("p_break",), "ms_garch": ("ms_n_regimes", "ms_garch_model"),
+    "ms_ar_garch_m": ("ms_ar_n_regimes", "ms_ar_garch_model"), "tvtp_ms_garch": ("tvtp_n_regimes", "tvtp_garch_model")}
+
+
+def _check_param_names(params, ess_grid, method, who):
+    """Seit 1.6.5 (CR2-O-1, Entscheidung 189; R ``.check_param_names``): unbekannte Namen in ``params`` und
+    ``ess_grid`` sind ein Fehler, in ``ess_grid`` auch Namen, die das Verfahren nicht nutzt."""
+    ok = [k for k, _ in _PARAM_DEFAULTS]
+    for nm in (params or {}):
+        if not isinstance(nm, str) or nm == "":
+            chk_stop("e2.benannt", who, "params")
+    for nm in (params or {}):
+        if nm not in ok:
+            chk_stop("b1.param_unbekannt", who, nm, "params", ", ".join(ok))
+    use = _METHOD_PARAMS.get(method, ())
+    for nm in (ess_grid or {}):
+        if nm not in ok:
+            chk_stop("b1.param_unbekannt", who, nm, "ess_grid", ", ".join(ok))
+        if nm not in use:
+            chk_stop("b1.gitter_verfahren", who, nm, method, ", ".join(use) if use else "keine")
+    return True
 
 
 def _get_base_params(params):
@@ -766,7 +810,7 @@ def _pw_block(x):
         return r_sum(xc[0:n - k] * xc[k:n]) / n
 
     r0 = acov(0)
-    if r0 <= 0:
+    if not math.isfinite(r0) or r0 <= 0:   # seit 1.6.5 (CR2-X51-1): NaN-Eingabe wie Varianz 0 (R .pw_block)
         return one
     nlag = int(math.floor(mmax))
     A = np.array([acov(k) for k in range(1, nlag + 1)])   # seit 1.6.4 (A-089) einmal für rho und Rk (M <= nlag)
@@ -883,10 +927,17 @@ def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
     return pd.DataFrame(np.array(rows).reshape(-1, 2), index=rn, columns=["stationary", "circular"])
 
 
-def _resolve_auto(params, returns):
-    """"auto"-Parameter auflösen (R: ``.resolve_auto``)."""
+def _resolve_auto(params, returns, method=None, skip=()):
+    """"auto"-Parameter auflösen (R: ``.resolve_auto``); seit 1.6.5 (Entscheidung 178) gilt ohne Angabe "auto" für den
+    Blockparameter von ``method``; ``skip``: Namen, die das ESS-Gitter setzt."""
     params = dict(params or {})
+    if method is not None:
+        nm0 = {"stationary": "L", "block": "block_length", "circular": "block_length"}.get(method)
+        if nm0 is not None and params.get(nm0) is None and nm0 not in skip:
+            params[nm0] = "auto"
     for nm in ("L", "block_length"):
+        if nm in skip:
+            continue
         if isinstance(params.get(nm), str) and params.get(nm) == "auto":
             lr = np.asarray(_libm.log(returns), dtype=np.float64)
             b = pd.concat([bootstrap_block_length(lr), bootstrap_block_length(lr, transform="abs")])
@@ -970,7 +1021,8 @@ def _fit_tail(base_ret, prob, side):
         if v > 0 and m > 0:
             ratio = m * m / v
             shape = max(-0.5, min(1.0, 0.5 * (1 - ratio)))
-            scale = max(1e-3, 0.5 * m * (1 + ratio))
+            # seit 1.6.5 (CR2-S-2): scale aus dem begrenzten shape (GPD-Mittel scale / (1 - shape) = m)
+            scale = max(1e-3, m * (1 - shape))
             method = "Momente"
     if scale is None and ne >= 5:
         scale = max(1e-3, r_sd(exc))
@@ -997,9 +1049,13 @@ def _seq_len_out(n_out):
 
 
 @_quiet
-def _prepare_regime_info(base_ret, vol_window, n_regimes):
-    """Regime aus rollierender Volatilität (R: ``.prepare_regime_info``)."""
-    vol = _slm.rolling_vol(base_ret, int(vol_window))
+def _prepare_regime_info(base_ret, vol_window, n_regimes, vol_unit="rows", day=None):
+    """Regime aus rollierender Volatilität (R: ``.prepare_regime_info``); seit 1.6.5 (E-T2-6) Fenster wahlweise in
+    Kalendertagen (``vol_unit = "days"``, Tage der Renditezeilen in ``day``)."""
+    if vol_unit == "days":
+        vol = _slm.rolling_vol_days(base_ret, day, float(vol_window))
+    else:
+        vol = _slm.rolling_vol(base_ret, int(vol_window))
     th = _quantile7(vol, _seq_len_out(float(n_regimes) + 1))
     th[-1] = th[-1] + 1e-10
     reg = _slm.assign_regimes(vol, th)
@@ -1048,6 +1104,9 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1
                 lv = _NAN
             if math.isfinite(lv):
                 lam[r] = max(-5.0, min(5.0, lv))
+            # seit 1.6.5 (CR2-C-12, K2): Achsenabschnitt nach phi und lambda neu (Mittel des bedingten Mittelwerts im
+            # Regime = Datenmittel)
+            mu[r] = r_mean(ex[i] - phi[r] * lag_ex[i] - lam[r] * sig[i])
     unc = np.zeros(K)
     for r in range(K):
         p = al[r] + be[r] + ga[r] / 2
@@ -1078,7 +1137,11 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1
     z = (ex - cm) / sig
     z[~np.isfinite(z)] = 0.0
     pools = [i + 1 if len(i) >= 10 else np.arange(1, n + 1) for i in idx]
+    # seit 1.6.5 (Entscheidung 195, Nebenpunkt von CR2-C-12): nur Regime ab 10 Tagen normieren; ein kleineres Regime
+    # zieht aus allen Tagen, ohne alle Residuen erneut zu normieren (R .prepare_ms_info)
     for r in range(K):
+        if len(idx[r]) < 10:
+            continue
         i = pools[r] - 1
         sv = r_sd(z[i])
         if math.isfinite(sv) and sv > 0:
@@ -1092,14 +1155,14 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1
             "cross": _fit_cross(returns, config, base)}
 
 
-def _prepare_method_info(returns, config, method, params, cores=1):
+def _prepare_method_info(returns, config, method, params, cores=1, day=None):
     """Verfahrensspezifische Vorberechnung (R: ``.prepare_method_info``)."""
     p = _get_base_params(params)
     base = config["index_names"].index(config["regime_index"]) + 1
     br = returns[:, base - 1]
     info = {"base": base}
     if method == "regime":
-        info.update(_prepare_regime_info(br, p["vol_window"], p["n_regimes"]))
+        info.update(_prepare_regime_info(br, p["vol_window"], p["n_regimes"], p["vol_unit"], day))
     if method == "evt":
         info["left"] = _fit_tail(br, p["tail_prob"], "left")
         info["right"] = _fit_tail(br, p["tail_prob"], "right") if p["both_tails"] is True or \
@@ -1297,9 +1360,35 @@ def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None, spec=
     return out
 
 
+def _boot_days(data, ex, who):
+    """Datum der Renditezeilen als Tage (seit 1.6.5, ``vol_unit = "days"``; R ``.boot_days``)."""
+    if not isinstance(data, pd.DataFrame) or "date" not in _data_cols(data):
+        chk_stop("b1.vol_days", who)
+    d = _days_of(_to_date(data["date"], who + ": data$date"))[np.asarray(ex["src_rows"]) - 1]
+    if np.isnan(d).any() or (len(d) > 1 and (np.diff(d) <= 0).any()):
+        chk_stop("b1.vol_days", who)
+    return d
+
+
+def _span_days(day):
+    return None if day is None or not len(day) else float(day[-1] - day[0] + 1)
+
+
+def _boot_mem_check(setup, config, who):
+    """Seit 1.6.5 (FB-5; R ``.boot_mem_check``): Speicher aller Pfade gegen den freien Speicher laut System."""
+    cols = config["n_indices"] + config["n_letfs"] + 2 * config["n_aux"]
+    need = float(setup["n_paths"]) * (setup["n_out"] + 1) * cols * 8
+    avail = _sl.mem_avail()
+    if avail >= 0 and need > avail:
+        chk_stop("b1.speicher", who, _sp("%.1f", need / 1e9))
+    return need
+
+
 @_quiet
-def _ess_design(method, grid, budget, n_obs):
-    """ESS-Design (R: ``.ess_design``): ``DataFrame`` oder ``None``."""
+def _ess_design(method, grid, budget, n_obs, params=None, base_ret=None, who="bootstrap", day=None):
+    """ESS-Design (R: ``.ess_design``): ``DataFrame`` oder ``None``. Seit 1.6.5: jede Kombination vor der ESS-Rechnung
+    geprüft (CR2-O-2), "regime" mit der Verweildauer der geschätzten Übergangsmatrix (P04-R13), immer genau ``budget``
+    Pfade (CR2-J-2), Kombinationen ohne Pfad entfallen mit Hinweis."""
     if grid is None:
         grid = _get_ess_grid(method, n_obs)
     if grid is None or not len(grid):
@@ -1323,8 +1412,20 @@ def _ess_design(method, grid, budget, n_obs):
             design[k] = design[k].astype(np.float64)
         except (TypeError, ValueError):
             pass
+    rws = [{k: (bool(design[k].iloc[i]) if design[k].dtype == bool else float(design[k].iloc[i])) for k in nm}
+           for i in range(len(design))]
+    if base_ret is not None:
+        for r in rws:
+            _check_boot_params(method, _get_base_params(_modify_list(params or {}, r)), n_obs, who, _span_days(day))
+    infos = []
+    for r in rws:
+        if method == "regime" and base_ret is not None:
+            p = _get_base_params(_modify_list(params or {}, r))
+            infos.append(_prepare_regime_info(base_ret, p["vol_window"], p["n_regimes"], p["vol_unit"], day))
+        else:
+            infos.append(None)
     design["ess_per_boot"] = [
-        _calculate_ess(n_obs, method, {k: float(design[k].iloc[i]) for k in nm}) for i in range(len(design))]
+        _calculate_ess(n_obs, method, {k: float(design[k].iloc[i]) for k in nm}, infos[i]) for i in range(len(design))]
     if any(k in non_ess for k in nm):
         ec = [k for k in nm if k in ess_params]
         if ec:
@@ -1342,11 +1443,21 @@ def _ess_design(method, grid, budget, n_obs):
         design["weight_alloc"] = 1 / design["ess_per_boot"].to_numpy()
     wa = design["weight_alloc"].to_numpy()
     sw = r_sum(wa)
-    ns = np.array([max(1.0, _r_round0(budget * w / sw)) for w in wa])
+    q = np.array([budget * w / sw for w in wa])
+    ns = np.array([max(1.0, _r_round0(v)) for v in q])
     while r_sum(ns) > budget:
         i = int(np.argmax(ns))
         ns[i] -= 1
+    # seit 1.6.5 (CR2-J-2, Entscheidung 189): immer genau budget Pfade; fehlende nach größtem Bruchteil q - n_sims
+    miss = int(budget - r_sum(ns))
+    if miss > 0:
+        for i in sorted(range(len(q)), key=lambda j: (-(q[j] - ns[j]), j))[:miss]:
+            ns[i] += 1
     design["n_sims"] = ns
+    if (ns == 0).any():
+        _message(chk_msg("b1.ess_ohne_pfad", who, int((ns == 0).sum()), len(ns), _as_char(float(budget))))
+        design = design.loc[ns > 0].reset_index(drop=True)
+        ns = design["n_sims"].to_numpy()
     tot = design["ess_per_boot"].to_numpy() * ns
     design["total_ESS"] = tot
     target = r_median(tot[tot > 0])
@@ -1356,7 +1467,7 @@ def _ess_design(method, grid, budget, n_obs):
     return design
 
 
-def _check_boot_params(method, p, n_obs, who="bootstrap"):
+def _check_boot_params(method, p, n_obs, who="bootstrap", n_days=None):
     """Verfahrensparameter vor dem Ziehen prüfen (R: ``.check_boot_params``; seit 1.6.4 vor der Vorberechnung, ohne
     Eingabewert in den Meldungen, dazu ``n_regimes``, ``vol_window``, ``tail_prob``, ``both_tails`` und höchstens 64
     MS-GARCH-Regime)."""
@@ -1379,6 +1490,15 @@ def _check_boot_params(method, p, n_obs, who="bootstrap"):
     if method == "regime":
         chk_int1(p.get("n_regimes"), who, "params$n_regimes", lo=1)
         chk_int1(p.get("vol_window"), who, "params$vol_window", lo=2)
+        chk_choice(p.get("vol_unit"), who, "params$vol_unit", ["rows", "days"])
+        # seit 1.6.5 (CR2-M-9): Fenster höchstens so lang wie die Historie, höchstens ein Regime je 10 Beobachtungen
+        days = p.get("vol_unit") == "days"
+        span = n_days if days else n_obs
+        if span is not None and float(_num_vec(p.get("vol_window"))[0]) > span:
+            chk_stop("b1.vol_window", who, chk_fmt(span), "Kalendertage" if days else "Zeilen")
+        mx = max(1, n_obs // 10)
+        if float(_num_vec(p.get("n_regimes"))[0]) > mx:
+            chk_stop("b1.n_regimes", who, int(mx), int(n_obs))
     if method in ("evt", "tails"):
         chk_num1(p.get("tail_prob"), who, "params$tail_prob", lo=0, hi=0.5, lo_open=True, hi_open=True)
     if method == "evt":
@@ -1413,14 +1533,20 @@ def _check_ess_grid(g, who):
                 if isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype):
                     ok = False
             else:
-                ok = ok and _atomic1(v) and v is not None
+                ok = ok and _atomic1(v)   # seit 1.6.5 None wie R NA (Meldung b1.gitter_na unten)
     if not ok:
         chk_stop("e2.gitter", who)
     # seit 1.6.4 nur Zahlen (Entscheidung 31; Wahrheitswerte erlaubt, Entscheidung 45); R: is.numeric/is.logical
     for v in g.values():
         vals = list(np.asarray(v, dtype=object).ravel()) if isinstance(v, (list, tuple, np.ndarray, pd.Series)) else [v]
-        if not all(isinstance(z, (int, float, bool, np.integer, np.floating, np.bool_)) for z in vals):
+        if not all(z is None or z is pd.NA or isinstance(z, (int, float, bool, np.integer, np.floating, np.bool_))
+                   for z in vals):
             chk_stop("gitter_zahlen", who)
+    # seit 1.6.5 (CR2-O-2): keine fehlenden Werte (bis 1.6.4 je Sprache andere Rohfehler)
+    for v in g.values():
+        vals = list(np.asarray(v, dtype=object).ravel()) if isinstance(v, (list, tuple, np.ndarray, pd.Series)) else [v]
+        if any(z is None or z is pd.NA or (isinstance(z, (float, np.floating)) and math.isnan(float(z))) for z in vals):
+            chk_stop("b1.gitter_na", who)
 
 
 def _boot_numcols(data, config, who):
@@ -1436,7 +1562,9 @@ def _boot_numcols(data, config, who):
             v = data.iloc[:, nms.index(col)]
             if isinstance(v.dtype, pd.CategoricalDtype):
                 chk_stop("spalte_faktor", who, col)
-            ok = v.dtype.kind in "fiu" or (v.dtype.kind != "b" and bool(v.isna().all()))
+            # seit 1.6.5 (CR2-X6-2): auch object-Spalten, deren Werte ohne NA alle Zahlen (nicht logisch) sind
+            ok = v.dtype.kind in "fiu" or (v.dtype.kind != "b" and bool(v.isna().all())) or \
+                (v.dtype == object and _dp_is_numeric_col(v))
         else:
             ok = data.dtype.kind in "fiu"
         if not ok:
@@ -1483,6 +1611,7 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
     params = _unwrap_params(params)
     ess = chk_bool1(ess, who, "ess")
     _check_ess_grid(ess_grid, who)
+    _check_param_names(params, ess_grid if ess else None, method, who)   # seit 1.6.5 (CR2-O-1)
     chk_int1(max_tries, who, "max_tries")
     cores = chk_cores(cores, who)   # seit 1.6.4 höchstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
     chk_bool1(progress, who, "progress")
@@ -1493,10 +1622,21 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
     if ess and ess_grid is None and method in ("stationary", "block", "circular") and n_obs < 4:
         chk_stop("ess_kurz", who, 4)
     n_out = _as_int(path_length if path_length is not None else n_obs)
+    # seit 1.6.5 (FB-6): Hinweise bei langen Pfaden und GARCH-Schätzung auf wenigen Beobachtungen
+    if n_out > 5 * n_obs:
+        _message(chk_msg("b1.pfad_lang", who, int(n_out), int(n_obs)))
+    if method in ("garch", "gjr_garch", "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch") and n_obs < 500:
+        _message(chk_msg("b1.garch_kurz", who, method, int(n_obs)))
     if method in ("wild", "reset") and n_out != n_obs:
         chk_stop("ut2.chronologie", who, method, int(n_obs))
-    params = _resolve_auto(params, ex["ret"])
-    design = _ess_design(method, ess_grid, _as_int(n), n_obs) if ess else None
+    # seit 1.6.5 (E-T2-6): Datum der Renditezeilen nur für vol_unit = "days"
+    day = None
+    if method == "regime" and (params or {}).get("vol_unit") == "days":
+        day = _boot_days(data, ex, who)
+    grid0 = (ess_grid if ess_grid is not None else _get_ess_grid(method, n_obs)) if ess else None
+    params = _resolve_auto(params, ex["ret"], method, tuple(grid0.keys()) if grid0 else ())   # Standard "auto" (178)
+    base = config["index_names"].index(config["regime_index"])
+    design = _ess_design(method, ess_grid, _as_int(n), n_obs, params, ex["ret"][:, base], who, day) if ess else None
     if ess and design is None:
         _message("Keine Hyperparameter für ESS - nutze Standard-Bootstrap")
     if design is None:
@@ -1510,11 +1650,11 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
     n_paths = len(combo_of_path)
     base_p = [_get_base_params(cp) for cp in combos]
     for bp in base_p:
-        _check_boot_params(method, bp, n_obs, who)   # seit 1.6.4 vor der Vorberechnung
+        _check_boot_params(method, bp, n_obs, who, _span_days(day))   # seit 1.6.4 vor der Vorberechnung
     infos = []
     for cp in combos:
         try:
-            infos.append(_prepare_method_info(ex["ret"], config, method, cp, cores))
+            infos.append(_prepare_method_info(ex["ret"], config, method, cp, cores, day))
         except (ImportError, ModuleNotFoundError, NotImplementedError):
             raise
         except Exception as err:  # noqa: BLE001
@@ -1632,15 +1772,19 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
             (Standard ``{}`` = alle Standardwerte). Je Verfahren werden nur die oben genannten Einträge verwendet:
             Seit 1.6.4 geprüft: n_regimes ganze Zahl ≥ 1, vol_window ganze Zahl ≥ 2, tail_prob > 0 und < 0.5, both_tails TRUE oder FALSE, MS-GARCH-Regime höchstens 64.
 
-            - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1, Standard 20) oder ``"auto"``
-              (``bootstrap_block_length()``, Spalte ``stationary``).
-            - block_length: Feste Blocklänge in Zeilen für "block" und "circular" (ganze Zahl, Standard 20; bei
+            - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1) oder ``"auto"`` (Standard seit 1.6.5, bis
+              1.6.4 fest 20; ``bootstrap_block_length()``, Spalte ``stationary``; der gewählte Wert wird als Meldung ausgegeben).
+            - block_length: Feste Blocklänge in Zeilen für "block" und "circular" (ganze Zahl; bei
               "block" höchstens Zeilen der Historie minus 1, bei "circular" höchstens Zeilen der Historie) oder
-              ``"auto"`` (``bootstrap_block_length()``, Spalte ``circular``).
+              ``"auto"`` (Standard seit 1.6.5, bis 1.6.4 fest 20; ``bootstrap_block_length()``, Spalte ``circular``).
             - wild_type: Gewichte beim Wild Bootstrap: 0 = Rademacher (Standard), 1 = Mammen, 2 = Standardnormal;
               andere Werte sind ein Fehler.
             - n_regimes: Anzahl Volatilitätsregime für "regime" (Standard 2).
-            - vol_window: Fensterlänge der rollierenden Volatilität in Zeilen für "regime" (Standard 20).
+            - vol_window: Fensterlänge der rollierenden Volatilität für "regime" (Standard 20) in der Einheit von
+              ``vol_unit``; seit 1.6.5 höchstens so lang wie die Historie (bis 1.6.4 still gekürzt). ``n_regimes`` ist seit
+              1.6.5 höchstens ein Regime je 10 Renditen.
+            - vol_unit: Seit 1.6.5, nur "regime": ``"rows"`` (Standard, Fenster in Zeilen wie bis 1.6.4) oder ``"days"``
+              (Fenster in Kalendertagen über die Spalte ``date``; Lücken wie Wochenenden zählen mit).
             - tail_prob: Tail-Wahrscheinlichkeit je Seite als Anteil für "evt" und "tails" (Standard 0.05 = 5
               Prozent).
             - both_tails: Logisch, nur "evt": auch den rechten Tail mit einer GPD modellieren (Standard ``True``).
@@ -1694,10 +1838,9 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             Das Ergebnis hängt nicht von cores
             ab.
             Je paralleler Einheit rechnen die Kerne mit höchstens Zahl der Prozessoren / Läufe Threads (mindestens 1).
@@ -1759,6 +1902,7 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress,
                         "bootstrap")
     cores = setup["cores"]   # begrenzt (Entscheidung 41)
+    _boot_mem_check(setup, config, "bootstrap")   # seit 1.6.5 (FB-5)
     if seed is None:                    # None -> einmal k aus G
         seed = _sl.next_seed()
     else:
@@ -1837,7 +1981,12 @@ def bootstrap_validate(result, *, min_rows=None, verbose=True):
     def valid(p):
         if p is None or not isinstance(p, (pd.DataFrame, np.ndarray)) or p.shape[0] == 0:
             return False
-        a = p.to_numpy(dtype=np.float64) if isinstance(p, pd.DataFrame) else np.asarray(p, dtype=np.float64)
+        # seit 1.6.5 (CR2-H-3): nicht lesbare Werte (z. B. Textspalte) machen den Pfad ungültig wie in R und Julia
+        # (bis 1.6.4 Rohfehler "could not convert string to float")
+        try:
+            a = p.to_numpy(dtype=np.float64) if isinstance(p, pd.DataFrame) else np.asarray(p, dtype=np.float64)
+        except (TypeError, ValueError):
+            return False
         return not np.isnan(a).any() and bool(np.isfinite(a).all())
 
     ok = np.array([valid(p) for p in P], dtype=bool)
@@ -1925,6 +2074,9 @@ def bootstrap_data(result, *, i=1, dates=None, start="2000-01-01"):
     chk_date1(start, "bootstrap_data", "start")
     start = chk_scalar(start)
     P = result["paths"][int(i) - 1] if is_res else result
+    # seit 1.6.5 (CR2-N-4): eine Pfadspalte 'date' ist ein Fehler (bis 1.6.4 still mit den Pfadwerten überschrieben)
+    if "date" in [str(c) for c in getattr(P, "columns", [])]:
+        chk_stop("b1.pfad_date", "bootstrap_data")
     nr = P.shape[0]
     chk_nofactor(dates, "bootstrap_data", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     if dates is None:
@@ -2064,6 +2216,18 @@ def _is_study(x) -> bool:
         isinstance(x, RList) and "SimLevBootstrapStudy" in getattr(x, "r_class", ()))
 
 
+def _path_frame(P, date_col, burn_in: int):
+    """Pfad als interner Rahmen ``_Frame`` (seit 1.6.5, Paket E): Spalte date und die Pfadspalten, umgewandelt wie
+    ``_to_frame`` eine Tabelle ``DataFrame({"date": dates, **Pfad})`` umwandelt, ohne die ersten ``burn_in`` Zeilen."""
+    from ._sim_base import _Frame, _column
+    names = ["date"] + [str(c) for c in P.columns]
+    cols, kinds = {"date": date_col[1][burn_in:].copy()}, {"date": date_col[0]}
+    for nm, c in zip(names[1:], P.columns):
+        k, a = _column(P[c])
+        cols[nm], kinds[nm] = a[burn_in:], k
+    return _Frame(names, cols, kinds, None)
+
+
 def _sim_call(df, strategy, args):
     """``simulation()`` mit den aufgelösten sim_args (R: ``.sim_call``)."""
     from ._sim_blocks import _sim_call as call
@@ -2112,6 +2276,24 @@ def _chunk_stem(ci, seed, keep_returns, keep_paths):
 def _chunk_meldung(datei):
     return ("chunk_dir: '%s' stammt von einer anderen Sprache oder einer älteren Fassung von SimLev (bis 1.6.2) und "
             "wird nicht gelesen; je Sprache ein eigenes Verzeichnis verwenden." % datei)
+
+
+def _chunk_tmp_weg(d, eigen, fn):
+    """Seit 1.6.5 (E-T2-5; R ``.chunk_tmp_weg``): verwaiste Zwischendateien ``<Chunk-Datei>.tmp<Prozessnummer>`` der
+    eigenen Sprache vor dem Rechnen entfernen, mit Hinweis."""
+    import re
+    pat = re.compile(r"^chunk_.*" + re.escape(eigen) + r"\.tmp[0-9]+$")
+    f = sorted(x for x in os.listdir(d) if pat.match(x))
+    k = 0
+    for x in f:
+        try:
+            os.remove(os.path.join(d, x))
+            k += 1
+        except OSError:
+            pass
+    if k:
+        _message(chk_msg("b1.chunk_tmp", fn, k))
+    return k
 
 
 def _chunk_pruefen(d, n_chunks, seed, keep_returns, keep_paths, eigen):
@@ -2195,15 +2377,19 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         params: Benannte Liste von Verfahrensparametern; nicht angegebene Einträge erhalten den Standardwert
             (Standard ``{}`` = alle Standardwerte). Je Verfahren werden nur die oben genannten Einträge verwendet:
 
-            - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1, Standard 20) oder ``"auto"``
-              (``bootstrap_block_length()``, Spalte ``stationary``).
-            - block_length: Feste Blocklänge in Zeilen für "block" und "circular" (ganze Zahl, Standard 20; bei
+            - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1) oder ``"auto"`` (Standard seit 1.6.5, bis
+              1.6.4 fest 20; ``bootstrap_block_length()``, Spalte ``stationary``; der gewählte Wert wird als Meldung ausgegeben).
+            - block_length: Feste Blocklänge in Zeilen für "block" und "circular" (ganze Zahl; bei
               "block" höchstens Zeilen der Historie minus 1, bei "circular" höchstens Zeilen der Historie) oder
-              ``"auto"`` (``bootstrap_block_length()``, Spalte ``circular``).
+              ``"auto"`` (Standard seit 1.6.5, bis 1.6.4 fest 20; ``bootstrap_block_length()``, Spalte ``circular``).
             - wild_type: Gewichte beim Wild Bootstrap: 0 = Rademacher (Standard), 1 = Mammen, 2 = Standardnormal;
               andere Werte sind ein Fehler.
             - n_regimes: Anzahl Volatilitätsregime für "regime" (Standard 2).
-            - vol_window: Fensterlänge der rollierenden Volatilität in Zeilen für "regime" (Standard 20).
+            - vol_window: Fensterlänge der rollierenden Volatilität für "regime" (Standard 20) in der Einheit von
+              ``vol_unit``; seit 1.6.5 höchstens so lang wie die Historie (bis 1.6.4 still gekürzt). ``n_regimes`` ist seit
+              1.6.5 höchstens ein Regime je 10 Renditen.
+            - vol_unit: Seit 1.6.5, nur "regime": ``"rows"`` (Standard, Fenster in Zeilen wie bis 1.6.4) oder ``"days"``
+              (Fenster in Kalendertagen über die Spalte ``date``; Lücken wie Wochenenden zählen mit).
             - tail_prob: Tail-Wahrscheinlichkeit je Seite als Anteil für "evt" und "tails" (Standard 0.05 = 5
               Prozent).
             - both_tails: Logisch, nur "evt": auch den rechten Tail mit einer GPD modellieren (Standard ``True``).
@@ -2306,10 +2492,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             In Julia erscheinen Ausgaben, die
             eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
             Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
@@ -2443,6 +2628,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     if chunk_dir is not None:
         os.makedirs(chunk_dir, exist_ok=True)
         _chunk_pruefen(chunk_dir, len(chunks), seed, keep_returns, keep_paths, "_py.pkl")
+        _chunk_tmp_weg(chunk_dir, "_py.pkl", fn)   # seit 1.6.5 (E-T2-5)
         # seit 1.6.4 (Entscheidung 29): vorhandene Zwischendateien vor dem Rechnen lesen; eine unvollständige oder
         # beschädigte Datei bricht bei jedem cores mit derselben Meldung ab (R: gleiche Prüfung)
         for ci in range(1, len(chunks) + 1):
@@ -2485,17 +2671,29 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             return P[a].to_numpy()[sim_rows - 1]
         return P.attrs["aux_level"][a].to_numpy()[sim_rows - 1]
 
+    from ._sim_base import _column
+    date_col = _column(pd.DataFrame({"date": dates})["date"])   # Datumsspalte wie _to_frame (seit 1.6.5, _path_frame)
+
     def eval_path(i):
         dp = _draw_path(setup, i, streams[i - 1], config, method, max_tries)
         if dp["path"] is None:
             return None
         P = dp["path"]
-        df0 = pd.DataFrame({"date": dates, **{c: P[c].to_numpy() for c in P.columns}})   # ein Aufbau (seit 1.6.1)
+        df0 = fr0 = None
         rows = {}
         for nm in snames:
             sp = specs[nm]
-            # Kopie nur, wenn Signalfunktion oder map den Rahmen ändern (seit 1.6.3; simulation() ändert ihn nicht)
-            df = df0.copy() if sp.get("signal") is not None or sp.get("map") is not None else df0
+            if sp.get("signal") is None and sp.get("map") is None:
+                # seit 1.6.5 (Paket E, Studienkern): ohne Signalfunktion und map der interne Rahmen _Frame statt einer
+                # pandas-Tabelle (dieselben Spalten wie _to_frame aus der Tabelle; simulation() kopiert ihn), einmal je Pfad
+                if fr0 is None:
+                    fr0 = _path_frame(P, date_col, burn_in)
+                df = fr0
+            else:
+                if df0 is None:
+                    df0 = pd.DataFrame({"date": dates, **{c: P[c].to_numpy() for c in P.columns}})   # ein Aufbau (seit 1.6.1)
+                # Kopie, weil Signalfunktion oder map den Rahmen ändern (seit 1.6.3; simulation() ändert ihn nicht)
+                df = df0.copy()
             wr = []
 
             def fail(stage, msg, wr=wr):
@@ -2531,7 +2729,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
                         df[a2] = df[col]
                     elif a2 in df.columns:
                         df = df.drop(columns=[a2])
-            if burn_in > 0:
+            if burn_in > 0 and df is not fr0:
                 df = df.iloc[burn_in:].reset_index(drop=True)
             args = sp["sim"]
             try:
@@ -2584,6 +2782,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     res = [r for ch in res for r in ch]
     # seit 1.6.4 (Entscheidung 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte (R: gleiche
     # Prüfung nach dem Rechnen); ohne Namen (Liste, Array) gelten sie als leer
+    # seit 1.6.5 (CR2-A-1, Entscheidung 185 K9): je Strategie dieselben Kennzahlen in jedem Pfad; andere Reihenfolge
+    # wird nach Namen eingeordnet, andere Menge ist ein Fehler (bis 1.6.4 still nach Position bzw. numpy-Rohfehler)
+    ref = {}
     for r in res:
         if r is None:
             continue
@@ -2595,6 +2796,18 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             if (any(not isinstance(k, str) or k == "" for k in mn) or len(set(mn)) != len(mn)
                     or any(k in ("path", "weight", "combo", "tries", "strategy") for k in mn)):
                 chk_stop("kennzahl_namen", fn)
+            if nm0 not in ref:
+                ref[nm0] = mn
+                continue
+            if mn == ref[nm0]:
+                continue
+            fehlt = [k for k in ref[nm0] if k not in mn]
+            extra = [k for k in mn if k not in ref[nm0]]
+            if fehlt or extra:
+                chk_stop("b1.kennzahl_pfad", fn, int(r["id"]), nm0,
+                         "; ".join(([("fehlt " + ", ".join(fehlt))] if fehlt else [])
+                                   + ([("zusätzlich " + ", ".join(extra))] if extra else [])))
+            r["rows"][nm0]["row"] = rw[list(rw.index)[:4] + ref[nm0]]
     tab_parts = []
     for nm in snames:
         rws = [r["rows"][nm]["row"] for r in res if r is not None and r["rows"][nm]["row"] is not None]
@@ -2798,16 +3011,25 @@ def _eval_condition(cond, d, env):
         from ._r import rexpr as _rexpr
         return _rexpr.as_logical(_rexpr.eval_r(str(cond), d, env=env))
     v = cond(d)
-    a = np.asarray(v)
+    # seit 1.6.5 (CR2-X9-2): Ergebnis wie Text über as.logical (R, Julia): Text "TRUE"/"FALSE" als Wahrheitswert,
+    # anderer Text NA, pd.NA als NA, Matrix spaltenweise; bis 1.6.4 bool() je Element (jeder Text wahr, pd.NA Rohfehler)
+    a = np.asarray(v.to_numpy(dtype=object) if hasattr(v, "to_numpy") else v, dtype=object)
     if a.ndim == 0:
-        a = np.full(len(d), a.item())
-    out = np.empty(len(a), dtype=object)
-    for i, z in enumerate(a):
-        if z is None or (isinstance(z, float) and math.isnan(z)):
-            out[i] = None
+        a = np.full(len(d), a.item(), dtype=object)
+    elif a.ndim > 1:
+        a = a.ravel(order="F")
+    vals = []
+    for z in a:
+        if z is None or z is pd.NA:
+            vals.append(None)
+        elif isinstance(z, np.generic):
+            vals.append(z.item())
         else:
-            out[i] = bool(z)
-    return out
+            vals.append(z)
+    from ._r import rexpr as _rexpr
+    if not vals:
+        return np.empty(0, dtype=object)
+    return _rexpr.as_logical(vals)
 
 
 @env_from_caller
@@ -2917,13 +3139,48 @@ def _bootstrap_probability(study, args, kwargs, thresholds, env):
 
 
 @_quiet
+def _q_names(probs):
+    """Spaltennamen der Quantile (seit 1.6.5, CR2-S-3/X5-3; R ``.q_names``): ganze Prozente "q05", sonst mit so vielen
+    Nachkommastellen wie nötig ("q02.5"); bis 1.6.4 gerundet ("q02", doppelte Namen)."""
+    out = []
+    for p0 in probs:
+        p = 100 * float(p0)
+        if abs(p - _r_round0(p)) < 1e-8:
+            out.append("q%02d" % int(_r_round0(p)))
+            continue
+        d = 1
+        while d < 8 and abs(p - round(p, d)) >= 1e-8:
+            d += 1
+        out.append("q%0*.*f" % (d + 3, d, p))
+    return out
+
+
+def _check_probs(probs, fn):
+    """probs der Zusammenfassungen (seit 1.6.5, CR2-X5-3; R ``.check_probs``): Zahlen von 0 bis 1 ohne NA, doppelte
+    einmal."""
+    vals = list(np.asarray(probs, dtype=object).ravel()) if isinstance(probs, (list, tuple, np.ndarray, pd.Series)) \
+        else [probs]
+    ok = len(vals) > 0
+    for v in vals:
+        if (isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.integer, np.floating))
+                or math.isnan(float(v)) or not 0 <= float(v) <= 1):
+            ok = False
+    if not ok:
+        chk_stop("b1.probs", fn)
+    out = []
+    for v in vals:
+        if float(v) not in out:
+            out.append(float(v))
+    return np.array(out, dtype=np.float64)
+
+
 def _summary_study(obj, metrics=("cagr", "ttwror", "max_drawdown", "sharpe", "ulcer_index", "final_value"),
                    probs=(0.05, 0.25, 0.5, 0.75, 0.95)):
+    probs = _check_probs(probs, "summary")   # seit 1.6.5 (CR2-X5-3)
     tab = obj["results"]
     # ein einzelner Name als Text gilt als ein Name (seit 1.6.4, A-006; bis 1.6.3 von list() in Buchstaben zerlegt)
     metrics = [m for m in _uniq([metrics] if isinstance(metrics, str) else list(metrics)) if m in tab.columns]
-    probs = np.atleast_1d(np.asarray(probs, dtype=np.float64))
-    qn = [_sp("q%02d", _r_round0(100 * p)) for p in probs]
+    qn = _q_names(probs)
     rows = []
     for s in obj["strategies"]:
         d = tab[tab["strategy"] == s]
@@ -3019,13 +3276,26 @@ def _plot_study(x, metric="cagr", width=640, height=420):
     from .svg import _esc, _jl_fmt, _jl_max, _jl_maximum, _jl_minimum, _jl_str as J
     tab = x["results"]
     strats = [str(v) for v in x["strategies"]]
+    # seit 1.6.5 (CR2-X4-3): metric aus den Zahlenspalten von results; Strategien mit weniger als 2 endlichen Werten
+    # fehlen mit Hinweis, sind es alle: Fehler (bis 1.6.4 innere Meldung von bw.nrd0 bzw. KeyError)
+    num = [str(c) for c in tab.columns if tab[c].dtype.kind in "fiu" and str(c) not in ("path", "weight", "combo", "tries")]
+    metric = chk_scalar(metric)
+    chk_choice(metric, "plot", "metric", num)
     mv = tab[metric].to_numpy(dtype=np.float64)
     sv = tab["strategy"].to_numpy()
     dl = [mv[sv == st] for st in strats]
-    allv = np.concatenate(dl) if dl else np.array([], dtype=np.float64)
+    okl = [int(np.isfinite(v).sum()) >= 2 for v in dl]
+    if not any(okl):
+        chk_stop("b1.plot_keine", "plot", metric)
+    if not all(okl):
+        _message(chk_msg("b1.plot_undef", "plot", metric, ", ".join(s for s, o in zip(strats, okl) if not o)))
+    allv = np.concatenate([v for v, o in zip(dl, okl) if o])
     allv = allv[np.isfinite(allv)]
     dens = []
-    for v in dl:
+    for v, o in zip(dl, okl):
+        if not o:
+            dens.append(None)
+            continue
         v = v[np.isfinite(v)]
         dd = _sl.kde(v)   # Gauß-Kerndichte wie .sl_kde in R (slc; nur Grafik)
         dens.append((np.asarray(_get(dd, "x"), dtype=np.float64), np.asarray(_get(dd, "y"), dtype=np.float64)))
@@ -3034,7 +3304,8 @@ def _plot_study(x, metric="cagr", width=640, height=420):
         x1 = x0 + 1
     y1 = 1e-12
     for d in dens:
-        y1 = _jl_max(y1, 0.0 if d[1].size == 0 else _jl_maximum(d[1]))
+        if d is not None:
+            y1 = _jl_max(y1, 0.0 if d[1].size == 0 else _jl_maximum(d[1]))
     ml, mr, mt, mb = 60, 20, 40, 50
     pw, ph = width - ml - mr, height - mt - mb
 
@@ -3055,8 +3326,13 @@ def _plot_study(x, metric="cagr", width=640, height=420):
            "<text x=\"16\" y=\"%s\" text-anchor=\"middle\" transform=\"rotate(-90 16 %s)\">Dichte</text>\n"
            % (J(mt + ph / 2), J(mt + ph / 2))]
     rs, rx, ry = [], [], []
-    for i, (gx, gy) in enumerate(dens, start=1):
+    for i, dd in enumerate(dens, start=1):
         col = _DARK3[(i - 1) % len(_DARK3)]
+        if dd is None:
+            out.append("<text x=\"%s\" y=\"%s\">%s</text>\n" % (J(width - mr - 95), J(mt + 16 * i + 4),
+                                                                _esc(strats[i - 1] + " (nicht definiert)")))
+            continue
+        gx, gy = dd
         keep = [(a, b) for a, b in zip(gx.tolist(), gy.tolist()) if x0 <= a <= x1]
         pts = " ".join(_jl_fmt("%.2f", sx(a)) + "," + _jl_fmt("%.2f", sy(b)) for a, b in keep)
         out.append("<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"1.5\" points=\"%s\"/>\n" % (col, pts))
@@ -3076,7 +3352,7 @@ def summary(object, *args, **kwargs):  # noqa: A002
     """``summary()`` für Bootstrap-Studien und Entnahme-Ergebnisse."""
     if hasattr(object, "summary"):
         return object.summary(*args, **kwargs)
-    raise TypeError("keine summary-Methode für %s" % type(object).__name__)
+    chk_stop("e5.methode", "summary")   # seit 1.6.5 (CR2-O-7) wie simlev.summary (bis 1.6.4 TypeError mit Typnamen)
 
 
 def plot(x, *args, **kwargs):
@@ -3086,7 +3362,7 @@ def plot(x, *args, **kwargs):
     geschrieben wird nur mit ``file="….svg"``."""
     if hasattr(x, "plot"):
         return x.plot(*args, **kwargs)
-    raise TypeError("keine plot-Methode für %s" % type(x).__name__)
+    chk_stop("e5.methode", "plot")   # seit 1.6.5 (CR2-O-7) wie simlev.plot
 
 
 from .svg import _plot_method  # noqa: E402

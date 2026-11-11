@@ -743,6 +743,19 @@ inline int wd_pwr(int64_t ny, int64_t np, const double* AR, double legacy, const
     }
     double* rv = w;
     double* tp = w + n;
+    if (n >= 1 && r[n - 1] == 0.0) {
+      // seit 1.6.5 (CR2-M-8): Totalverlust im letzten Jahr. Formel durch r_n gekuerzt: PWR = prod_{j<n} r_j /
+      // (1 + sum_{i<n} prod_{i<=j<n} r_j) * 100 (Entnahme zu Jahresbeginn, das letzte Jahr kuerzt sich heraus);
+      // bis 1.6.4 0/0 = NaN. Mit legacy > 0 ist das Erbe nicht erreichbar: NA (Hinweis in der Huelle).
+      if (legacy > 0) { out[i] = simlev_na_real(); continue; }
+      const int64_t m = n - 1;
+      for (int64_t k = 0; k < m; k++) rv[k] = r[m - 1 - k];
+      sl_r_cumprod(m, rv, tp);
+      for (int64_t k = 0; k < m; k++) rv[k] = tp[m - 1 - k];
+      rv[m] = 1.0;                                      // Summand i = n (leeres Produkt)
+      out[i] = sl_r_prod(m, r, 0) / sl_r_sum(n, rv, 0) * 100;
+      continue;
+    }
     for (int64_t k = 0; k < n; k++) rv[k] = r[n - 1 - k];
     sl_r_cumprod(n, rv, tp);                            // tp = cumprod(rev(r))
     for (int64_t k = 0; k < n; k++) rv[k] = tp[n - 1 - k];   // rev(...)
@@ -768,6 +781,7 @@ inline int64_t wd_tariff_count(int64_t N, const double* M) {
 }
 inline void wd_tariff_compact(int64_t N, const double* M, int64_t ny, int64_t nkeep, double* out) {
   int64_t row = 0;
+  if (ny < 0) return;   // seit 1.6.5 (CR1-Y9-1): die Huellen lehnen ny < 0 ab; hier keine Division durch 0
   for (int64_t c = 0; c < N; c++) {
     const double* col = M + c * (int64_t) TR_N;
     if (std::isnan(col[0])) continue;

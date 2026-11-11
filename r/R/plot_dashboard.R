@@ -58,22 +58,23 @@ plot.SimLevResult <- function(
 ) {
   # seit 1.6.4 (K42 E5, Entscheidung 57): benannte unbekannte Argumente sind ein Fehler (bis 1.6.3 still ignoriert)
   chk_dots(names(match.call(expand.dots = FALSE)$...) %||% character(0), character(0), "plot.SimLevResult")
-  style <- match.arg(style)
+  # seit 1.6.5 (CR2-V1-3): unbekannter style als Paketmeldung (Abkuerzungen wie bei match.arg bleiben erlaubt)
+  style <- tryCatch(match.arg(style), error = function(e)
+    chk_stop("auswahl", "plot.SimLevResult", "style", paste0("\"", c("full", "compact", "custom"), "\"", collapse = ", ")))
   panels_given <- !missing(panels)
   
   # panels pruefen: Tippfehler sind ein Fehler (match.arg(several.ok = TRUE) verwirft
   # nicht passende Werte still); Abkuerzungen wie bei match.arg erlaubt
   all_panels <- c("performance", "drawdown", "distribution", "rolling", "monthly", "stats", "correlation", "comparison")
   if (!is.character(panels) || !length(panels) || anyNA(panels))
-    stop(sprintf("plot.SimLevResult: panels muss ein Zeichenvektor sein; m\u00f6glich: %s.",   # seit 1.6.4 ohne Wert
+    stop(chk_msg("c.m_plot_simlevresult", # seit 1.6.4 ohne Wert
                  paste0("\"", all_panels, "\"", collapse = ", ")))
   pm <- pmatch(panels, all_panels, duplicates.ok = TRUE)
   if (anyNA(pm))
-    stop(sprintf("plot.SimLevResult: unbekannte(s) Panel(s) %s in panels; m\u00f6glich: %s.",
-                 paste0("\"", panels[is.na(pm)], "\"", collapse = ", "), paste0("\"", all_panels, "\"", collapse = ", ")))
+    stop(chk_msg("c.m_plot_simlevresult_2", paste0("\"", panels[is.na(pm)], "\"", collapse = ", "), paste0("\"", all_panels, "\"", collapse = ", ")))
   panels <- unique(all_panels[pm])
   if (panels_given && style != "custom")
-    warning(sprintf("plot.SimLevResult: panels wirkt nur mit style = \"custom\" und wird bei style = \"%s\" ignoriert.", style))
+    warning(chk_msg("c.m_plot_simlevresult_3", style))
   
   # Standard-Farbschema; eigene Farben ergaenzen es (Teilangabe moeglich)
   default_colors <- list(
@@ -87,18 +88,15 @@ plot.SimLevResult <- function(
   )
   if (is.null(colors)) colors <- default_colors else {
     if (!(is.list(colors) || is.character(colors)) || is.null(names(colors)) || any(names(colors) == ""))
-      stop(sprintf("plot.SimLevResult: colors muss eine benannte Liste (oder ein benannter Zeichenvektor) sein, z. B. list(primary = \"#003366\"); m\u00f6glich: %s.",
-                   paste(names(default_colors), collapse = ", ")))
+      stop(chk_msg("c.m_plot_simlevresult_4", paste(names(default_colors), collapse = ", ")))
     unk <- setdiff(names(colors), names(default_colors))
-    if (length(unk)) stop(sprintf("plot.SimLevResult: unbekannte Farbe(n) %s in colors; m\u00f6glich: %s.",
-                                  paste0("'", unk, "'", collapse = ", "), paste(names(default_colors), collapse = ", ")))
+    if (length(unk)) stop(chk_msg("c.m_plot_simlevresult_5", paste0("'", unk, "'", collapse = ", "), paste(names(default_colors), collapse = ", ")))
     # Farbwerte pruefen: je Element ein Wert, den grDevices::col2rgb() versteht (Name oder Hex-Code)
     # seit 1.6.4 gelten nur reine ASCII-Ganzzahltexte als Farbnummer (Entscheidung 55; "3.0", "2e0", "0x1" Fehler)
     ok <- vapply(as.list(colors), function(v) length(v) == 1 && !is.na(v) && (is.character(v) || is.numeric(v)) &&
                    !(is.character(v) && grepl("^[0-9]", v) && !grepl("^[0-9]+$", v)) &&
                    !inherits(tryCatch(grDevices::col2rgb(v), error = function(e) e), "error"), TRUE)
-    if (!all(ok)) stop(sprintf("plot.SimLevResult: ung\u00fcltige Farbe(n) in colors: %s; erwartet je Element ein R-Farbname (z. B. \"navy\", siehe grDevices::colors()) oder ein Hex-Code \"#RRGGBB\" bzw. \"#RRGGBBAA\".",
-                               paste0("'", names(colors)[!ok], "'", collapse = ", ")))   # seit 1.6.4 nur die Namen (Entscheidung 8)
+    if (!all(ok)) stop(chk_msg("c.m_plot_simlevresult_6", paste0("'", names(colors)[!ok], "'", collapse = ", ")))   # seit 1.6.4 nur die Namen (Entscheidung 8)
     colors <- utils::modifyList(default_colors, as.list(colors))
   }
   # Transparenz ueber adjustcolor() (gleiche RGBA-Werte wie das fruehere Hex-Suffix "30"/"40"/"80" bei
@@ -114,8 +112,7 @@ plot.SimLevResult <- function(
   # style = "custom": Panels, die einen Vergleich brauchen, ohne compare nicht zeichnen (mit Warnung statt Leerfeld)
   if (style == "custom" && is.null(compare) && any(need <- panels %in% c("correlation", "comparison"))) {
     skipped <- panels[need]
-    warning(sprintf("plot.SimLevResult: Panel(s) %s nicht gezeichnet: %s ein Vergleichsergebnis (compare).",
-                    paste0("\"", skipped, "\"", collapse = ", "), if (length(skipped) > 1) "ben\u00f6tigen" else "ben\u00f6tigt"))
+    warning(chk_msg("c.m_alpha_col", paste0("\"", skipped, "\"", collapse = ", "), if (length(skipped) > 1) "ben\u00f6tigen" else "ben\u00f6tigt"))
     panels <- panels[!need]
   }
   
@@ -157,12 +154,18 @@ plot.SimLevResult <- function(
   
   # Kurzform fuer Achsen und Endwert (Einheit EUR im Achsentitel): Tsd. bzw. Mio.; Achsenwerte mit so
   # vielen Nachkommastellen, dass sie exakt sind (12.5 Tsd. statt 12 Tsd.), Endwert mit 3 gueltigen Stellen
-  format_amount <- function(x, signif3 = FALSE) {
-    u <- ifelse(abs(x) >= 1e6, 1e6, ifelse(abs(x) >= 1e3, 1e3, 1)); v <- x / u
-    d <- if (signif3) pmax(0, 2 - floor(log10(pmax(abs(v), 1)))) else
-      vapply(v, function(z) { for (k in 0:2) if (abs(z - round(z, k)) < 1e-8 * max(1, abs(z))) return(k); 3L }, 0)
-    paste0(sprintf("%.*f", as.integer(d), v), ifelse(u == 1e6, " Mio.", ifelse(u == 1e3, " Tsd.", "")))
-  }
+  # seit 1.6.5 (CR2-X16-2): erreicht der gerundete Betrag 1000, die naechste Einheit; beim Endwert nach dem Runden
+  # hoechstens 3 gueltige Stellen (bis 1.6.4 "1000 Tsd." bzw. "100.0")
+  format_amount <- function(x, signif3 = FALSE) vapply(x, function(z) {
+    pick <- function(u) { v <- z / u
+      d <- if (signif3) max(0, 2 - floor(log10(max(abs(v), 1)))) else {
+        k0 <- 3L; for (k in 0:2) if (abs(v - round(v, k)) < 1e-8 * max(1, abs(v))) { k0 <- k; break }; k0 }
+      list(v = v, d = as.integer(d), u = u) }
+    p <- pick(if (abs(z) >= 1e6) 1e6 else if (abs(z) >= 1e3) 1e3 else 1)
+    if (p$u < 1e6 && abs(as.numeric(sprintf("%.*f", p$d, p$v))) >= 1000) p <- pick(p$u * 1000)
+    if (signif3 && p$d > 0 && abs(as.numeric(sprintf("%.*f", p$d, p$v))) >= 10^(3 - p$d)) p$d <- p$d - 1L
+    paste0(sprintf("%.*f", p$d, p$v), if (p$u == 1e6) " Mio." else if (p$u == 1e3) " Tsd." else "")
+  }, "", USE.NAMES = FALSE)
   
   # Beschriftung mit hinterlegtem Hintergrund (bleibt lesbar, wenn eine Kurve darunter verlaeuft)
   label_bg <- function(x, y, lab, adj, col, cex = 1, font = 2, xpd = FALSE) {
@@ -705,9 +708,22 @@ export_dashboard <- function(x, filename = "dashboard.pdf",
   chk_num1(width, fn, "width", lo = 3, hi = 100)
   chk_num1(height, fn, "height", lo = 3, hi = 100)
   chk_dots(names(list(...)) %||% character(0), c("style", "panels", "compare", "colors"), fn)
-  pdf(filename, width = width, height = height)
+  # seit 1.6.5 (CR2-V1-3): Ordner vorab pruefen (eine Meldung fuer alle Sprachen); in eine Zwischendatei zeichnen und
+  # erst nach Erfolg nach filename kopieren (bis 1.6.4 blieb bei einem Fehler eine leere oder halbe Datei liegen und
+  # ueberschrieb eine vorhandene); ein Grafikfehler (z. B. 3 x 3 Zoll) als Paketmeldung
+  if (!dir.exists(dirname(filename))) chk_stop("c.dash_ordner", fn, dirname(filename))
+  tmp <- tempfile(fileext = ".pdf")
+  on.exit(unlink(tmp), add = TRUE)
+  pdf(tmp, width = width, height = height)
   dev_pdf <- dev.cur()
-  on.exit(dev.off(dev_pdf))   # PDF-Geraet auch bei Fehler schliessen
-  plot(x, ...)
+  ok <- FALSE
+  tryCatch({ plot(x, ...); ok <- TRUE },
+           error = function(e) {
+             dev.off(dev_pdf); dev_pdf <<- NULL
+             if (grepl("figure margins too large|plot region too large|invalid graphics state", conditionMessage(e)))
+               chk_stop("c.dash_zeichnen", fn, conditionMessage(e))
+             stop(e)
+           }, finally = if (!is.null(dev_pdf)) dev.off(dev_pdf))
+  if (!file.copy(tmp, filename, overwrite = TRUE)) stop(chk_msg("c.m_export_dashboard", filename))
   message(sprintf("export_dashboard: Dashboard gespeichert in %s", filename))
 }

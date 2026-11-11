@@ -13,6 +13,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from ._pruefen import chk_msg, chk_stop   # seit 1.6.5 (Entscheidung 193)
 from . import _dependence_core as _core
 from . import dependence as _dep
 from ._r import fmt as _fmt
@@ -31,6 +32,10 @@ def _hmm_viterbi(lB, lA, lp0):
     """Viterbi-Pfad (1-basiert) aus Log-Emissionen, Log-Übergangsmatrix, Log-Start."""
     lB = np.asarray(lB, dtype=np.float64)
     lA = np.asarray(lA, dtype=np.float64)
+    # seit 1.6.5 (CR2-X7-2) ohne NA/NaN über den Kern (sl_hmm_viterbi, erstes Maximum; gleicher Pfad)
+    if not (np.isnan(lB).any() or np.isnan(lA).any() or np.isnan(np.asarray(lp0, dtype=np.float64)).any()):
+        from ._lib_models import hmm_viterbi
+        return np.asarray(hmm_viterbi(lB, lA, np.asarray(lp0, dtype=np.float64)), dtype=np.int64)
     Tn, k = lB.shape
     dl = np.asarray(lp0, dtype=np.float64) + lB[0, :]
     bp = np.zeros((Tn, k), dtype=np.int64)
@@ -68,8 +73,11 @@ def _e4_dates(dv, fn):
     elif isinstance(dv, (str, _dt.date, np.datetime64)):
         ok = True
     elif isinstance(dv, (pd.Series, pd.Index)):
+        # seit 1.6.5 (CR2-X11-1): Fehlwerte (NaN, pd.NA, None, NaT) in Text- und Objektspalten wie R und Julia; eine
+        # Zahlenspalte bleibt abgelehnt
         ok = len(dv) >= 1 and (pd.api.types.is_datetime64_any_dtype(dv.dtype) or
-                               all(isinstance(v, (str, _dt.date, np.datetime64)) or v is None or v is pd.NaT for v in dv))
+                               (getattr(dv.dtype, "kind", "O") not in "fiubc" and
+                                all(isinstance(v, (str, _dt.date, np.datetime64)) or _dep._e4_isna(v) for v in dv)))
     elif isinstance(dv, (list, tuple, np.ndarray)):
         a = np.asarray(dv)
         ok = a.ndim == 1 and a.size >= 1 and (a.dtype.kind in "MU" or
@@ -160,6 +168,11 @@ class SimLevHMM(RList):
             lines.append(_fmt.sprintf("  Z%d: Anteil %.0f %%, erwartete Dauer %.1f Perioden, Rendite %s %% p. a., Vola %s %%",
                                       j + 1, 100 * share[j], dur[j], "/".join(_dep._sprintf_vec("%.1f", mu[j, :])),
                                       "/".join(_dep._sprintf_vec("%.1f", vo[j, :]))))
+        if x.get("iterations") is not None:    # seit 1.6.5 (K34): Schritte der Schätzung
+            lines.append(_fmt.sprintf("  Schritte: %d%s%s", int(x["iterations"]),
+                                      "" if x.get("converged") else " (Grenze erreicht)",
+                                      _fmt.sprintf(", %d Startwert(e) verworfen", int(x["n_failed"]))
+                                      if int(x.get("n_failed") or 0) > 0 else ""))
         lines.append("\nÜbergangsmatrix")
         T = x["transition"]
         lines.append(_fmt.print_matrix(pd.DataFrame(_fmt.r_round(np.asarray(T, dtype=np.float64), 3),
@@ -292,8 +305,7 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
           and math.isfinite(float(kv[0])) and float(kv[0]) == float(_fmt.r_round(float(kv[0]))) and float(kv[0]) >= 2)
     fn = "regime_hmm"                                          # seit 1.6.4 vor der Rechnung (K42 E4)
     if not ok or _dep.chk_is_factor(k):                         # seit 1.6.4 ohne Wert
-        raise ValueError("regime_hmm: k muss eine ganze Zahl >= 2 sein; ein Zustand wäre eine einzige "
-                         "Normalverteilung ohne Regime.")
+        chk_stop("c.m_regime_hmm")
     _dep.chk_max(kv[0], _dep.SL_MAX_N, fn, "k")   # B-054
     columns = _dep._e4_names(columns, fn, "columns")
     _dep._e4_data(data, columns, fn)                           # B-015
@@ -325,14 +337,19 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
         else:
             inits.append(_hmm_init_cl(X, np.asarray(sl.sample(k, Tn, replace=True, stream=rs), dtype=np.int64), k, ridge))
     fits = []
+    n_failed = 0
     for i in inits:
         try:
             fits.append(_hmm_em(X, k, i, max_iter, tol, ridge))
         except Exception:  # noqa: BLE001 - tryCatch(error = NULL)
+            n_failed += 1                      # seit 1.6.5 (K34, CR2-E-11)
             continue
     if not fits:
-        raise ValueError("regime_hmm: Schätzung fehlgeschlagen.")
+        chk_stop("c.m_regime_hmm_3")
     f = fits[_which_max([fi["ll"] for fi in fits])]
+    converged = bool(int(f["iter"]) < int(max_iter))
+    if not converged:
+        warnings.warn(_dep.chk_msg("c.hmm_grenze", fn, int(max_iter)))
     vol = np.array([math.sqrt(r_mean(np.diag(s))) for s in f["S"]])
     o = np.argsort(vol, kind="stable")
     A = f["A"][np.ix_(o, o)]
@@ -362,6 +379,9 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
     out["frequency"] = frequency
     out["ppy"] = ppy
     out["share"] = _dep._colmeans(f["smoothed"][:, o])
+    out["iterations"] = int(f["iter"])          # seit 1.6.5 (K34)
+    out["converged"] = converged
+    out["n_failed"] = int(n_failed)
     return out
 
 
@@ -416,13 +436,13 @@ def regime_states(x, dates, *, type=("filtered", "smoothed", "viterbi"), output=
     state_prob = _dep.chk_int1(state_prob, fn, "state_prob", lo=1, hi=x["k"])   # B-007
     lag = _dep.chk_int1(lag, fn, "lag", lo=0)                  # B-012
     if type != "filtered":
-        warnings.warn("Geglättete bzw. Viterbi-Zustände nutzen Zukunftsdaten - nur zur Beschreibung verwenden.")
+        warnings.warn(chk_msg("c.m_regime_states"))
     src = dates["date"] if isinstance(dates, pd.DataFrame) else dates
     d = _dep._to_date(src, "regime_states: dates")
     P = {"filtered": x["filtered"], "smoothed": x["smoothed"], "viterbi": None}[type]
     if output == "probability":
         if P is None:
-            raise ValueError("Wahrscheinlichkeit nicht für Viterbi.")
+            chk_stop("c.m_regime_states_2")
         v = np.asarray(P, dtype=np.float64)[:, int(state_prob) - 1]
     elif P is None:
         v = np.asarray(x["viterbi"], dtype=np.float64)

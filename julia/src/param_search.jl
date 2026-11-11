@@ -50,6 +50,7 @@ ausgewählt und Bereiche stetig zwischen `lower` und `upper` gezogen (`n` und `s
 # Argumente
 - `dims`: Benannte Dimensionen als Schlüsselwörter (`n = [50, 100]`) oder Paare (`"name" => werte`); siehe
   `...` in den übrigen Sprachen.
+  Seit 1.6.5 sind doppelte Namen und Datumswerte ein Fehler.
 
 # Rückgabe
 `param_space`: Objekt der Klasse `SimLevParamSpace` (benannte Liste der Dimensionen); `param_range`: Objekt
@@ -64,15 +65,22 @@ println(param_space(n = [50, 100, 200], w = param_range(0.3, 0.9; step = 0.1)))
 function param_space(args...; dims...)
     items = Pair{String,Any}[]
     for a in args
-        a isa Pair || error("param_space: alle Dimensionen müssen benannt sein.")
+        a isa Pair || SL.chk_stop("b2b.m_param_space")
         push!(items, String(string(a.first)) => a.second)
     end
     for (k, v) in dims
         push!(items, String(k) => v)
     end
-    (isempty(items) || any(p -> isempty(p.first), items)) && error("param_space: alle Dimensionen müssen benannt sein.")
+    (isempty(items) || any(p -> isempty(p.first), items)) && SL.chk_stop("b2b.m_param_space")
+    # seit 1.6.5 (CR2-O-4): doppelte Namen sind ein Fehler (bis 1.6.4 galt still die letzte Dimension)
+    nms = String[p.first for p in items]
+    dup = findfirst(i -> nms[i] in nms[1:i-1], eachindex(nms))
+    dup === nothing || SL.chk_stop("b2b.dim_doppelt", "param_space", nms[dup])
     for (k, v) in items
-        _is_range(v) || _is_atomic(v) || error("param_space: Dimension '$k' muss ein Vektor oder param_range() sein.")
+        # seit 1.6.5 (CR2-W2-4, Entscheidung 189): Datum mit eigener Meldung wie in R und Python
+        (v isa Dates.TimeType || v isa Dates.Period || (v isa AbstractVector && !isempty(v) &&
+         any(e -> e isa Dates.TimeType || e isa Dates.Period, v))) && SL.chk_stop("b2b.dim_datum", "param_space", k)
+        _is_range(v) || _is_atomic(v) || SL.chk_stop("b2b.m_param_space_2", k)
     end
     for (k, v) in items
         SL.chk_nofactor(v, "param_space", k)   # seit 1.6.4 (Entscheidung 15)
@@ -95,9 +103,11 @@ ausgewählt und Bereiche stetig zwischen `lower` und `upper` gezogen (`n` und `s
   `lower > 0`).
   Seit 1.6.4 je eine endliche Zahl.
 - `n`: Anzahl Rasterpunkte des Bereichs bei `method = "grid"` (ganze Zahl von 1 bis 1e6, Standard 5); wird
-  ignoriert, wenn `step` angegeben ist.
+  ignoriert, wenn `step` angegeben ist; mit `step` wird `n` seit 1.6.5 nicht geprüft (ungültige Werte als
+  `missing` abgelegt).
 - `step`: Schrittweite des Rasters in der Einheit des Parameters (`seq(lower, upper, by = step)`, > 0); hat
   Vorrang vor `n` und `log` (`log` gilt dann nur für Zufallsziehungen). `nothing` (Standard) = `n` Punkte.
+  Seit 1.6.5 höchstens 1e6 Rasterpunkte (⌊(upper - lower)/step⌋ + 1).
 - `integer`: Logisch (Standard `false`): Raster- und Zufallswerte auf ganze Zahlen runden; doppelte
   Rasterwerte entfallen.
   Seit 1.6.4 nur TRUE oder FALSE.
@@ -128,25 +138,41 @@ function param_range(lower, upper; n = 5, step = nothing, integer = false, log =
     log = SL.chk_bool1(log, "param_range", "log")
     log && lower <= 0 && error("param_range: log = TRUE erfordert lower > 0.")
     if step === nothing && !(_is_num(n) && isfinite(n) && n >= 1 && n == OF._r_round(n))
-        error("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein.")
+        SL.chk_stop("b2b.m_param_range")
     end
     step === nothing && SL.chk_max(n, SL.SL_MAX_GITTER, "param_range", "n")   # seit 1.6.4 (B-004, wie n_grid; Entscheidung 16)
     if step !== nothing && !(_is_num(step) && isfinite(step) && step > 0)
-        error("param_range: step muss eine Zahl > 0 sein.")
+        SL.chk_stop("b2b.m_param_range_2")
     end
-    return SL.RList("lower" => lower, "upper" => upper, "n" => trunc(Int, n), "step" => step, "integer" => integer,
+    if step !== nothing
+        # seit 1.6.5 (CR2-M-5): Stufenzahl mit step höchstens 1e6 wie n; n wird mit step nicht verwendet und nur als
+        # ganze Zahl von 1 bis 1e6 abgelegt, sonst missing (bis 1.6.4 trunc(Int, n) mit Rohfehler)
+        ns = floor((Float64(upper) - Float64(lower)) / Float64(step) + 1e-10) + 1
+        ns > SL.SL_MAX_GITTER && SL.chk_stop("b2b.step_punkte", "param_range", OF._spf("%.0f", ns), OF._spf("%.0f", Float64(SL.SL_MAX_GITTER)))
+        n = (_is_num(n) && isfinite(n) && n >= 1 && n == OF._r_round(n) && n <= SL.SL_MAX_GITTER) ? trunc(Int, n) : missing
+    else
+        n = trunc(Int, n)
+    end
+    return SL.RList("lower" => lower, "upper" => upper, "n" => n, "step" => step, "integer" => integer,
                     "log" => log; class = "SimLevParamRange")
 end
+
+# Zahlen im Druck des Suchraums ohne Exponentenschreibweise (seit 1.6.5, CR2-W2-3; R .ps_fmt_num/.ps_range_text)
+_ps_fmt_num(d) = (v = _vec(d); (!isempty(v) && all(e -> _is_num(e) && isfinite(e), v)) ? String[SL._blk_fmt(e) for e in v] : OF._formatv(v))
+_ps_range_text(d) = OF._spf("Bereich [%s, %s]%s%s, Raster %s", SL._blk_fmt(d["lower"]), SL._blk_fmt(d["upper"]),
+                            d["integer"] ? " ganzzahlig" : "", d["log"] ? " log" : "",
+                            d["step"] !== nothing ? "Schritt " * SL._blk_fmt(d["step"]) : "$(d["n"]) Punkte")
+# seit 1.6.5 (CR2-W4-3): eine Zeile wie im Parameterraum (bis 1.6.4 die rohe Liste)
+_print_range(io::IO, x) = (print(io, "SimLev-Parameterbereich: ", _ps_range_text(x), "\n"); nothing)
 
 function _print_space(io::IO, x)
     print(io, "SimLev-Parameterraum\n")
     for (k, d) in x
+        # seit 1.6.5 (CR2-W2-3): Grenzen und Zahlen einzeln ohne Exponentenschreibweise (bis 1.6.4 %g bzw. gemeinsam)
         if _is_range(d)
-            rast = d["step"] !== nothing ? "Schritt " * OF._as_chr(d["step"]) : "$(d["n"]) Punkte"
-            print(io, OF._spf("  %-14s Bereich [%g, %g]%s%s, Raster %s\n", k, Float64(d["lower"]), Float64(d["upper"]),
-                              d["integer"] ? " ganzzahlig" : "", d["log"] ? " log" : "", rast))
+            print(io, OF._spf("  %-14s %s\n", k, _ps_range_text(d)))
         else
-            f = OF._formatv(_vec(d))
+            f = _ps_fmt_num(d)
             print(io, OF._spf("  %-14s %s\n", k, join(f[1:min(12, end)], ", ")))
         end
     end
@@ -192,12 +218,20 @@ end
 _round_vec(v) = Float64[OF._r_round(x) for x in v]
 "`unique(v)` mit Reihenfolge des ersten Auftretens (NaN gleich NaN, -0 gleich 0)."
 function _unique(v)
+    # seit 1.6.5 (CR2-M-3): über eine Menge von Schlüsseln mit der Gleichheit von _same (bis 1.6.4 jeder Wert gegen
+    # alle bisherigen, quadratisch); gleiche Auswahl in gleicher Reihenfolge
     out = similar(v, 0)
+    seen = Set{Any}()
     for x in v
-        any(y -> _same(x, y), out) || push!(out, x)
+        k = _same_key(x)
+        k in seen && continue
+        push!(seen, k); push!(out, x)
     end
     out
 end
+# Schlüssel mit derselben Gleichheit wie _same unter isequal/hash: missing und NaN je ein Schlüssel, -0.0 wie 0.0;
+# sonst der Wert selbst (isequal und hash sind für Zahlen numerisch: 1 und 1.0 gleich)
+_same_key(a) = a === missing ? (:NA,) : a isa AbstractFloat ? (isnan(a) ? (:NaN,) : (a == 0 ? 0.0 : a)) : a
 _same(a, b) = (a === missing && b === missing) || (a isa AbstractFloat && b isa AbstractFloat && isnan(a) && isnan(b)) ||
               (a !== missing && b !== missing && !(a isa AbstractFloat && isnan(a)) && a == b)
 
@@ -267,13 +301,13 @@ function _rbind(A::SL.RFrame, B::SL.RFrame)
     SL.RFrame((k => _cat_cols(A[k], B[k]) for k in nm)...; nrow = SL.nrow(A) + SL.nrow(B))
 end
 function _unique_rows(D::SL.RFrame)
+    # seit 1.6.5 (CR2-M-3): Zeilenschlüssel in einer Menge (bis 1.6.4 jede Zeile gegen alle bisherigen)
     nm = names(D); n = SL.nrow(D)
     keep = falses(n)
-    seen = Vector{Vector{Any}}()
+    seen = Set{Vector{Any}}()
     for i in 1:n
-        key = Any[D[k][i] for k in nm]
-        dup = any(s -> all(_same(a, b) for (a, b) in zip(s, key)), seen)
-        dup || (push!(seen, key); keep[i] = true)
+        key = Any[_same_key(D[k][i]) for k in nm]
+        key in seen || (push!(seen, key); keep[i] = true)
     end
     SL.rows(D, keep)
 end
@@ -303,8 +337,10 @@ function _ps_design(space, method, n, constraint, stream = nothing)
             tries += 1
         end
         D = SL.rows(D, 1:(n >= 0 ? min(Int(n), SL.nrow(D)) : max(SL.nrow(D) + Int(n), 0)))
+        # seit 1.6.5 (CR2-A-7, Entscheidung 185 K22): Hinweis, wenn der Plan weniger als n zulässige Punkte hat
+        0 < SL.nrow(D) < n && SL.DeepAnalysis._message(SL.chk_msg("b2b.weniger_punkte", "param_search", SL.nrow(D), Int(n)))
     end
-    SL.nrow(D) == 0 && error("param_search: kein zulässiger Punkt im Suchraum (constraint prüfen).")
+    SL.nrow(D) == 0 && SL.chk_stop("b2b.m_ok_rows")
     D.rownames = nothing
     return D
 end
@@ -401,7 +437,8 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
 - `method`: `"grid"` (Standard, volles Raster), `"random"` (Zufallssuche) oder `"lhs"` (Latin Hypercube;
   gleichmäßige Abdeckung bei vielen Dimensionen).
 - `n`: Anzahl Punkte bei `"random"` und `"lhs"` (ganze Zahl, Standard 50); bei `"grid"` ignoriert. Doppelte
-  Punkte werden entfernt und in höchstens 20 Runden nachgezogen; es können weniger Punkte entstehen.
+  Punkte werden entfernt und in höchstens 20 Runden nachgezogen; es können weniger Punkte entstehen (seit 1.6.5
+  mit Hinweis).
   Seit 1.6.4 höchstens 10^8.
 - `constraint`: Optional `function(p)`, die `true` für zulässige Punkte liefert (z. B. Gewichte summieren sich
   höchstens zu 1); Punkte ohne `true` entfallen. `nothing` (Standard) = alle Punkte.
@@ -412,13 +449,14 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
   nennt.
 - `burn_in`: Anzahl Zeilen am Anfang von `data` (bei Tagesdaten: Tage), die nach der Signalberechnung
   verworfen werden (Signal-Vorlauf; ganze Zahl, Standard 0).
-  Seit 1.6.4 eine ganze Zahl ≥ 0.
+  Seit 1.6.4 eine ganze Zahl ≥ 0; seit 1.6.5 kleiner als die Zahl der Datenzeilen (vorab geprüft).
 - `metrics`: Funktion `SimLevResult ->` benannter numerischer Vektor (Standard `bootstrap_study_metrics()`: u.
   a. `cagr`, `max_drawdown` als Anteil, `sharpe`; `cagr` ist mit Sparplan geldgewichtet, XIRR).
   Seit 1.6.4 müssen die Namen der Kennzahlen eindeutig und nicht leer sein und dürfen keiner festen Spalte des
   Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
 - `objective`: Name der Zielgröße (Element von `metrics`, Standard `"sharpe"`) für Ranking, Plateau und
   `param_bootstrap()`.
+  Seit 1.6.5 nach dem ersten Punkt geprüft (vorher nach allen Punkten).
 - `maximize`: Logisch: Zielgröße maximieren (Standard `true`; `false` z. B. für `max_drawdown`).
 - `keep_returns`: `"day"` (Standard): tägliche Renditen je Punkt speichern (nötig für `overfit_pbo()`,
   `sharpe_deflated()`, `overfit_walk_forward()`, `overfit_reality_check()`, `sharpe_haircut()`); `"none"`:
@@ -439,10 +477,9 @@ die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen d
   bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
   Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
   Einheitenreihenfolge.
-  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
-  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
-  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+  `"auto"`, nimmt aber höchstens so viele Aufgaben (bis 1.6.4 immer so viele ohne Messung; höchstens Zahl der
+  Julia-Threads, mit einem Thread nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
   Ausgaben, die eigene Funktionen
   (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
   in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
@@ -494,7 +531,7 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
     SimLev.DataPrep._e5_match_arg(method, ("grid", "random", "lhs"), "param_search", "method")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     method = OF._match_arg(method, ("grid", "random", "lhs"))
     # Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
-    keep_returns isa Bool && error("param_search: keep_returns ist \"day\" oder \"none\" (früher TRUE/FALSE).")
+    keep_returns isa Bool && SL.chk_stop("b2b.m_param_search")
     SimLev.DataPrep._e5_match_arg(keep_returns, ("day", "none"), "param_search", "keep_returns")
     keep_returns = OF._match_arg(keep_returns, ("day", "none"))
     keep_ret = keep_returns == "day"
@@ -502,7 +539,7 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
     # (Entscheidung 6; vorher NamedTuple/Dict umgewandelt)
     fn = "param_search"
     (data isa SL.RFrame || data isa SL._Frame) ||
-        error("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein ($(SL.chk_msg("tabelle.formen"))).")
+        SL.chk_stop("a.m_sim_check_inputs", SL.chk_msg("tabelle.formen"))
     (data isa SL.RFrame ? SL.nrow(data) : SL._fnrow(data)) == 0 && SL.chk_stop("zeilen_keine", fn, "data")   # seit 1.6.4 (Entscheidung 38)
     builder === nothing || builder isa Function || SL.chk_stop("e2.funktion", fn, "builder")
     space === _MISSING && SL.chk_stop("fehlt", fn, "space")
@@ -514,6 +551,9 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
     SL.Bootstrap._is_listlike(sim_args) || SL.chk_stop("liste", fn, "sim_args")
     sim_args = SL.Bootstrap._e2_sim_args(sim_args)
     burn_in = SL.chk_int1(burn_in, fn, "burn_in"; lo = 0)
+    # seit 1.6.5 (CR2-A-7): burn_in kleiner als die Zahl der Datenzeilen, vorab
+    nrow_d = data isa SL.RFrame ? SL.nrow(data) : SL._fnrow(data)
+    burn_in >= nrow_d && SL.chk_stop("b2b.burn_in", fn, Int(burn_in), Int(nrow_d))
     metrics === nothing || metrics isa Function || SL.chk_stop("e2.funktion", fn, "metrics")
     objective = SL.chk_name1(objective, fn, "objective")
     maximize = SL.chk_bool1(maximize, fn, "maximize")
@@ -521,10 +561,12 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
     sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
     metrics === nothing && (metrics = SL.Bootstrap.bootstrap_study_metrics)
     # R: unbenannter Vektor -> Meldung von param_space
-    space isa Union{Tuple,AbstractVector} && !(space isa AbstractVector{<:Pair}) && error("param_space: alle Dimensionen müssen benannt sein.")
+    space isa Union{Tuple,AbstractVector} && !(space isa AbstractVector{<:Pair}) && SL.chk_stop("b2b.m_param_space")
+    # seit 1.6.5 (CR2-7, K19): ein Dict mit mehreren Dimensionen gibt eine Warnung (Reihenfolge der Hash-Tabelle)
+    space isa Base.Dict && SL.DeepAnalysis._list_items(space; fn = fn)
     (space isa SL.RList && SL.inherits(space, "SimLevParamSpace")) || (space = param_space(OF._kv(space)...))
     if builder === nothing
-        strategy === nothing && error("param_search: 'builder' oder 'strategy' angeben.")
+        strategy === nothing && SL.chk_stop("b2b.m_param_search_3")
         fixed = strategy
         SL._sim_check_names(collect(keys(space)), "param_search")   # Dimensionen = Argumente von simulation() bzw. Pfade
         builder = p -> SL.RList("strategy" => fixed, "args" => p)
@@ -556,7 +598,14 @@ SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MI
         end
         return (m = mp, err = missing, date = nothing, ret = nothing)
     end
-    out = _par_lapply(1:SL.nrow(design), run, cores)
+    # seit 1.6.5 (CR2-W1-3): der erste Punkt vorab, damit Namen der Kennzahlen und objective vor der ganzen Rechnung
+    # geprüft werden (bis 1.6.4 erst nach allen Punkten)
+    first_ = run(1)
+    if first_.m !== nothing
+        SL.chk_kennzahlen(first_.m[1], length(first_.m[2]), vcat("id", String[string(k) for k in names(design)], "error"), fn)
+        objective in first_.m[1] || SL.chk_stop("rs.objective", fn, objective, join(first_.m[1], ", "))
+    end
+    out = SL.nrow(design) > 1 ? vcat(Any[first_], collect(Any, _par_lapply(2:SL.nrow(design), run, cores))) : Any[first_]
     okm = [o for o in out if o.m !== nothing]
     isempty(okm) && error("param_search: alle Punkte fehlgeschlagen, z. B.: $(out[1].err)")
     # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
@@ -731,7 +780,9 @@ function _ps_neighbours(x; radius = 1, k = 5)
         mx = maximum(r); mn = minimum(r)
         push!(zs, mx > mn ? (r .- mn) ./ (mx - mn) : r .* 0)
     end
-    Z = nr == 1 ? reshape(Float64[z[1] for z in zs], :, 1) : reduce(hcat, zs)
+    # seit 1.6.5 (CR2-X1-1): immer eine Zeile je Punkt (bis 1.6.4 bei genau einem Punkt p Zeilen, dann BoundsError)
+    Z = reduce(hcat, zs)
+    Z isa AbstractMatrix || (Z = reshape(Z, :, 1))
     D = _dist_matrix(Matrix{Float64}(Z))
     m = min(Int(k), size(Z, 1))
     return [OF._order(D[i, :])[1:m] for i in 1:size(Z, 1)]
@@ -762,7 +813,9 @@ Tabelle (RFrame) je Punkt mit `id`, `value` (Kennzahl des Punkts), `plateau_mean
 die Nachbarschaft, fehlende Werte ignoriert), `plateau_min` (ungünstigster Wert der Nachbarschaft: bei der
 Zielgröße je nach `x["maximize"]` das Minimum bzw. Maximum; bei anderen Kennzahlen das Maximum für
 `max_drawdown`, `avg_drawdown`, `dd_q50`, `dd_q90`, `ulcer_index` und `longest_drawdown` (kleiner = besser),
-sonst das Minimum) und `neighbours` (Anzahl Punkte der Nachbarschaft). Die Einheit entspricht der Kennzahl.
+sonst das Minimum), `neighbours` (Anzahl Punkte der Nachbarschaft) und `valid` (seit 1.6.5: Anzahl Punkte der
+Nachbarschaft mit Wert). Die Einheit entspricht der Kennzahl. Seit 1.6.5 haben Punkte ohne eigenen Wert
+(fehlgeschlagen oder NA) kein Plateau: `plateau_mean` und `plateau_min` sind dort NA.
 
 # Details
 Rasterstufen sind die Positionen in den Rasterwerten jeder Dimension des Suchraums. Im rangskalierten Raum
@@ -799,10 +852,12 @@ function param_plateau(x; metric = nothing, radius = 1, k = 5)
         isempty(a) && return lower_better ? -Inf : Inf
         return lower_better ? maximum(a) : minimum(a)
     end
+    # seit 1.6.5 (CR2-R-1, Entscheidung 189): Punkte ohne eigenen Wert ohne Plateau (NA); Spalte valid
+    own = .!isnan.(v)
     return SL.RFrame("id" => tab["id"], "value" => v,
-                     "plateau_mean" => Float64[SL.r_mean(v[j]; na_rm = true) for j in nb],
-                     "plateau_min" => Float64[worst(v[j]) for j in nb],
-                     "neighbours" => Int[length(j) for j in nb])
+                     "plateau_mean" => Float64[own[i] ? SL.r_mean(v[j]; na_rm = true) : NA for (i, j) in enumerate(nb)],
+                     "plateau_min" => Float64[own[i] ? worst(v[j]) : NA for (i, j) in enumerate(nb)],
+                     "neighbours" => Int[length(j) for j in nb], "valid" => Int[count(!isnan, v[j]) for j in nb])
 end
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -929,6 +984,7 @@ end
 
 function __init__()
     SL.register_print!("SimLevParamSpace", _print_space)
+    SL.register_print!("SimLevParamRange", _print_range)
     SL.register_print!("SimLevParamSearch", _print_ps)
     SL.register_summary!("SimLevParamSearch", _summary_ps)
     SL.register_print!("summary.SimLevParamSearch", _print_summary_ps)

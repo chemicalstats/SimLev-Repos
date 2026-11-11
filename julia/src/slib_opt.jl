@@ -70,12 +70,17 @@ function _opt_control(control, m::Int, n::Int)
         length(p) in (1, n) || error("optim: Steuerwert parscale passt nicht zu par")
         ps = length(p) == n ? p : fill(p[1], n)
     end
-    (Cint(maxit), Cint(maxfev), reltol, gtol, num1("xtol", _EPS), num1("fnscale", 1.0)), ps, get(ctl, "trace", false) == true
+    # seit 1.6.5 (CR2-L-4): gebrochene maxit/maxfev zur Null hin wie R und Python (der Kern schneidet ab; bis 1.6.4
+    # InexactError)
+    (Cint(trunc(maxit)), Cint(trunc(maxfev)), reltol, gtol, num1("xtol", _EPS), num1("fnscale", 1.0)), ps,
+        get(ctl, "trace", false) == true
 end
 
 _opt_ctrl(c, ps) = OptCtrl(c[1], c[2], c[3], c[4], c[5], c[6], ps === nothing ? Ptr{Float64}(C_NULL) : pointer(ps), Cint(0))
 
-_bounds(b, n) = (v = Float64.(vec(collect(b))); length(v) == n ? v : [v[mod1(i, length(v))] for i in 1:n])
+# seit 1.6.5 (CR2-L-4): leere Schranke wie R rep_len als NA (der Kern meldet sie; bis 1.6.4 DivideError)
+_bounds(b, n) = (v = Float64.(vec(collect(b))); isempty(v) ? fill(NaN, n) :
+                 length(v) == n ? v : [v[mod1(i, length(v))] for i in 1:n])
 
 function _fscalar(v)
     v === nothing &&   # seit 1.6.4 wie R NULL (Länge 0) ein Fehler (B-028, Entscheidung 76; bis 1.6.3 NaN)

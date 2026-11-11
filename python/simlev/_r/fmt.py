@@ -106,14 +106,15 @@ def _r_as_int1(v):
     if isinstance(v, (bool, np.bool_)):
         return int(bool(v))
     if isinstance(v, str):
-        t = v.strip()
-        try:
-            f = float(t) if t and not t.lower().startswith(("nan", "inf", "+inf", "-inf")) else None
-        except ValueError:
-            f = None
-        if t == "NA":
+        # seit 1.6.5 (CR2-Q-3) wie R's IntegerFromString: leerer Text NA ohne Warnung, sonst R_strtod (Hex, Ziffern nur
+        # ASCII) mit Rest nur aus Leerraum; NaN ohne Warnung, außerhalb des int-Bereichs (auch Inf) die Bereichswarnung
+        # (bis 1.6.4 Python-float(): "0x10" NA, "1_0" 10, Warnungen anders als R)
+        from .rnum import r_strtod
+        ws = " \t\n\v\f\r"
+        if not v.strip(ws):
             return None
-        if f is None:
+        f, end = r_strtod(v, 0)
+        if end == 0 or v[end:].strip(ws):
             warnings.warn("NAs introduced by coercion")
             return None
         v = f
@@ -1042,7 +1043,8 @@ def paste(*args, sep=" ", collapse=None):
     vecs = []
     for a in args:
         v = _as_v(a)
-        if v.type == "NULL":
+        if v.type == "NULL":   # seit 1.6.5 (CR2-R-6) wie R ein leerer Vektor ("" neben anderen; bis 1.6.4 übergangen)
+            vecs.append([])
             continue
         s = ["NA" if q is None else q for q in _as_character_list(v)]
         vecs.append(s)

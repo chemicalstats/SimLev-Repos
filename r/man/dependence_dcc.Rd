@@ -13,7 +13,11 @@ Werte). Die Einheit ist frei (z. B. Log-Renditen als Anteil); die
 Korrelationen haengen nicht davon ab. Spaltennamen werden uebernommen
 (sonst \code{V1}, \code{V2}, ...). Konstante oder (nahezu) perfekt
 korrelierte Reihen (singulaere Korrelationsmatrix der standardisierten
-Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler. Seit 1.6.4 geprueft: nur Zahlen, alle endlich.}
+Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler. Seit 1.6.4 geprueft: nur Zahlen, alle endlich.
+Grenze der Einheit: eine Reihe mit Varianz unter 1e-16 (Streuung unter
+1e-8, z. B. Renditen mal 1e-8) gilt als konstant; die geschaetzten
+DCC-Parameter haengen in den letzten Stellen (etwa ab der 7.) von der
+Einheit ab.}
 }
 \value{
 Liste mit \code{a}, \code{b} (DCC-Parameter), \code{loglik}

@@ -29,7 +29,14 @@
 # Jede Hilfe gibt x unsichtbar zurueck (chk_date1: das Datum als Date).
 
 # Text der Tabelle eingabe
-chk_msg <- function(key, ...) sprintf(.MELD_EINGABE[[key]], ...)
+# seit 1.6.5 (CR2-W1-4): ein Wert mit Laenge != 1 wird mit ", " zu einem Text (Laenge 0: ""), wie in Python und Julia;
+# bis 1.6.4 ergab Laenge 0 einen leeren und Laenge > 1 aneinandergehaengte Texte (kein Aufrufer betroffen)
+chk_msg <- function(key, ...) {
+  a <- list(...)
+  if (all(lengths(a) == 1L)) return(sprintf(.MELD_EINGABE[[key]], ...))
+  do.call(sprintf, c(list(.MELD_EINGABE[[key]]),
+                     lapply(a, function(v) if (length(v) == 1L) v else paste(v, collapse = ", "))))
+}
 
 # Abbruch mit einem Text der Tabelle eingabe (ohne Aufruf: der Text beginnt mit dem Funktionsnamen)
 chk_stop <- function(key, ...) stop(chk_msg(key, ...), call. = FALSE)
@@ -168,7 +175,8 @@ chk_date1 <- function(x, fn, arg, null_ok = FALSE) {
   d <- if (inherits(x, "Date") && length(x) == 1L) x
        else if (is.character(x) && length(x) == 1L && !is.na(x)) tryCatch(as.Date(x), error = function(e) NA)
        else NA
-  if (length(d) != 1L || !is.finite(unclass(d))) chk_stop("datum", fn, arg)
+  # seit 1.6.5 (CR2-X8-3): Tage vor dem 01.01.0001 (-719162) abgelehnt wie in Python (kein Jahr 0)
+  if (length(d) != 1L || !is.finite(unclass(d)) || unclass(d) < -719162) chk_stop("datum", fn, arg)
   invisible(d)
 }
 
@@ -245,10 +253,14 @@ chk_nona <- function(x, fn, arg, hint = "") {
 # Zahl aus Text (seit 1.6.4, Entscheidung 27): wie as.numeric(), aber nur ASCII-Zeichen (Ziffern, Vorzeichen,
 # Punkt, Exponent, ASCII-Leerraum); ein Text mit anderen Zeichen (z. B. geschuetztes Leerzeichen U+00A0, fremde
 # Ziffern) ergibt NA, unabhaengig von der Spracheinstellung. Ohne Warnung.
+# Seit 1.6.5 (CR2-X13-1, Entscheidung 189) zusaetzlich eine strenge Zahlengrammatik in allen drei Sprachen: Dezimalzahl
+# mit vollstaendigem Exponenten, ganzzahliges Hex (0x...), Inf/inf, NaN, NA, je mit Vorzeichen und Leerraum; sonst NA
+# (bis 1.6.4 las R "1400e" als 1400 und Hex mit Exponent wie "0x1p3", Python nicht).
+.chk_num_re <- "^[ \t\n\r\f\v]*[-+]?(([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][-+]?[0-9]+)?|0[xX][0-9a-fA-F]+|Inf|inf|NaN|NA)[ \t\n\r\f\v]*$"
 chk_as_num <- function(x) {
   x <- as.character(x)
   v <- suppressWarnings(as.numeric(x))
-  v[!is.na(x) & grepl("[^\x01-\x7f]", x, useBytes = TRUE)] <- NA_real_
+  v[!is.na(x) & (grepl("[^\x01-\x7f]", x, useBytes = TRUE) | !grepl(.chk_num_re, x, perl = TRUE))] <- NA_real_
   v
 }
 

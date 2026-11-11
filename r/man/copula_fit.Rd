@@ -9,7 +9,8 @@ copula_fit(x, y, families = NULL)
 \arguments{
 \item{x, y}{Numerische Vektoren gleicher Laenge (z. B. Renditen; nur die
 Raenge zaehlen). Paare mit nicht endlichen Werten werden entfernt;
-mindestens 20 Paare noetig. Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).}
+mindestens 20 Paare noetig.
+Seit 1.6.4 nur Zahlenvektoren (keine Matrix, Liste, Wahrheitswerte, Faktor oder Text).}
 
 \item{families}{Zeichenvektor der Familien: \code{"gaussian"}, \code{"t"},
 \code{"clayton"}, \code{"gumbel"}, \code{"frank"}, jeweils optional mit
@@ -21,7 +22,8 @@ Vorzeichen von Kendalls Tau: bei Tau >= 0 \code{gaussian}, \code{t},
 \code{clayton_90}, \code{clayton_270}, \code{gumbel_90},
 \code{gumbel_270}. Rotationen gibt es nur fuer \code{clayton} und
 \code{gumbel} (Gauss-, t- und Frank-Copula sind radialsymmetrisch);
-andere Namen sind ein Fehler, ebenso eine konstante Reihe. Seit 1.6.4 nicht leer.}
+andere Namen sind ein Fehler, ebenso eine konstante Reihe.
+Seit 1.6.4 nicht leer.}
 }
 \value{
 data.frame mit einer Zeile je Familie, aufsteigend nach AIC
@@ -55,6 +57,18 @@ Maximum in der Korrelation, danach eine eindimensionale Suche um den
 besten Rasterpunkt. Liegt das Maximum bei \eqn{\nu > 500} (auch
 \eqn{\nu = \infty}), steht in \code{par2} 500; \code{loglik} gilt fuer
 das gefundene \eqn{\nu}.
+Die Gauss-Copula wird seit 1.6.5 wie die t-Copula ueber \eqn{\mathrm{atanh}\,\rho}
+geschaetzt (ohne die fruehere Schranke \eqn{|\rho| \le 0.995}). Die
+Log-Dichte der Frank-Copula rechnet seit 1.6.5 ohne Ausloeschung (bis
+1.6.4 blieb die Schaetzung bei starker positiver Abhaengigkeit bei
+\eqn{\theta \approx 37} stehen). Liegt der Parameter von Clayton,
+Gumbel oder Frank am Rand starker Abhaengigkeit des Suchbereichs
+(\eqn{\theta} bis 60 bzw. \eqn{\pm 60}), gibt die Funktion einen Hinweis;
+Schaetzung, Log-Likelihood und AIC dieser Familie sind dann unzuverlaessig.
+Ebenso seit 1.6.5 fuer Gauss und t bei nahezu vollstaendiger Abhaengigkeit
+(\eqn{1 - |\rho| \le 10^{-12}}, z. B. ein Index gegen seinen eigenen
+Hebelindex): die Log-Likelihood waechst dort unbeschraenkt, ihr Wert haengt
+nur von der Rundung ab und gewinnt den AIC-Vergleich ohne Aussage.
 }
 \examples{
 set.seed(1); z <- matrix(rnorm(2000), ncol = 2) \%*\% chol(matrix(c(1, .6, .6, 1), 2))

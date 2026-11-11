@@ -52,7 +52,7 @@ def min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit):
     """``.min_cvar_core``: minimaler CVaR (geglaettet, FISTA mit Schrittweitensuche)."""
     R = _mat(R)
     T, N = R.shape
-    out = np.empty(N)
+    out = np.empty(N + 1)                     # seit 1.6.5: N Gewichte + Grenzmerker (K39)
     _ext.min_cvar_core(np.ravel(R, order="F"), T, N, float(alpha), _c1(lo), _c1(hi), _c1(w0), float(zeta0),
                        _c1(scales), int(maxit), out)
     return out

@@ -43,7 +43,9 @@ simulation(
     \code{risk_free}), logische Trigger- und numerische Gewichtsspalten für
     \code{rebalance_plan(event_col, event_weight)}.
     Fehlende Kalendertage werden automatisch per LOCF aufgefüllt (logische
-    Spalten mit \code{FALSE}); aufgefüllte Tage werden in \code{filled}
+    Spalten mit \code{FALSE}); seit 1.6.5 gibt es dazu nur noch einen Hinweis,
+    wenn eine Lücke länger als 5 Kalendertage ist (mehr als Wochenende und
+    Feiertage; der Hinweis nennt die größte Lücke). Aufgefüllte Tage werden in \code{filled}
     markiert und aus Risikometriken ausgeschlossen. Trägt \code{data} das
     Attribut \code{filled} aus \code{\link{series_align}}, gelten Tage, an
     denen keines der Strategie-Assets einen echten Kurs hat, ebenso als
@@ -88,7 +90,7 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
     Numerisch. Anfangskapital in EUR. Standard: \code{10000}.
   }
   \item{costs}{
-    Kosten: \code{\link{sim_costs}(order_fee, dca_fee)} (Ordergebühren, Gebühren der
+    Kosten: \code{\link{sim_costs}(order_fee, dca_fee, custody_fee)} (Ordergebühren, Depotgebühr seit 1.6.5, Gebühren der
     Sparplankäufe) oder \code{NULL} (keine Kosten). Standard: \code{sim_costs()} (keine
     Gebühren). Der Bid-Ask-Spread gilt je Asset (\code{spread} in \code{\link{asset_config}}).
   }
@@ -118,7 +120,9 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
     \strong{in Prozent} (z. B. \code{3} = 3 \% p.a.) oder Name einer
     Spalte in \code{data} mit einer täglichen, annualisierten Zeitreihe in
     Prozent (z. B. SOFR als \code{5.31}; nur Zahlenspalten, Text-, logische und
-    Faktorspalten sind ein Fehler). \code{NULL} und \code{0} sind
+    Faktorspalten sind ein Fehler). Seit 1.6.5 sind fehlende Werte (\code{NA}) in der
+    Spalte und Zinsen von -100 oder weniger (als Zahl oder in der Spalte) ein Fehler.
+    \code{NULL} und \code{0} sind
     äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent umgerechnet und
     von der jeweiligen Tagesrendite abgezogen; Sharpe und Sortino werden auf
     den Überschussrenditen berechnet. LOCF-aufgefüllte Tage werden konsistent
@@ -201,7 +205,12 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
       (brutto, wie die übrigen Einzahlungen) und \eqn{t_i} = Kalendertage seit
       Start / 365,25 (Nullstelle nach Brent; auch bei Beinahe-Totalverlust
       mit Rendite nahe -100 \%); ohne Einzahlungen nach dem Starttag
-      \eqn{(W_n / W_1)^{1/T} - 1}. Gibt es keine Lösung, ist \code{cagr = NA}
+      \eqn{(W_n / S)^{1/T} - 1}. Seit 1.6.5 ist der Bezug immer \eqn{S}, also
+      vor den Kaufkosten am Starttag (bis 1.6.4 ohne spätere Einzahlungen der
+      Depotwert am Starttag \eqn{W_1}, nach den Kaufkosten); Spread und
+      Ordergebühr des Startkaufs mindern damit \code{cagr}, \code{ttwror},
+      \code{twr_index} (erste Stufe \eqn{W_1 / S}), die Drawdowns und alle
+      Renditekennzahlen (die erste Tagesrendite enthält die Startkosten). Gibt es keine Lösung, ist \code{cagr = NA}
       (mit Warnung). Ist der Endwert negativ (nicht gedeckte Steuerschuld, Verlust
       über 100 \%), sind \code{cagr} und \code{ttwror} nicht definiert: \code{NA}
       mit Warnung (nicht -1, das den Verlust untertreiben würde); der Endwert bleibt
@@ -248,7 +257,11 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
         \item{\code{kurtosis}}{Überschuss-Kurtosis der Tagesrenditen.}
         \item{\code{lpm}, \code{hpm}}{Unteres bzw. oberes partielles Moment
           1. Ordnung der Tagesrenditen (Schwelle 0).}
-        \item{\code{sharpe}}{Annualisierte Sharpe Ratio auf Überschussrenditen.}
+        \item{\code{sharpe}}{Annualisierte Sharpe Ratio auf Überschussrenditen;
+          \code{NA} ohne Schwankung (seit 1.6.5 auch, wenn die Standardabweichung
+          nur Rundungsrauschen ist, d. h. höchstens \eqn{16 \sqrt{N}\,\epsilon\,(1 + \max|x|)};
+          ebenso für \code{cv}, \code{skewness} und \code{kurtosis}; Ursache
+          \code{zero_volatility}).}
         \item{\code{sortino}}{Annualisierte Sortino Ratio auf Überschussrenditen
           \eqn{e_i}: \eqn{\bar e \cdot P / (D \sqrt{P})} mit \eqn{P}
           Beobachtungen je Jahr und Downside-Abweichung über alle
@@ -258,14 +271,24 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
         \item{\code{calmar}}{Calmar Ratio (CAGR / Max Drawdown; mit Einzahlungen TTWROR / Max Drawdown).}
         \item{\code{omega}}{Omega Ratio (Schwelle 0).}
         \item{\code{gain_to_pain}}{Summe der Renditen / Summe der Verluste (Betrag).}
-        \item{\code{serenity}}{CAGR / (Ulcer Index * Max Drawdown); mit Einzahlungen TTWROR im Zähler.}
-        \item{\code{martin_ratio}}{CAGR / Ulcer Index; mit Einzahlungen TTWROR / Ulcer Index.}
+        \item{\code{serenity}}{Serenity Ratio nach KeyQuant (AlternativeSoft): (CAGR - risikoloser Zins) / (Ulcer Index · Pitfall), mit Einzahlungen TTWROR statt CAGR; Pitfall = CDaR / Volatilität. Eigene Festlegungen von SimLev (die Quelle nennt sie nicht): CDaR zum Niveau 95 \% = Mittel der Tages-Drawdowns ab ihrem 95-\%-Quantil, Volatilität jährlich wie bei sharpe (Standardabweichung der Überschussrenditen · Wurzel der Beobachtungen je Jahr), Rendite und Zins jährlich wie bei martin_ratio. NA ohne Drawdown oder ohne Schwankung. Seit 1.6.5 (bis 1.6.4 CAGR / (Ulcer Index · Max Drawdown)).}
+        \item{\code{martin_ratio}}{Ulcer Performance Index nach Martin:
+          (CAGR - risikoloser Zins) / Ulcer Index, mit Einzahlungen (TTWROR -
+          risikoloser Zins) / Ulcer Index; risikoloser Zins = mittlere jährliche Rate
+          wie \code{risk_free} (als Anteil). Seit 1.6.5 mit Abzug des Zinses (bis
+          1.6.4 ohne).}
         \item{\code{max_drawdown}}{Maximaler Drawdown (positiver Anteil).}
-        \item{\code{average_drawdown}}{Mittlerer Drawdown über alle Tage unter dem Höchststand.}
+        \item{\code{average_drawdown}}{Mittlere Tiefe an Tagen unter dem Höchststand
+          (Mittel der Tageswerte von \code{drawdowns} über alle Tage mit Drawdown größer 0;
+          lange Phasen zählen mit vielen Tagen, kein Mittel je Phase).}
         \item{\code{ulcer_index}}{Ulcer Index (Wurzel des mittleren quadrierten Drawdowns).}
         \item{\code{longest_drawdown}}{Längste Phase unter dem Höchststand in Kalendertagen.}
-        \item{\code{avg_recovery_time}}{Mittlere Erholungsdauer in Kalendertagen
-          (\code{NA}, wenn keine abgeschlossene Erholung).}
+        \item{\code{avg_recovery_time}}{Mittlere Dauer abgeschlossener Phasen unter
+          dem Höchststand: Zahl der Kalendertage unter dem Hoch je Phase, vom Tag nach
+          dem Hoch bis vor das neue Hoch (ganze Phase, nicht erst ab dem Tief; auch
+          Ein-Tages-Dellen zählen); eine am
+          Ende noch offene Phase zählt nicht mit (\code{NA}, wenn keine abgeschlossene
+          Erholung).}
       }
     }
     \item{\code{report}}{
@@ -366,12 +389,14 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
           \code{ttwror}, \code{buys}, \code{sells}, \code{avg_recovery_time} und
           alle Renditekennzahlen) bzw. zu wenige Tagesrenditen (Schiefe ab 3,
           Kurtosis ab 4, Sharpe ab 2).}
-        \item{\code{zero_start_value}}{Depotwert am Starttag nicht positiv
+        \item{\code{zero_start_value}}{Startbetrag (\code{start_value} plus Rate am Starttag) nicht positiv
           (\code{cagr}; wegen \code{start_value > 0} praktisch nicht erreichbar).}
         \item{\code{nonpositive_twr_index}}{zeitgewichteter Wertindex fällt auf 0
           oder darunter (Tagesrendite unter -100 \%): \code{ttwror}.}
-        \item{\code{zero_volatility}}{Standardabweichung der Tagesrenditen 0:
-          \code{skewness}, \code{kurtosis}, \code{sharpe}.}
+        \item{\code{zero_volatility}}{Standardabweichung der Tagesrenditen 0 (seit 1.6.5
+          auch reines Rundungsrauschen):
+          \code{skewness}, \code{kurtosis}, \code{sharpe}, \code{serenity}
+          (seit 1.6.5).}
         \item{\code{zero_mean_return}}{mittlere Tagesrendite 0: \code{cv}.}
         \item{\code{no_negative_returns}}{keine negativen (Überschuss-)Renditen:
           \code{sortino}, \code{omega}, \code{gain_to_pain}.}
@@ -422,7 +447,8 @@ Seit 1.6.4 darf date kein Faktor sein (vorher still in Text umgewandelt).}
     \item{\code{sells}}{Benannter Vektor. Mittlere Anzahl Verkäufe je Jahr und Asset
       (Einzeltag: \code{NA}).}
     \item{\code{fees_paid}}{Nur wenn \code{order_fee} oder \code{dca_fee}
-      eine Gebühr ungleich 0 festlegt: Summe der gezahlten Ordergebühren in EUR.}
+      eine Gebühr ungleich 0 festlegt oder (seit 1.6.5) \code{custody_fee} gesetzt ist: Summe der
+      gezahlten Order- und Depotgebühren in EUR.}
     \item{\code{harvest_days}}{Nur mit \code{tax_profile(harvest = harvest_rule())}: Date-Vektor
       der Termine der Gewinnrealisierung.}
     \item{\code{wrappers}}{Nur mit \code{details = TRUE} und Fonds-Wrapper-Assets
@@ -594,7 +620,8 @@ summary(result_tax)
 \section{print und summary}{
   \code{summary()} liefert unter anderem \code{total_return_twr}
   (zeitgewichtete Gesamtrendite: mit Einzahlungen letzter Wert von
-  \code{twr_index} minus 1, sonst Endwert / Depotwert am Starttag - 1),
+  \code{twr_index} minus 1, sonst Endwert / (\code{start_value} plus Rate am
+  Starttag) - 1; seit 1.6.5 zählen die Kaufkosten am Starttag mit),
   \code{return_on_invested} = (Endwert - Eingezahlt) / Eingezahlt mit
   Eingezahlt = letzter Wert von \code{invested} (brutto) und
   \code{total_return} als gleichwertigen Alias für \code{total_return_twr}

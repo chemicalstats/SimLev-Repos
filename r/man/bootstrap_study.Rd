@@ -94,19 +94,25 @@ Eintraege erhalten den Standardwert (Standard \code{list()} = alle
 Standardwerte). Je Verfahren werden nur die oben genannten Eintraege
 verwendet:
 \describe{
-\item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1,
-Standard 20) oder \code{"auto"} (\code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte
-\code{stationary}).}
+\item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1)
+oder \code{"auto"} (Standard seit 1.6.5, bis 1.6.4 fest 20; \code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte
+\code{stationary}); der gewaehlte Wert wird als Meldung ausgegeben.}
 \item{block_length}{Feste Blocklaenge in Zeilen fuer "block" und
-"circular" (ganze Zahl, Standard 20; bei "block" hoechstens Zeilen der
+"circular" (ganze Zahl; bei "block" hoechstens Zeilen der
 Historie minus 1, bei "circular" hoechstens Zeilen der Historie) oder
-\code{"auto"} (\code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte \code{circular}).}
+\code{"auto"} (Standard seit 1.6.5, bis 1.6.4 fest 20; \code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte \code{circular}).}
 \item{wild_type}{Gewichte beim Wild Bootstrap: 0 = Rademacher
 (Standard), 1 = Mammen, 2 = Standardnormal; andere Werte sind ein
 Fehler.}
 \item{n_regimes}{Anzahl Volatilitaetsregime fuer "regime" (Standard 2).}
-\item{vol_window}{Fensterlaenge der rollierenden Volatilitaet in Zeilen
-fuer "regime" (Standard 20).}
+\item{vol_window}{Fensterlaenge der rollierenden Volatilitaet fuer "regime"
+(Standard 20) in der Einheit von \code{vol_unit}; seit 1.6.5 hoechstens so lang wie die
+Historie (bis 1.6.4 still gekuerzt). \code{n_regimes} ist seit 1.6.5 hoechstens
+ein Regime je 10 Renditen.}
+\item{vol_unit}{Seit 1.6.5, nur "regime": \code{"rows"} (Standard, Fenster in Zeilen wie bis 1.6.4)
+oder \code{"days"} (Fenster in Kalendertagen ueber die Spalte \code{date} von \code{data}; Luecken
+wie Wochenenden oder Feiertage zaehlen mit, das Fenster enthaelt die Renditen der letzten
+\code{vol_window} Kalendertage).}
 \item{tail_prob}{Tail-Wahrscheinlichkeit je Seite als Anteil fuer "evt"
 und "tails" (Standard 0.05 = 5 Prozent).}
 \item{both_tails}{Logisch, nur "evt": auch den rechten Tail mit einer
@@ -134,7 +140,12 @@ ueber Hyperparameter (wie im Original). Das Budget \code{n} wird invers
 zur effektiven Stichprobengroesse (ESS) je Kombination verteilt; die
 Pfade erhalten Gewichte (Mittel 1), mit denen \code{\link[=bootstrap_probability]{bootstrap_probability()}}
 und \code{summary()} rechnen. Fuer "raw", "garch" und "gjr_garch" gibt es
-kein Standardgitter (dann normaler Bootstrap).}
+kein Standardgitter (dann normaler Bootstrap).
+Seit 1.6.5 ist die Summe der Pfade genau \code{n} (Rest nach groesstem Bruchteil verteilt;
+bis 1.6.4 durch Runden etwas mehr oder weniger); Kombinationen ohne Pfad entfallen mit
+einem Hinweis. Beim Verfahren "regime" rechnet die ESS mit den tatsaechlich verwendeten
+Regimen und dem Fenster der Kombination. Unbekannte Namen in \code{params} und
+\code{ess_grid} sind seit 1.6.5 ein Fehler (bis 1.6.4 still ignoriert).}
 
 \item{ess_grid}{Benannte Liste von Wertevektoren je Hyperparameter (z. B.
 \code{list(L = c(20, 50, 100))}); \code{NULL} (Standard) = Standardgitter
@@ -256,11 +267,10 @@ viele, wie der freie Speicher traegt, und
 nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
-Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
-rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl: SimLev misst und plant wie mit
+\code{"auto"}, nimmt aber hoechstens so viele Prozesse (bis 1.6.4 immer so viele Prozesse ohne Messung);
+unter Windows rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster; hoechstens Zahl der Prozessoren:
 mehr wird mit einem Hinweis begrenzt.
-Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
 In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
 \code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
 der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).

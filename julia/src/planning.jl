@@ -128,13 +128,23 @@ function series_shift_return(data, columns, target; type = ["returns", "prices"]
         length(unique(keys_)) < length(keys_) &&
             SimLev.chk_stop("rs.preise_doppelt", fn)
     end
+    # seit 1.6.5 (CR2-E-8): Werte > 0, bei Renditen Median >= 0.5, mindestens 2 Kurse bzw. eine Datumsspanne > 0
+    for k in columns
+        v = filter(!isnan, DA._f64(DA._as_numeric_col(data[k])))
+        any(<=(0), v) && SimLev.chk_stop("b1.ssr_werte", fn, k, SimLev.chk_msg(type == "returns" ? "b1.ssr_brutto" : "b1.ssr_kurse"))
+        type == "returns" && !isempty(v) && SimLev.r_median(v) < 0.5 &&
+            SimLev.chk_stop("b1.ssr_median", fn, k, SimLev.chk_msg("b1.ssr_brutto"))
+        type == "prices" && length(v) < 2 && SimLev.chk_stop("b1.ssr_kurz", fn)
+    end
+    span = nothing
+    if dd !== nothing
+        okd = filter(!isnan, dd)
+        span = isempty(okd) ? NaN : maximum(okd) - minimum(okd)
+    end
+    ppy === nothing && dd !== nothing && !(span > 0) && SimLev.chk_stop("b1.ssr_kurz", fn)
+    # seit 1.6.5 (CR2-E-7, K4): n - 1 Abstände auch bei Renditen (bis 1.6.4 n Renditen auf n - 1 Abstände)
     if ppy === nothing
-        if dd !== nothing
-            ok = filter(!isnan, dd)
-            ppy = (n - (type == "prices" ? 1 : 0)) / ((maximum(ok) - minimum(ok)) / 365.25)
-        else
-            ppy = 252.0
-        end
+        ppy = dd !== nothing ? (n - 1) / (span / 365.25) : 252.0
     end
     ppy = Float64(ppy)
     out = copy(data)
@@ -142,8 +152,15 @@ function series_shift_return(data, columns, target; type = ["returns", "prices"]
     shift = Dict{String,Float64}()
     for k in columns
         v = DA._as_numeric_col(data[k])
-        lr = type == "returns" ? SimLev.RLibm.log.(v) : (lv = SimLev.RLibm.log.(v[o]); Float64[lv[i] - lv[i-1] for i in 2:length(lv)])
-        g_hist = SimLev.r_mean(lr; na_rm = true)
+        g_hist = if type == "returns"
+            SimLev.r_mean(SimLev.RLibm.log.(v); na_rm = true)
+        else
+            # seit 1.6.5 (CR2-E-9): mittlere Log-Rendite aus erstem und letztem vorhandenen Kurs über ihren Zeilenabstand
+            vo = v[o]
+            okp = findall(x -> !isnan(x), vo)
+            a_ = okp[1]; b_ = okp[end]
+            (SimLev.RLibm.log(vo[b_]) - SimLev.RLibm.log(vo[a_])) / (b_ - a_)
+        end
         g_tgt = SimLev.RLibm.log1p(tg[k] / 100) / ppy
         delta = g_tgt - g_hist
         if type == "returns"
@@ -182,8 +199,26 @@ function _period_gross(df, columns, frequency, fn = nothing, land = nothing)
     for (j, k) in enumerate(columns)
         V[:, j] = DA._f64(SimLev.Backcast._fill_na(DA._as_numeric_col(df[k]), "locf"; keep_leading = true))[e]
     end
+    de = d[e]
+    # seit 1.6.5 (CR2-K-3): verwendete Periodenkurse endlich und > 0, sonst Fehler mit Spalte und Datum
+    fnm = fn === nothing ? "portfolio_returns" : fn
+    for (j, k) in enumerate(columns)
+        W._wd_check_level(V[:, j], [SimLev.fmt_date(Int(x)) for x in de], k, fnm)
+    end
     nr = size(V, 1)
     G = nr >= 1 ? V[2:end, :] ./ V[1:end-1, :] : zeros(0, length(columns))
+    # seit 1.6.5 (CR2-K-1): Rendite über eine fehlende Periode entfällt, mit Hinweis
+    km = DA._key_month(de)
+    yy = Int[k ÷ 100 for k in km]; mm = Int[k % 100 - 1 for k in km]
+    pn = frequency == "year" ? yy : frequency == "quarter" ? yy .* 4 .+ mm .÷ 3 : yy .* 12 .+ mm
+    dpn = diff(pn)
+    gap = findall(>(1), dpn)
+    if !isempty(gap)
+        SimLev.Bootstrap._message(SimLev.chk_msg("b1.periode_luecke", fnm, sum(dpn[gap] .- 1), land === nothing ? "" : " im Datensatz '$land'",
+                                SimLev.fmt_date(Int(de[gap[1]])), SimLev.fmt_date(Int(de[gap[1] + 1]))))
+        keep = trues(size(G, 1)); keep[gap] .= false
+        G = G[keep, :]
+    end
     ok = [!any(isnan, G[i, :]) for i in 1:size(G, 1)]
     SimLev.NamedMat(G[ok, :]; colnames = columns)
 end
@@ -221,6 +256,9 @@ lange Baissen) in die Planung ein - US-Daten allein überschätzen langfristige 
 - `years`: Länge jedes Pfads in Jahren (Standard 30); ergibt `years` x Perioden je Jahr (1, 4 bzw. 12)
   Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei `"quarter"` und `"month"` (vorher jede Zahl, die
   ganze Perioden ergab).
+- `periods`: Seit 1.6.5: Pfadlänge in Perioden der gewählten `frequency` (ganze Zahl von 1 bis 100 x Perioden je Jahr)
+  statt `years`; erlaubt Längen, die keine ganzen Jahre sind (z. B. 30 Monate). `years` muss dann beim Standard 30
+  bleiben, sonst Fehler. `nothing` (Standard) = `years` gilt.
 - `L`: Mittlere Blocklänge in Perioden der gewählten `frequency` (Blocklänge = 1 + geometrisch verteilte Zahl
   mit Mittel `L` - 1). `nothing` (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw. 120 Monate. Seit 1.6.4
   höchstens 100 Jahre (100 Jahre, 400 Quartale bzw. 1200 Monate).
@@ -275,8 +313,9 @@ println(size(pb["returns"]))   # 30 Jahre x 200 Pfade
 """
 function bootstrap_pooled(datasets, columns; weights = nothing, inflation = nothing,
                           frequency = ["year", "quarter", "month"], n = 1000, years = 30, L = nothing,
-                          country_weights = nothing, target = nothing, seed = nothing)
+                          country_weights = nothing, target = nothing, seed = nothing, periods = nothing)
     fn = "bootstrap_pooled"
+    _dict_warn(datasets, fn, "datasets")   # seit 1.6.5 (CR2-7, Entscheidung 185 K19)
     frequency = W._e3_match_arg(frequency, ["year", "quarter", "month"], fn, "frequency")
     dn, dv = DA._is_listlike(datasets) ? DA._list_items(datasets) : (nothing, Any[])
     (dn === nothing || isempty(dv) || any(==(""), dn)) && SimLev.chk_stop("ut2.datasets", "bootstrap_pooled")
@@ -302,6 +341,8 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
     # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; vorher
     # Baustein e3.jahre_perioden: jede Zahl > 0, die ganze Perioden ergab)
     years = SimLev.chk_jahre(years, fn, "years")
+    # seit 1.6.5 (Entscheidung 173): Pfadlänge wahlweise in Perioden von frequency (periods; years dann nur 30)
+    periods = W._chk_periods(years, periods, fn; ppy = _wd_ppy(frequency))
     L = SimLev.chk_num1(L, fn, "L"; lo = 1, null_ok = true)
     L === nothing || SimLev.chk_max(L, SimLev.SL_MAX_JAHRE * ppy, fn, "L")   # seit 1.6.4 höchstens 100 Jahre in Perioden (K43 T2-N1)
     if country_weights !== nothing
@@ -363,37 +404,19 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
         end
     end
     Lf = L === nothing ? Float64(10 * ppy) : Float64(L)
-    nper = Int(trunc(years * ppy)); nc = length(G)
+    nper = periods === nothing ? Int(trunc(years * ppy)) : Int(Float64(SimLev.chk_scalar(periods))); nc = length(G)
     cw = country_weights === nothing ? fill(1 / nc, nc) : DA._f64(country_weights)
     cw = cw ./ SimLev.r_sum(cw)
     nrs = [size(g, 1) for g in G]
     nn = Int(n)
-    function draw_all(rs)
-        out = Tuple{Vector{Int},Vector{Int}}[]
-        for _ in 1:nn
-            ctry = zeros(Int, nper); row = zeros(Int, nper); t = 1
-            while t <= nper
-                cidx = Int(first(SimLev.SLib.sample(nc, 1; prob = cw, stream = rs)))
-                len = 1 + first(SimLev.SLib.rgeom(1, 1 / Lf; stream = rs))
-                nr = nrs[cidx]
-                st = Int(first(SimLev.SLib.sample(nr, 1; stream = rs)))
-                take = Int(min(len, nper - t + 1))
-                for q in 1:take
-                    ctry[t-1+q] = cidx
-                    row[t-1+q] = ((st - 1 + q - 1) % nr) + 1
-                end
-                t += take
-            end
-            push!(out, (ctry, row))
-        end
-        out
-    end
-    draw = draw_all(SimLev.SLib.main_stream(seed, "bootstrap_pooled"))        # Hauptstrom
+    # seit 1.6.5 (Paket E, K40/CR2-6) im Kern (sl_pooled_draw): je Pfad und Block Land (Gewichte cw), Länge
+    # 1 + rgeom(1 / L) und Startzeile, dieselben Züge in derselben Reihenfolge wie bis 1.6.4 die Schleife hier
+    dc, dr = SimLev.SLib.pooled_draw(nrs, cw, Lf, nper, nn; stream = SimLev.SLib.main_stream(seed, "bootstrap_pooled"))   # Hauptstrom
     Gall = reduce(vcat, G)
     off = vcat(0, cumsum(nrs))[1:nc]
     gi = zeros(Int, nper, nn)
-    for (j, (c, r)) in enumerate(draw)
-        gi[:, j] = off[c] .+ r
+    for j in 1:nn
+        gi[:, j] = off[dc[:, j]] .+ dr[:, j]
     end
     A = Dict{String,Matrix{Float64}}()
     for c in unique(cols)
@@ -407,8 +430,8 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
     end
     Inf_m = inflation !== nothing ? A[String(inflation)] : ones(nper, nn)
     cmat = Matrix{String}(undef, nper, nn)
-    for (j, (c, _)) in enumerate(draw)
-        cmat[:, j] = dn[c]
+    for j in 1:nn
+        cmat[:, j] = dn[dc[:, j]]
     end
     assets = SimLev.RList()
     for k in columns
@@ -469,6 +492,7 @@ println(size(portfolio_returns(d, cand)))
 ```
 """
 function portfolio_returns(data, candidates; frequency = ["year", "quarter", "month"])
+    _dict_warn(candidates, "portfolio_returns", "candidates")   # seit 1.6.5 (CR2-7, K19)
     fn = "portfolio_returns"
     frequency = W._e3_match_arg(frequency, ["year", "quarter", "month"], fn, "frequency")
     # Eingaben vor der Rechnung prüfen (seit 1.6.4): Tabelle; Kandidaten als benannte Gewichtsvektoren mit endlichen
@@ -659,6 +683,9 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
     wmin = max(1e-6, minimum(pos) / 1000)
     lg = DA._vecf(SimLev.RStats.seq_len_out(SimLev.RLibm.log(wmin), SimLev.RLibm.log(wmax), Int(ceil(ngrid))))
     pts = SimLev.RLibm.exp.(lg)
+    # seit 1.6.5 (CR2-C-6): Rasterpunkte relativ näher als 1e-12 an Ziel oder Startwert entfallen
+    ex = goal > 0 ? [Float64(goal), Float64(start_value)] : [Float64(start_value)]
+    pts = Float64[v for v in pts if !any(e -> v != e && abs(v - e) <= 1e-12 * e, ex)]
     goal > 0 && push!(pts, goal)
     push!(pts, start_value)
     grid = sort(unique(pts))
@@ -677,23 +704,10 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
     pol = dp.policy
     Vt = Any[dp.value[:, t] for t in 1:horizon+1]
     p_dp = dp.p_dp
-    function run(rs)
-        W = fill(start_value, nsim)
-        choice = zeros(Int, horizon, nsim)
-        ruined = fill(false, nsim)
-        for t in 1:horizon
-            base = W .+ cf[t]
-            alive = (base .> 0) .& .!ruined
-            ruined = ruined .| .!alive
-            g = [max(1, min(ng, searchsortedlast(lgrid, SimLev.RLibm.log(max(w, wmin))))) for w in W]
-            k = pol[t, g]
-            choice[t, :] = k
-            draw = Vector{Int}(SimLev.SLib.sample(S, nsim; replace = true, stream = rs))
-            W = Float64[alive[i] ? base[i] * R[draw[i], k[i]] : 0.0 for i in 1:nsim]
-        end
-        SimLev.RList("terminal" => W, "choice" => choice, "success" => .!ruined .& (W .>= goal))
-    end
-    sim = run(SimLev.SLib.main_stream(seed, "planning_goal"))              # Hauptstrom
+    # seit 1.6.5 (CR2-C-7): Vorwärtssimulation in einer typisierten Funktion mit vorab angelegten Feldern (gleiche
+    # Ziehungen und Rechenschritte; bis 1.6.4 2,8-mal langsamer als Python)
+    sim = _goal_forward(SimLev.SLib.main_stream(seed, "planning_goal"), Float64(start_value), cf, Matrix{Int}(pol),
+                        Matrix{Float64}(R), Vector{Float64}(lgrid), Float64(wmin), ng, S, nsim, horizon, Float64(goal))
     p_sim = DA._mean_lgl(sim["success"])
     se = sqrt(p_sim * (1 - p_sim) / nsim)
     tol = 4 * sqrt(max(p_sim * (1 - p_sim), 1 / nsim) / nsim) + 0.01
@@ -707,12 +721,44 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
                  "contributions" => cf, "candidates" => cn; class = ["SimLevGoalPlan"])
 end
 
-_eur(v) = DA._strs(SimLev.RFmt.formatC(DA._rround.(DA._f64(v isa AbstractVector ? v : [v])); format = "d", big_mark = " "))
+# seit 1.6.5 (CR2-X37-2) über "f" (bis 1.6.4 "d": ab 2^31 "NA")
+_eur(v) = DA._strs(SimLev.RFmt.formatC(DA._rround.(DA._f64(v isa AbstractVector ? v : [v])); format = "f", digits = 0, big_mark = " "))
+
+function _goal_forward(rs, start_value::Float64, cf::Vector{Float64}, pol::Matrix{Int}, R::Matrix{Float64},
+                       lgrid::Vector{Float64}, wmin::Float64, ng::Int, S::Int, nsim::Int, horizon::Int, goal::Float64)
+    W = fill(start_value, nsim)
+    choice = zeros(Int, horizon, nsim)
+    ruined = fill(false, nsim)
+    base = Vector{Float64}(undef, nsim); alive = Vector{Bool}(undef, nsim); k = Vector{Int}(undef, nsim)
+    for t in 1:horizon
+        c = cf[t]
+        @inbounds for i in 1:nsim
+            b = W[i] + c
+            base[i] = b
+            a = (b > 0) & !ruined[i]
+            alive[i] = a
+            ruined[i] = ruined[i] | !a
+            g = max(1, min(ng, searchsortedlast(lgrid, SimLev.RLibm.log(max(W[i], wmin)))))
+            k[i] = pol[t, g]
+            choice[t, i] = k[i]
+        end
+        draw = SimLev.SLib.sample(S, nsim; replace = true, stream = rs)
+        @inbounds for i in 1:nsim
+            W[i] = alive[i] ? base[i] * R[Int(draw[i]), k[i]] : 0.0
+        end
+    end
+    SimLev.RList("terminal" => W, "choice" => choice, "success" => .!ruined .& (W .>= goal))
+end
+
+"""Julia `Dict` hat keine feste Reihenfolge: Hinweis, wo die Reihenfolge das Ergebnis bestimmt (seit 1.6.5, CR2-7,
+Entscheidung 185 K19; später ein Fehler)."""
+_dict_warn(x, fn, arg) = (x isa AbstractDict && !(x isa SimLev.RList) && length(x) > 1 && @warn SimLev.chk_msg("b1.dict_reihenfolge", fn, arg); nothing)
 
 "`print.SimLevGoalPlan`."
 function _print_goalplan(io::IO, x)
     cf = DA._f64(x["contributions"])
-    pay = any(!=(0), cf) ? ", Zahlungen " * join(_eur(unique(cf)), "/") * " je Periode" : ""
+    # seit 1.6.5 (CR2-X53-1): +0 und -0 als eine Zahlung (cf .+ 0.0 macht -0 zu +0; wie R unique)
+    pay = any(!=(0), cf) ? ", Zahlungen " * join(_eur(unique(cf .+ 0.0)), "/") * " je Periode" : ""
     print(io, DA._sp("Zielplanung: Ziel %s in %d Perioden, Start %s%s\n", _eur(x["goal"])[1], Int(x["horizon"]),
                      _eur(x["start_value"])[1], pay))
     pse = get(x, "probability_se", nothing)

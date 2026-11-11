@@ -139,15 +139,16 @@ def _r_round_vec(v):
 
 
 def _unique(v):
-    """``unique(v)`` mit Reihenfolge des ersten Auftretens."""
+    """``unique(v)`` mit Reihenfolge des ersten Auftretens. Seit 1.6.5 (CR2-M-3) über eine Menge (bis 1.6.4 Suche in
+    einer Liste, quadratisch); gleiche Schlüssel, gleiche Auswahl."""
     a = np.asarray(v)
-    seen = []
+    seen = set()
     keep = []
     for i, x in enumerate(a.tolist()):
         key = ("NaN",) if isinstance(x, float) and math.isnan(x) else (x,)
         if key in seen:
             continue
-        seen.append(key)
+        seen.add(key)
         keep.append(i)
     return a[keep]
 
@@ -230,7 +231,25 @@ class SimLevParamRange(RList):
     r_class = ("SimLevParamRange",)
 
     def format(self):
-        return "<SimLevParamRange [%s, %s]>" % (self["lower"], self["upper"])
+        # seit 1.6.5 (CR2-W4-3): eine Zeile wie im Parameterraum (bis 1.6.4 "<SimLevParamRange [lo, hi]>")
+        return "SimLev-Parameterbereich: " + _ps_range_text(self)
+
+
+def _ps_range_text(d):
+    """Bereichstext im Druck (R ``.ps_range_text``); Zahlen seit 1.6.5 (CR2-W2-3) ohne Exponentenschreibweise."""
+    from .config import _fmt15
+    rast = ("Schritt " + _fmt15(d["step"])) if d["step"] is not None else ("%d Punkte" % d["n"])
+    return "Bereich [%s, %s]%s%s, Raster %s" % (_fmt15(d["lower"]), _fmt15(d["upper"]),
+                                                " ganzzahlig" if d["integer"] else "", " log" if d["log"] else "", rast)
+
+
+def _ps_fmt_num(d):
+    """Rasterwerte im Druck (R ``.ps_fmt_num``): Zahlen einzeln ohne Exponentenschreibweise, sonst ``format(d)``."""
+    a = np.asarray(d)
+    if a.dtype.kind in "iuf" and a.size and bool(np.all(np.isfinite(a.astype(np.float64)))):
+        from .config import _fmt15
+        return [_fmt15(x) for x in a.tolist()]
+    return [str(t) for t in np.atleast_1d(_fmt.format(d))]
 
 
 class SimLevParamSpace(RList, _PrintFormat):
@@ -241,13 +260,12 @@ class SimLevParamSpace(RList, _PrintFormat):
     def format(self):
         out = ["SimLev-Parameterraum"]
         for k, d in self.items():
+            # seit 1.6.5 (CR2-W2-3): Grenzen und Zahlen einzeln ohne Exponentenschreibweise (bis 1.6.4 %g bzw.
+            # format(d) gemeinsam)
             if isinstance(d, SimLevParamRange):
-                rast = ("Schritt " + _fmt.paste(d["step"])) if d["step"] is not None else ("%d Punkte" % d["n"])
-                out.append(_fmt.sprintf("  %-14s Bereich [%g, %g]%s%s, Raster %s", k, float(d["lower"]), float(d["upper"]),
-                                        " ganzzahlig" if d["integer"] else "", " log" if d["log"] else "", rast))
+                out.append(_fmt.sprintf("  %-14s %s", k, _ps_range_text(d)))
             else:
-                f = [str(s) for s in np.atleast_1d(_fmt.format(d))]
-                out.append(_fmt.sprintf("  %-14s %s", k, ", ".join(f[:12])))
+                out.append(_fmt.sprintf("  %-14s %s", k, ", ".join(_ps_fmt_num(d)[:12])))
         return "\n".join(out)
 
 
@@ -265,10 +283,12 @@ def param_space(*args, **dims):
             ohne ``builder`` zu Argumentnamen von ``simulation()`` bzw. Pfaden zu Parametern der Bausteine wie
             ``dca.value`` oder ``rebalance.thresh``). Jede ist entweder ein nicht leerer atomarer Vektor diskreter
             Werte (numerisch, Zeichen, logisch) oder ein Bereich aus ``param_range()``. Bei ``print()`` ungenutzt.
+            Seit 1.6.5 sind doppelte Namen und Datumswerte ein Fehler.
         **dims: Benannte Dimensionen (alle Namen Pflicht; sie werden zu den Namen der Liste ``p`` im ``builder``,
             ohne ``builder`` zu Argumentnamen von ``simulation()`` bzw. Pfaden zu Parametern der Bausteine wie
             ``dca.value`` oder ``rebalance.thresh``). Jede ist entweder ein nicht leerer atomarer Vektor diskreter
             Werte (numerisch, Zeichen, logisch) oder ein Bereich aus ``param_range()``. Bei ``print()`` ungenutzt.
+            Seit 1.6.5 sind doppelte Namen und Datumswerte ein Fehler.
 
     Returns:
         ``param_space``: Objekt der Klasse ``SimLevParamSpace`` (benannte Liste der Dimensionen); ``param_range``:
@@ -281,25 +301,40 @@ def param_space(*args, **dims):
         print(simlev.param_space(n=[50, 100, 200], w=simlev.param_range(0.3, 0.9, step=0.1)))
     """
     if args or not dims:
-        raise ValueError("param_space: alle Dimensionen müssen benannt sein.")
+        chk_stop("b2b.m_param_space")
     out = SimLevParamSpace()
     for k, v in dims.items():
         if k == "":
-            raise ValueError("param_space: alle Dimensionen müssen benannt sein.")
+            chk_stop("b2b.m_param_space")
     for k, v in dims.items():
         if isinstance(v, SimLevParamRange):
             out[k] = v
             continue
         if isinstance(v, pd.Categorical) or (isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype)):
             continue   # R: Faktor ist atomar; Meldung unten (Entscheidung 15)
+        # seit 1.6.5 (CR2-W2-4, Entscheidung 189): Datum als Rasterwert abgelehnt wie in R und Julia
+        if _is_date_dim(v):
+            chk_stop("b2b.dim_datum", "param_space", k)
         a = _as_atomic(v)
         if a is None or not len(a):
-            raise ValueError("param_space: Dimension '%s' muss ein Vektor oder param_range() sein." % k)
+            chk_stop("b2b.m_param_space_2", k)
         out[k] = a
     for k, v in dims.items():   # seit 1.6.4 (Entscheidung 15): keine Kategorie
         if (isinstance(v, pd.Categorical) or (isinstance(v, pd.Series) and isinstance(v.dtype, pd.CategoricalDtype))):
             chk_stop("faktor", "param_space", k)
     return out
+
+
+def _is_date_dim(v):
+    """Datum, Zeitpunkt oder Zeitspanne als Dimension (R: ``Date``, ``POSIXt``, ``difftime``)."""
+    import datetime as _dt
+    if isinstance(v, (_dt.date, _dt.timedelta, np.datetime64, np.timedelta64, pd.Timestamp, pd.Timedelta)):
+        return True
+    if isinstance(v, (pd.Series, pd.Index, np.ndarray)):
+        return np.asarray(v).dtype.kind in "mM"
+    if isinstance(v, (list, tuple)):
+        return any(isinstance(e, (_dt.date, _dt.timedelta, np.datetime64, np.timedelta64)) for e in v)
+    return False
 
 
 def param_range(lower, upper, *, n=5, step=None, integer=False, log=False):
@@ -316,10 +351,12 @@ def param_range(lower, upper, *, n=5, step=None, integer=False, log=False):
             True`` ``lower > 0``).
             Seit 1.6.4 je eine endliche Zahl.
         n: Anzahl Rasterpunkte des Bereichs bei ``method = "grid"`` (ganze Zahl von 1 bis 1e6, Standard 5); wird
-            ignoriert, wenn ``step`` angegeben ist.
+            ignoriert, wenn ``step`` angegeben ist; mit ``step`` wird ``n`` seit 1.6.5 nicht geprüft (ungültige Werte
+            als ``None`` abgelegt).
         step: Schrittweite des Rasters in der Einheit des Parameters (``seq(lower, upper, by = step)``, > 0); hat
             Vorrang vor ``n`` und ``log`` (``log`` gilt dann nur für Zufallsziehungen). ``None`` (Standard) =
             ``n`` Punkte.
+            Seit 1.6.5 höchstens 1e6 Rasterpunkte (⌊(upper - lower)/step⌋ + 1).
         integer: Logisch (Standard ``False``): Raster- und Zufallswerte auf ganze Zahlen runden; doppelte
             Rasterwerte entfallen.
             Seit 1.6.4 nur TRUE oder FALSE.
@@ -351,12 +388,22 @@ def param_range(lower, upper, *, n=5, step=None, integer=False, log=False):
     if log and lower <= 0:
         raise ValueError("param_range: log = TRUE erfordert lower > 0.")
     if step is None and (not _is_numeric_scalar(n) or not math.isfinite(n) or n < 1 or n != _r_round_vec([n])[0]):
-        raise ValueError("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein.")
+        chk_stop("b2b.m_param_range")
     if step is None:
         chk_max(n, SL_MAX_GITTER, "param_range", "n")   # seit 1.6.4 (B-004, wie n_grid; Entscheidung 16)
     if step is not None and (not _is_numeric_scalar(step) or not math.isfinite(step) or step <= 0):
-        raise ValueError("param_range: step muss eine Zahl > 0 sein.")
-    return SimLevParamRange(lower=_py(lower), upper=_py(upper), n=int(n), step=None if step is None else _py(step),
+        chk_stop("b2b.m_param_range_2")
+    if step is not None:
+        # seit 1.6.5 (CR2-M-5): Stufenzahl mit step höchstens 1e6 wie n; n wird mit step nicht verwendet und nur als
+        # ganze Zahl von 1 bis 1e6 abgelegt, sonst None (bis 1.6.4 int(n), Rohfehler bei NaN oder Text)
+        ns = math.floor((float(upper) - float(lower)) / float(step) + 1e-10) + 1
+        if ns > SL_MAX_GITTER:
+            chk_stop("b2b.step_punkte", "param_range", "%.0f" % ns, "%.0f" % SL_MAX_GITTER)
+        ok = (_is_numeric_scalar(n) and math.isfinite(n) and n >= 1 and n == _r_round_vec([n])[0] and n <= SL_MAX_GITTER)
+        n = int(n) if ok else None
+    else:
+        n = int(n)
+    return SimLevParamRange(lower=_py(lower), upper=_py(upper), n=n, step=None if step is None else _py(step),
                             integer=bool(integer), log=bool(log))
 
 
@@ -459,8 +506,12 @@ def _ps_design(space, method, n, constraint, stream=None):
             D = Dc[np.array(keep, dtype=bool)].reset_index(drop=True) if len(Dc) else Dc
             tries += 1
         D = D.iloc[:int(n)] if n >= 0 else D.iloc[:max(len(D) + int(n), 0)]
+        # seit 1.6.5 (CR2-A-7, Entscheidung 185 K22): Hinweis, wenn der Plan weniger als n zulässige Punkte hat
+        if len(D) and len(D) < n:
+            from ._util import _message
+            _message(chk_msg("b2b.weniger_punkte", "param_search", len(D), int(n)))
     if not len(D):
-        raise ValueError("param_search: kein zulässiger Punkt im Suchraum (constraint prüfen).")
+        chk_stop("b2b.m_ok_rows")
     return D.reset_index(drop=True)
 
 
@@ -564,7 +615,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             gleichmäßige Abdeckung bei vielen Dimensionen).
         n: Anzahl Punkte bei ``"random"`` und ``"lhs"`` (ganze Zahl, Standard 50); bei ``"grid"`` ignoriert.
             Doppelte Punkte werden entfernt und in höchstens 20 Runden nachgezogen; es können weniger Punkte
-            entstehen.
+            entstehen (seit 1.6.5 mit Hinweis).
             Seit 1.6.4 höchstens 10^8.
         constraint: Optional ``function(p)``, die ``True`` für zulässige Punkte liefert (z. B. Gewichte summieren
             sich höchstens zu 1); Punkte ohne ``True`` entfallen. ``None`` (Standard) = alle Punkte.
@@ -575,7 +626,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             ergeben einen Fehler, der den Baustein nennt.
         burn_in: Anzahl Zeilen am Anfang von ``data`` (bei Tagesdaten: Tage), die nach der Signalberechnung
             verworfen werden (Signal-Vorlauf; ganze Zahl, Standard 0).
-            Seit 1.6.4 eine ganze Zahl ≥ 0.
+            Seit 1.6.4 eine ganze Zahl ≥ 0; seit 1.6.5 kleiner als die Zahl der Datenzeilen (vorab geprüft).
         metrics: Funktion ``SimLevResult ->`` benannter numerischer Vektor (Standard
             ``bootstrap_study_metrics()``: u. a. ``cagr``, ``max_drawdown`` als Anteil, ``sharpe``; ``cagr`` ist
             mit Sparplan geldgewichtet, XIRR).
@@ -583,6 +634,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).
         objective: Name der Zielgröße (Element von ``metrics``, Standard ``"sharpe"``) für Ranking, Plateau und
             ``param_bootstrap()``.
+            Seit 1.6.5 nach dem ersten Punkt geprüft (vorher nach allen Punkten).
         maximize: Logisch: Zielgröße maximieren (Standard ``True``; ``False`` z. B. für ``max_drawdown``).
         keep_returns: ``"day"`` (Standard): tägliche Renditen je Punkt speichern (nötig für ``overfit_pbo()``,
             ``sharpe_deflated()``, ``overfit_walk_forward()``, ``overfit_reality_check()``, ``sharpe_haircut()``);
@@ -603,10 +655,9 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             In Julia erscheinen Ausgaben, die
             eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
             Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
@@ -654,7 +705,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
     method = _match_arg(method, ("grid", "random", "lhs"), "method")
     # Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
     if isinstance(keep_returns, (bool, np.bool_)):
-        raise ValueError("param_search: keep_returns ist \"day\" oder \"none\" (früher TRUE/FALSE).")
+        chk_stop("b2b.m_param_search")
     _e5_choice(keep_returns, ("day", "none"), "param_search", "keep_returns")
     keep_returns = _match_arg(keep_returns, ("day", "none"), "keep_returns")
     keep_ret = keep_returns == "day"
@@ -662,8 +713,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
     fn = "param_search"
     from ._sim_base import _Frame
     if not isinstance(data, (pd.DataFrame, _Frame)):
-        raise ValueError("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s)."
-                         % chk_msg("tabelle.formen"))
+        chk_stop("a.m_sim_check_inputs", chk_msg("tabelle.formen"))
     if len(data) == 0 if isinstance(data, pd.DataFrame) else data.nrow == 0:   # seit 1.6.4 vorab (Entscheidung 38)
         chk_stop("zeilen_keine", fn, "data")
     if builder is not None and not callable(builder):
@@ -682,6 +732,10 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
     from .sensitivity import _e2_sim_args
     sim_args = _e2_sim_args(sim_args, fn)
     burn_in = chk_int1(burn_in, fn, "burn_in", lo=0)
+    # seit 1.6.5 (CR2-A-7): burn_in kleiner als die Zahl der Datenzeilen, vorab
+    nrow_d = len(data) if isinstance(data, pd.DataFrame) else data.nrow
+    if burn_in >= nrow_d:
+        chk_stop("b2b.burn_in", fn, int(burn_in), int(nrow_d))
     if metrics is not None and not callable(metrics):
         chk_stop("e2.funktion", fn, "metrics")
     objective = chk_name1(objective, fn, "objective")
@@ -691,12 +745,12 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
     if metrics is None:
         metrics = _ext("bootstrap", "bootstrap_study_metrics")
     if isinstance(space, (list, tuple, np.ndarray)):   # R: unbenannter Vektor -> param_space-Meldung
-        raise ValueError("param_space: alle Dimensionen müssen benannt sein.")
+        chk_stop("b2b.m_param_space")
     if not isinstance(space, SimLevParamSpace):
         space = param_space(**dict(space))
     if builder is None:
         if strategy is None:
-            raise ValueError("param_search: 'builder' oder 'strategy' angeben.")
+            chk_stop("b2b.m_param_search_3")
         fixed = strategy
         from ._sim_blocks import _sim_check_names
         _sim_check_names(list(space.keys()), "param_search")   # Dimensionen = Argumente von simulation() bzw. Pfade
@@ -731,7 +785,14 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             out["date"] = np.asarray(ix["date"]).astype("datetime64[D]")
             out["ret"] = v[1:] / v[:-1] - 1
         return out
-    out = list(_par_lapply(list(range(len(design))), run, cores))
+    # seit 1.6.5 (CR2-W1-3): der erste Punkt vorab, damit Namen der Kennzahlen und objective vor der ganzen Rechnung
+    # geprüft werden (bis 1.6.4 erst nach allen Punkten)
+    first = run(0)
+    if first["m"] is not None:
+        chk_kennzahlen(list(first["m"].index), len(first["m"]), ["id"] + [str(k) for k in design.columns] + ["error"], fn)
+        if objective not in [str(k) for k in first["m"].index]:
+            chk_stop("rs.objective", fn, objective, ", ".join(str(k) for k in first["m"].index))
+    out = [first] + (list(_par_lapply(list(range(1, len(design))), run, cores)) if len(design) > 1 else [])
     okm = [o for o in out if o["m"] is not None]
     if not okm:
         raise ValueError("param_search: alle Punkte fehlgeschlagen, z. B.: %s" % out[0]["err"])
@@ -860,11 +921,8 @@ def _ps_neighbours(x, radius=1, k=5):
             zs.append((r - r.min()) / (r.max() - r.min()))
         else:
             zs.append(r * 0)
-    nr = len(P)
-    if nr == 1:
-        Z = np.array([z[0] for z in zs], dtype=np.float64).reshape(-1, 1)   # vapply liefert einen Vektor
-    else:
-        Z = np.column_stack(zs)
+    # seit 1.6.5 (CR2-X1-1): immer eine Zeile je Punkt (bis 1.6.4 bei genau einem Punkt p Zeilen wie R)
+    Z = np.column_stack(zs)
     D = _dist_matrix(Z)
     m = min(k, Z.shape[0])
     return [np.argsort(D[i], kind="stable")[:m].astype(np.int64) + 1 for i in range(Z.shape[0])]
@@ -936,8 +994,10 @@ def param_plateau(x, *, metric=None, radius=1, k=5):
         die Nachbarschaft, fehlende Werte ignoriert), ``plateau_min`` (ungünstigster Wert der Nachbarschaft: bei
         der Zielgröße je nach ``x["maximize"]`` das Minimum bzw. Maximum; bei anderen Kennzahlen das Maximum für
         ``max_drawdown``, ``avg_drawdown``, ``dd_q50``, ``dd_q90``, ``ulcer_index`` und ``longest_drawdown``
-        (kleiner = besser), sonst das Minimum) und ``neighbours`` (Anzahl Punkte der Nachbarschaft). Die Einheit
-        entspricht der Kennzahl.
+        (kleiner = besser), sonst das Minimum), ``neighbours`` (Anzahl Punkte der Nachbarschaft) und ``valid``
+        (seit 1.6.5: Anzahl Punkte der Nachbarschaft mit Wert). Die Einheit entspricht der Kennzahl. Seit 1.6.5 haben
+        Punkte ohne eigenen Wert (fehlgeschlagen oder NA) kein Plateau: ``plateau_mean`` und ``plateau_min`` sind dort
+        NA.
 
     Details:
         Rasterstufen sind die Positionen in den Rasterwerten jeder Dimension des Suchraums. Im rangskalierten Raum
@@ -977,10 +1037,14 @@ def param_plateau(x, *, metric=None, radius=1, k=5):
         if not a.size:
             return math.inf if lower_better is False else -math.inf
         return float(a.max()) if lower_better else float(a.min())
+    # seit 1.6.5 (CR2-R-1, Entscheidung 189): Punkte ohne eigenen Wert ohne Plateau (NA); Spalte valid
+    own = ~np.isnan(v)
     return pd.DataFrame({"id": tab["id"].to_numpy(), "value": v,
-                         "plateau_mean": np.array([r_mean(v[j - 1], na_rm=True) for j in nb], dtype=np.float64),
-                         "plateau_min": np.array([worst(v[j - 1]) for j in nb], dtype=np.float64),
-                         "neighbours": np.array([len(j) for j in nb], dtype=np.int64)})
+                         "plateau_mean": np.array([r_mean(v[j - 1], na_rm=True) if o else _NAN for j, o in zip(nb, own)],
+                                                  dtype=np.float64),
+                         "plateau_min": np.array([worst(v[j - 1]) if o else _NAN for j, o in zip(nb, own)], dtype=np.float64),
+                         "neighbours": np.array([len(j) for j in nb], dtype=np.int64),
+                         "valid": np.array([int((~np.isnan(v[j - 1])).sum()) for j in nb], dtype=np.int64)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1056,7 +1120,7 @@ def summary(object, top=10, **kwargs):  # noqa: A002 - R-Argumentname
         return _summary_param_search(object, top=top)
     if hasattr(object, "summary"):
         return object.summary(**kwargs)
-    raise TypeError("summary: kein passendes Objekt")
+    chk_stop("e5.methode", "summary")   # seit 1.6.5 (CR2-O-7) wie simlev.summary (bis 1.6.4 TypeError)
 
 
 def _ps_same(a, b):
@@ -1071,6 +1135,31 @@ def _ps_same(a, b):
     if fa and math.isnan(a):
         return False
     return bool(a == b)
+
+
+def _ps_key(a):
+    """Schlüssel mit derselben Gleichheit wie ``_ps_same`` (NA, NaN je eigener Schlüssel, sonst ``==``)."""
+    if a is None:
+        return ("NA",)
+    if isinstance(a, (float, np.floating)) and math.isnan(a):
+        return ("NaN",)
+    return a
+
+
+def _ps_groups(g, lev):
+    """Zeilen je Stufe (0-basiert, in Tabellenreihenfolge), seit 1.6.5 (CR2-D-16) in einem Durchgang statt jede Stufe
+    gegen jede Zeile; gleiche Auswahl wie ``[_ps_same(e, lv) for e in g]``."""
+    pos = {}
+    for i, lv in enumerate(lev):
+        pos.setdefault(_ps_key(lv), []).append(i)   # mehrere Stufen mit gleichem Schlüssel (z. B. 0.0 und -0.0)
+    out = [[] for _ in lev]
+    idx = []
+    for r, e in enumerate(g):
+        ks = pos.get(_ps_key(e), ())
+        for k in ks:
+            out[k].append(r)
+        idx.append(ks)
+    return [np.asarray(o, dtype=np.int64) for o in out], idx
 
 
 def _ps_formatv(vals):
@@ -1111,7 +1200,8 @@ def _plot_param_search(x, metric=None, params=None, fun=max):
     if len(params) == 1:
         g = _ps_col(tab, params[0])
         lev = _jl_sort_levels(g)
-        a = [agg(vals[np.array([_ps_same(e, lv) for e in g], dtype=bool)]) for lv in lev]
+        grp, _ = _ps_groups(g, lev)
+        a = [agg(vals[ix]) for ix in grp]
         xs = [float(lv) if _is_numeric_scalar(lv) else float(i + 1) for i, lv in enumerate(lev)]
         p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(a), title="%s nach %s" % (metric, params[0]),
                        xlab=params[0], ylab=metric)
@@ -1137,14 +1227,17 @@ def _plot_param_search(x, metric=None, params=None, fun=max):
     l1 = _jl_sort_levels(g1)
     l2 = _jl_sort_levels(g2)
     M = np.full((len(l1), len(l2)), _NAN)
-    # Zugehörigkeit je Stufe einmal (seit 1.6.3; _ps_same ist rein, also gleiche Auswahl wie je Zelle)
-    m1 = [np.array([_ps_same(u, a) for u in g1], dtype=bool) for a in l1]
-    m2 = [np.array([_ps_same(w, b) for w in g2], dtype=bool) for b in l2]
-    for i, a in enumerate(l1):
-        for j, b in enumerate(l2):
-            sel = m1[i] & m2[j]
-            if sel.any():
-                M[i, j] = agg(vals[sel])
+    # Zugehörigkeit je Stufe einmal (seit 1.6.3); seit 1.6.5 (CR2-D-16) Zellen in einem Durchgang (bis 1.6.4 jede
+    # Stufe gegen jede Zeile und jede Zelle als Maske): gleiche Zeilen je Zelle in Tabellenreihenfolge
+    _, i1 = _ps_groups(g1, l1)
+    _, i2 = _ps_groups(g2, l2)
+    cell = {}
+    for r in range(len(g1)):
+        for a in i1[r]:
+            for b in i2[r]:
+                cell.setdefault((a, b), []).append(r)
+    for (i, j), rr in cell.items():
+        M[i, j] = agg(vals[np.asarray(rr, dtype=np.int64)])
     fin = [float(v) for v in M.ravel(order="F") if not math.isnan(v)]
     if fin:
         lo = hi = fin[0]

@@ -30,21 +30,21 @@ function _blk_num(who, x, arg, what; mn = 0.0, null_ok = false)
     @nospecialize
     x === nothing && null_ok && return nothing
     if !_blk_one(x) || (mn !== nothing && x < mn)
-        error("$who: '$arg' muss $what sein.")
+        chk_stop("a.m_blk_num", who, arg, what)
     end
     return nothing
 end
 
 function _blk_lgl(who, x, arg)
     @nospecialize
-    x isa Bool || error("$who: '$arg' muss TRUE oder FALSE sein.")
+    x isa Bool || chk_stop("a.m_blk_lgl", who, arg)
     return nothing
 end
 
 function _blk_frac_warn(who, x, arg, hi = 1.0)
     @nospecialize
     if _blk_one(x) && 0 < x < hi
-        @warn "$who: $arg = $(r_format1(x)) wird als $(r_format1(x)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(x * 100))."
+        @warn chk_msg("e.prozent_anteil", who, arg, r_format1(x), r_format1(x), r_format1(x * 100))
     end
     return nothing
 end
@@ -56,11 +56,11 @@ function _blk_days(who, x)
     flat = !(x isa AbstractMatrix || (x isa Union{AbstractVector,Tuple} && any(e -> e isa Union{AbstractArray,Tuple}, x)))
     v = flat ? _num_vec(x) : nothing
     if v === nothing || isempty(v) || any(isnan, v) || any(d -> d < 1 || d > 31 || d != r_round(d), v)
-        error("$who: days muss ganze Zahlen von 1 bis 31 enthalten.")
+        chk_stop("a.m_blk_days", who)
     end
     u = unique(v)
     if length(u) < length(v)
-        @warn "$who: days enthält doppelte Tage ($(join(r_format(v), ", "))); jeder Tag ergibt nur einen Termin, verwendet wird days = $(r_deparse(u))."
+        @warn chk_msg("a.m_blk_days_2", who, join([_blk_fmt(e) for e in v], ", "), r_deparse(u))
         return u
     end
     return x
@@ -72,11 +72,12 @@ function _blk_start(who, x)
     @nospecialize
     x === nothing && return nothing
     d = try
-        _is_date_like(x) ? _as_date(chk_scalar(x)) : nothing
+        # seit 1.6.5 (Entscheidung 185 K27) Text nach der Regel von .to_date() (bis 1.6.4 wie as.Date)
+        _is_date_like(x) ? _start_date(chk_scalar(x), "$who: start") : nothing
     catch
         nothing
     end
-    d === nothing && error("$who: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+    d === nothing && chk_stop("a.m_blk_start", who)
     return nothing
 end
 
@@ -99,13 +100,16 @@ function _blk_check_taxable_income(x, years::Vector{Int}, who::String = "simulat
             j !== nothing && (vc = j; break)
         end
         if yc === nothing || vc === nothing
-            ncol(x) != 2 && error("$who: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: $(join(names(x), ", ")).")
+            ncol(x) != 2 && chk_stop("a.m_check_taxable_income", who, join(names(x), ", "))
             yc, vc = 1, 2
         end
         kind, col = _column(x.cols[vc])
-        kind != :numeric && error("$who: taxable_income: Spalte '$(names(x)[vc])' (Betrag) muss numerisch sein.")
+        kind != :numeric && chk_stop("a.m_check_taxable_income_2", who, names(x)[vc])
         vals = collect(Float64, col)
-        nms = [_isna_val(v) ? "NA" : yrname(v) for v in x.cols[yc]]
+        # seit 1.6.5 (CR2-C-2, CR2-D-15): fehlendes Jahr mit eigener Meldung, in allen drei Sprachen gleich
+        iy = findfirst(_isna_val, x.cols[yc])
+        iy === nothing || chk_stop("a.zve_jahr_na", who, iy, names(x)[yc])
+        nms = [yrname(v) for v in x.cols[yc]]
     elseif x isa RVector
         vals = _num_vec(x.values)
         x.names !== nothing && (nms = copy(x.names))
@@ -119,7 +123,7 @@ function _blk_check_taxable_income(x, years::Vector{Int}, who::String = "simulat
         vals = _num_vec(x)
     end
     vals !== nothing && isempty(vals) && (vals = nothing)
-    (vals === nothing || x isa AbstractMatrix) && error("$who: taxable_income muss $form sein.")
+    (vals === nothing || x isa AbstractMatrix) && chk_stop("a.m_check_taxable_income_3", who, form)
     for (i, v) in enumerate(vals)
         isfinite(v) || error("$who: taxable_income enthält einen ungültigen Wert" *
                              (nms !== nothing ? " (für $(nms[i]))" : "") * "; erwartet werden endliche Beträge in EUR.")
@@ -135,11 +139,11 @@ function _blk_check_taxable_income(x, years::Vector{Int}, who::String = "simulat
         t = strip(nm, (' ', '\t', '\r', '\n'))
         y = occursin(r"^-?[0-9]+$", t) ? tryparse(Int, t) : nothing
         y !== nothing && abs(y) > 2147483647 && (y = nothing)
-        (y === nothing || string(y) != t) && error("$who: taxable_income: Name '$nm' ist kein Kalenderjahr (erwartet z. B. \"2024\").")
+        (y === nothing || string(y) != t) && chk_stop("a.m_check_taxable_income_5", who, nm)
         push!(yy, y)
     end
     for (i, y) in enumerate(yy)
-        y in yy[1:i-1] && error("$who: taxable_income: Jahr $y kommt mehrfach vor.")
+        y in yy[1:i-1] && chk_stop("a.m_yrname", who, y)
     end
     miss = [y for y in years if !(y in yy)]
     if !isempty(miss)
@@ -178,7 +182,7 @@ end
 function _blk_check(x, cls, arg, ctor)
     @nospecialize
     if x !== nothing && !inherits(x, cls)
-        error("simulation: $arg muss NULL oder ein Objekt aus $ctor() sein.")   # seit 1.6.4 ohne Klasse
+        chk_stop("a.m_blk_check", arg, ctor)   # seit 1.6.4 ohne Klasse
     end
     return nothing
 end
@@ -194,7 +198,19 @@ function _blk_print(io::IO, title, rows)
     return nothing
 end
 
-_blk_fmt(x) = r_format1(Float64(x); digits = 15)
+# seit 1.6.5 (CR2-W2-3) fuer 0 und 1e-4 <= |x| < 1e15 ohne Exponentenschreibweise (R: scientific = FALSE)
+function _blk_fmt(x)
+    v = Float64(x)
+    return isfinite(v) && (v == 0 || 1e-4 <= abs(v) < 1e15) ? r_format1(v; digits = 15, scientific = false) :
+           r_format1(v; digits = 15)
+end
+
+"Depotgebühr (seit 1.6.5; R `.blk_custody_text`)."
+function _blk_custody_text(x)
+    @nospecialize
+    s = _is_num(x) ? "$(_blk_fmt(x)) EUR" : replace(_blk_fee_text(x), " %" => " % des Depotwerts"; count = 1)
+    return "$s je Jahr (am 31.12., im ersten und im letzten Jahr anteilig)"
+end
 
 function _blk_fee_text(x)
     @nospecialize
@@ -203,12 +219,13 @@ function _blk_fee_text(x)
     d = Dict(_kvpairs(x))
     g(k) = get(d, k, nothing)
     p = String[]
-    g("fixed") === nothing || push!(p, "$(_blk_fmt(g("fixed"))) EUR")
-    g("percent") === nothing || push!(p, "$(_blk_fmt(g("percent"))) %")
+    # seit 1.6.5 (CR2-G-5): Nullbeträge und max = Inf erscheinen nicht
+    (g("fixed") === nothing || Float64(g("fixed")) == 0) || push!(p, "$(_blk_fmt(g("fixed"))) EUR")
+    (g("percent") === nothing || Float64(g("percent")) == 0) || push!(p, "$(_blk_fmt(g("percent"))) %")
     s = isempty(p) ? "0 EUR" : join(p, " + ")
     q = String[]
-    g("min") === nothing || push!(q, "mindestens $(_blk_fmt(g("min"))) EUR")
-    g("max") === nothing || push!(q, "höchstens $(_blk_fmt(g("max"))) EUR")
+    (g("min") === nothing || Float64(g("min")) == 0) || push!(q, "mindestens $(_blk_fmt(g("min"))) EUR")
+    (g("max") === nothing || Float64(g("max")) == Inf) || push!(q, "höchstens $(_blk_fmt(g("max"))) EUR")
     isempty(q) || (s = "$s ($(join(q, ", ")))")
     return s
 end
@@ -270,6 +287,15 @@ startender Assets wird dann über das Rebalancing gekauft); nur mit `event_col`,
 `skip = true` wird ausschließlich an Ereignistagen umgeschichtet. `tax = tax_profile()` steht für die
 persönliche Besteuerung.
 
+# Rechtsstand
+Die Steuerrechnung (`tax_profile()`, `income_rate()`, `income_tariff()`, Vorabpauschale) wendet auf alle
+simulierten Jahre das heutige Recht an, auch in Rückrechnungen über frühere Jahre: Investmentsteuergesetz in der
+Fassung ab 2018 (Teilfreistellung, Vorabpauschale), Sparer-Pauschbetrag und Freigrenze nach § 23 EStG mit den
+angegebenen Beträgen (Standard je 1000 EUR, für alle Jahre gleich) und der Einkommensteuertarif der Tarifdatei
+(mitgeliefert: ab VZ 2026). Früheres Recht wird nicht nachgebildet (z. B. Sparer-Pauschbetrag 801 EUR bis 2022,
+Freigrenze 600 EUR bis 2023, Investmentsteuer vor 2018). Weitere Vereinfachungen: nur thesaurierende Fonds
+(keine Ausschüttungen), Erstattungen erst zum Jahreswechsel, keine Cent-Rundung der Abgeltungsteuer.
+
 # Fondskosten
 `funds_costs(fee, performance_fee)` ist der Kostenbaustein des Fonds-Wrappers: `wrapper_config(strategy, costs
 = funds_costs(...))`. Die Rechnung (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die
@@ -278,7 +304,7 @@ frühere Fondsmodus `simulation(funds = funds_costs())` ist entfernt; `simulatio
 für ein unbekanntes Argument."""
 
 """
-    sim_costs(order_fee = nothing, dca_fee = nothing)
+    sim_costs(order_fee = nothing, dca_fee = nothing; custody_fee = nothing)
 
 $(_BLK_DOC_KOPF)
 
@@ -298,6 +324,15 @@ $(_BLK_DOC_KOPF)
   `order_fee` und nur die Sparrate mit `dca_fee` angelegt (zwei Orders); fällt ein Sparplantermin auf einen
   Rebalancing-Tag, wird die Rate im Rebalancing mit angelegt. Standard (`nothing`): wie `order_fee`. Viele
   Broker führen Sparpläne kostenlos aus (`dca_fee = 0`).
+- `custody_fee`: `sim_costs`: seit 1.6.5 jährliche Depotgebühr: `nothing` (keine, Standard), eine Zahl (fester
+  Betrag in EUR je Jahr) oder `(fixed = …, percent = …, min = …, max = …)` mit `percent` in Prozent p. a. des
+  Depotwerts (Geld und Bestände zum Kurs) am 31.12. Abgerechnet wird an jedem 31.12. im Zeitraum, im ersten
+  (angebrochenen) Jahr anteilig nach Kalendertagen; ein angebrochenes letztes Jahr (Ende vor dem 31.12.) wird am
+  letzten Tag anteilig nach Kalendertagen abgerechnet.
+  Gezahlt wird zuerst aus den Geldbeständen der Assets (absteigend nach Wert), dann durch Verkauf wie eine
+  Steuerzahlung (mit Ordergebühr und Steuer auf den Veräußerungsgewinn; die Depotgebühr selbst mindert keine
+  Steuer, § 20 Abs. 9 EStG). Sie zählt in `fees_paid` und mindert Depotwert und Rendite; `details = true` zeigt
+  je Jahr die Zeilen mit dem Präfix „Depotgebühr:“.
 
 $(_BLK_DOC_SCHLUSS)
 
@@ -307,13 +342,18 @@ using SimLev
 println(sim_costs((fixed = 1, percent = 0.25, min = 2, max = 20), 0))
 ```
 """
-function sim_costs(order_fee_pos = nothing, dca_fee_pos = nothing; order_fee = order_fee_pos, dca_fee = dca_fee_pos)
+function sim_costs(order_fee_pos = nothing, dca_fee_pos = nothing; order_fee = order_fee_pos, dca_fee = dca_fee_pos,
+                   custody_fee = nothing)
     @nospecialize
     order_fee = _blk_fee_check(order_fee, "sim_costs", "order_fee")
     dca_fee = _blk_fee_check(dca_fee, "sim_costs", "dca_fee")
+    custody_fee = _blk_fee_check(custody_fee, "sim_costs", "custody_fee")
     _fee_spec(order_fee, "sim_costs", "order_fee")
     _fee_spec(dca_fee, "sim_costs", "dca_fee")
-    return RList("order_fee" => order_fee, "dca_fee" => dca_fee; class = ["SimLevSimCosts"])
+    _fee_spec(custody_fee, "sim_costs", "custody_fee")   # seit 1.6.5 (Entscheidung 150)
+    # Feld custody_fee nur, wenn gesetzt (ohne Depotgebühr derselbe Baustein wie bis 1.6.4)
+    custody_fee === nothing && return RList("order_fee" => order_fee, "dca_fee" => dca_fee; class = ["SimLevSimCosts"])
+    return RList("order_fee" => order_fee, "dca_fee" => dca_fee, "custody_fee" => custody_fee; class = ["SimLevSimCosts"])
 end
 
 """
@@ -377,7 +417,7 @@ function dca_plan(value_pos = _UNSET, span_pos = _UNSET, days_pos = nothing; val
     span = chk_scalar(_val(span, nothing))
     unit, anchor, start, skip, fill_deficits = (chk_scalar(v) for v in (unit, anchor, start, skip, fill_deficits))
     if !_blk_one(value) || value <= 0
-        error("$who: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR).")
+        chk_stop("a.m_one", who)
     end
     days = _blk_days(who, days)
     unit = _match_arg(unit, ("month", "quarter", "year"))
@@ -489,13 +529,13 @@ function rebalance_plan(span_pos = nothing, days_pos = nothing; span = span_pos,
     _blk_frac_warn(who, thresh, "thresh", 0.2)
     thresh_type = _match_arg(thresh_type, ("absolute", "relative"))
     event_col === nothing && !(event_mode isa _Unset) &&
-        @warn "rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert."
+        @warn chk_msg("a.m_rebalance_plan")
     event_mode = _match_arg(_val(event_mode, ("additional", "replace")), ("additional", "replace"))
     if event_col !== nothing && !(event_col isa AbstractString && !isempty(event_col))
-        error("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.")
+        chk_stop("a.m_rebalance_plan_2")
     end
     event_col === nothing && event_weight !== nothing &&
-        @warn "rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert."
+        @warn chk_msg("a.m_rebalance_plan_3")
     # seit 1.6.4 (A-049): event_weight benannt, je Asset ein Spaltenname (die Spalten prüft simulation())
     if event_weight !== nothing
         items = _is_mapping(event_weight) ? [String(string(k)) => chk_scalar(v) for (k, v) in _kvpairs(event_weight)] :
@@ -542,12 +582,14 @@ println(split_rule([20, 500]))
 function split_rule(thresh_pos = _UNSET; thresh = thresh_pos)
     @nospecialize
     thresh = _val(thresh, nothing)
+    # seit 1.6.5 (CR2-W3-3): benannte Schwellen wie R c(lo = 50, hi = 200) (NamedTuple; Reihenfolge zählt)
+    thresh isa NamedTuple && (thresh = collect(values(thresh)))
     st = thresh === nothing ? nothing : _num_vec(thresh)
     if st === nothing || length(st) != 2 || any(isnan, st)
-        error("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein.")   # seit 1.6.4 ohne Eingabewert
+        chk_stop("a.m_split_rule")   # seit 1.6.4 ohne Eingabewert
     end
     if !(st[1] < 100 < st[2])
-        @warn "split_rule: thresh = c($(r_format1(st[1])), $(r_format1(st[2]))) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)."
+        @warn chk_msg("a.m_split_rule_2", r_format1(st[1]), r_format1(st[2]))
     end
     return RList("thresh" => st; class = ["SimLevSplitRule"])
 end
@@ -583,9 +625,10 @@ function income_rate(marginal_rate_pos = _UNSET, soli_rate_pos = 0; marginal_rat
     _blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
     _blk_frac_warn(who, marginal_rate, "marginal_rate")
     if marginal_rate > 50
-        error("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %).")
+        chk_stop("e.grenzsteuersatz")
     end
     _blk_num(who, soli_rate, "soli_rate", "eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5.5; 0 = ohne Soli)")
+    _blk_frac_warn(who, soli_rate, "soli_rate")   # seit 1.6.5 (CR2-V2-3)
     return RList("marginal_rate" => marginal_rate, "soli_rate" => soli_rate; class = ["SimLevIncomeRate"])
 end
 
@@ -621,12 +664,12 @@ function income_tariff(taxable_income_pos = _UNSET, tariff_pos = nothing; taxabl
                        tariff = tariff_pos)
     @nospecialize
     if taxable_income isa _Unset || taxable_income === nothing
-        error("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der Simulation) fehlt.")
+        chk_stop("a.m_income_tariff")
     end
     _blk_check_taxable_income(taxable_income, Int[], "income_tariff"; plan_ok = true)   # auch je Planjahr
     if tariff !== nothing && !inherits(tariff, "SimLevTaxTariff")
         tariff isa AbstractString ||
-            error("income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.")
+            chk_stop("a.m_income_tariff_2")
         tariff = tax_tariff(tariff)
     end
     return RList("taxable_income" => taxable_income, "tariff" => tariff; class = ["SimLevIncomeTariff"])
@@ -656,7 +699,7 @@ function harvest_rule(day_pos = "12-15", loss_pot_pos = true; day = day_pos, los
     # wie R: nur ASCII-Ziffern, kein Zeilenende (seit 1.6.4, A-012)
     # seit 1.6.4 Monat 01-12 und Tag 01-31 (Entscheidung 35)
     if !(day isa AbstractString) || !occursin(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\z", day) || day >= "12-31"
-        error("harvest_rule: day im Format 'MM-TT' (Monat 01 bis 12, Tag 01 bis 31) und vor dem 31.12. angeben (z. B. '12-15').")   # seit 1.6.4 mit den Bereichen (F8)
+        chk_stop("a.m_harvest_rule")   # seit 1.6.4 mit den Bereichen (F8)
     end
     _blk_lgl("harvest_rule", loss_pot, "loss_pot")
     return RList("day" => day, "loss_pot" => loss_pot; class = ["SimLevHarvestRule"])
@@ -725,20 +768,20 @@ function tax_profile(rate_pos = _UNSET; rate = rate_pos, church_tax = 0, sparer_
     church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate, guenstigerpruefung = (
         chk_scalar(v) for v in (church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate, guenstigerpruefung))
     if !_is_num(rate) || isnan(Float64(rate)) || rate < 0 || rate > 100
-        error("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für 26,375 %).")
+        chk_stop("e.steuersatz")
     end
     _blk_frac_warn(who, rate, "rate")
     if church_tax !== nothing
         if !_is_num(church_tax) || isnan(Float64(church_tax)) || church_tax < 0 || church_tax > 100
-            error("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).")
+            chk_stop("a.m_tax_profile")
         end
         if 0 < church_tax < 1
-            @warn "tax_profile: church_tax = $(r_format1(church_tax)) wird als $(r_format1(church_tax)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(church_tax * 100))."
+            @warn chk_msg("e.kirchensteuer_anteil", r_format1(church_tax), r_format1(church_tax), r_format1(church_tax * 100))
         elseif church_tax > 9
-            @warn "tax_profile: church_tax = $(r_format1(church_tax)) % ist ungewöhnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %)."
+            @warn chk_msg("e.kirchensteuer_hoch", r_format1(church_tax))
         end
         if church_tax > 0 && rate_given
-            error("tax_profile: rate und church_tax schließen sich aus; rate gilt nur ohne Kirchensteuer (mit church_tax gilt der Satz nach § 32d Abs. 1 EStG).")
+            chk_stop("a.m_tax_profile_2")
         end
     end
     _blk_num(who, sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000; 0 = ohne)")
@@ -752,10 +795,10 @@ function tax_profile(rate_pos = _UNSET; rate = rate_pos, church_tax = 0, sparer_
     end
     _blk_lgl(who, guenstigerpruefung, "guenstigerpruefung")
     if income !== nothing && !(inherits(income, "SimLevIncomeRate") || inherits(income, "SimLevIncomeTariff"))
-        error("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schließen sich aus).")
+        chk_stop("a.m_tax_profile_4")
     end
     if harvest !== nothing && !inherits(harvest, "SimLevHarvestRule")
-        error("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein.")
+        chk_stop("a.m_tax_profile_5")
     end
     return RList("rate" => rate, "church_tax" => church_tax, "sparer_pauschbetrag" => sparer_pauschbetrag,
                  "private_sale_threshold" => private_sale_threshold, "base_rate" => base_rate,
@@ -793,15 +836,18 @@ function funds_costs(fee_pos = 0.95, performance_fee_pos = 5; fee = fee_pos, per
                   (a == "fee" ? "0.95 für 0,95 % p. a." : "5 für 5 %") * ").")
         end
     end
+    _blk_frac_warn("funds_costs", performance_fee, "performance_fee")   # seit 1.6.5 (CR2-V2-3); fee nicht (0.95 üblich)
     return RList("fee" => fee, "performance_fee" => performance_fee; class = ["SimLevFundsCosts"])
 end
 
 # ── Druckmethoden ─────────────────────────────────────────────────────────────
 
 function _print_sim_costs(io::IO, x)
-    _blk_print(io, "Kosten (sim_costs)",
-               ["Ordergebühr" => _blk_fee_text(x["order_fee"]),
-                "Sparplan-Gebühr" => x["dca_fee"] === nothing ? "wie Ordergebühr" : _blk_fee_text(x["dca_fee"])])
+    rows = ["Ordergebühr" => _blk_fee_text(x["order_fee"]),
+            "Sparplan-Gebühr" => x["dca_fee"] === nothing ? "wie Ordergebühr" : _blk_fee_text(x["dca_fee"])]
+    cf = get(x, "custody_fee", nothing)   # seit 1.6.5
+    cf === nothing || push!(rows, "Depotgebühr" => _blk_custody_text(cf))
+    _blk_print(io, "Kosten (sim_costs)", rows)
 end
 
 function _print_dca_plan(io::IO, x)
@@ -922,6 +968,8 @@ function _sim_from_blocks(costs, dca, rebalance, splits, tax)
     _blk_check(tax, "SimLevTaxProfile", "tax", "tax_profile")
     a = Pair{Symbol,Any}[:order_fee => costs === nothing ? nothing : costs["order_fee"],
                          :dca_fee => costs === nothing ? nothing : costs["dca_fee"]]
+    # seit 1.6.5 (Entscheidung 150)
+    (costs !== nothing && get(costs, "custody_fee", nothing) !== nothing) && push!(a, :custody_fee => costs["custody_fee"])
     if dca !== nothing
         append!(a, Pair{Symbol,Any}[:dca_mode => true, :dca_value => dca["value"], :dca_span => dca["span"],
                                     :dca_days => dca["days"], :dca_unit => dca["unit"], :dca_anchor => dca["anchor"],
@@ -974,7 +1022,7 @@ const _SIM_TOP = ("start_value", "costs", "dca", "rebalance", "splits", "tax", "
 const _SIM_BLOCKS = ["costs" => "sim_costs", "dca" => "dca_plan", "rebalance" => "rebalance_plan",
                      "splits" => "split_rule", "tax" => "tax_profile"]
 const _SIM_BLOCK_PARAMS = Dict{String,Vector{String}}(
-    "sim_costs" => ["order_fee", "dca_fee"],
+    "sim_costs" => ["order_fee", "dca_fee", "custody_fee"],
     "dca_plan" => ["value", "span", "days", "unit", "anchor", "start", "skip", "fill_deficits"],
     "rebalance_plan" => ["span", "days", "unit", "anchor", "start", "skip", "thresh", "thresh_type", "event_col",
                          "event_mode", "event_weight"],
@@ -1064,11 +1112,11 @@ function _sim_check_names(nms, who)
         if haskey(_SIM_FLAT, k)
             path, hint = _SIM_FLAT[k]
             isempty(hint) && (hint = _sim_path_hint(path))
-            error("$who: $k gibt es nicht mehr; bitte $hint$(isempty(path) ? "" : " (Pfad \"$path\")").")
+            chk_stop("a.m_sim_check_names", who, k, hint, isempty(path) ? "" : " (Pfad \"$path\")")
         end
         if occursin('.', k)
             _sim_path_ok(k) ||
-                error("$who: unbekannter Pfad \"$k\"; möglich sind die Bausteine mit ihren Parametern: $(_sim_path_text()).")
+                chk_stop("a.m_sim_check_names_2", who, k, _sim_path_text())
             continue
         end
         error("$who: unbekanntes Argument $(isempty(k) ? "ohne Namen" : k) für simulation(); möglich sind " *
@@ -1087,7 +1135,7 @@ function _sim_kv(x)
     x isa Pair && return Pair{String,Any}[String(string(x.first)) => x.second]
     x isa AbstractVector && all(p -> p isa Pair, x) && return Pair{String,Any}[String(string(p.first)) => p.second for p in x]
     x isa AbstractVector && isempty(x) && return Pair{String,Any}[]
-    error("sim_args muss eine benannte Liste sein (RList, NamedTuple, Dict oder Pair-Vektor).")
+    chk_stop("a.m_sim_kv")
 end
 
 const _SIM_CTORS = Dict{String,Function}("sim_costs" => sim_costs, "dca_plan" => dca_plan,
@@ -1146,7 +1194,12 @@ function _sim_args_set(args, over, who)
     end
     for b in blocks
         ctor = _sim_block_ctor(b)
-        f = _sim_fields(get(out, b, nothing))
+        # seit 1.6.5 (CR2-F-1): ein Wert, der kein Baustein ist, ist ein Fehler (bis 1.6.4 Rohfehler)
+        cls = Dict("costs" => "SimLevSimCosts", "dca" => "SimLevDcaPlan", "rebalance" => "SimLevRebalancePlan",
+                   "splits" => "SimLevSplitRule", "tax" => "SimLevTaxProfile")[b]
+        bv = get(out, b, nothing)
+        (bv === nothing || inherits(bv, cls)) || chk_stop("a.m_sim_args_set", who, b, ctor)
+        f = _sim_fields(bv)
         set = String[]
         mine = [p for p in paths if split(p.first, ".")[1] == b]
         for p in mine
@@ -1183,5 +1236,7 @@ function _sim_args_set(args, over, who)
     return out
 end
 
-"`simulation()` mit aufgelösten sim_args aufrufen (R: `.sim_call`)."
-_sim_call(data, strategy, args) = simulation(data, strategy; (Symbol(k) => v for (k, v) in args)...)
+"""`simulation()` mit aufgelösten sim_args aufrufen (R: `.sim_call`); seit 1.6.5 (Paket E, Entscheidung 176) in einer
+Studie über den Studienkern (sim_prepared.jl), bitgleich."""
+_sim_call(data, strategy, args) = _STUDY_ON[] ? _sim_call_study(data, strategy, args) :
+                                  simulation(data, strategy; (Symbol(k) => v for (k, v) in args)...)

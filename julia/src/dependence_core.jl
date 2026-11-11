@@ -8,6 +8,7 @@ module DependenceCore
 
 import ..SimLev
 using ..SimLev: CAbi, LIBSLC
+using ..SimLev: chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 
 export kendall_tau_core, quantile_reg_core, hmm_em, goal_dp, pbo_cscv, QuantileRegError
 
@@ -29,7 +30,7 @@ _fvec(x::Real) = [Float64(x)]
 function kendall_tau_core(x, y)
     x = _fvec(x); y = _fvec(y)
     n = length(x)
-    length(y) >= n || error("kendall_tau_core: 'y' muss mindestens die Länge $n haben (erhalten: $(length(y))).")
+    length(y) >= n || chk_stop("c.m_kendall_tau_core", n, length(y))
     out = Ref(0.0)
     CAbi.check(ccall((:simlev_c_kendall_tau_core, LIBSLC), Cint, (Ptr{Float64}, Ptr{Float64}, Int64, Ref{Float64}),
                      x, y, n, out))
@@ -49,8 +50,8 @@ function quantile_reg_core(y, X, tau::Real, beta0, sc::Real, tol::Real, maxit::I
     n, p = size(X)
     beta = _fvec(beta0)
     p == 0 && return Float64[], nothing
-    length(y) >= n || error("quantile_reg_core: 'y' ist zu kurz ($(length(y)) statt mindestens $n).")
-    length(beta) >= p || error("quantile_reg_core: 'beta0' ist zu kurz ($(length(beta)) statt mindestens $p).")
+    length(y) >= n || chk_stop("c.m_quantile_reg_core", length(y), n)
+    length(beta) >= p || chk_stop("c.m_quantile_reg_core_2", length(beta), p)
     out = Vector{Float64}(undef, p)
     opt = Ref{Cint}(0)
     CAbi.check(ccall((:simlev_c_quantile_reg_core, LIBSLC), Cint,
@@ -71,10 +72,10 @@ function hmm_em(X, k, mu, S, A, n_iter, tol, ridge)
     Xm = _fmat(X); Tn, d = size(Xm); k = Int(k)
     mum = copy(_fmat(mu)); Am = copy(_fmat(A)); rid = _fmat(ridge)
     (size(mum) == (k, d) && size(Am) == (k, k) && size(rid) == (d, d) && length(S) == k) ||
-        error("hmm_em: ungültige Abmessungen.")
+        chk_stop("c.m_hmm_em")
     Sv = Vector{Float64}(undef, d * d * k)
     for j in 1:k
-        Sj = _fmat(S[j]); size(Sj) == (d, d) || error("hmm_em: ungültige Abmessungen.")
+        Sj = _fmat(S[j]); size(Sj) == (d, d) || chk_stop("c.m_hmm_em")
         Sv[(j - 1) * d * d + 1:j * d * d] = vec(Sj)
     end
     p0 = Vector{Float64}(undef, k)
@@ -100,7 +101,7 @@ function goal_dp(R, grid, cf, goal, wmin, wmax, start_value, tie_score)
     Rm = _fmat(R); S, K = size(Rm)
     g = Float64.(collect(grid)); c = Float64.(collect(cf)); tie = Float64.(collect(tie_score))
     ng = length(g); h = length(c)
-    (ng >= 2 && h >= 1 && length(tie) == K) || error("goal_dp: ungültige Abmessungen.")
+    (ng >= 2 && h >= 1 && length(tie) == K) || chk_stop("c.m_goal_dp")
     stat = Vector{Float64}(undef, K); pol = Matrix{Int32}(undef, h, ng); val = Matrix{Float64}(undef, ng, h + 1)
     nc = Ref{Int64}(0); pdp = Ref{Float64}(0.0)
     CAbi.check(ccall((:simlev_c_goal_dp, LIBSLC), Cint,
@@ -122,7 +123,7 @@ function pbo_cscv(Bs, Ts, combos, half, metric, S, N)
     Bv = reduce(vcat, [vec(_fmat(B)) for B in Bs]); Tv = reduce(vcat, [Float64.(collect(t)) for t in Ts])
     H = S ÷ 2
     if combos isa AbstractMatrix
-        size(combos, 1) == H || error("pbo_cscv: ungültige Abmessungen.")
+        size(combos, 1) == H || chk_stop("c.m_pbo_cscv")
         C = size(combos, 2); cb = combos isa Matrix{Int32} ? vec(combos) : Int32.(vec(combos))
     else
         C = length(combos)
@@ -131,7 +132,7 @@ function pbo_cscv(Bs, Ts, combos, half, metric, S, N)
             cb[(c - 1) * H + q] = Int32(b)
         end
     end
-    (length(Bv) == 5 * S * N && length(Tv) == 5 * N) || error("pbo_cscv: ungültige Abmessungen.")
+    (length(Bv) == 5 * S * N && length(Tv) == 5 * N) || chk_stop("c.m_pbo_cscv")
     out = ntuple(_ -> Vector{Float64}(undef, C), 4)
     m = findfirst(==(String(metric)), ["sharpe", "sortino", "geometric", "mean"]) - 1
     CAbi.check(ccall((:simlev_c_pbo_cscv, LIBSLC), Cint,

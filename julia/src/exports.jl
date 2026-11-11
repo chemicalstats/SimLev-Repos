@@ -15,7 +15,7 @@ const _MODULE_EXPORTS = (
     (:Dependence, (:copula_fit, :tail_dependence, :dependence_dcc, :dependence_analysis, :quantile_regression,
                    :tail_regression, :tail_covar, :dependence_validate, :regime_subset)),
     (:Regimes, (:regime_hmm, :regime_states)),
-    (:Scenarios, (:view_mean, :view_prob, :view_vol, :scenario_entropy_pooling, :scenario_copula, :scenario_risk,
+    (:Scenarios, (:view_mean, :view_prob, :view_vol, :view_cor, :view_rank, :scenario_entropy_pooling, :scenario_copula, :scenario_risk,
                   :scenario_crisis)),
     (:Optimize, (:portfolio_optimize, :portfolio_frontier, :portfolio_rolling, :portfolio_risk_contributions,
                  :portfolio_cpcv)),

@@ -9,6 +9,7 @@ from ._r.rlist import RList, _PrintFormat
 from ._r.rformat import r_round, r_sprintf
 from ._r.rnum import NA_REAL, r_sum
 from ._util import _n_tage, _na
+from ._pruefen import chk_msg   # seit 1.6.5 (Entscheidung 197)
 
 __all__ = ["SimLevResult", "SimLevSummary"]
 
@@ -95,6 +96,8 @@ class SimLevResult(RList, _PrintFormat):
         out.append("  Martin Ratio:     %s" % fr(s["martin_ratio"]))
         if ext:
             out.append("  (Calmar, Serenity, Martin mit TTWROR)")
+        if len(self["worth"]) < 365:   # seit 1.6.5 (FB-6, Entscheidung 197): Auswertung unter einem Jahr
+            out.append("  " + chk_msg("e.kurz_jahr", _n_tage(len(self["worth"]))))
         out.append("")
         out += ["  Verteilung", _RULE]
         out.append(r_sprintf("  Mittel je Tag:    %+.4f%%", s["mean"] * 100))
@@ -180,6 +183,8 @@ class SimLevSummary(RList, _PrintFormat):
             out.append("  %s %s" % (k.ljust(16), v))
         if ext:
             out.append("  (Drawdowns zeitgewichtet; Calmar, Serenity, Martin mit TTWROR)")
+        if n_days < 365:   # seit 1.6.5 (FB-6, Entscheidung 197)
+            out.append("  " + chk_msg("e.kurz_jahr", _n_tage(n_days)))
         out.append("")
         out.append(_LINE)
         return "\n".join(out)
@@ -203,7 +208,9 @@ def summary(object: SimLevResult) -> SimLevSummary:
     else:
         res["start_capital"] = NA_REAL
     res["end_value"] = float(worth[-1])
-    res["total_return_twr"] = (float(twr[-1]) / float(twr[0]) - 1) if ext else (float(worth[-1]) / float(worth[0])) - 1
+    # seit 1.6.5 (M4): Bezug start_value plus Rate des Starttags (Kaufkosten am Starttag zählen)
+    res["total_return_twr"] = (float(twr[-1]) - 1) if ext else \
+        (float(worth[-1]) / (float(invested[0]) if invested is not None else float(worth[0]))) - 1
     res["return_on_invested"] = NA_REAL
     res["total_return"] = NA_REAL
     res["invested"] = float(invested[-1]) if invested is not None else float(worth[0])

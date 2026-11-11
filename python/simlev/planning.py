@@ -33,8 +33,10 @@ from .deep_analysis import (
 )
 from .svg import _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 from ._util import _num_col
+from ._util import _dates as _u_dates, _message
+from ._r.rnum import r_median
 from ._pruefen import (chk_cols, chk_df, chk_int1, chk_max, chk_name1, chk_nofactor, chk_num1, chk_range_text,
-                       chk_stop)
+                       chk_stop, chk_msg)
 from ._pruefen import SL_MAX_GITTER, SL_MAX_JAHRE, SL_MAX_N, SL_MAX_TAGE, chk_jahre  # seit 1.6.4 (Entscheidungen 46 und 47)
 
 __all__ = ["series_shift_return", "bootstrap_pooled", "portfolio_returns", "planning_goal", "SimLevGoalPlan"]
@@ -146,20 +148,38 @@ def series_shift_return(data, columns, target, *, type=("returns", "prices"), pp
         vals = ["NA" if math.isnan(v) else v for v in dd.tolist()]
         if len(set(vals)) < len(vals):
             chk_stop("rs.preise_doppelt", fn)
+    # seit 1.6.5 (CR2-E-8): Werte > 0, bei Renditen Median >= 0.5, mindestens 2 Kurse bzw. eine Datumsspanne > 0
+    for k in columns:
+        v = _num_col(data[k])
+        v = v[~np.isnan(v)]
+        if (v <= 0).any():
+            chk_stop("b1.ssr_werte", fn, k, chk_msg("b1.ssr_brutto" if type == "returns" else "b1.ssr_kurse"))
+        if type == "returns" and len(v) and r_median(v) < 0.5:
+            chk_stop("b1.ssr_median", fn, k, chk_msg("b1.ssr_brutto"))
+        if type == "prices" and len(v) < 2:
+            chk_stop("b1.ssr_kurz", fn)
+    span = None
+    if dd is not None:
+        okd = dd[~np.isnan(dd)]
+        span = float(np.max(okd)) - float(np.min(okd)) if len(okd) else _NAN
+    if ppy is None and dd is not None and not span > 0:
+        chk_stop("b1.ssr_kurz", fn)
+    # seit 1.6.5 (CR2-E-7, K4): n - 1 Abstände auch bei Renditen (bis 1.6.4 n Renditen auf n - 1 Abstände)
     if ppy is None:
-        if dd is not None:
-            ok = dd[~np.isnan(dd)]
-            with np.errstate(divide="ignore", invalid="ignore"):   # Spanne 0 (eine Zeile): wie R Inf bzw. NaN
-                ppy = float(np.float64(n - (1 if type == "prices" else 0)) / np.float64((float(np.max(ok)) - float(np.min(ok))) / 365.25))
-        else:
-            ppy = 252.0
+        ppy = float(np.float64(n - 1) / np.float64(span / 365.25)) if dd is not None else 252.0
     ppy = float(ppy)
     out = data.copy()
     shift = {}
     for k in columns:
         v = _num_col(data[k])
-        lr = _libm.log(v) if type == "returns" else np.diff(_libm.log(v[o]))
-        g_hist = r_mean(lr, na_rm=True)
+        if type == "returns":
+            g_hist = r_mean(_libm.log(v), na_rm=True)
+        else:
+            # seit 1.6.5 (CR2-E-9): mittlere Log-Rendite aus erstem und letztem vorhandenen Kurs über ihren Zeilenabstand
+            vo = v[o]
+            okp = np.flatnonzero(~np.isnan(vo))
+            a_, b_ = int(okp[0]), int(okp[-1])
+            g_hist = (float(_libm.log(vo[b_])) - float(_libm.log(vo[a_]))) / (b_ - a_)
         g_tgt = float(_libm.log1p(tg[k] / 100)) / ppy
         delta = g_tgt - g_hist
         if type == "returns":
@@ -198,9 +218,32 @@ def _period_gross(df, columns, frequency, fn=None, land=None):
     end = _last_of_key(key)
     V = np.column_stack([_fill_na(_num_col(df[k]),
                                   "locf", keep_leading=True)[end] for k in columns]) if columns else np.zeros((len(end), 0))
+    de = np.asarray(d)[end]
+    # seit 1.6.5 (CR2-K-3): verwendete Periodenkurse endlich und > 0, sonst Fehler mit Spalte und Datum
+    for j, k in enumerate(columns):
+        _wd()._wd_check_level(V[:, j], _fmt_days(de), k, fn if fn is not None else "portfolio_returns")
     G = V[1:, :] / V[:-1, :]
+    # seit 1.6.5 (CR2-K-1): Rendite über eine fehlende Periode entfällt, mit Hinweis
+    ym = [str(s) for s in _key_month(de)]
+    yy = np.array([int(s[:4]) for s in ym], dtype=np.int64)
+    mm = np.array([int(s[5:7]) - 1 for s in ym], dtype=np.int64)
+    pn = yy if frequency == "year" else (yy * 4 + mm // 3 if frequency == "quarter" else yy * 12 + mm)
+    gap = np.flatnonzero(np.diff(pn) > 1)
+    if len(gap):
+        ds = _fmt_days(de)
+        _message(chk_msg("b1.periode_luecke", fn if fn is not None else "portfolio_returns",
+                         int((np.diff(pn)[gap] - 1).sum()), "" if land is None else " im Datensatz '%s'" % land,
+                         ds[gap[0]], ds[gap[0] + 1]))
+        keep = np.ones(G.shape[0], dtype=bool)
+        keep[gap] = False
+        G = G[keep, :]
     ok = ~np.isnan(G).any(axis=1)
     return pd.DataFrame(G[ok, :], columns=columns)
+
+
+def _fmt_days(days):
+    """Tage seit 1970 als Text "JJJJ-MM-TT" (wie R format(Date))."""
+    return [str(s) for s in _fmt.format_date(_u_dates(np.asarray(days, dtype=np.float64)))]
 
 
 def _wd():
@@ -221,7 +264,7 @@ def _paths_class():
 
 
 def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequency=("year", "quarter", "month"),
-                     n=1000, years=30, L=None, country_weights=None, target=None, seed=None):
+                     n=1000, years=30, L=None, country_weights=None, target=None, seed=None, periods=None):
     """Länder-Bootstrap für lange Horizonte.
 
     Stationärer Block-Bootstrap über mehrere Länder: Jeder Block stammt aus einem zufällig gezogenen Land
@@ -248,6 +291,9 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
         years: Länge jedes Pfads in Jahren (Standard 30); ergibt ``years`` x Perioden je Jahr (1, 4 bzw. 12)
             Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei ``"quarter"`` und ``"month"`` (vorher jede Zahl,
             die ganze Perioden ergab).
+        periods: Seit 1.6.5: Pfadlänge in Perioden der gewählten ``frequency`` (ganze Zahl von 1 bis 100 x Perioden je
+            Jahr) statt ``years``; erlaubt Längen, die keine ganzen Jahre sind (z. B. 30 Monate). ``years`` muss dann
+            beim Standard 30 bleiben, sonst Fehler. ``None`` (Standard) = ``years`` gilt.
         L: Mittlere Blocklänge in Perioden der gewählten ``frequency`` (Blocklänge = 1 + geometrisch verteilte
             Zahl mit Mittel ``L`` - 1). ``None`` (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw. 120
             Monate. Seit 1.6.4 höchstens 100 Jahre (100 Jahre, 400 Quartale bzw. 1200 Monate).
@@ -327,6 +373,8 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
     # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; vorher
     # Baustein e3.jahre_perioden: jede Zahl > 0, die ganze Perioden ergab)
     years = chk_jahre(years, fn, "years")
+    # seit 1.6.5 (Entscheidung 173): Pfadlänge wahlweise in Perioden von frequency (periods; years dann nur 30)
+    periods = W._chk_periods(years, periods, fn, ppy=ppy)
     L = chk_num1(L, fn, "L", lo=1, null_ok=True)
     if L is not None:
         chk_max(L, SL_MAX_JAHRE * ppy, fn, "L")  # seit 1.6.4 höchstens 100 Jahre in Perioden (K43 T2-N1)
@@ -386,35 +434,18 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
     if L is None:
         L = 10 * ppy
     L = float(L)
-    nper = int(years * ppy)
+    nper = int(years * ppy) if periods is None else int(periods)
     nc = len(G)
     cw = np.repeat(1 / nc, nc) if country_weights is None else np.asarray(country_weights, dtype=np.float64).ravel()
     cw = cw / r_sum(cw)
     nrs = [g.shape[0] for g in G]
 
-    def draw_all(S):
-        out = []
-        for _ in range(int(n)):
-            ctry = np.zeros(nper, dtype=np.int64)
-            row = np.zeros(nper, dtype=np.int64)
-            t = 1
-            while t <= nper:
-                cidx = int(_sl.sample(nc, 1, prob=cw, stream=S)[0])
-                ln = 1 + float(_sl.rgeom(1, 1 / L, stream=S)[0])
-                nr = nrs[cidx - 1]
-                st = int(_sl.sample(nr, 1, stream=S)[0])
-                take = int(min(ln, nper - t + 1))
-                idx = ((st - 1 + np.arange(1, take + 1) - 1) % nr) + 1
-                ctry[t - 1:t - 1 + take] = cidx
-                row[t - 1:t - 1 + take] = idx
-                t += take
-            out.append((ctry, row))
-        return out
-
-    draw = draw_all(_sl.main_stream(seed, "bootstrap_pooled"))          # Hauptstrom
+    # seit 1.6.5 (Paket E, K40/CR2-6) im Kern (sl_pooled_draw): je Pfad und Block Land (Gewichte cw), Länge
+    # 1 + rgeom(1 / L) und Startzeile, dieselben Züge in derselben Reihenfolge wie bis 1.6.4 die Schleife hier
+    ctry, row = _sl.pooled_draw(nrs, cw, L, nper, int(n), stream=_sl.main_stream(seed, "bootstrap_pooled"))  # Hauptstrom
     Gall = np.vstack(G)
     off = np.concatenate([[0], np.cumsum(nrs)])[:nc]
-    gi = np.column_stack([off[c - 1] + r for c, r in draw]) if draw else np.zeros((nper, 0), dtype=np.int64)
+    gi = off[ctry - 1] + row
     A = {k: Gall[gi - 1, j].reshape(nper, int(n)) for k, j in ((c, ci[c]) for c in dict.fromkeys(cols))}
     if weights is None:
         wn, wv = list(columns), np.repeat(1 / len(columns), len(columns))
@@ -427,8 +458,7 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
         Rp = term if Rp is None else Rp + term
     Inf_m = A[inflation] if inflation is not None else np.ones((nper, int(n)))
     # Länder je Periode und Pfad als Namen (seit 1.6.3 über die Codes, dieselben Textobjekte, ohne Schleife je Zelle)
-    cmat = np.array(ctry_names, dtype=object)[np.column_stack([np.asarray(dr[0], dtype=np.int64) for dr in draw]) - 1] \
-        if draw else np.zeros((nper, 0), dtype=object)
+    cmat = np.array(ctry_names, dtype=object)[ctry - 1]
     cls = _paths_class()
     return cls([("returns", Rp), ("inflation", Inf_m), ("cape", None), ("base_rate", None), ("frequency", frequency),
                 ("historical", False), ("start_dates", None), ("weights", None), ("source", "pooled_bootstrap"),
@@ -674,6 +704,9 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
     wmin = max(1e-6, min(pos) / 1000)
     lg = _stats("seq_len_out")(float(_libm.log(wmin)), float(_libm.log(wmax)), int(math.ceil(n_grid)))
     pts = list(_libm.exp(np.asarray(lg, dtype=np.float64)))
+    # seit 1.6.5 (CR2-C-6): Rasterpunkte relativ näher als 1e-12 an Ziel oder Startwert entfallen
+    ex = ([goal] if goal > 0 else []) + [start_value]
+    pts = [v for v in pts if not any(v != e and abs(v - e) <= 1e-12 * e for e in ex)]
     if goal > 0:
         pts.append(goal)
     pts.append(start_value)
@@ -726,7 +759,7 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
 
 def _eur(v):
     a = _fmt.r_round(np.atleast_1d(np.asarray(v, dtype=np.float64)))
-    out = _fmt.formatC(a, format="d", big_mark=" ")
+    out = _fmt.formatC(a, format="f", digits=0, big_mark=" ")   # seit 1.6.5 (CR2-X37-2; bis 1.6.4 "d": ab 2^31 "NA")
     return [str(s) for s in np.atleast_1d(out)]
 
 

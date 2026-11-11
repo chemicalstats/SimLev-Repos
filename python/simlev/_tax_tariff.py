@@ -36,8 +36,17 @@ def _as_numeric(s: Any) -> float:
 
 
 def _split_csv_line(line: str) -> list[str]:
-    """Felder einer CSV-Zeile (Komma, Anführungszeichen wie ``read.csv``)."""
+    """Felder einer CSV-Zeile (Komma, Anführungszeichen wie ``read.csv``).
+
+    Wie ``read.csv(strip.white = TRUE)`` werden nur Leerzeichen und Tabulatoren außerhalb der Anführungszeichen
+    abgeschnitten; seit 1.6.5 (CR2-X16-1) bleibt der Inhalt eines Felds in Anführungszeichen unverändert (bis 1.6.4
+    auch gekürzt, R lehnte z. B. ``" zone "`` ab, Python las ``zone``)."""
     out, cur, q = [], [], False
+    quoted, qend = False, 0   # Feld mit Anführungszeichen; Länge des Inhalts beim Schließen
+    def field():
+        if not quoted:
+            return "".join(cur).strip(" \t")
+        return "".join(cur[:qend]) + "".join(cur[qend:]).rstrip(" \t")
     i = 0
     while i < len(line):
         ch = line[i]
@@ -48,18 +57,22 @@ def _split_csv_line(line: str) -> list[str]:
                     i += 1
                 else:
                     q = False
+                    qend = len(cur)
             else:
                 cur.append(ch)
         elif ch == '"':
+            if not quoted and not "".join(cur).strip(" \t"):
+                cur = []   # Leerraum vor dem öffnenden Anführungszeichen
             q = True
+            quoted = True
         elif ch == ",":
-            out.append("".join(cur))
-            cur = []
+            out.append(field())
+            cur, quoted, qend = [], False, 0
         else:
             cur.append(ch)
         i += 1
-    out.append("".join(cur))
-    return [x.strip(" \t") for x in out]   # wie read.csv(strip.white = TRUE): nur Leerzeichen und Tabulator
+    out.append(field())
+    return out
 
 
 class SimLevTaxTariff(_PrintFormat):
@@ -176,8 +189,7 @@ def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
     if file is None:
         file = default_tariff_file()
         if not os.path.exists(file):
-            raise ValueError("tax_tariff: Die mitgelieferte Datei extdata/steuertarif.csv wurde nicht gefunden "
-                             "(Paket unvollständig installiert?).")
+            chk_stop("a.m_tax_tariff")
         # mitgelieferter Tarif je Prozess gemerkt (seit 1.6.3; Studien lesen ihn sonst je Lauf), solange Pfad,
         # Änderungszeit und Größe gleich sind; gemerkt wird nur ein Ergebnis ohne Warnung, zurück kommt eine Kopie
         try:
@@ -203,16 +215,18 @@ _DEFAULT_CACHE: dict = {}
 def _tax_tariff_read(file) -> tuple:
     """``tax_tariff(file)``: (Tarif, ohne Sprungwarnung?)."""
     if not isinstance(file, (str, os.PathLike)):
-        raise ValueError("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.")
+        chk_stop("a.m_tax_tariff_read")
     file = os.fspath(file)
     if not os.path.exists(file):
-        raise ValueError("tax_tariff: Datei '%s' nicht gefunden." % file)
+        chk_stop("a.m_tax_tariff_read_2", file)
     # seit 1.6.4 (A-071, A-037): Ordner, Kodierung und Anführungszeichen vorab mit Meldung; ein UTF-8-BOM am
     # Dateianfang (Excel "CSV UTF-8") wird übergangen
     if os.path.isdir(file):
         chk_stop("e1.tarif_ordner", "tax_tariff", file)
     with open(file, "rb") as fh:
         rawb = fh.read()
+    if b"\x00" in rawb:   # seit 1.6.5 (CR2-B-8): NUL-Byte vorab ablehnen, in allen drei Sprachen gleich
+        chk_stop("a.tarif_nul", "tax_tariff", file)
     try:
         txt = rawb.decode("utf-8")
     except UnicodeDecodeError:
@@ -243,7 +257,7 @@ def _tax_tariff_read(file) -> tuple:
                     "tax_tariff: In '%s' hat Datenzeile %d insgesamt %d Felder, die Kopfzeile %d. Dezimalzeichen ist der "
                     "Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen." % (file, i, nf[i], nf[0]))
     if not body:
-        raise ValueError("tax_tariff: Datei '%s' ist keine lesbare CSV-Datei (no lines available in input)." % file)
+        chk_stop("a.m_tax_tariff_read_5", file)
     header = _split_csv_line(body[0])
     rows = [_split_csv_line(ln) for ln in body[1:]]
     d = {h: [r[j] if j < len(r) else "" for r in rows] for j, h in enumerate(header)}
@@ -273,14 +287,14 @@ def _tax_tariff_read(file) -> tuple:
     zr = [i for i, a in enumerate(art) if a == "zone"]
     sr = [i for i, a in enumerate(art) if a == "soli"]
     if not zr:
-        raise ValueError("tax_tariff: Die Datei enthält keine Tarifzone (art = \"zone\").")
+        chk_stop("a.m_num")
     if len(sr) != 1:
         raise ValueError("tax_tariff: Es muss genau eine soli-Zeile geben (gefunden: %d)." % len(sr))
     zd = {c: num(c, zr) for c in ("ab", "bezug", "teiler", "a", "b", "c")}
     z = pd.DataFrame(zd)
     ab = zd["ab"]
     if ab[0] != 0:
-        raise ValueError("tax_tariff: Die erste Zone muss bei ab = 0 beginnen.")
+        chk_stop("a.m_num_2")
     for k in range(len(ab) - 1):
         if ab[k + 1] - ab[k] <= 0:
             raise ValueError("tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone %d)." % (k + 2))
@@ -289,11 +303,10 @@ def _tax_tariff_read(file) -> tuple:
             raise ValueError("tax_tariff: teiler muss > 0 sein (Zone %d)." % (k + 1))
     soli = {"freigrenze": num("ab", sr)[0], "satz": num("a", sr)[0], "milderung": num("b", sr)[0]}
     if soli["freigrenze"] < 0:
-        raise ValueError("tax_tariff: Die Soli-Freigrenze (ab) darf nicht negativ sein.")
+        chk_stop("a.m_num_3")
     for s in ("satz", "milderung"):
         if soli[s] < 0 or soli[s] > 100:
-            raise ValueError("tax_tariff: Soli-%s muss zwischen 0 und 100 Prozent liegen."
-                             % ("Zuschlagsatz (a)" if s == "satz" else "Milderungssatz (b)"))
+            chk_stop("a.m_num_4", "Zuschlagsatz (a)" if s == "satz" else "Milderungssatz (b)")
     out = SimLevTaxTariff(z, soli, geltung, os.path.realpath(os.path.abspath(file)))
 
     def f(j: int, x: float) -> float:

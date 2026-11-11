@@ -76,6 +76,7 @@
  * Prüforakel: R 4.3.3 pnorm, qnorm, dnorm; eigene Rechnung mit decimal.
  */
 #define SLC_NEED_NORMAL_TABLES
+#include <float.h>
 #include "slc_internal.h"
 #include "slc_constants.h"
 
@@ -243,11 +244,15 @@ double sl_dnorm1(double x, int give_log)
     if (!give_log) return isinf(a) ? 0.0 : dens(a);
     if (isinf(a)) return -INFINITY;
     if (a <= SLC_NT_XMAX) return log(dens(a));
-    if (a > 1e150) return -INFINITY;
+    /* seit 1.6.5 (CR1-Y8-2, PR1-1): Schwelle 2 sqrt(DBL_MAX) (etwa 2,68e154) wie R dnorm.c statt 1e150
+     * (bis 1.6.4). Darüber läuft (0.5 xh) xh ohnehin nach +Inf über; ab etwa 1,1e158 liefe auch
+     * xl (a + xh) über und ergäbe bei xl < 0 Inf - Inf = NaN, darum muss die Schwelle darunter liegen */
+    if (a >= 2.0 * sqrt(DBL_MAX)) return -INFINITY;
     {
+        /* (0.5 xh) xh ist bitgleich mit 0.5 (xh xh) und läuft wie R erst ab etwa 1,9e154 über */
         double xh, xl;
         split26(a, &xh, &xl);
-        return -(0.5 * (xh * xh) + 0.5 * (xl * (a + xh))) - SLC_LN_SQRT2PI;
+        return -((0.5 * xh) * xh + 0.5 * (xl * (a + xh))) - SLC_LN_SQRT2PI;
     }
 }
 

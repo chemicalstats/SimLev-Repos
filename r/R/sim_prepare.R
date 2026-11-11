@@ -37,10 +37,20 @@
   # P-3: Lueckenhafte Handelstag-Daten automatisch auf Kalenderraster auffuellen
   # (LOCF fuer numerische Spalten; logische Signal-Spalten -> FALSE).
   expected_days <- as.numeric(difftime(stopp_date, start_date, units = "days")) + 1
+  fill_how <- "keine"
   if (nrow(data) != expected_days) {
-    message(sprintf(
-      "Hinweis: %d Zeilen, erwartet %d Kalendertage. Fehlende Tage werden aufgef\u00fcllt (LOCF; Signale = FALSE).",
-      nrow(data), expected_days))
+    fill_how <- "merge"
+    # seit 1.6.5 (Entscheidung 180, FB-3): Hinweis nur bei ungewoehnlichen Luecken, d. h. Abstand zweier Datenzeilen
+    # ueber 5 Kalendertage (Wochenende mit Feiertagen, z. B. Ostern Do -> Di, ergibt hoechstens 5; gleiche Schwelle wie
+    # series_check() bei Tagesdaten); Handelstagsdaten ohne solche Luecken werden still aufgefuellt (bis 1.6.4 immer
+    # der Hinweis)
+    dg <- diff(as.numeric(data$date)); big <- which(dg > 5)
+    if (length(big)) {
+      k <- big[which.max(dg[big])]
+      ii <- function(x) as.character(as.integer(x))
+      message(chk_msg("a.locf_luecken", ii(nrow(data)), ii(expected_days), ii(length(big)), ii(dg[k]),
+                      format(as.Date(data$date[k]))))
+    }
     all_dates <- seq.Date(as.Date(start_date), as.Date(stopp_date), by = "day")
     data$.filled <- pre_filled      # Tage ohne echten Kurs (align_series/NA) bleiben markiert
     dd <- unclass(data$date)
@@ -51,6 +61,7 @@
         all(vapply(cols, function(v) is.null(attributes(v)) && typeof(v) %in% c("double", "integer", "logical", "character"), NA))) {
       fill <- .Call(C_sl_cal_fill, unclass(cols), as.double(dd), unclass(all_dates)[1L], as.double(length(all_dates)),
                     match(".filled", names(cols)))
+      fill_how <- "kern"   # seit 1.6.5 (Paket E): der Studienkern fuellt getauschte Spalten ebenso
       names(fill) <- names(cols)
       data <- structure(c(list(date = all_dates), fill), row.names = c(NA_integer_, -length(all_dates)), class = "data.frame")
     } else {
@@ -65,7 +76,7 @@
     data$.filled <- pre_filled      # aufgefuellte Tage aus series_align() wie eigene behandeln
   }
 
-  list(data = data, start_date = start_date, stopp_date = stopp_date)
+  list(data = data, start_date = start_date, stopp_date = stopp_date, fill = fill_how)
 }
 
 #' Phase 2b von simulation(): Zentralstruktur sim_mem anlegen
@@ -133,9 +144,9 @@
       sb <- strategy[[name]][["signal_buy"]]
       ss <- strategy[[name]][["signal_sell"]]
       if (is.null(sb) || !sb %in% names(data))
-        stop(sprintf("simulation: signal_buy-Spalte '%s' fehlt im Datensatz (Asset '%s').", sb %||% "NULL", name))
+        stop(chk_msg("a.m_sim_build_state", sb %||% "NULL", name))
       if (is.null(ss) || !ss %in% names(data))
-        stop(sprintf("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s').", ss %||% "NULL", name))
+        stop(chk_msg("a.m_sim_build_state_2", ss %||% "NULL", name))
       # seit 1.6.4 nur TRUE/FALSE oder 0/1 mit NA (Entscheidung 1; bis 1.6.3: Faktor-Codes in R, Text in Python als
       # wahr, jede Zahl ungleich 0 als TRUE)
       chk_col_signal(data, sb, "simulation"); chk_col_signal(data, ss, "simulation")
@@ -200,10 +211,8 @@
     if (!isTRUE(get(paste0(a, "_mode"))) || is.null(sd0)) next
     sd1 <- tryCatch(as.Date(sd0), error = function(e) NA)
     # seit 1.6.4 ohne Eingabewert (der letzte Datentag bleibt als Ort in den Daten)
-    if (length(sd1) != 1L || is.na(sd1)) stop(sprintf("simulation: %s_start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", a))
-    if (sd1 > stopp_date) stop(sprintf("simulation: %s liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine.",
-                                       sprintf("start von %s", if (a == "dca") "dca_plan()" else "rebalance_plan()"),
-                                       format(stopp_date)))
+    if (length(sd1) != 1L || is.na(sd1)) stop(chk_msg("a.m_sim_build_calendar", a))
+    if (sd1 > stopp_date) stop(chk_msg("a.m_sim_build_calendar_2", sprintf("start von %s", if (a == "dca") "dca_plan()" else "rebalance_plan()"), format(stopp_date)))
   }
   balance <- .sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, NULL, balance_anchor,
                         balance_start, balance_skip)
@@ -214,27 +223,29 @@
   flag_event <- NULL
   if (!is.null(event_col)) {
     if (is.null(data[[event_col]]))
-      stop(sprintf("simulation: event_col '%s' nicht im Datensatz gefunden.", event_col))
+      stop(chk_msg("a.m_sim_build_calendar_3", event_col))
+    # seit 1.6.5 (CR2-G-6, Entscheidung 185 K36) wie Signalspalten: TRUE/FALSE oder 0/1, NA erlaubt (bis 1.6.4 ergab
+    # Text wie "ja"/"nein" still kein Ereignis, eine 2 zaehlte als Ereignis)
+    chk_col_signal(data, event_col, "simulation")
     flag_event <- as.logical(data[[event_col]])
     flag_event[is.na(flag_event)] <- FALSE
     if (!is.null(event_weight)) {   # Gewichtsspalten pruefen
       if (is.null(names(event_weight)) || any(names(event_weight) == ""))
-        stop("simulation: event_weight muss benannt sein (Asset = Spaltenname), z. B. c(A = \"wA\", B = \"wB\").")
+        stop(chk_msg("a.m_sim_build_calendar_4"))
       event_weight <- as.list(event_weight)
       unk <- setdiff(names(event_weight), names(strategy))
       if (length(unk)) stop(sprintf("simulation: event_weight nennt unbekannte Assets: %s.", paste(unk, collapse = ", ")))
       for (nm in names(event_weight)) {
         col <- event_weight[[nm]]
         if (!is.character(col) || length(col) != 1L || !col %in% names(data))
-          stop(sprintf("simulation: event_weight-Spalte '%s' (Asset '%s') fehlt in 'data'.", paste(col, collapse = ","), nm))
+          stop(chk_msg("a.m_sim_build_calendar_5", paste(col, collapse = ","), nm))
         wv <- data[[col]][flag_event]
         if (!is.numeric(data[[col]]) || any(wv < 0, na.rm = TRUE))
-          stop(sprintf("simulation: event_weight-Spalte '%s' muss nicht negative Zahlen enthalten.", col))
+          stop(chk_msg("a.m_sim_build_calendar_6", col))
       }
       fehlt <- setdiff(names(strategy), names(event_weight))
       if (length(fehlt))
-        warning(sprintf("simulation: event_weight nennt nicht alle Assets (es fehlt: %s); an Event-Tagen gelten dann die Strategie-Gewichte.",
-                        paste(fehlt, collapse = ", ")), call. = FALSE)
+        warning(chk_msg("a.m_sim_build_calendar_7", paste(fehlt, collapse = ", ")), call. = FALSE)
     }
   }
 
@@ -243,13 +254,11 @@
   for (k in seq_along(flag_assets)) {
     st_a <- starts[[k]]
     if (length(st_a) == 1L && !is.na(st_a) && st_a > stopp_date)
-      stop(sprintf("simulation: start von '%s' liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.",
-                   flag_assets[k], format(stopp_date)))   # seit 1.6.4 ohne Eingabewert
+      stop(chk_msg("a.m_sim_build_calendar_8", flag_assets[k], format(stopp_date)))   # seit 1.6.4 ohne Eingabewert
   }
   # bis 1.3.0 .sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
   if (!length(flag_assets[vapply(starts, function(st) (st %||% flag_date[1]) <= flag_date[1], NA)]))
-    stop(sprintf("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); mindestens ein Asset muss ab Beginn handelbar sein.",
-                 format(flag_date[1])))
+    stop(chk_msg("a.m_sim_build_calendar_9", format(flag_date[1])))
 
   list(data = data,
        flags = list(flag_date = flag_date, flag_filled = flag_filled, flag_assets = flag_assets, dca = dca,

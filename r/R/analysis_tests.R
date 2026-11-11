@@ -24,7 +24,7 @@
   if (frequency == "day") { keep <- c(TRUE, !s$filled[-1]); d <- s$date[keep]; v <- s$value[keep] }
   else { key <- if (frequency == "week") format(s$date, "%G-%V") else format(s$date, "%Y-%m")
          e <- which(c(key[-1] != key[-length(key)], TRUE)); d <- s$date[e]; v <- s$value[e] }
-  list(r = v[-1] / v[-length(v)] - 1, date = d[-1])
+  list(r = v[-1] / v[-length(v)] - 1, date = d[-1], lvl = v, ldate = d)
 }
 
 #' Signal-Analyse: Vorwaertsrenditen je Signalbereich
@@ -133,7 +133,7 @@
 #' @export
 signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bins = 5L, breaks = NULL,
                             signal2 = NULL, bins2 = 3L, splits = 1L, degree = 2L) {
-  if (!is.data.frame(data) || !"date" %in% names(data)) stop("signal_analysis: data muss ein data.frame mit Spalte 'date' sein.")
+  if (!is.data.frame(data) || !"date" %in% names(data)) stop(chk_msg("b2b.m_signal_analysis"))
   chk_col_nofactor(data, "date", "signal_analysis")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   n <- nrow(data); d <- .to_date(data$date, "signal_analysis: data$date")
   # seit 1.6.4: Spalten logisch oder numerisch (target numerisch; vorher Faktor-Codes bzw. Text als NA), Vektoren
@@ -141,7 +141,7 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
   getcol <- function(v, what, type = "logisch_oder_numerisch") {
     if (is.character(v)) {
       if (length(v) != 1L || !v %in% names(data))
-        stop(sprintf("signal_analysis: %s: Spalte '%s' fehlt in data (vorhanden: %s).", what, v[1], paste(names(data), collapse = ", ")))
+        stop(chk_msg("b2b.m_getcol", what, v[1], paste(names(data), collapse = ", ")))
       chk_col_nofactor(data, v, "signal_analysis")   # Entscheidung 15
       chk_col_type(data, v, "signal_analysis", type)
       return(as.numeric(data[[v]]))
@@ -153,7 +153,7 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
     as.numeric(v)
   }
   sig <- getcol(signal, "signal")
-  if (!is.character(target) || length(target) != 1L) stop("signal_analysis: target muss ein Spaltenname sein.")
+  if (!is.character(target) || length(target) != 1L) stop(chk_msg("b2b.m_getcol_2"))
   px <- getcol(target, "target", "numerisch")
   s2all <- if (!is.null(signal2)) getcol(signal2, "signal2") else NULL
   # zeitlich sortieren, doppelte Daten (letzter Wert) entfernen
@@ -164,18 +164,18 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
   # seit 1.6.4: ganze Zahlen (vorher z. B. 2.5 und "21" still mit as.integer), Meldung ohne Eingabewert
   int1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v) && v == trunc(v)
   if (!int1(horizon)) chk_stop("ganz", "signal_analysis", "horizon", "1")
-  if (!is.null(step) && !(int1(step) && step >= 1)) stop("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
-  if (!(int1(bins) && bins >= 2)) stop("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+  if (!is.null(step) && !(int1(step) && step >= 1)) stop(chk_msg("b2b.m_int1"))
+  if (!(int1(bins) && bins >= 2)) stop(chk_msg("b2b.m_int1_2"))
   chk_int1(bins2, "signal_analysis", "bins2", lo = 2)
   chk_int1(splits, "signal_analysis", "splits")
   chk_int1(degree, "signal_analysis", "degree", lo = 0)
   horizon <- as.integer(horizon); step <- as.integer(step %||% horizon)
   if (length(horizon) != 1L || is.na(horizon) || horizon < 1L || horizon >= n)
     stop(sprintf("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen.", n - 1L))
-  if (length(step) != 1L || is.na(step) || step < 1L) stop("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
+  if (length(step) != 1L || is.na(step) || step < 1L) stop(chk_msg("b2b.m_int1"))
   if (!is.null(breaks) && (!is.numeric(breaks) || length(breaks) < 3L || anyNA(breaks) || is.unsorted(breaks, strictly = TRUE)))
-    stop("signal_analysis: breaks braucht mindestens 3 streng aufsteigende Grenzen (erste und letzte werden zu -Inf und Inf), z. B. c(-Inf, 0, Inf).")
-  if (is.null(breaks) && (length(bins) != 1L || is.na(bins) || bins < 2)) stop("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+    stop(chk_msg("b2b.m_int1_3"))
+  if (is.null(breaks) && (length(bins) != 1L || is.na(bins) || bins < 2)) stop(chk_msg("b2b.m_int1_2"))
   t0 <- seq(1L, n - horizon, by = step)
   fwd <- px[t0 + horizon] / px[t0] - 1
   s2 <- if (!is.null(s2all)) s2all[t0] else NULL
@@ -184,7 +184,7 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
   df <- df[stats::complete.cases(df), , drop = FALSE]
   if (nrow(df) < 20) stop(sprintf("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorw\u00e4rtsrendite.", nrow(df)))
   if (length(unique(df$signal)) < 2L)
-    stop("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche m\u00f6glich.")
+    stop(chk_msg("b2b.m_int1_4"))
   ppy <- (n - 1) / (as.numeric(d[n] - d[1]) / 365.25)
   ann <- function(m) .pow1m(m, ppy / horizon)
   cutb <- function(v, k, br) {
@@ -205,6 +205,26 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
   wt <- if (length(lo) > 2 && length(hi) > 2) .sl_welch_test(hi, lo) else NULL   # Welch-Test
   spread <- c(difference = mean(hi) - mean(lo), t = if (!is.null(wt)) unname(wt$statistic) else NA,
               p = if (!is.null(wt)) wt$p.value else NA)
+  ov <- st(df$forward)
+  # seit 1.6.5 (CR2-5, Entscheidung 185 K3): bei step < horizon ueberlappen die Vorwaertsrenditen; t je Bereich, t
+  # aller Stichtage und der Spread mit Newey-West-Standardfehlern (Bartlett, Lag ceiling(horizon / step) - 1; Mittel
+  # je Bereich als Regression auf Bereichs-Dummys, Hansen & Hodrick 1980, Newey & West 1987), p-Wert des Spreads aus
+  # der Normalverteilung (bis 1.6.4 wie bei unabhaengigen Stichtagen: viel zu optimistisch)
+  if (step < horizon) {
+    L <- ceiling(horizon / step) - 1L
+    zb <- function(b) { z <- numeric(nrow(df)); i <- df$bin == b; z[i] <- df$forward[i] - mean(df$forward[i]); z }
+    for (r in seq_len(nrow(tab))) {
+      z <- zb(tab$bin[r]); tab$t[r] <- tab$mean[r] / sqrt(.sa_lrv(z, z, L) / tab$n[r]^2)
+    }
+    z0 <- df$forward - ov[["mean"]]; ov[["t"]] <- ov[["mean"]] / sqrt(.sa_lrv(z0, z0, L) / nrow(df)^2)
+    if (length(lo) > 2 && length(hi) > 2) {
+      zh <- zb(lv[length(lv)]); zl <- zb(lv[1])
+      v <- .sa_lrv(zh, zh, L) / length(hi)^2 + .sa_lrv(zl, zl, L) / length(lo)^2 -
+           2 * .sa_lrv(zh, zl, L) / (length(hi) * length(lo))
+      tt <- spread[["difference"]] / sqrt(v)
+      spread[["t"]] <- tt; spread[["p"]] <- 2 * .sl_pnorm(-abs(tt))
+    }
+  }
   fit <- NULL
   if (degree > 0 && length(unique(df$signal)) > degree + 1) {
     m <- .sl_poly_fit(df$signal, df$forward, degree)         # kleinste Quadrate, r^2 aus den Residuen
@@ -223,7 +243,7 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
     df$bin2 <- cutb(df$signal2, bins2, NULL)
     t2 <- list(mean = tapply(df$forward, list(df$bin, df$bin2), mean), n = table(df$bin, df$bin2))
   }
-  structure(list(bins = tab, overall = st(df$forward), spread = spread, splits = spl, table2d = t2, fit = fit,
+  structure(list(bins = tab, overall = ov, spread = spread, splits = spl, table2d = t2, fit = fit,
                  data = df, horizon = horizon, step = step, target = target,
                  signal_name = if (is.character(signal)) signal else "signal"), class = "SimLevSignalAnalysis")
 }
@@ -255,7 +275,7 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
   graphics::par(mfrow = c(1, 2), mar = c(4.4, 4.4, 2.6, 1), mgp = c(2.5, 0.6, 0), las = 1, cex.axis = 0.75)
   b <- x$bins; se <- b$sd / sqrt(b$n)
-  yl <- range(100 * c(b$mean - 2 * se, b$mean + 2 * se, 0))
+  yl <- range(100 * c(b$mean - 2 * se, b$mean + 2 * se, 0), finite = TRUE)   # seit 1.6.5 (CR2-X55-1): n = 1 ohne sd
   mids <- graphics::barplot(100 * b$mean, names.arg = seq_len(nrow(b)), col = "#2C6E9B", border = NA, ylim = yl,
                             xlab = "Signalbereich (niedrig -> hoch)", ylab = "Mittlere Vorw\u00e4rtsrendite (%)", main = "Je Signalbereich")
   graphics::arrows(mids, 100 * (b$mean - 2 * se), mids, 100 * (b$mean + 2 * se), angle = 90, code = 3, length = 0.03)
@@ -265,6 +285,28 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
   if (!is.null(x$fit)) { o <- order(x$data$signal); graphics::lines(x$data$signal[o], 100 * x$fit$model$fitted[o], col = "#B5562B", lwd = 2) }
   graphics::abline(h = 0, col = "grey50", lty = 3)
   invisible(x)
+}
+
+# Langfristige Kovarianz zweier Reihen mit Bartlett-Gewichten (seit 1.6.5, CR2-5):
+# sum(a * b) + sum_l (1 - l / (L + 1)) * (sum(a_t b_{t-l}) + sum(b_t a_{t-l}))
+.sa_lrv <- function(a, b, L) {
+  n <- length(a); s <- sum(a * b)
+  for (l in seq_len(L)) if (l < n) {
+    s <- s + (1 - l / (L + 1)) * (sum(a[(l + 1):n] * b[1:(n - l)]) + sum(b[(l + 1):n] * a[1:(n - l)]))
+  }
+  s
+}
+
+# Langfristkovarianz fuer sharpe_test (seit 1.6.5, Entscheidung 177): Bartlett ohne Prewhitening wie bisher
+# (.hac_cov, Newey-West); sonst Kern-Schaetzer nach Ledoit & Wolf (2008, Abschnitt 3.1) im Kern (research_vec op 8):
+# QS mit Andrews-Bandbreite bzw. Bartlett mit festem Lag, wahlweise Prewhitening (Andrews & Monahan 1992), Faktor T/(T-4)
+.st_hac <- function(Y, kernel, prewhiten) {
+  if (kernel == "bartlett" && !prewhiten) return(.hac_cov(Y))
+  k <- ncol(Y)
+  o <- .research_vec(8L, as.numeric(Y), c(nrow(Y), k, if (kernel == "qs") 2 else 1, as.numeric(prewhiten)), k * k + 2L)
+  if (o[k * k + 1L] == 1) chk_stop("b2b.st_prewhiten", "sharpe_test")
+  if (o[k * k + 1L] == 2) chk_stop("b2b.st_bandbreite", "sharpe_test")
+  matrix(o[seq_len(k * k)], k, k)
 }
 
 #' Newey-West-Kovarianz (Bartlett-Kern)
@@ -283,7 +325,8 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #' Prueft, ob sich die Sharpe Ratios zweier Strategien unterscheiden, robust
 #' gegen Autokorrelation, Heteroskedastie und dicke Raender (Ledoit & Wolf
 #' 2008): mit der Delta-Methode und Newey-West-Kovarianz (\code{"hac"}) oder
-#' einem stationaeren Block-Bootstrap der Renditepaare (\code{"bootstrap"}).
+#' einem Block-Bootstrap der Renditepaare (\code{"bootstrap"}, seit 1.6.5 studentisiert und zirkulaer wie bei
+#' Ledoit & Wolf).
 #' Der klassische Jobson-Korkie-Test unterstellt Normalverteilung und
 #' unabhaengige Renditen und ist fuer Finanzdaten zu optimistisch.
 #'
@@ -295,6 +338,19 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #' Mindestens 10 gemeinsame Renditepaare sind noetig, und keine der beiden
 #' Reihen darf die Varianz 0 haben (sonst Fehler). Identische Reihen ergeben
 #' \code{difference = 0}, \code{se = 0}, \code{z = 0} und \code{p_value = 1}.
+#'
+#' Studentisierter Bootstrap (Standard bei \code{method = "bootstrap"} seit 1.6.5, Ledoit & Wolf 2008,
+#' Abschnitt 3.2.2 und Bemerkung 3.2): \eqn{\Delta = \mu_x/\sigma_x - \mu_y/\sigma_y}; Standardfehler
+#' \eqn{s(\hat\Delta) = \sqrt{\nabla f' \hat\Psi \nabla f / T}} (Gl. 5) mit der HAC-Kovarianz der Momente
+#' \eqn{(r_x, r_y, r_x^2, r_y^2)}; Teststatistik \eqn{d = |\hat\Delta| / s(\hat\Delta)}. Je Wiederholung
+#' \eqn{m} werden Bloecke der festen Laenge \eqn{b} mit gleichverteiltem Start zyklisch gezogen; der
+#' Standardfehler der Stichprobe ist \eqn{s(\hat\Delta^*_m)} aus
+#' \eqn{\hat\Psi^* = l^{-1} \sum_{j=1}^{l} \zeta_j \zeta_j'}, \eqn{\zeta_j = b^{-1/2} \sum_{t=1}^{b} y^*_{(j-1)b+t}},
+#' \eqn{l = \lfloor T/b \rfloor} (Gl. 8), \eqn{d^*_m = |\hat\Delta^*_m - \hat\Delta| / s(\hat\Delta^*_m)}.
+#' p-Wert \eqn{(\#\{d^*_m \ge d\} + 1)/(B + 1)} (Gl. 9), Intervall
+#' \eqn{\hat\Delta \pm z^*_{0.95}\, s(\hat\Delta)} mit dem 95-%-Quantil der \eqn{d^*_m} (Gl. 7); \code{se} ist
+#' \eqn{s(\hat\Delta)}, \code{z} = \code{difference / se}. Die Blocklaenge waehlt SimLev nicht
+#' datenabhaengig (die Kalibrierung von Ledoit & Wolf, Algorithmus 3.1, ist nicht umgesetzt).
 #'
 #' @param x,y Zwei Renditequellen derselben Art (nicht mischen, sonst
 #'   Fehler):
@@ -314,28 +370,49 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #'   \code{"day"} oder \code{"month"}. Bei Vektor-Eingabe bestimmt sie nur
 #'   den Standardwert von \code{ppy}.
 #' @param method \code{"hac"} (Standard): Delta-Methode mit
-#'   Newey-West-Kovarianz (Bartlett-Kern, Lag
-#'   \eqn{\lfloor 4 (T/100)^{2/9} \rfloor}); \code{"bootstrap"}:
-#'   stationaerer Block-Bootstrap der Renditepaare (Standardfehler =
+#'   HAC-Kovarianz (Standard Newey-West, Bartlett-Kern, Lag
+#'   \eqn{\lfloor 4 (T/100)^{2/9} \rfloor}; siehe \code{kernel}, \code{prewhiten}); \code{"bootstrap"}:
+#'   seit 1.6.5 studentisierter zirkulaerer Block-Bootstrap der Renditepaare nach Ledoit & Wolf (2008,
+#'   Abschnitt 3.2.2, siehe \code{studentize} und Details); mit \code{studentize = FALSE}
+#'   stationaerer Block-Bootstrap wie bis 1.6.4 (Standardfehler =
 #'   Standardabweichung der Bootstrap-Differenzen, p-Wert = Anteil der
 #'   Wiederholungen mit \eqn{|d^* - d| \ge |d|}, Intervall = 2.5- und
 #'   97.5-%-Quantil der Bootstrap-Differenzen).
 #' @param B Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur
 #'   bei \code{method = "bootstrap"}.
 #'   Seit 1.6.4 hoechstens 10^8.
-#' @param block Mittlere Blocklaenge des stationaeren Bootstraps in Perioden
+#' @param block Blocklaenge in Perioden: mit \code{studentize = TRUE} die feste Laenge \eqn{b} der Bloecke des
+#'   zirkulaeren Block-Bootstraps (ganze Zahl), sonst die mittlere Blocklaenge des stationaeren Bootstraps
 #'   (geometrisch verteilte Blocklaengen, Bloecke laufen zyklisch ueber das
 #'   Ende); \code{NULL} (Standard) = \code{max(2, round(T^(1/3)))} mit
 #'   \eqn{T} = Anzahl Renditepaare. Nur bei \code{method = "bootstrap"}.
-#' @param seed Startwert fuer den Bootstrap (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
-#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
-#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
+#'   Seit 1.6.4 eine Zahl >= 1. Mit \code{studentize = TRUE} seit 1.6.5 hoechstens
+#'   \eqn{T/4}: die Block-Kovarianz \eqn{\hat\Psi^*} braucht mindestens 4 Bloecke
+#'   (\eqn{l = \lfloor T/b \rfloor \ge 4}, sonst Fehler; bei weniger Bloecken ist sie
+#'   singulaer und p-Wert und Intervall sind unbrauchbar). Die Guete des Tests sinkt schon
+#'   vorher mit wachsender Blocklaenge; \eqn{T/4} ist nur die Mindestbedingung.
 #' @param ppy Perioden je Jahr fuer die Annualisierung. \code{NULL}
 #'   (Standard) = bei Vektoren 252 (\code{"day"}), 52 (\code{"week"}) bzw. 12
 #'   (\code{"month"}); bei Ergebnissen und data.frames aus den gemeinsamen
 #'   Daten geschaetzt: (Anzahl Perioden - 1) / (Zeitspanne in Tagen /
 #'   365.25).
+#'   Seit 1.6.4 eine Zahl > 0.
+#' @param seed Startwert fuer den Bootstrap (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
+#' @param studentize Logisch (seit 1.6.5, Standard \code{TRUE}): bei \code{method = "bootstrap"} der
+#'   studentisierte zirkulaere Block-Bootstrap nach Ledoit & Wolf (2008); \code{FALSE} = der nicht studentisierte
+#'   stationaere Block-Bootstrap bis 1.6.4 (bitgleich).
+#' @param kernel Kern der HAC-Kovarianz (seit 1.6.5): \code{"bartlett"} (Lag
+#'   \eqn{\lfloor 4 (T/100)^{2/9} \rfloor}) oder \code{"qs"} (Quadratic Spectral mit automatischer Bandbreite
+#'   \eqn{S_T = 1.3221 (\hat\alpha(2) T)^{1/5}} nach Andrews 1991 aus AR(1)-Naeherungen je Moment).
+#'   \code{NULL} (Standard) = \code{"bartlett"} bei \code{method = "hac"} (bitgleich zu 1.6.4 ausser 142),
+#'   \code{"qs"} beim studentisierten Bootstrap (Standardfehler der Ausgangsstichprobe wie bei Ledoit & Wolf 2008).
+#' @param prewhiten Logisch (seit 1.6.5): Prewhitening mit einem VAR(1) nach Andrews & Monahan (1992).
+#'   \code{NULL} (Standard) = \code{FALSE} bei \code{method = "hac"}, \code{TRUE} beim studentisierten
+#'   Bootstrap. Ausser bei Bartlett ohne Prewhitening (Newey-West wie bisher) rechnet SimLev den Schaetzer von
+#'   Ledoit & Wolf (2008, Abschnitt 3.1) mit dem Faktor \eqn{T/(T-4)}.
 #' @return Benannter numerischer Vektor: \code{sharpe_x}, \code{sharpe_y}
 #'   (Sharpe Ratios p. a.), \code{difference} (\code{sharpe_x - sharpe_y},
 #'   p. a.), \code{se} (Standardfehler der Differenz, p. a.), \code{z}
@@ -363,9 +440,16 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #' @references Ledoit, O. & Wolf, M. (2008), Robust performance hypothesis
 #'   testing with the Sharpe ratio, Journal of Empirical Finance 15(5),
 #'   850-859.
+#'
+#'   Andrews, D. W. K. (1991), Heteroskedasticity and autocorrelation consistent covariance matrix estimation,
+#'   Econometrica 59(3), 817-858.
+#'
+#'   Andrews, D. W. K. & Monahan, J. C. (1992), An improved heteroskedasticity and autocorrelation consistent
+#'   covariance matrix estimator, Econometrica 60(4), 953-966.
 #' @export
 sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c("hac", "bootstrap"),
-                        B = 2000L, block = NULL, ppy = NULL, seed = NULL) {
+                        B = 2000L, block = NULL, ppy = NULL, seed = NULL, studentize = TRUE, kernel = NULL,
+                        prewhiten = NULL) {
   .e5_choice(frequency, c("week", "day", "month"), "sharpe_test", "frequency")   # seit 1.6.4 (K43 T2-N4) Pruefung vor match.arg (Meldung auswahl)
   .e5_choice(method, c("hac", "bootstrap"), "sharpe_test", "method")
   frequency <- match.arg(frequency); method <- match.arg(method)
@@ -375,12 +459,26 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
   chk_num1(block, "sharpe_test", "block", lo = 1, null_ok = TRUE)
   chk_num1(ppy, "sharpe_test", "ppy", lo = 0, lo_open = TRUE, null_ok = TRUE)
   if (!is.null(seed)) .sl_check_seed(seed, "sharpe_test")
+  # seit 1.6.5 (Entscheidung 177): studentisierter zirkulaerer Block-Bootstrap (Standard), Kern und Prewhitening
+  chk_bool1(studentize, "sharpe_test", "studentize")
+  if (!is.null(kernel)) .e5_choice(kernel, c("bartlett", "qs"), "sharpe_test", "kernel")
+  if (!is.null(prewhiten)) chk_bool1(prewhiten, "sharpe_test", "prewhiten")
+  stud <- method == "bootstrap" && studentize
+  kernel <- kernel %||% (if (stud) "qs" else "bartlett"); prewhiten <- prewhiten %||% stud
+  if (stud && !is.null(block) && block != trunc(block)) chk_stop("b2b.st_block_ganz", "sharpe_test")
   a <- .ret_from(x, frequency); b <- .ret_from(y, frequency)
   if (is.null(a$date) != is.null(b$date))
-    stop("sharpe_test: x und y m\u00fcssen dieselbe Art sein: beide Renditevektoren oder beide Kursreihen/Ergebnisse (data.frame bzw. SimLevResult).")
+    stop(chk_msg("b2b.m_sharpe_test"))
   if (!is.null(a$date)) {                                         # dann auch b$date (Pruefung oben)
-    common <- intersect(as.numeric(a$date), as.numeric(b$date))
-    ra <- a$r[match(common, as.numeric(a$date))]; rb <- b$r[match(common, as.numeric(b$date))]
+    # seit 1.6.5 (CR2-H-2, Entscheidung 189): erst die gemeinsamen Perioden-Enddaten, dann die Renditen zwischen
+    # ihnen (bis 1.6.4 Renditen je Reihe, nach einer Luecke in nur einer Reihe Mehr- neben Einperiodenrendite)
+    la <- as.numeric(a$ldate); lb <- as.numeric(b$ldate)
+    cl <- intersect(la, lb)
+    nskip <- length(setdiff(la, cl)) + length(setdiff(lb, cl))
+    if (nskip > 0L) message(chk_msg("b2.st_luecke", "sharpe_test", nskip))
+    va <- a$lvl[match(cl, la)]; vb <- b$lvl[match(cl, lb)]; m <- length(cl)
+    ra <- if (m > 1) va[-1] / va[-m] - 1 else numeric(0); rb <- if (m > 1) vb[-1] / vb[-m] - 1 else numeric(0)
+    common <- cl[-1]
     ppy <- ppy %||% ((length(common) - 1) / (diff(range(common)) / 365.25))
   } else {
     if (length(a$r) != length(b$r)) stop(sprintf("sharpe_test: Renditevektoren x und y m\u00fcssen gleich lang und zeitgleich sein (L\u00e4ngen %d und %d).",
@@ -390,23 +488,47 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
   ok <- is.finite(ra) & is.finite(rb); ra <- ra[ok]; rb <- rb[ok]; Tn <- length(ra)
   if (Tn < 10) stop(sprintf("sharpe_test: zu wenige gemeinsame Renditepaare (%d, mindestens 10).", Tn))
   for (k in c("x", "y")) if (.sl_sd(if (k == "x") ra else rb) == 0)
-    stop(sprintf("sharpe_test: Renditen von %s haben die Varianz 0; die Sharpe Ratio ist nicht definiert.", k))
+    stop(chk_msg("b2b.m_sharpe_test_2", k))
   sr <- function(r) mean(r) / .sl_sd(r)
   d0 <- sr(ra) - sr(rb)
   if (identical(ra, rb))                                      # identische Reihen: kein Unterschied, kein Test noetig
     return(c(sharpe_x = sr(ra) * sqrt(ppy), sharpe_y = sr(rb) * sqrt(ppy), difference = 0, se = 0, z = 0, p_value = 1,
              ci_low = 0, ci_high = 0, n = Tn))
-  if (method == "hac") {
+  if (method == "hac" || stud) {
+    # seit 1.6.5 (Entscheidung 142): Schwankung ueber die Abweichungen vom Mittel (bis 1.6.4 mean(r^2) - mean(r)^2,
+    # Stellenverlust bei ruhigen Reihen)
     mu <- c(mean(ra), mean(rb)); g <- c(mean(ra^2), mean(rb^2))
-    grad <- c(g[1] / (g[1] - mu[1]^2)^1.5, -g[2] / (g[2] - mu[2]^2)^1.5,
-              -0.5 * mu[1] / (g[1] - mu[1]^2)^1.5, 0.5 * mu[2] / (g[2] - mu[2]^2)^1.5)
-    Psi <- .hac_cov(cbind(ra, rb, ra^2, rb^2))
+    vv <- c(mean((ra - mu[1])^2), mean((rb - mu[2])^2))
+    grad <- c(g[1] / vv[1]^1.5, -g[2] / vv[2]^1.5, -0.5 * mu[1] / vv[1]^1.5, 0.5 * mu[2] / vv[2]^1.5)
+    Psi <- .st_hac(cbind(ra, rb, ra^2, rb^2), kernel, prewhiten)
     se <- sqrt(drop(t(grad) %m% Psi %m% grad) / Tn)
     z <- d0 / se; p <- 2 * .sl_pnorm(-abs(z)); ci <- d0 + c(-1, 1) * .sl_qnorm(0.975) * se
-  } else {
+  }
+  if (stud) {
+    # seit 1.6.5 (Entscheidung 177): studentisierter zirkulaerer Block-Bootstrap nach Ledoit & Wolf (2008, Abschnitt
+    # 3.2.2, Bemerkung 3.2): d = |Delta| / s(Delta) mit dem HAC-Standardfehler oben, je Stichprobe m
+    # d*_m = |Delta*_m - Delta| / s(Delta*_m) (Gl. 8, Block-Kovarianz im Kern), p = (#{d*_m >= d} + 1) / (B + 1) (Gl. 9),
+    # Intervall Delta +- q_0.95(d*) s(Delta) (Gl. 7)
     block <- block %||% max(2, round(Tn^(1 / 3)))
+    if (block > Tn) chk_stop("b2.st_block", "sharpe_test", Tn)
+    # seit 1.6.5 (PR2-1): mindestens 4 Bloecke (l = floor(T / b) >= 4), sonst ist die 4x4-Block-Kovarianz singulaer
+    if (4 * block > Tn) chk_stop("pf2.st_bloecke", "sharpe_test", Tn %/% 4L, Tn)
     S <- .sl_main_stream(seed, "sharpe_test")                                  # Hauptstrom
-    db <- vapply(seq_len(B), function(i) { k <- .sl_boot_idx_stationary(Tn, Tn, block, stream = S); sr(ra[k]) - sr(rb[k]) }, 0)
+    dk <- .research_vec(9L, c(ra, rb), c(Tn, block), 2L)[1]                    # Delta wie im Kern
+    ds <- vapply(seq_len(B), function(i) { k <- .sl_boot_idx_block(Tn, Tn, block, TRUE, stream = S)
+      o <- .research_vec(9L, c(ra[k], rb[k]), c(Tn, block), 2L)
+      if (is.na(o[1]) || !(o[2] > 0)) NA_real_ else abs(o[1] - dk) / o[2] }, 0)
+    if (anyNA(ds)) chk_stop("b2.st_var0", "sharpe_test", sum(is.na(ds)), B)
+    p <- (sum(ds >= abs(dk) / se) + 1) / (B + 1)
+    ci <- d0 + c(-1, 1) * stats::quantile(ds, 0.95, names = FALSE) * se
+  } else if (method == "bootstrap") {
+    block <- block %||% max(2, round(Tn^(1 / 3)))
+    if (block > Tn) chk_stop("b2.st_block", "sharpe_test", Tn)          # seit 1.6.5 (CR2-H-1)
+    S <- .sl_main_stream(seed, "sharpe_test")                                  # Hauptstrom
+    # seit 1.6.5 (CR2-H-1): Stichproben mit Varianz 0 gezaehlt, dann klare Meldung (bis 1.6.4 Rohfehler)
+    db <- vapply(seq_len(B), function(i) { k <- .sl_boot_idx_stationary(Tn, Tn, block, stream = S)
+      if (.sl_sd(ra[k]) == 0 || .sl_sd(rb[k]) == 0) NA_real_ else sr(ra[k]) - sr(rb[k]) }, 0)
+    if (anyNA(db)) chk_stop("b2.st_var0", "sharpe_test", sum(is.na(db)), B)
     se <- .sl_sd(db); z <- d0 / se; p <- mean(abs(db - d0) >= abs(d0))
     ci <- stats::quantile(db, c(0.025, 0.975), names = FALSE)
   }
@@ -512,14 +634,28 @@ overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, f
   chk_max(B, SL_MAX_N, "overfit_reality_check", "B")   # seit 1.6.4 (Entscheidung 16, wie n)
   chk_num1(block, "overfit_reality_check", "block", lo = 1, null_ok = TRUE)
   if (!is.null(seed)) .sl_check_seed(seed, "overfit_reality_check")
+  fn <- "overfit_reality_check"
   rr <- .of_returns(x, frequency, dates); R <- rr$R
   if (is.null(benchmark)) b <- rep(0, nrow(R))
   else if (length(benchmark) == 1L) {
-    j <- if (is.character(benchmark)) match(benchmark, colnames(R)) else if (is.finite(benchmark) && benchmark == trunc(benchmark)) as.integer(benchmark) else NA
-    if (is.na(j) || j < 1 || j > ncol(R)) stop("benchmark: unbekannte Spalte.")
+    # seit 1.6.5 (CR2-D-5, Entscheidung 185 K7): eine Nummer zaehlt die Spalten der Eingabe (bei einer Suche die id),
+    # nicht die nach dem Verwerfen leerer Spalten verbliebenen; eine leere Spalte ist ein Fehler
+    if (is.character(benchmark)) j <- match(benchmark, colnames(R))
+    else {
+      j0 <- if (is.finite(benchmark) && benchmark == trunc(benchmark)) benchmark else NA
+      j <- if (is.na(j0)) NA_integer_ else match(j0, rr$cols)
+      if (is.na(j) && !is.na(j0) && j0 >= 1 && j0 <= max(rr$cols)) chk_stop("b2.bench_leer", fn)
+    }
+    if (is.na(j)) chk_stop("b2.bench_spalte", fn)
     b <- R[, j]; R <- R[, -j, drop = FALSE]
   } else b <- as.numeric(benchmark)
   if (length(b) != nrow(R)) chk_stop("rs.benchmark_laenge", "overfit_reality_check")
+  # seit 1.6.5 (CR2-X9-1, Entscheidung 189): Vergleichsreihe mit Inf ist ein Fehler; Perioden mit NA/NaN in der
+  # Vergleichsreihe entfallen fuer alle Strategien (bis 1.6.4: R NA, Python p-Werte 0, Julia Rohfehler)
+  if (any(is.infinite(b))) chk_stop("b2.bench_inf", fn)
+  if (anyNA(b)) { ok <- !is.na(b); R <- R[ok, , drop = FALSE]; b <- b[ok] }
+  # seit 1.6.5 (CR2-D-6): mindestens drei Perioden (bei zwei ist die SPA-Schwelle log(log(2)) < 0 nicht definiert)
+  if (nrow(R) < 3L) chk_stop("b2.rc_perioden", fn)
   D <- R - b; Tn <- nrow(D); K <- ncol(D)
   fbar <- colMeans(D)
   block <- block %||% max(2, round(Tn^(1 / 3)))
@@ -547,7 +683,8 @@ overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, f
 #' @param ... ungenutzt.
 #' @export
 print.SimLevRealityCheck <- function(x, ...) {
-  cat(sprintf("Reality Check und SPA: %d Strategien, %d Perioden, B = %d\n", x$k, x$n, x$B))
+  # seit 1.6.5 (CR2-W3-3): "1 Strategie"
+  cat(sprintf("Reality Check und SPA: %d %s, %d Perioden, B = %d\n", x$k, if (x$k == 1) "Strategie" else "Strategien", x$n, x$B))
   cat(sprintf("  Beste Strategie: %s (mittlere \u00dcberrendite %.4f je Periode)\n", x$best, max(x$mean_excess)))
   cat(sprintf("  p-Wert Reality Check (White):   %.3f\n  p-Wert SPA (Hansen, konsistent): %.3f  [untere %.3f, obere %.3f]\n",
               x$p_rc, x$p_spa, x$p_spa_lower, x$p_spa_upper))
@@ -640,6 +777,12 @@ sharpe_min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("w
 #' vor dem 31.12. liegt, bei Handelstagen also z. B. der 30.12.
 #' Die Daten werden nach Datum sortiert, doppelte Daten wie in
 #' [result_analysis()] behandelt.
+#' Seit 1.6.5 zaehlt die Haltedauer in Kalenderjahren: fehlt ein Kalenderjahr in den Daten, bleiben die Zellen,
+#' die es als Start- oder Endjahr brauchen, leer (bis 1.6.4 zaehlten die Zeilen der Jahresend-Tabelle). Bei groben
+#' Daten (mittlerer Zeilenabstand ueber 7 Tage, z. B. Monatsdaten am Monatsersten) ist das Jahresende der letzte Wert
+#' im Dezember und das erste, unvollstaendige Jahr entfaellt; bei Jahresdaten (eine Zeile je Jahr) entfaellt das erste
+#' Jahr. Fallen alle Zeilen auf den 1.1. (Jahresdaten zum Jahresanfang), gilt jeder Wert als Jahresende des Vorjahres:
+#' die Rendite vom 1.1.2010 zum 1.1.2011 steht in der Zeile 2010 (bis 1.6.4 und bei anderen Daten das Jahr des Datums).
 #'
 #' @param x Eine Reihe: \code{SimLevResult} aus [simulation()] (verwendet
 #'   wird der um Ein- und Auszahlungen bereinigte Wertindex aus
@@ -683,19 +826,33 @@ result_heatmap <- function(x, inflation = NULL, max_years = 30L) {
   chk_max(max_years, SL_MAX_JAHRE, "result_heatmap", "max_years")   # Entscheidungen 16 und 46
   s <- .da_series(x, "x")
   if (!is.null(inflation)) s <- .da_deflate(s, inflation)
-  yr <- as.integer(format(s$date, "%Y")); m <- length(yr)
+  # seit 1.6.5 (CR2-N-1, Entscheidung 195 F2 Weg b): fallen alle Zeilen auf den 1.1. (Jahresdaten zum Jahresanfang),
+  # gilt jeder Wert als Jahresende des Vorjahres (Zeile und Beschriftung); sonst zaehlt das Jahr des Datums
+  jan1 <- length(s$date) > 1L && all(format(s$date, "%m-%d") == "01-01")
+  dt <- if (jan1) s$date - 1 else s$date
+  yr <- as.integer(format(dt, "%Y")); m <- length(yr)
   e <- which(c(yr[-1] != yr[-length(yr)], TRUE))
   # Rumpfjahr am Ende weglassen: vollstaendig, wenn das Datenende hoechstens um die groesste
   # Zeilenluecke der Reihe (hoechstens 7 Tage, z. B. Feiertage bei Handelstagen) vor dem 31.12. liegt
-  tol <- min(7, max(as.numeric(diff(s$date[c(TRUE, !s$filled[-1])]))))   # nur Zeilen mit echten Werten
-  if (as.numeric(as.Date(sprintf("%d-12-31", yr[m])) - s$date[m]) >= tol) e <- e[-length(e)]
-  base <- c(s$value[1], s$value[e]); years <- c(yr[1] - 1L, yr[e])
-  if (format(s$date[1], "%m-%d") != "01-01") { base <- s$value[e]; years <- yr[e] }   # erstes volles Jahr
-  ny <- length(base) - 1L
-  if (ny < 1L) stop("result_heatmap: Die Reihe umfasst kein vollst\u00e4ndiges Kalenderjahr.")
+  gaps <- as.numeric(diff(s$date[c(TRUE, !s$filled[-1])]))       # nur Zeilen mit echten Werten
+  tol <- min(7, max(gaps))
+  # seit 1.6.5 (CR2-N-1, Entscheidung 189): Haltedauer nach Kalenderjahren (fehlendes Jahr = leere Zellen); grobe Daten
+  # (mittlerer Zeilenabstand ueber 7 Tage, z. B. Monatsdaten am Monatsersten): Jahresende ist der Dezemberwert, das
+  # erste Jahr entfaellt; Jahresdaten (eine Zeile je Jahr) wie bisher bis auf das erste Jahr
+  coarse <- length(gaps) > 0L && stats::median(gaps) > 7
+  annual <- !anyDuplicated(yr)
+  last_ok <- as.numeric(as.Date(sprintf("%d-12-31", yr[m])) - dt[m]) < tol
+  ok <- if (coarse && !annual) as.integer(format(s$date[e], "%m")) == 12L else c(rep(TRUE, length(e) - 1L), last_ok)
+  ye <- yr[e][ok]; ve <- s$value[e][ok]
+  if (!coarse && format(s$date[1], "%m-%d") == "01-01") { ye <- c(yr[1] - 1L, ye); ve <- c(s$value[1], ve) }   # erstes volles Jahr
+  ny <- if (length(ye)) max(ye) - min(ye) else 0L
+  if (ny < 1L) stop(chk_msg("b2b.m_result_heatmap"))
+  yrs <- min(ye) + 0:ny; base <- rep(NA_real_, ny + 1L); base[match(ye, yrs)] <- ve
+  years <- yrs
   H <- min(max_years, ny)
   M <- matrix(NA_real_, ny, H, dimnames = list(years[-1], seq_len(H)))
-  for (i in seq_len(ny)) for (h in seq_len(min(H, ny - i + 1L))) M[i, h] <- .cagr_q(base[i + h] / base[i], h)
+  for (i in seq_len(ny)) for (h in seq_len(min(H, ny - i + 1L)))
+    if (!is.na(base[i]) && !is.na(base[i + h])) M[i, h] <- .cagr_q(base[i + h] / base[i], h)
   summ <- data.frame(years = seq_len(H), min = apply(M, 2, min, na.rm = TRUE), median = apply(M, 2, stats::median, na.rm = TRUE),
                      max = apply(M, 2, max, na.rm = TRUE), share_negative = apply(M, 2, function(v) mean(v < 0, na.rm = TRUE)),
                      n = colSums(!is.na(M)))

@@ -4,6 +4,7 @@
 \alias{param_space}
 \alias{param_range}
 \alias{print.SimLevParamSpace}
+\alias{print.SimLevParamRange}
 \title{Suchraum fuer param_search()}
 \usage{
 param_space(...)
@@ -11,6 +12,8 @@ param_space(...)
 param_range(lower, upper, n = 5, step = NULL, integer = FALSE, log = FALSE)
 
 \method{print}{SimLevParamSpace}(x, ...)
+
+\method{print}{SimLevParamRange}(x, ...)
 }
 \arguments{
 \item{...}{Benannte Dimensionen (alle Namen Pflicht; sie werden zu den
@@ -18,7 +21,8 @@ Namen der Liste \code{p} im \code{builder}, ohne \code{builder} zu
 Argumentnamen von \code{\link[=simulation]{simulation()}} bzw. Pfaden zu Parametern der
 Bausteine wie \code{dca.value} oder \code{rebalance.thresh}). Jede ist entweder ein nicht leerer
 atomarer Vektor diskreter Werte (numerisch, Zeichen, logisch) oder ein
-Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.}
+Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.
+Seit 1.6.5 sind doppelte Namen und Datumswerte (\code{Date}, \code{POSIXct}) ein Fehler.}
 
 \item{lower, upper}{Bereichsgrenzen (Zahlen in der Einheit des Parameters,
 \code{lower <= upper}; bei \code{log = TRUE} \code{lower > 0}).
@@ -26,12 +30,14 @@ Seit 1.6.4 je eine endliche Zahl.}
 
 \item{n}{Anzahl Rasterpunkte des Bereichs bei \code{method = "grid"}
 (ganze Zahl von 1 bis 1e6, Standard 5); wird ignoriert, wenn \code{step}
-angegeben ist.}
+angegeben ist; mit \code{step} wird \code{n} seit 1.6.5 nicht geprueft (ungueltige Werte als
+\code{NA} abgelegt).}
 
 \item{step}{Schrittweite des Rasters in der Einheit des Parameters
 (\code{seq(lower, upper, by = step)}, > 0); hat Vorrang vor \code{n} und
 \code{log} (\code{log} gilt dann nur fuer Zufallsziehungen).
-\code{NULL} (Standard) = \code{n} Punkte.}
+\code{NULL} (Standard) = \code{n} Punkte.
+Seit 1.6.5 hoechstens 1e6 Rasterpunkte (\eqn{\lfloor (upper - lower)/step \rfloor + 1}).}
 
 \item{integer}{Logisch (Standard \code{FALSE}): Raster- und Zufallswerte
 auf ganze Zahlen runden; doppelte Rasterwerte entfallen.
@@ -41,7 +47,8 @@ Seit 1.6.4 nur TRUE oder FALSE.}
 der Log-Skala und Ziehung log-gleichverteilt, z. B. fuer
 Fensterlaengen.}
 
-\item{x}{Objekt der Klasse \code{SimLevParamSpace} (fuer \code{print()}).}
+\item{x}{Objekt der Klasse \code{SimLevParamSpace} bzw. \code{SimLevParamRange} (fuer \code{print()};
+Zahlen seit 1.6.5 einzeln ohne Exponentenschreibweise, \code{param_range()} seit 1.6.5 als eine Zeile).}
 }
 \value{
 \code{param_space}: Objekt der Klasse \code{SimLevParamSpace}

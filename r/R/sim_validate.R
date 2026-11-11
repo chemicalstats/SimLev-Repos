@@ -60,9 +60,13 @@
 .sim_study <- function() {
   if (isTRUE(.sim_study_env$on)) return(FALSE)
   .sim_study_env$on <- TRUE; .sim_study_env$m <- list()
+  .sim_study_env$prep <- .sim_study_env$seen <- .sim_study_env$never <- list()   # Studienkern (seit 1.6.5)
   TRUE
 }
-.sim_study_end <- function(own) if (isTRUE(own)) { .sim_study_env$on <- FALSE; .sim_study_env$m <- NULL }
+.sim_study_end <- function(own) if (isTRUE(own)) {
+  .sim_study_env$on <- FALSE; .sim_study_env$m <- NULL
+  .sim_study_env$prep <- .sim_study_env$seen <- .sim_study_env$never <- NULL
+}
 .sim_memo_get <- function(what, key) {
   if (!isTRUE(.sim_study_env$on)) return(NULL)
   e <- .sim_study_env$m[[what]]
@@ -111,8 +115,7 @@
   if (!length(v)) return(invisible(NULL))
   m <- stats::median(v)
   if (is.finite(m) && m > 0 && m < hi)
-    warning(sprintf("simulation: %s-Spalte '%s' hat den Median %s und wird als %s %% gelesen (Prozent-Konvention); gemeint waren vermutlich Werte x 100 (Median %s).",
-                    arg, col, format(m), format(m), format(m * 100)), call. = FALSE)
+    warning(chk_msg("e.prozent_spalte", arg, col, format(m), format(m), format(m * 100)), call. = FALSE)
   invisible(NULL)
 }
 
@@ -268,24 +271,21 @@
   # Pflichtparameter
   # seit 1.6.4 ohne Eingabewert bzw. Klasse; die Meldung zu data nennt die Tabellenform je Sprache und die Umwandlung
   if (missing(data) || !is.data.frame(data)) {
-    stop(sprintf("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).",
-                 chk_msg("tabelle.formen")))
+    stop(chk_msg("a.m_sim_check_inputs", chk_msg("tabelle.formen")))
   }
   if (missing(strategy) || length(strategy) == 0) {
-    stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()).")
+    stop(chk_msg("a.m_sim_check_inputs_2"))
   }
 
   # --- Eingabepruefung der Daten ---
   filled_attr <- attr(data, "filled")                 # series_align(): gefuellte Werte (Matrix)
   if (!identical(class(data), "data.frame")) data <- as.data.frame(data, stringsAsFactors = FALSE)  # z. B. tibble
   if (is.null(names(strategy)) || any(is.na(names(strategy)) | names(strategy) == ""))   # seit 1.6.4 auch NA
-    stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
+    stop(chk_msg("a.m_sim_check_inputs_3"))
   if (anyDuplicated(names(strategy)))
-    stop(sprintf("simulation: Asset-Name '%s' kommt in 'strategy' mehrfach vor; jeder Name darf nur einmal vorkommen.",
-                 names(strategy)[anyDuplicated(names(strategy))]))
+    stop(chk_msg("a.m_sim_check_inputs_4", names(strategy)[anyDuplicated(names(strategy))]))
   if (anyDuplicated(names(data)))   # R2: sonst wuerde still die erste gleichnamige Spalte verwendet
-    stop(sprintf("simulation: Spaltenname '%s' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein.",
-                 names(data)[anyDuplicated(names(data))]))
+    stop(chk_msg("a.m_sim_check_inputs_5", names(data)[anyDuplicated(names(data))]))
   # seit 1.6.4: .filled ist der interne Name der aufgefuellten Tage (bis 1.6.3 schaltete eine solche Spalte den
   # Handel still ab)
   if (".filled" %in% names(data)) chk_stop("spalte_intern", "simulation", ".filled")
@@ -296,41 +296,35 @@
   if (!strat_ok) for (nm in names(strategy)) {
     a <- strategy[[nm]]
     if (!is.list(a))
-      stop(sprintf("simulation: Asset '%s' in 'strategy' muss eine Liste bzw. asset_config() sein.", nm), call. = FALSE)
+      chk_stop("a.m_sim_check_inputs_6", nm)
     if (!inherits(a, "asset_config")) .asset_list_fields(a, nm, "simulation")   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
     cls_ok <- c("etf", "etn", "etc", "certificate", "etn_standard", "etn_deliverable")
     if (!is.character(a$asset_class) || length(a$asset_class) != 1L || !a$asset_class %in% cls_ok)
-      stop(sprintf("simulation: asset_class von Asset '%s' ist ung\u00fcltig; erlaubt sind %s (veraltet: etn_standard, etn_deliverable). Strategie am besten mit create_strategy()/asset_config() bauen.",
-                   nm, paste(cls_ok[1:4], collapse = ", ")), call. = FALSE)
+      chk_stop("a.m_sim_check_inputs_7", nm, paste(cls_ok[1:4], collapse = ", "))
     if (!is.null(a$tax_regime) && (!is.character(a$tax_regime) || length(a$tax_regime) != 1L ||
                                    !a$tax_regime %in% c("investment_fund", "capital_gains", "private_sale")))
-      stop(sprintf("simulation: tax_regime von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden.",
-                   nm, "tax = NULL"), call. = FALSE)
+      chk_stop("a.m_sim_check_inputs_8", nm, "tax = NULL")
     if (!is.character(a$trading) || length(a$trading) != 1L || !a$trading %in% c("bnh", "signal"))
-      stop(sprintf("simulation: trading von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
-                   nm), call. = FALSE)
+      chk_stop("a.m_sim_check_inputs_9", nm)
     if (!is.null(a[["wrapper"]])) {   # Fonds-Wrapper (wrapper.R)
       if (!inherits(a[["wrapper"]], "SimLevWrapperConfig"))
-        stop(sprintf("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein.", nm), call. = FALSE)
+        chk_stop("a.m_sim_check_inputs_10", nm)
       if (a$trading != "bnh")
-        stop(sprintf("simulation: Asset '%s' ist ein Fonds-Wrapper; daf\u00fcr ist nur trading = \"bnh\" m\u00f6glich (keine Signale auf den Anteilswert).",
-                     nm), call. = FALSE)
+        chk_stop("a.m_sim_check_inputs_11", nm)
     }
     .sim_check_asset_fields(a, nm)
   }
   if (!strat_ok) .sim_memo_set("strategy", strategy)
-  if (!"date" %in% names(data)) stop("simulation: Spalte 'date' fehlt in 'data'.")
+  if (!"date" %in% names(data)) chk_stop("a.date_fehlt", "simulation")   # seit 1.6.5 (FB-4) mit Hinweis
   # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (.strategy_columns)
   wraps <- .sim_memo_val("wraps", strategy, function() .strategy_wrappers(strategy))
   if (length(coll <- intersect(wraps, names(data))))
-    stop(sprintf("simulation: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); 'data' darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet). Spalte umbenennen oder entfernen.",
-                 coll[1]), call. = FALSE)
+    chk_stop("a.m_sim_check_inputs_12", coll[1])
   miss <- setdiff(.sim_memo_val("columns", strategy, function() .strategy_columns(strategy)), names(data))
   if (length(miss))
-    stop(sprintf("simulation: %s %s in 'data'; je Asset der Strategie wird eine Spalte gleichen Namens erwartet (vorhanden: %s).",
-                 if (length(miss) == 1L) "Kursspalte" else "Kursspalten", paste(paste0("'", miss, "'", collapse = ", "),
+    stop(chk_msg("a.m_sim_check_inputs_13", if (length(miss) == 1L) "Kursspalte" else "Kursspalten", paste(paste0("'", miss, "'", collapse = ", "),
                  if (length(miss) == 1L) "fehlt" else "fehlen"), paste(setdiff(names(data), "date"), collapse = ", ")))
-  if (nrow(data) < 1L) stop("simulation: 'data' enth\u00e4lt keine Zeilen.")
+  if (nrow(data) < 1L) stop(chk_msg("a.m_sim_check_inputs_14"))
   # seit 1.6.4 kein Faktor als Datumsspalte (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   chk_col_nofactor(data, "date", "simulation")
   if (is.character(data$date)) {
@@ -345,7 +339,7 @@
     message("Hinweis: Spalte 'date' wurde von Datum-Uhrzeit in Date umgewandelt.")
   }
   if (!inherits(data$date, "Date"))
-    stop("simulation: Spalte 'date' muss die Klasse Date haben.")
+    stop(chk_msg("a.m_sim_check_inputs_15"))
   # In einer Studie (seit 1.5.1) nur einmal je Datumsspalte, wenn sie ohne Meldung durchging (kein NA, sortiert,
   # eindeutig); sonst je Lauf wie bisher mit Meldung bzw. Fehler
   dates_ok <- !is.null(.sim_memo_get("dates", data$date))
@@ -395,11 +389,11 @@
     pre_filled <- rowSums(real) == 0
   }
   all_na <- Reduce(`&`, lapply(names(strategy), function(nm) is.na(data[[nm]])))
-  if (all_na[1]) stop("simulation: In der ersten Zeile von 'data' fehlen alle Kurse (NA); mindestens ein Asset muss am ersten Tag notieren. Daten erst ab dem ersten Kurs \u00fcbergeben.")
+  if (all_na[1]) stop(chk_msg("a.m_sim_check_inputs_16"))
   pre_filled <- pre_filled | all_na
   for (nm in names(strategy)) {
     v <- data[[nm]]
-    if (!is.numeric(v)) stop(sprintf("simulation: Kursspalte '%s' muss numerisch sein.", nm))
+    if (!is.numeric(v)) stop(chk_msg("a.m_sim_check_inputs_17", nm))
     # seit 1.6.4 (A-086) Schnellweg ohne NA: Bereich ueber min/max statt der Indexvektoren; nur bei einem Fehler wie
     # bisher ueber which() (gleiche Meldung, gleiche Reihenfolge der Pruefungen)
     if (length(v) && !is.object(v) && !anyNA(v)) {
@@ -407,13 +401,12 @@
       if (is.finite(lo) && is.finite(hi) && lo >= 1e-100 && hi <= 1e100) next
     }
     bad <- which(!is.na(v) & !(is.finite(v) & v > 0))
-    if (length(bad)) stop(sprintf("simulation: Kursspalte '%s' enth\u00e4lt ung\u00fcltige Kurse (<= 0 oder unendlich), erstmals am %s; erwartet werden positive Kursniveaus.",
-                                  nm, format(data$date[bad[1]])))
+    if (length(bad)) stop(chk_msg("a.m_sim_check_inputs_18", nm, format(data$date[bad[1]])))
     # seit 1.6.4 (A-005, Entscheidung 103): Kurse von 1e-100 bis 1e100 (sonst laeuft die Stueckzahl Geld / Kurs ueber)
     bad <- which(!is.na(v) & (v < 1e-100 | v > 1e100))
     if (length(bad)) chk_stop("fa.kurs_bereich", "simulation", nm, format(data$date[bad[1]]))
     ok <- which(!is.na(v))
-    if (!length(ok)) stop(sprintf("simulation: Kursspalte '%s' enth\u00e4lt nur NA.", nm))
+    if (!length(ok)) stop(chk_msg("a.m_sim_check_inputs_19", nm))
     if (length(ok) < length(v)) {
       if (ok[1] > 1L) {                               # spaeter startendes Asset: wie start
         st0 <- strategy[[nm]][["start"]]
@@ -434,7 +427,7 @@
     message("Hinweis: start_value ist NULL oder NA; verwendet wird der Standardwert 10000 EUR.")
   }
   if (!is.numeric(start_value) || length(start_value) != 1L || start_value <= 0) {
-    stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000).")
+    stop(chk_msg("a.m_sim_check_inputs_20"))
   }
   if (start_value == Inf) chk_stop("zahl", "simulation", "start_value")
   
@@ -443,15 +436,14 @@
   # fractions (TRUE/FALSE) und risk_free (Prozent-Konvention) prueft simulation() selbst
   .frac_warn <- function(x, arg, hi = 1) {
     if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
-      warning(sprintf("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                      arg, format(x), format(x), format(x * 100)), call. = FALSE)
+      warning(chk_msg("e.prozent_anteil", "simulation", arg, format(x), format(x), format(x * 100)), call. = FALSE)
   }
   # seit 1.6.4 liquidate und details wie fractions (bis 1.6.3 je Sprache eigene Wahrheitsregel: R isTRUE, Python
   # bool(), Julia == true)
   for (lg in c("fractions", "liquidate", "details")) {
     v <- switch(lg, fractions = fractions, liquidate = liquidate, details = details)
     if (!is.logical(v) || length(v) != 1L || is.na(v))
-      stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein.", lg), call. = FALSE)
+      chk_stop("a.m_frac_warn", lg)
   }
   # seit 1.6.4 risk_free: NULL, eine endliche Zahl oder ein Spaltenname mit Zahlen (bis 1.6.3 in R Vektoren je Tag
   # reihum, Faktoren als Codes; in Python/Julia Rohfehler)
@@ -460,7 +452,15 @@
           (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && nzchar(risk_free))))
       chk_stop("zahl_oder_spalte", "simulation", "risk_free")
     # Spalte: nur Zahlen (Entscheidung 2; bis 1.6.3 Text und Wahrheitswerte ueber as.numeric, Faktoren als Codes)
-    if (is.character(risk_free) && risk_free %in% names(data)) chk_col_type(data, risk_free, "simulation", "numerisch")
+    if (is.character(risk_free) && risk_free %in% names(data)) {
+      chk_col_type(data, risk_free, "simulation", "numerisch")
+      # seit 1.6.5 (MA2-5, Entscheidung 186 M8): keine Luecken und Zinsen > -100 % (bis 1.6.4 je nach Daten LOCF oder
+      # still 0, Werte <= -100 fielen still aus Mittel und Streuung)
+      chk_col_nona(data, risk_free, "simulation")
+      bad <- which(data[[risk_free]] <= -100)
+      if (length(bad)) chk_stop("a.rf_spalte", "simulation", risk_free, bad[1])
+    }
+    if (is.numeric(risk_free) && risk_free <= -100) chk_stop("a.rf_zahl", "simulation")   # seit 1.6.5 (M8)
   }
   .frac_warn(risk_free, "risk_free", hi = 0.05)
   # dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
@@ -477,7 +477,7 @@
     tt <- if (is.null(tariff)) tax_tariff()
           else if (inherits(tariff, "SimLevTaxTariff")) tariff
           else if (is.character(tariff) && length(tariff) == 1L && !is.na(tariff)) tax_tariff(tariff)
-          else stop("simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.", call. = FALSE)
+          else chk_stop("a.m_frac_warn_2")
     tariff_env <- new.env(parent = emptyenv())
     tariff_env$tariff <- tt
     tariff_env$zve_all <- zv$all; tariff_env$zve <- zv$by_year

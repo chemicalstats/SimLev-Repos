@@ -85,8 +85,9 @@ end
 function _is_numeric_named(x)
     x isa RVector && return x.names !== nothing && eltype(x.values) <: Union{Real,Missing} && !(eltype(x.values) <: Bool)
     x isa Union{AbstractDict,NamedTuple} && return length(x) > 0 && all(v -> v isa Real && !(v isa Bool), values(x))
-    x isa Pair && return x.second isa Real
-    (x isa AbstractVector && !isempty(x) && all(p -> p isa Pair && p.second isa Real, x)) && return true
+    # seit 1.6.5 (CR2-X15-2): Wahrheitswerte auch in Paaren ausgeschlossen (Meldung wie R und Python)
+    x isa Pair && return x.second isa Real && !(x.second isa Bool)
+    (x isa AbstractVector && !isempty(x) && all(p -> p isa Pair && p.second isa Real && !(p.second isa Bool), x)) && return true
     false
 end
 
@@ -140,7 +141,7 @@ function _as_weights_m(dates, M::AbstractMatrix, cols, source = "")
     M[M .< 0] .= 0.0
     s = _rowsums(M)
     bad = count(<=(0), s)
-    bad > 0 && error("Gewichte: $bad Zeilen ohne positive Gewichte.")
+    bad > 0 && chk_stop("b2b.m_as_weights_m", bad)
     M = M ./ s
     cols === nothing && (cols = size(M, 2) > 1 ? ["X$j" for j in 1:size(M, 2)] : ["W"])
     d = _to_date(dates, "date")
@@ -157,7 +158,7 @@ end
 (`"day"`, `"week"` = ISO-Woche, `"month"`, `"quarter"`, `"year"`).
 """
 function _period_last(dates, every)
-    every in ("day", "week", "month", "quarter", "year") || error("every: 'day', 'week', 'month', 'quarter' oder 'year'.")
+    every in ("day", "week", "month", "quarter", "year") || chk_stop("b2b.m_period_last")
     d = dates isa AbstractVector{Date} ? dates : _to_date(dates, "date")
     n = length(d)
     every == "day" && return collect(1:n)
@@ -433,7 +434,17 @@ end
 const _UserEnv = SimLev._UserEnv
 
 "Bedingung als Text in R-Syntax auswerten (`SimLev.RExpr`): Spalten von `data`, dann Variablen aus `env`."
-function _eval_when(s::AbstractString, data, env)
+# Ergebnis einer Bedingung: logisch oder Zahlen 0/1 (NA erlaubt), ohne Dimension (seit 1.6.5, CR2-E-12)
+function _when_ok(v)
+    v isa Bool && return true
+    v isa Real && return isnan(Float64(v)) || v == 0 || v == 1
+    v isa AbstractMatrix && return false
+    a = v isa RVector ? v.values : v
+    a isa Union{AbstractVector,Tuple} || return false
+    return all(x -> x === missing || x isa Bool || (x isa Real && (isnan(Float64(x)) || x == 0 || x == 1)), a)
+end
+
+function _eval_when(s, data, env)
     cols = data isa Union{RFrame,NamedTuple,AbstractDict} ? data :
            Dict{String,Any}(c => _col(data, c) for c in _df_names(data))
     SimLev.RExpr.eval_r(s, cols; env = env isa Module ? _UserEnv(env) : env)
@@ -538,27 +549,28 @@ function tactical_rules(data, rules, default; env = Main)
     dn, _ = _named(default)
     assets = _unique(vcat(nm_all, dn === nothing ? String[] : dn))
     cond = falses(n, length(rules))
+    # seit 1.6.5 (CR2-E-12, K33): je Regel genau ein Ausdruck; Ergebnis eines Ausdrucks oder einer Funktion wie ein
+    # Vektor geprüft (logisch oder 0/1, NA erlaubt); Längenmeldung mit Regel und beiden Längen
     for (j, r) in enumerate(rules)
         w = _rget(r, "when")
-        v = if w isa AbstractString
-            _eval_when(w, data, env)
+        checked = false
+        v = if w isa AbstractString || (!_has_buy(w) && !(w isa Function) && _is_chr(w))
+            txt = w isa AbstractString ? String(w) : join([z isa AbstractString ? String(z) : "NA" for z in w], "\n")
+            ex = SimLev.RExpr.parse_r(txt)
+            length(ex) == 1 || chk_stop("b2.when_mehrere", fn, j)
+            checked = true
+            _eval_when(ex, data, env)
         elseif _has_buy(w)
             signal_state(w)
         elseif w isa Function
+            checked = true
             w(data)
-        elseif _is_chr(w)
-            # R: eval(parse(text = w)) – jedes Element ein Ausdruck (NA als "NA"), Ergebnis der letzte (seit 1.6.3;
-            # bis 1.6.2 wurde ein Textvektor als logischer Vektor gelesen)
-            vv = Any[]
-            for z in w
-                vv = _eval_when(z isa AbstractString ? z : "NA", data, env)
-            end
-            vv
         else
             w
         end
+        checked && !_when_ok(v) && chk_stop("e5.when", fn, j)
         v = _as_logical(v)
-        length(v) == n || error("Bedingung hat nicht die Länge nrow(data).")
+        length(v) == n || chk_stop("b2.when_laenge", fn, j, length(v), n)
         cond[:, j] = v
     end
     regime = Int[(k = findfirst(@view cond[i, :]); k === nothing ? 0 : k) for i in 1:n]
@@ -645,7 +657,8 @@ println(tactical_rotation(d, ["aktien", "anleihen"]; safe = "geld"))
 ```
 """
 function tactical_rotation(data, assets; top = 1, safe = nothing, absolute = true, canary = nothing, breadth = nothing,
-                           lookbacks = [1, 3, 6, 12], type = nothing, every = nothing, weighting = nothing)
+                           lookbacks = [1, 3, 6, 12], type = nothing, every = nothing, weighting = nothing,
+                           vol_window = 63)
     fn = "tactical_rotation"
     type = _dp()._e5_match_arg(type, ["average", "13612w"], fn, "type")
     every = _dp()._e5_match_arg(every, ["month", "week", "quarter"], fn, "every")
@@ -660,8 +673,9 @@ function tactical_rotation(data, assets; top = 1, safe = nothing, absolute = tru
     _dp()._e5_lookbacks(lookbacks, fn)
     (absolute || !isempty(canary)) && isempty(safe) && error("absolute bzw. canary brauchen eine sichere Anlage 'safe'.")
     top = Int(chk_int1(top, fn, "top"; lo = 1))
-    top > length(assets) && error("top muss zwischen 1 und der Anzahl der Anlagen in assets ($(length(assets))) liegen.")
+    top > length(assets) && chk_stop("b2b.m_tactical_rotation_3", length(assets))
     breadth === nothing || (breadth = chk_int1(breadth, fn, "breadth"; lo = 1))
+    vol_window = Int(chk_int1(vol_window, fn, "vol_window"; lo = 2, hi = 2147483647))   # seit 1.6.5 (Entscheidung 144)
     allc = _unique(vcat(assets, safe, canary))
     Sm = momentum_score(data, allc; lookbacks = lookbacks, type = type)
     S = Sm.data
@@ -673,8 +687,8 @@ function tactical_rotation(data, assets; top = 1, safe = nothing, absolute = tru
     rows = Int[i for i in rows if count(isfinite, S[i, ja]) >= top]
     # inverse_vol: Termine erst ab Zeile 63, wenn das Fenster der Schwankung voll ist (seit 1.6.4, Entscheidung 144;
     # bis 1.6.3 Abbruch "Zeilen ohne positive Gewichte" bei jedem früheren Termin)
-    weighting == "inverse_vol" && (rows = Int[i for i in rows if i >= 63])
-    isempty(rows) && error("Zu kurze Historie für den Rückblick.")
+    weighting == "inverse_vol" && (rows = Int[i for i in rows if i >= vol_window])
+    isempty(rows) && chk_stop("b2b.m_tactical_rotation_2")
     out_assets = _unique(vcat(assets, safe))
     oi = Dict(a => j for (j, a) in enumerate(out_assets))
     vol = nothing
@@ -685,7 +699,7 @@ function tactical_rotation(data, assets; top = 1, safe = nothing, absolute = tru
             lx = SimLev.RLibm.log(x)
             r = vcat(NA, lx[2:end] .- lx[1:end-1])
             r0 = Float64[isnan(v) ? 0.0 : v for v in r]
-            rm = Float64[Float64(v) for v in SimLev.Signals._roll_mean(r0 .* r0, 63)]
+            rm = Float64[Float64(v) for v in SimLev.Signals._roll_mean(r0 .* r0, vol_window)]
             vol[:, j] = Float64[isnan(v) ? v : sqrt(max(v, 1e-12)) for v in rm]
         end
     end
@@ -754,11 +768,11 @@ end
 function _e5_risk_check(fn, data, weights, safe, window, ppy)
     _dp()._e5_data_dates(data, fn, "data\$date")
     if !_isweights(weights)
-        _is_numeric_named(weights) || error("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+        _is_numeric_named(weights) || chk_stop("b2b.m_e5_risk_check")
         _dp()._e5_weights(weights, fn, "weights")
     end
     safe = chk_name1(safe, fn, "safe")
-    window = chk_int1(window, fn, "window"; lo = 2)
+    window = chk_int1(window, fn, "window"; lo = 2, hi = 2147483647)   # seit 1.6.5 mit Obergrenze (CR2-X2-1)
     ppy = chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true, null_ok = true)
     wn = _isweights(weights) ? names(weights)[2:end] : (nm = _named(weights)[1]; nm === nothing ? String[] : nm)
     nms = _df_names(data)
@@ -766,22 +780,22 @@ function _e5_risk_check(fn, data, weights, safe, window, ppy)
     return safe, window, ppy
 end
 
-"`.risk_vol`: Volatilität des Risikoportfolios."
-function _risk_vol(data, weights, safe, window, ppy)
+"`.risk_vol`: Risiko je Zeile mit den Gewichten der Zeile (seit 1.6.5: CR2-V1-1, CR2-R-2, lit1 S2/S3; Kern op 3)."
+function _risk_vol(data, weights, safe, window, ppy; measure = 0, q = 2.0, alpha = 0.05, est = 0, lam = 0.94)
     d = _to_date(_col(data, "date"), "data\$date")
     n = length(d)
     if !_isweights(weights)
-        _is_numeric_named(weights) || error("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+        _is_numeric_named(weights) || chk_stop("b2b.m_e5_risk_check")
         nm, vals = _named(weights)
         weights = _as_weights_m(d, repeat(reshape(vals, 1, :), n, 1), nm, "static")
     end
-    _has(data, safe) || error("Sichere Anlage '$safe' fehlt in data.")
+    _has(data, safe) || chk_stop("b2b.m_risk_vol", safe)
     risky = _setdiff(names(weights)[2:end], [safe])
     miss = _setdiff(risky, _df_names(data))
     isempty(miss) || error("Kursspalte(n) aus weights fehlen in data: " * join(miss, ", "))
     wd = _to_date(weights["date"], "date")
     (SimLev.nrow(weights) != n || !isequal(Float64[_dnum(z) for z in wd], Float64[_dnum(z) for z in d])) &&
-        error("weights passt nicht zu data (andere Daten); Gewichte aus demselben Datensatz erzeugen.")
+        chk_stop("b2b.m_risk_vol_2")
     Wr = _wmat(weights, risky)
     R = zeros(n, length(risky))
     for (j, a) in enumerate(risky)
@@ -795,20 +809,17 @@ function _risk_vol(data, weights, safe, window, ppy)
     Wn = Wr ./ Float64[v > 0 ? v : 1.0 for v in rs]
     pr = n > 0 ? vcat(0.0, _rowsums(Wn[1:end-1, :] .* R[2:end, :])) : Float64[]
     move = abs.(pr) .> 0
-    if ppy === nothing
+    rolling = ppy == "rolling"
+    if ppy === nothing || rolling
         span = n > 0 ? Float64(Dates.value(d[n] - d[1])) / 365.25 : NaN
         ppy = count(move) / max(span, 1e-9)
     end
     ppy = Float64(ppy)
-    vol = fill(NA, n)
-    idx = findall(move)
-    window = Int(window)
-    if length(idx) > window
-        v = Float64[Float64(z) for z in SimLev.Signals._roll_var(pr[idx], window)]
-        vol[idx] = Float64[isnan(z) ? z : sqrt(max(z, 0.0) * ppy) for z in v]
-    end
-    (d = d, n = n, risky = risky, Wr = Wr, rs = rs, move = move, ppy = ppy, vol_move = vol,
-     vol = _fill_na(vol, "locf"; keep_leading = true))
+    x = vcat(vec(R), vec(Matrix{Float64}(Wn)), Float64[_dnum(z) for z in d])
+    vol = SimLev.SignalsCore.research_vec(3, x, Float64[n, length(risky), Int(window), measure, q, alpha, est, lam,
+                                                        rolling ? 0.0 : ppy], n)
+    vm = copy(vol); vm[.!move] .= NA
+    (d = d, n = n, risky = risky, Wr = Wr, rs = rs, move = move, ppy = ppy, pr = pr, vol_move = vm, vol = vol)
 end
 
 "`.risk_weights`: Risikoteil mit Exposure skalieren, Rest in die sichere Anlage."
@@ -877,26 +888,60 @@ tv = tactical_target_volatility(d, (aktien = 0.8, anleihen = 0.2), "geld"; targe
 println(tv)
 ```
 """
-function tactical_target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1, every = nothing, ppy = nothing)
+function tactical_target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1, every = nothing,
+                                    ppy = nothing, risk = nothing, estimator = nothing, alpha = 0.05, lpm_order = 1,
+                                    lambda = 0.94, exponent = 1, min_exposure = 0, risk_floor = nothing,
+                                    reference = nothing, cushion = nothing, cushion_window = 252)
     fn = "tactical_target_volatility"
     every = _dp()._e5_match_arg(every, ["month", "week", "day", "quarter"], fn, "every")
-    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, ppy)   # seit 1.6.4 (K42 E5)
+    # seit 1.6.5 (lit1 S1-S5, S7, Entscheidungen 175, 192)
+    risk = _dp()._e5_match_arg(risk, ["sd", "downside", "es", "var", "lpm"], fn, "risk")
+    estimator = _dp()._e5_match_arg(estimator, ["window", "ewma"], fn, "estimator")
+    reference = _dp()._e5_match_arg(reference, ["fixed", "median"], fn, "reference")
+    rolling = ppy == "rolling"
+    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, rolling ? nothing : ppy)   # seit 1.6.4 (K42 E5)
     data = SimLev.as_rframe(data)
     target = chk_num1(target, fn, "target"; lo = 0, lo_open = true)
     max_exposure = chk_num1(max_exposure, fn, "max_exposure"; lo = 0)
-    max_exposure > 1 && error("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über Hebelprodukte abbilden).")
-    target < 1 && _warn("target = $(_g(target)) ist sehr klein; target ist in Prozent p. a. (10 = 10 %), nicht als Anteil.")
-    rv = _risk_vol(data, weights, safe, window, ppy)
+    max_exposure > 1 && chk_stop("b2b.m_tactical_target_volatili")
+    alpha = chk_num1(alpha, fn, "alpha"; lo = 0, hi = 0.5, lo_open = true)
+    lpm_order = chk_num1(lpm_order, fn, "lpm_order"; lo = 1, hi = 4)
+    lambda = chk_num1(lambda, fn, "lambda"; lo = 0, hi = 1, lo_open = true, hi_open = true)
+    exponent = chk_num1(exponent, fn, "exponent"; lo = 0)
+    min_exposure = chk_num1(min_exposure, fn, "min_exposure"; lo = 0, hi = max_exposure)
+    risk_floor = chk_num1(risk_floor, fn, "risk_floor"; lo = 0, lo_open = true, null_ok = true)
+    cushion = chk_num1(cushion, fn, "cushion"; lo = 0, hi = 100, lo_open = true, hi_open = true, null_ok = true)
+    cushion_window = chk_int1(cushion_window, fn, "cushion_window"; lo = 1)
+    chk_max(cushion_window, 2147483647, fn, "cushion_window")
+    reference == "fixed" && target < 1 &&
+        _warn("target = $(_g(target)) ist sehr klein; target ist in Prozent p. a. (10 = 10 %), nicht als Anteil.")
+    meas = Dict("sd" => 0, "downside" => 2, "lpm" => 2, "var" => 3, "es" => 4)[risk]
+    q = risk == "downside" ? 2.0 : Float64(lpm_order)
+    rv = _risk_vol(data, weights, safe, window, rolling ? "rolling" : ppy; measure = meas, q = q, alpha = Float64(alpha),
+                   est = estimator == "ewma" ? 1 : 0, lam = Float64(lambda))
     n = rv.n; vol = rv.vol
+    ref = reference == "fixed" ? fill(Float64(target) / 100, n) : SimLev.SignalsCore.research_vec(4, vol, [63.0], n)
     rows = _period_last(rv.d, every)
-    rows = rows[isfinite.(vol[rows])]
-    isempty(rows) && error("Zu kurze Historie für das Volatilitätsfenster.")
-    expo_r = Float64[_pmin(Float64(max_exposure), Float64(target) / 100 / _pmax(1e-6, v)) for v in vol[rows]]
+    rows = rows[isfinite.(vol[rows]) .& isfinite.(ref[rows])]
+    isempty(rows) && chk_stop("b2b.m_tactical_target_volatili_2")
+    den = Float64[max(v, 1e-6) for v in vol[rows]]
+    risk_floor === nothing || (den = Float64[max(den[i], Float64(risk_floor) * ref[rows[i]]) for i in eachindex(den)])
+    kr = ref[rows] ./ den
+    exponent != 1 && (kr = Float64[SimLev.r_pow(z, Float64(exponent)) for z in kr])
+    expo_r = Float64[min(Float64(max_exposure), z) for z in kr]
+    min_exposure > 0 && (expo_r = Float64[max(Float64(min_exposure), z) for z in expo_r])
+    cm = nothing
+    if cushion !== nothing                      # Drawdown-Polster am Index des Risikoportfolios (lit1 S7)
+        cm = SimLev.SignalsCore.research_vec(5, rv.pr, Float64[cushion_window, Float64(cushion) / 100], n)
+        expo_r = expo_r .* cm[rows]
+    end
     k = _find_interval(collect(1:n), rows)
     expo = Float64[k[i] > 0 ? expo_r[k[i]] : 0.0 for i in 1:n]
     out = _risk_weights(rv, expo, safe, "target_volatility")
     SimLev.attrs(out)["exposure"] = expo
     SimLev.attrs(out)["volatility"] = vol
+    reference == "median" && (SimLev.attrs(out)["reference"] = ref)
+    cm === nothing || (SimLev.attrs(out)["cushion"] = cm)
     out
 end
 
@@ -999,17 +1044,17 @@ function tactical_conditional_volatility(data, weights, safe; base = 1, upper = 
     target === nothing || chk_num1(target, fn, "target"; lo = 0, lo_open = true)
     min_history = chk_num1(min_history, fn, "min_history"; lo = 0)
     chk_max(min_history, 100, fn, "min_history")             # Entscheidung 46
-    max_exposure > 1 && error("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über Hebelprodukte abbilden).")
-    (base < 0 || base > max_exposure) && error("base muss zwischen 0 und max_exposure liegen.")
-    (min_exposure < 0 || min_exposure > base) && error("min_exposure muss zwischen 0 und base liegen.")
-    (upper > 0 && upper < 1) || error("upper muss zwischen 0 und 1 liegen.")
-    lower !== nothing && !(lower > 0 && lower < upper) && error("lower muss zwischen 0 und upper liegen.")
+    max_exposure > 1 && chk_stop("b2b.m_tactical_target_volatili")
+    (base < 0 || base > max_exposure) && chk_stop("b2b.m_tactical_conditional_vol")
+    (min_exposure < 0 || min_exposure > base) && chk_stop("b2b.m_tactical_conditional_vol_2")
+    (upper > 0 && upper < 1) || chk_stop("b2b.m_tactical_conditional_vol_3")
+    lower !== nothing && !(lower > 0 && lower < upper) && chk_stop("b2b.m_tactical_conditional_vol_4")
     if scaling == "fixed"
         (high_exposure === nothing || (lower !== nothing && low_exposure === nothing)) &&
-            error("scaling = 'fixed' braucht high_exposure (und low_exposure, wenn lower gesetzt ist).")
-        high_exposure > base && error("high_exposure darf nicht über base liegen.")
+            chk_stop("b2b.m_tactical_conditional_vol_5")
+        high_exposure > base && chk_stop("b2b.m_tactical_conditional_vol_6")
         lower !== nothing && (low_exposure < base || low_exposure > max_exposure) &&
-            error("low_exposure muss zwischen base und max_exposure liegen.")
+            chk_stop("b2b.m_tactical_conditional_vol_7")
     end
     target !== nothing && target < 1 &&
         _warn("target = $(_g(target)) ist sehr klein; target ist in Prozent p. a. (10 = 10 %), nicht als Anteil.")
@@ -1052,7 +1097,7 @@ function tactical_conditional_volatility(data, weights, safe; base = 1, upper = 
     end
     rows = _period_last(d, every)
     rows = rows[isfinite.(vol[rows])]
-    isempty(rows) && error("Zu kurze Historie für das Volatilitätsfenster.")
+    isempty(rows) && chk_stop("b2b.m_tactical_target_volatili_2")
     e_r = fill(Float64(base), length(rows))
     s_r = state[rows]
     if scaling == "inverse"
@@ -1137,7 +1182,7 @@ function tactical_glidepath(data, from_, to; start = nothing, end_ = nothing, ev
     tn === nothing || for (k, x) in zip(tn, tv); t[findfirst(==(k), a)] = x; end
     s = _to_date(start === nothing ? d[1] : start, "start")[1]
     e = _to_date(end_ === nothing ? d[end] : end_, "end")[1]
-    e < s && error("tactical_glidepath: end liegt vor start; für den umgekehrten Weg from und to tauschen.")   # seit 1.6.4 ohne Daten
+    e < s && chk_stop("b2b.m_tactical_glidepath")   # seit 1.6.4 ohne Daten
     rows = _unique(vcat(1, _period_last(d, every)))
     sd = _dnum(s); ed = _dnum(e)
     frac = if e > s
@@ -1189,7 +1234,7 @@ println(tactical_blend(kern, satellit; shares = [0.7, 0.3]))
 """
 function tactical_blend(ws...; shares = nothing)
     ws = collect(ws)
-    (isempty(ws) || !all(_isweights, ws)) && error("tactical_blend: ... muss aus SimLevWeights bestehen.")
+    (isempty(ws) || !all(_isweights, ws)) && chk_stop("b2b.m_tactical_blend")
     shares === nothing && (shares = fill(1 / length(ws), length(ws)))
     sv = shares isa Union{AbstractVector,Tuple} ? collect(Any, shares) : Any[shares]
     num = !(shares isa SimLev.RFmt.RFactor) && all(v -> v isa Real && !(v isa Bool), sv)
@@ -1398,7 +1443,7 @@ function tactical_simulation(data, weights; rebalance = nothing, tolerance = not
     tolerance_type = _dp()._e5_match_arg(tolerance_type, ["absolute", "relative"], fn, "tolerance_type")
     _dp()._e5_data_dates(data, fn, "data\$date")           # seit 1.6.4 (K42 E5)
     data = SimLev.as_rframe(data)
-    _isweights(weights) || error("weights muss ein SimLevWeights sein.")
+    _isweights(weights) || chk_stop("b2b.m_tactical_simulation")
     lag = chk_int1(lag, fn, "lag"; lo = 0)                  # seit 1.6.4 ohne Abschneiden (Entscheidung 19)
     (asset_args === nothing || asset_args isa Union{NamedTuple,AbstractDict}) || chk_stop("liste", fn, "asset_args")
     bad = [String(k) for (k, _) in kwargs if String(k) in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh") ||

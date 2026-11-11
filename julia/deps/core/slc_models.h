@@ -139,8 +139,11 @@ void sl_msgarch_unpack(int K, int gjr, const double *theta, double *omega, doubl
                        double *beta, double *gamma, double *P) SL_NOTHROW;
 void sl_msgarch_pack(int K, int gjr, const double *omega, const double *alpha, const double *beta,
                      const double *gamma, const double *P, double *theta) SL_NOTHROW;
-/* stationäre Verteilung wie .ms_garch_stat (Potenziteration, höchstens 1000 Schritte) */
+/* stationäre Verteilung (seit 1.6.5 direkt gelöst, sl_markov_stat_exact; nur bei singulärem System die
+ * Potenziteration bis 1.6.4 mit höchstens 1000 Schritten) */
 void sl_msgarch_stat(int K, const double *P, double *pi) SL_NOTHROW;
+/* seit 1.6.5: stationäre Verteilung direkt (LU); 1 = gelöst, 0 = singulär/ungültig (pi unverändert) */
+int sl_markov_stat_exact(int K, const double *P, double *pi) SL_NOTHROW;
 /* negative Log-Likelihood an theta (nicht endlich -> +Inf); h1 = NaN: Stichprobenvarianz von y
  * (ebenso in sl_msgarch_fit und sl_msgarch_starts) */
 int sl_msgarch_nll(sl_ctx *cx, int n, const double *y, int K, int gjr, const double *theta,
@@ -234,6 +237,8 @@ int sl_boot_ms_garch(sl_ctx *cx, sl_rng *r, int n_out, int base, int k, int K, c
                      int32_t *idx, int32_t *regime) SL_NOTHROW;
 /* ohne Zufall */
 int sl_rolling_vol(sl_ctx *cx, int n, const double *x, int window, double *vol) SL_NOTHROW;
+/* seit 1.6.5: Fenster in Kalendertagen (day streng aufsteigend) */
+int sl_rolling_vol_days(sl_ctx *cx, int n, const double *x, const double *day, double days, double *vol) SL_NOTHROW;
 int sl_assign_regimes(sl_ctx *cx, int n, const double *vol, int nth, const double *thresh, int32_t *reg) SL_NOTHROW;
 int sl_estimate_trans_mat(sl_ctx *cx, int n, const int32_t *regimes, int K, double alpha, double *P) SL_NOTHROW;
 

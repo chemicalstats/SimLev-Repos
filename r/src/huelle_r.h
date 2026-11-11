@@ -9,12 +9,16 @@
  * Rueckmeldungen: der Kern springt nie; finish() gibt die gesammelten Warnungen in Reihenfolge mit
  * Rf_warningcall(R_NilValue, ...) aus (wie warning(call. = FALSE)) und einen Fehler mit
  * Rf_errorcall(R_NilValue, ...) (wie stop(call. = FALSE)). Benutzerabbruch: Rueckruf ueber R_ToplevelExec
- * (kein longjmp im Kern); bei SL_EINTR danach R_CheckUserInterrupt().
+ * (kein longjmp im Kern); bei SL_EINTR danach Rf_onintr() (seit 1.6.5; bis 1.6.4 R_CheckUserInterrupt(), das
+ * nichts mehr fand, dann der Fehler "Benutzerabbruch").
  */
 #ifndef SIMLEV_HUELLE_R_H
 #define SIMLEV_HUELLE_R_H
 
 /* ── Kontext und Rueckmeldungen ── */
+
+/* Rinterface.h (nur Unix) deklariert Rf_onintr; wie simlev_capi.h hier selbst deklariert */
+void Rf_onintr(void);
 
 static inline void chk_int(void *d) { (void) d; R_CheckUserInterrupt(); }
 static inline int r_interrupted(void *h) { (void) h; return !R_ToplevelExec(chk_int, NULL); }
@@ -34,7 +38,9 @@ static inline void finish(sl_ctx *cx, int st, int nprot)
     if (st != SL_OK) {
         memcpy(msg, cx->msg, SL_MSG_LEN);
         if (nprot) UNPROTECT(nprot);
-        if (st == SL_EINTR) R_CheckUserInterrupt();
+        /* seit 1.6.5 (C-033, Entscheidung 171): R_ToplevelExec hat den Abbruch verbraucht; eine echte Unterbrechung
+         * (Bedingung interrupt) statt des Fehlers "Benutzerabbruch", den tryCatch(error = ) verschluckte */
+        if (st == SL_EINTR) Rf_onintr();
         Rf_errorcall(R_NilValue, "%s", msg);
     }
 }

@@ -84,8 +84,7 @@ def _frac_warn_col(fr: _Frame, col: str, arg: str, hi: float) -> None:
         return
     m = r_median(v)
     if math.isfinite(m) and 0 < m < hi:
-        _warn("simulation: %s-Spalte '%s' hat den Median %s und wird als %s %% gelesen (Prozent-Konvention); gemeint "
-              "waren vermutlich Werte x 100 (Median %s)." % (arg, col, r_format1(m), r_format1(m), r_format1(m * 100)))
+        _warn(chk_msg("e.prozent_spalte", arg, col, r_format1(m), r_format1(m), r_format1(m * 100)))
 
 
 def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who, *, details=False,
@@ -198,7 +197,7 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
                       "(keine Signale auf den Anteilswert)." % nm)
         _sim_check_asset_fields(a, nm)
     if "date" not in fr:
-        _stop("simulation: Spalte 'date' fehlt in 'data'.")
+        chk_stop("a.date_fehlt", "simulation")   # seit 1.6.5 (FB-4) mit Hinweis
     # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (_strategy_columns)
     wraps = _strategy_wrappers(strat)
     coll = [w for w in wraps if w in fr.names]
@@ -319,7 +318,6 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
         # seit 1.6.4 (A-005, Entscheidung 103): Kurse von 1e-100 bis 1e100 (sonst läuft die Stückzahl Geld / Kurs über)
         bad = np.flatnonzero(~np.isnan(v) & ((v < 1e-100) | (v > 1e100)))
         if bad.size:
-            from ._pruefen import chk_stop
             chk_stop("fa.kurs_bereich", "simulation", nm, fmt_date(int(dvals[bad[0]])))
         ok = np.flatnonzero(~np.isnan(v))
         if ok.size == 0:
@@ -364,6 +362,14 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
             chk_stop("zahl_oder_spalte", "simulation", "risk_free")
         if isinstance(risk_free, str) and risk_free in fr:   # nur Zahlen (Entscheidung 2; bis 1.6.3 Text/logisch umgewandelt)
             chk_col_type(fr, risk_free, "simulation", "numerisch")
+            # seit 1.6.5 (MA2-5, Entscheidung 186 M8): keine Lücken und Zinsen > -100 %
+            chk_col_nona(fr, risk_free, "simulation")
+            with np.errstate(invalid="ignore"):
+                bad = np.flatnonzero(np.asarray(fr.get(risk_free), dtype=np.float64) <= -100)
+            if bad.size:
+                chk_stop("a.rf_spalte", "simulation", risk_free, int(bad[0]) + 1)
+        if _is_num(risk_free) and float(risk_free) <= -100:   # seit 1.6.5 (M8)
+            chk_stop("a.rf_zahl", "simulation")
     sparer_pauschbetrag = float(sparer_pauschbetrag)
     private_sale_threshold = float(private_sale_threshold)
     use_guenstigerpruefung = bool(use_guenstigerpruefung)
@@ -372,8 +378,8 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
     use_sparer_pauschbetrag = bool(use_sparer_pauschbetrag)
 
     if _is_num(risk_free) and math.isfinite(float(risk_free)) and 0 < risk_free < 0.05:
-        _warn("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-              % ("risk_free", r_format1(risk_free), r_format1(risk_free), r_format1(risk_free * 100)))
+        _warn(chk_msg("e.prozent_anteil", "simulation", "risk_free", r_format1(risk_free), r_format1(risk_free),
+                      r_format1(risk_free * 100)))
     if isinstance(risk_free, str) and risk_free in fr:
         _frac_warn_col(fr, risk_free, "risk_free", hi=0.05)
 
@@ -404,9 +410,7 @@ def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value,
                 or (a.get("asset_class") in ("etn", "etc") and _is_true(a.get("deliverable"))))
     has_private_sale = any(is_private(a) for a in strat.values())
     if has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on:
-        _warn("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die "
-              "Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden "
-              "dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
+        _warn(chk_msg("a.m_is_private"))
     # Kirchensteuer, Prozent-Konvention und Günstigerprüfung: _tax_rates() (unten, nach der Gewichtssumme)
     if balance_thresh is not None:
         balance_thresh = float(balance_thresh) / 100
@@ -465,9 +469,16 @@ def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_r
         chk_col_nona(fr, base_rate_data, "simulation", chk_msg("hinweis.basiszins"))
         _frac_warn_col(fr, base_rate_data, "base_rate", hi=0.05)
     expected_days = (stopp_date - start_date) + 1
+    fill_src = None
     if fr.nrow != expected_days:
-        _message("Hinweis: %d Zeilen, erwartet %d Kalendertage. Fehlende Tage werden aufgef\u00fcllt (LOCF; Signale = "
-                 "FALSE)." % (fr.nrow, expected_days))
+        # seit 1.6.5 (Entscheidung 180, FB-3): Hinweis nur bei Lücken über 5 Kalendertage (R .sim_prepare_data)
+        dd0 = np.asarray(fr.get("date"), dtype=np.float64)
+        dg = np.diff(dd0)
+        big = np.flatnonzero(dg > 5)
+        if big.size:
+            k = int(big[int(np.argmax(dg[big]))])
+            _message(chk_msg("a.locf_luecken", str(fr.nrow), str(int(expected_days)), str(big.size), str(int(dg[k])),
+                             fmt_date(int(dd0[k]))))
         all_dates = np.arange(start_date, stopp_date + 1, dtype=np.int64)
         n = all_dates.size
         # Zeile je Kalendertag und Zahlenspalten mit LOCF seit 1.6.0 im Kern (sl_cal_index, sl_cal_fill_real)
@@ -477,26 +488,34 @@ def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_r
         new_cols, new_kinds = {"date": all_dates.astype(np.float64)}, {"date": "date"}
         names = ["date"] + [nm for nm in fr.names if nm != "date"]
         for nm in names[1:]:
-            v = fr.cols[nm]
             k = fr.kinds[nm]
-            if k in ("numeric", "date", "posixct"):
-                out = np.empty(n)
-                _ext.slc_cal_fill_real(src, np.ascontiguousarray(v, dtype=np.float64), out, k == "numeric")
-            else:
-                out = np.empty(n, dtype=object)
-                out[:] = None
-                out[have] = v[src[have]]
-                if k == "logical":
-                    out[np.equal(out, None)] = False
-            new_cols[nm], new_kinds[nm] = out, k
+            new_cols[nm], new_kinds[nm] = _fill_column(src, have, fr.cols[nm], k), k
         filled = np.ones(n, dtype=bool)
         filled[have] = np.asarray(pre_filled, dtype=bool)[src[have]]
         new_cols[".filled"], new_kinds[".filled"] = filled, "filled"
         names.append(".filled")
         fr.names, fr.cols, fr.kinds = names, new_cols, new_kinds
+        fill_src = src
     elif np.any(pre_filled):
         fr.set(".filled", np.asarray(pre_filled, dtype=bool), "filled")
-    return {"data": fr, "start_date": start_date, "stopp_date": stopp_date}
+    # fill_src (seit 1.6.5, Paket E): Quellzeile je Kalendertag bzw. None ohne Auffüllen (Studienkern)
+    return {"data": fr, "start_date": start_date, "stopp_date": stopp_date, "fill_src": fill_src}
+
+
+def _fill_column(src: np.ndarray, have: np.ndarray, v, k: str) -> np.ndarray:
+    """Eine Spalte auf das Kalenderraster: Zahlen und Daten LOCF im Kern, sonst Wert der Quellzeile bzw. None
+    (logisch: False); seit 1.6.5 eigene Funktion (auch für die getauschten Spalten des Studienkerns)."""
+    n = src.size
+    if k in ("numeric", "date", "posixct"):
+        out = np.empty(n)
+        _ext.slc_cal_fill_real(src, np.ascontiguousarray(v, dtype=np.float64), out, k == "numeric")
+    else:
+        out = np.empty(n, dtype=object)
+        out[:] = None
+        out[have] = v[src[have]]
+        if k == "logical":
+            out[np.equal(out, None)] = False
+    return out
 
 
 def _signal_col(fr: _Frame, col: str | None) -> np.ndarray | None:
@@ -628,6 +647,8 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
     if event_col is not None:
         if event_col not in fr:
             _stop("simulation: event_col '%s' nicht im Datensatz gefunden." % event_col)
+        # seit 1.6.5 (CR2-G-6, Entscheidung 185 K36) wie Signalspalten: TRUE/FALSE oder 0/1, NA erlaubt
+        chk_col_signal(fr, event_col, "simulation")
         flag_event = _as_logical_col(fr, event_col)
         if event_weight is not None:
             if not isinstance(event_weight, Mapping) or any(str(k) == "" for k in event_weight):

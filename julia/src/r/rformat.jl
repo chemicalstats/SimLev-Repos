@@ -215,17 +215,18 @@ function r_format(x; digits = nothing, nsmall::Int = 0, big_mark::AbstractString
             # in einem Aufruf (seit 1.6.3; bis 1.6.2 je Wert, gleicher Kern sl_r_encode_real, gleiche NA-Maske)
             out = SimLev._rb_encode_real(fv, UInt8[isna_strict(v) for v in fv], w, d, e, ".", "NA", false)
         end
+        # seit 1.6.5 (CR2-D-13) wie R format.default: erst die Breite, dann die Tausenderzeichen (gemeinsame Breite)
+        width !== nothing && (out = [lpad(s, Int(width)) for s in out])
         if !isempty(big_mark)
             out = [_insert_big_mark(s, String(big_mark)) for s in out]
             ww = maximum(length, out)
             out = [lpad(s, ww) for s in out]
         end
-        width !== nothing && (out = [lpad(s, Int(width)) for s in out])
         return out
     end
     if all(v -> v isa Bool || v === missing || v === nothing, vals)
         out = String[v isa Bool ? (v ? "TRUE" : "FALSE") : "NA" for v in vals]
-        ww = maximum(length, out)
+        ww = max(width === nothing ? 0 : Int(width), maximum(length, out))   # seit 1.6.5 mit width wie R (CR2-D-13)
         return [lpad(s, ww) for s in out]
     end
     out = String[v === missing || v === nothing ? "NA" : _as_str(v) for v in vals]
@@ -304,9 +305,24 @@ function r_deparse(@nospecialize(x))
         isempty(ps) && return "list()"
         return "list(" * join((string(k) * " = " * r_deparse(v) for (k, v) in ps), ", ") * ")"
     end
+    # seit 1.6.5 (CR2-C-11): benannter Vektor wie R "c(a = 1, b = 2)" (bis 1.6.4 ohne Namen)
+    if x isa SimLev.RVector && x.names !== nothing && !isempty(x.values)
+        nm(k) = occursin(r"^([A-Za-z]|[.](?![0-9]))[A-Za-z0-9._]*$", k) ? k : r_deparse_str(k)
+        return "c(" * join((nm(k) * " = " * r_deparse(v) for (k, v) in zip(x.names, x.values)), ", ") * ")"
+    end
     if x isa AbstractVector || x isa Tuple
         vals = collect(Any, x)
-        isempty(vals) && return x isa AbstractVector{<:Real} ? "numeric(0)" : "NULL"
+        # seit 1.6.5 (CR2-C-11): leerer Vektor nach Elementtyp wie R (bis 1.6.4 Text "NULL", Zahl "numeric(0)")
+        if isempty(vals)
+            x isa Tuple && return "NULL"
+            T = nonmissingtype(eltype(x))
+            return T <: Bool ? "logical(0)" : T <: Integer ? "integer(0)" : T <: Real ? "numeric(0)" :
+                   T <: AbstractString ? "character(0)" : T <: Date ? "structure(numeric(0), class = \"Date\")" : "NULL"
+        end
+        if x isa AbstractVector && nonmissingtype(eltype(x)) <: Date && all(ismissing, vals)   # nur NA als Datum
+            return "structure(" * (length(vals) == 1 ? "NA_real_" : "c(" * join(fill("NA_real_", length(vals)), ", ") * ")") *
+                   ", class = \"Date\")"
+        end
         any(v -> v isa Union{AbstractVector,Tuple,AbstractDict,NamedTuple}, vals) &&
             return "list(" * join((r_deparse(v) for v in vals), ", ") * ")"
         vals = _rp_vals(vals, "r_deparse")

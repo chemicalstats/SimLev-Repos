@@ -287,6 +287,13 @@ class _StudyCache:
     Warnungen entstehen weiter je Lauf, Fehler brechen vor dem Merken ab. Außerhalb einer Studie wirkungslos."""
     on = False
     m: dict = {}
+    # Studienkern (seit 1.6.5, Paket E; _sim_prepared.py): Vorlagen, einmal gesehene und nie gemerkte Schlüssel,
+    # Merker "nächster Lauf wird Vorlage" und die gemerkte Vorlage
+    prep: list = []
+    seen: list = []
+    never: list = []
+    cap = False
+    cap_out = None
 
 
 def _sim_study() -> bool:
@@ -294,6 +301,7 @@ def _sim_study() -> bool:
         return False
     _StudyCache.on = True
     _StudyCache.m = {}
+    _StudyCache.prep, _StudyCache.seen, _StudyCache.never = [], [], []
     return True
 
 
@@ -301,6 +309,8 @@ def _sim_study_end(own: bool) -> None:
     if own:
         _StudyCache.on = False
         _StudyCache.m = {}
+        _StudyCache.prep, _StudyCache.seen, _StudyCache.never = [], [], []
+        _StudyCache.cap, _StudyCache.cap_out = False, None
 
 
 def _study_scope(f):
@@ -616,15 +626,24 @@ def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", pla
         if kind != "numeric":
             _stop(who + ": taxable_income: Spalte '%s' (Betrag) muss numerisch sein." % x.columns[vc])
         vals = [float(v) for v in col]
-        names = [r_as_character(v) if _is_num(v) else str(v) for v in x.iloc[:, yc]]
+        # seit 1.6.5 (CR2-C-2, CR2-D-15): fehlendes Jahr mit eigener Meldung, in allen drei Sprachen gleich
+        ycol = list(x.iloc[:, yc])
+        for i, v in enumerate(ycol):
+            if v is None or v is pd.NA or v is pd.NaT or (isinstance(v, float) and math.isnan(v)):
+                from ._pruefen import chk_stop
+                chk_stop("a.zve_jahr_na", who, i + 1, str(x.columns[yc]))
+        names = [r_as_character(v) if _is_num(v) else str(v) for v in ycol]
     elif isinstance(x, pd.Series):
         kind, col = _column(x)
         if kind != "numeric":
             vals = None
         else:
             vals = [float(v) for v in col]
-            if not isinstance(x.index, pd.RangeIndex):
-                names = [r_as_character(v) if _is_num(v) else str(v) for v in x.index]
+            # seit 1.6.5 (CR2-C-1, Entscheidung 185 K17): nur der Standardindex 0, 1, 2, ... gilt als "ohne Namen";
+            # jeder andere Index (auch range(2024, 2027)) sind Kalenderjahre wie in R
+            idx = x.index
+            if not (isinstance(idx, pd.RangeIndex) and idx.start == 0 and idx.step == 1):
+                names = [r_as_character(v) if _is_num(v) else str(v) for v in idx]
     elif isinstance(x, Mapping):
         if all(_is_num(v) for v in x.values()) and len(x):
             vals = [float(v) for v in x.values()]
@@ -709,10 +728,12 @@ def _calculate_skewness(x: np.ndarray) -> float:
         return NA
     mean_x = r_mean(x)
     sd_x = r_sd(x)
-    if sd_x == 0:
+    if not math.isfinite(sd_x) or sd_x == 0:   # seit 1.6.5 (CR2-X20-2) wie R und Julia
         return NA
-    d = x - mean_x            # seit 1.6.4 (K43 T1-R11) (d * d) * d statt pow, wie der Kern (simlev_eval::moments)
-    return (n / ((n - 1.0) * (n - 2.0))) * r_sum(d * d * d) / r_pow(sd_x, 3.0)
+    # seit 1.6.5 (CR2-X20-2) Division wie IEEE (0/0 NaN statt ZeroDivisionError), ohne numpy-Warnung bei Überlauf
+    with np.errstate(all="ignore"):
+        d = x - mean_x            # seit 1.6.4 (K43 T1-R11) (d * d) * d statt pow, wie der Kern (simlev_eval::moments)
+        return float(np.float64(n / ((n - 1.0) * (n - 2.0))) * np.float64(r_sum(d * d * d)) / np.float64(r_pow(sd_x, 3.0)))
 
 
 def _calculate_kurtosis(x: np.ndarray, excess: bool = True) -> float:
@@ -722,12 +743,14 @@ def _calculate_kurtosis(x: np.ndarray, excess: bool = True) -> float:
         return NA
     mean_x = r_mean(x)
     sd_x = r_sd(x)
-    if sd_x == 0:
+    if not math.isfinite(sd_x) or sd_x == 0:   # seit 1.6.5 (CR2-X20-2) wie R und Julia
         return NA
     nf = float(n)
-    d = x - mean_x            # seit 1.6.4 (K43 T1-R11) (d * d) * (d * d) statt pow, wie der Kern
-    q = d * d
-    kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * r_sum(q * q) / r_pow(sd_x, 4.0)
+    with np.errstate(all="ignore"):   # seit 1.6.5 (CR2-X20-2) Division wie IEEE, ohne numpy-Warnung
+        d = x - mean_x            # seit 1.6.4 (K43 T1-R11) (d * d) * (d * d) statt pow, wie der Kern
+        q = d * d
+        kurt = float(np.float64((nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3))) * np.float64(r_sum(q * q))
+                     / np.float64(r_pow(sd_x, 4.0)))
     if excess:
         kurt = kurt - (3 * r_pow(nf - 1, 2.0)) / ((nf - 2) * (nf - 3))
     return kurt

@@ -33,6 +33,7 @@ extern SEXP C_roll_mean_core(SEXP, SEXP);
 extern SEXP C_kendall_tau_core(SEXP, SEXP);
 extern SEXP C_roll_cov_core(SEXP, SEXP, SEXP);
 extern SEXP C_roll_max_core(SEXP, SEXP, SEXP);
+extern SEXP C_research_vec(SEXP, SEXP, SEXP, SEXP);
 /* slc_r.cpp (C-Bibliothek slc) */
 extern SEXP C_sl_version(void);
 extern SEXP C_sl_rng_seed(SEXP);
@@ -48,6 +49,7 @@ extern SEXP C_sl_rexp(SEXP, SEXP, SEXP);
 extern SEXP C_sl_rgeom(SEXP, SEXP, SEXP);
 extern SEXP C_sl_rchisq(SEXP, SEXP, SEXP);
 extern SEXP C_sl_sample(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_pooled_draw(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_pnorm(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_qnorm(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_dnorm(SEXP, SEXP, SEXP, SEXP);
@@ -79,6 +81,7 @@ extern SEXP C_sl_kde_bw(SEXP);
 extern SEXP C_sim_engine_run(SEXP);
 extern SEXP C_sim_dates_flags(SEXP);
 extern SEXP C_sim_evaluate(SEXP);
+extern SEXP C_sim_run_prepared(SEXP, SEXP);
 extern SEXP C_sim_xirr(SEXP, SEXP, SEXP, SEXP);
 /* withdrawal_core.cpp */
 extern SEXP C_wd_simulate(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
@@ -134,6 +137,8 @@ extern SEXP C_sl_boot_evt(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_boot_garch(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_boot_ms_garch(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_rolling_vol(SEXP, SEXP);
+extern SEXP C_sl_rolling_vol_days(SEXP, SEXP, SEXP);
+extern SEXP C_sl_msgarch_stat(SEXP);
 extern SEXP C_sl_r_colsums_idx(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_assign_regimes(SEXP, SEXP);
 extern SEXP C_sl_estimate_trans_mat(SEXP, SEXP, SEXP);
@@ -169,6 +174,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"kendall_tau_core", (DL_FUNC) &C_kendall_tau_core, 2},
     {"roll_cov_core", (DL_FUNC) &C_roll_cov_core, 3},
     {"roll_max_core", (DL_FUNC) &C_roll_max_core, 3},
+    {"research_vec", (DL_FUNC) &C_research_vec, 4},
     /* slc_r.cpp (C-Bibliothek slc) */
     {"sl_version", (DL_FUNC) &C_sl_version, 0},
     {"sl_rng_seed", (DL_FUNC) &C_sl_rng_seed, 1},
@@ -184,6 +190,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_rgeom", (DL_FUNC) &C_sl_rgeom, 3},
     {"sl_rchisq", (DL_FUNC) &C_sl_rchisq, 3},
     {"sl_sample", (DL_FUNC) &C_sl_sample, 5},
+    {"sl_pooled_draw", (DL_FUNC) &C_sl_pooled_draw, 6},
     {"sl_pnorm", (DL_FUNC) &C_sl_pnorm, 4},
     {"sl_qnorm", (DL_FUNC) &C_sl_qnorm, 4},
     {"sl_dnorm", (DL_FUNC) &C_sl_dnorm, 4},
@@ -259,6 +266,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_boot_garch", (DL_FUNC) &C_sl_boot_garch, 8},
     {"sl_boot_ms_garch", (DL_FUNC) &C_sl_boot_ms_garch, 9},
     {"sl_rolling_vol", (DL_FUNC) &C_sl_rolling_vol, 2},
+    {"sl_rolling_vol_days", (DL_FUNC) &C_sl_rolling_vol_days, 3},
+    {"sl_msgarch_stat", (DL_FUNC) &C_sl_msgarch_stat, 1},
     {"sl_r_colsums_idx", (DL_FUNC) &C_sl_r_colsums_idx, 4},
     {"sl_assign_regimes", (DL_FUNC) &C_sl_assign_regimes, 2},
     {"sl_estimate_trans_mat", (DL_FUNC) &C_sl_estimate_trans_mat, 3},
@@ -266,6 +275,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"sim_engine_run", (DL_FUNC) &C_sim_engine_run, 1},
     {"sim_dates_flags", (DL_FUNC) &C_sim_dates_flags, 1},
     {"sim_evaluate", (DL_FUNC) &C_sim_evaluate, 1},
+    {"sim_run_prepared", (DL_FUNC) &C_sim_run_prepared, 2},
     {"sim_xirr", (DL_FUNC) &C_sim_xirr, 4},
     /* withdrawal_core.cpp */
     {"wd_simulate", (DL_FUNC) &C_wd_simulate, 27},

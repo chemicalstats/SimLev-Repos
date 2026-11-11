@@ -42,9 +42,12 @@ Objekt der Klasse \code{SimLevWeights} (data.frame mit
 Zeilensumme 1, eine Zeile je Zeile von \code{data}); vor dem ersten
 Entscheidungstermin gleich gewichtet. Attribute \code{source}
 (\code{"rolling <method>"}), \code{decision_rows} (Zeilennummern der
-Entscheidungstermine) und \code{failed_dates} (Date-Vektor der Termine
+Entscheidungstermine), \code{failed_dates} (Date-Vektor der Termine
 mit fehlgeschlagener Optimierung, dort Gleichgewichtung; leer, wenn
-keine).
+keine) und seit 1.6.5 \code{turnover} (Umschlag je Entscheidungstermin,
+Summe der Betraege der Aenderungen der Zielgewichte gegenueber dem
+vorigen Termin, am ersten Termin gegenueber der Gleichgewichtung; der
+einseitige Umschlag ist die Haelfte).
 }
 \description{
 Optimiert an jedem Entscheidungstermin auf den Renditen des

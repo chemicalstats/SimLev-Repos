@@ -28,14 +28,16 @@ import numpy as np
 import pandas as pd
 
 from . import _ext
+from ._dates import fmt_date
 from ._r import libm as _libm
 from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
+from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_string_to_real, r_sum
 from ._util import _match_arg, _which_min  # noqa: F401 (_match_arg für bonds/signals, _which_min für backcast)
 from ._util import _match_days, _message as message
 from ._r.rformat import _is_num as _is_number
+from ._r.rformat import r_sprintf
 
 __all__ = [
     "series_align", "series_check", "SimLevDataCheck", "series_align_macro", "series_convert_currency",
@@ -216,12 +218,16 @@ def _is_datelike(v) -> bool:
     return isinstance(v, (_dt.date, np.datetime64, pd.Timestamp))
 
 
+_DATE_RX = re.compile(r"^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}([ T][0-9]{1,2}:[0-9]{2}.*)?$", re.S)
+
+
 def _to_date(x, what="date", strict=True) -> np.ndarray:
     """Datumsangaben in Date umwandeln (R: ``.to_date``).
 
     POSIX-Zeitstempel mit Zeitzone ergeben den Kalendertag in ihrer eigenen
     Zeitzone, Text nur die Formate "JJJJ-MM-TT" und "JJJJ/MM/TT"
-    mit vierstelliger Jahreszahl am Anfang; numerische Werte und (seit 1.6.4) Faktoren werden abgelehnt.
+    mit vierstelliger Jahreszahl am Anfang, danach seit 1.6.5 nur das Ende oder eine Uhrzeit; numerische Werte
+    (außer nur NA, seit 1.6.5 NA) und (seit 1.6.4) Faktoren werden abgelehnt.
     Mit ``strict=True`` Fehler für nicht lesbare Werte, sonst NA. Leere
     Einträge ergeben NA.
 
@@ -261,14 +267,16 @@ def _to_date(x, what="date", strict=True) -> np.ndarray:
     if a.dtype.kind == "M":
         return _as_dates(_days(a))
     if a.dtype.kind in "iuf":   # seit 1.6.4 ohne Eingabewert (Entscheidung 8)
-        raise ValueError("%s: Datum ist numerisch; erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'." % what)
+        if a.dtype.kind == "f" and a.size and np.isnan(a).all():   # seit 1.6.5 (CR2-C-3): nur NA ergibt NA wie R
+            return np.full(a.size, np.datetime64("NaT", "D"), dtype="datetime64[D]")
+        _chk().chk_stop("a.m_to_date", what)
     a = a.ravel()
     if a.dtype == object:
         vals = [v for v in a if not _isna_scalar(v)]
         if vals and all(_is_datelike(v) for v in vals):
             return _as_dates([_obj_to_days(v) for v in a])
         if vals and all(_is_number(v) for v in vals):
-            raise ValueError("%s: Datum ist numerisch; erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'." % what)
+            _chk().chk_stop("a.m_to_date", what)
         if not vals and a.size and all(v is None or isinstance(v, (bool, np.bool_)) for v in a):
             pass   # logisches NA: as.character -> NA
     s = _as_character_vec(a)
@@ -278,13 +286,11 @@ def _to_date(x, what="date", strict=True) -> np.ndarray:
     for i, v in enumerate(s):
         if v is not None and math.isnan(d[i]):
             d[i] = _strptime_ymd(v, "/")
-    rx4 = re.compile(r"^[0-9]{4}[-/]")
+    # seit 1.6.5 (CR2-C-3, Entscheidung 185 K27) nach dem Tag nur das Ende oder eine Uhrzeit
+    rx4 = _DATE_RX
     bad = [i for i, v in enumerate(s) if v is not None and (math.isnan(d[i]) or not rx4.search(v))]
     if bad and strict:
-        raise ValueError(
-            "%s: %d Datumswerte nicht als 'JJJJ-MM-TT' lesbar (erstmals in Zeile %d). Andere Formate vorher umwandeln, "
-            "z. B. as.Date(x, format = \"%%d.%%m.%%Y\") f\u00fcr '31.12.2024' oder format = \"%%d-%%m-%%Y\"."
-            % (what, len(bad), bad[0] + 1))
+        _chk().chk_stop("e.datum_format", what, len(bad), bad[0] + 1)   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
     d[bad] = _NAN
     return _as_dates(d)
 
@@ -550,11 +556,10 @@ def _as_numeric(v) -> np.ndarray:
         elif isinstance(e, (bool, np.bool_)) or _is_number(e):
             out[i] = float(e)
         else:
-            try:
-                out[i] = float(str(e).strip())
-            except ValueError:
-                out[i] = _NAN
-                coerced = True
+            # seit 1.6.5 (CR2-X42-1) wie R's as.numeric (String_to_real: Hex, "1e", Überlauf, Rundung wie R; "NA" als
+            # Text NA mit Warnung, leerer Text ohne; bis 1.6.4 float(), das manche Texte anders las)
+            out[i], bad = r_string_to_real(str(e))
+            coerced |= bad
     if coerced:
         warnings.warn("NAs introduced by coercion")
     return out
@@ -612,10 +617,7 @@ def _num_text_stop(x, cols, name):
     if isinstance(cols, str):
         cols = [cols]
     # seit 1.6.4 ohne Beispielwert aus den Daten (Entscheidung 8)
-    raise ValueError(
-        "'%s': Spalte %s enth\u00e4lt Zahlen als Text bzw. Faktor, vermutlich mit Dezimalkomma. "
-        "Vorher umwandeln, z. B. mit read.csv2() oder as.numeric(sub(\",\", \".\", x, fixed = TRUE))."
-        % (name, ", ".join("'%s'" % c for c in cols)))
+    _chk().chk_stop("e.zahl_text", name, ", ".join("'%s'" % c for c in cols))   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
 
 
 def _is_named_numeric(x) -> bool:
@@ -624,14 +626,18 @@ def _is_named_numeric(x) -> bool:
         return not isinstance(x.index, pd.RangeIndex) and _is_numeric_col(x)
     if isinstance(x, Mapping) and not isinstance(x, pd.DataFrame):
         vals = list(x.values())
-        return bool(vals) and all(_is_number(v) or (isinstance(v, float)) for v in vals)
+        # seit 1.6.5 (CR2-X17-2): None und pd.NA zählen als NA (wie NA in R und missing in Julia); mindestens ein
+        # Wert, Wahrheitswerte nicht
+        return (bool(vals) and all(v is None or v is pd.NA or (_is_number(v) and not isinstance(v, (bool, np.bool_)))
+                                   or isinstance(v, float) for v in vals))
     return False
 
 
 def _named_parts(x):
     if isinstance(x, pd.Series):
         return [str(i) for i in x.index], _as_numeric(x)
-    return [str(k) for k in x.keys()], np.array([float(v) for v in x.values()], dtype=np.float64)
+    return [str(k) for k in x.keys()], np.array([_NAN if (v is None or v is pd.NA) else float(v) for v in x.values()],
+                                                dtype=np.float64)
 
 
 def _as_frame(x):
@@ -686,7 +692,7 @@ def _dp_frame(x, name, fn=None):
         x = pd.DataFrame({"date": _to_date(np.array(nm, dtype=object), "'%s' (Namen)" % name), "value": vals})
     x = _as_frame(x)
     if not isinstance(x, pd.DataFrame):
-        raise ValueError("'%s' muss ein data.frame mit Spalte 'date' sein." % name)
+        _chk().chk_stop("a.m_dp_frame", name)
     names = _names(x)
     if "date" in names:
         dcol = "date"
@@ -694,12 +700,11 @@ def _dp_frame(x, name, fn=None):
         dc = [k for k in names if _is_date_col(_col(x, k))]
         dcol = dc[0] if dc else (names[0] if names else None)
     if dcol is None:
-        raise ValueError("'%s': keine numerische Spalte." % name)
+        _chk().chk_stop("a.m_dp_frame_3", name)
     if fn is not None and _chk().chk_is_factor(x[dcol]):   # seit 1.6.4 (Entscheidung 15)
         _chk().chk_stop("spalte_faktor", fn, dcol)
     if _is_numeric_col(_col(x, dcol)):
-        raise ValueError("'%s': keine Datumsspalte; Spalte '%s' ist numerisch (z. B. Zeilennummern aus write.csv). "
-                         "Spalte 'date' (Date oder 'JJJJ-MM-TT') angeben." % (name, dcol))
+        _chk().chk_stop("a.m_dp_frame_2", name, dcol)
     num = [k for k in names if _is_numeric_col(_col(x, k)) and k != dcol]
     nr = x.shape[0]
     seq = np.arange(1, nr + 1, dtype=np.float64)
@@ -711,7 +716,7 @@ def _dp_frame(x, name, fn=None):
     if txt:
         _num_text_stop(x, txt, name)
     if not num:
-        raise ValueError("'%s': keine numerische Spalte." % name)
+        _chk().chk_stop("a.m_dp_frame_3", name)
     days = _days(_to_date(_col(x, dcol), "'%s': Spalte '%s'" % (name, dcol)))
     cols = {k: _as_numeric(_col(x, k)) for k in num}
     if len(num) == 1:
@@ -719,6 +724,8 @@ def _dp_frame(x, name, fn=None):
     keep = ~np.isnan(days)
     days = days[keep]
     cols = {k: v[keep] for k, v in cols.items()}
+    if not len(days) and fn is not None:   # seit 1.6.5 (CR2-I-5): Quelle ohne Zeilen mit Meldung
+        _chk().chk_stop("zeilen_keine", fn, "'%s'" % name)
     o = np.argsort(days, kind="stable")
     days = days[o]
     cols = {k: v[o] for k, v in cols.items()}
@@ -838,7 +845,7 @@ def series_align(*args, calendar=("day", "union", "intersect"), range=("common",
     if math.isnan(lo) or math.isnan(hi):
         raise ValueError("missing value where TRUE/FALSE needed")
     if lo > hi:
-        raise ValueError("series_align: Die Quellen \u00fcberlappen sich nicht.")
+        _chk().chk_stop("a.m_series_align")
     if calendar == "day":
         dates = lo + np.arange(int(math.floor(hi - lo)) + 1, dtype=np.float64)
     elif calendar == "union":
@@ -856,7 +863,7 @@ def series_align(*args, calendar=("day", "union", "intersect"), range=("common",
         mi = in_life = None                                    # seit 1.6.4 einmal je Quelle (B-110)
         for k, vals in fc.items():
             if k in out:
-                raise ValueError("series_align: Spaltenname '%s' kommt mehrfach vor." % k)
+                _chk().chk_stop("a.m_series_align_2", k)
             if mi is None:
                 mi = _match_days(dates, fd)
                 in_life = (dates >= fd[0]) & (dates <= fd[-1])
@@ -892,6 +899,8 @@ class SimLevDataCheck(RList):
 
     def format(self, max_issues=25) -> str:
         from ._r import fmt as _fmt
+        C = _chk()
+        max_issues = int(C.chk_int1(max_issues, "print", "max_issues", lo=0))   # seit 1.6.5 (CR2-W1-2)
         out = ["SimLev-Datenpr\u00fcfung\n\n"]
         S = self["summary"]
         if S is None:
@@ -962,7 +971,9 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
     Erstellt einen Prüfbericht für eigene Kursreihen, bevor sie in ``simulation()`` oder die Analysefunktionen
     gehen. Erwartet wird ein DataFrame mit Spalte ``date`` und Kursspalten (Niveaus, keine Renditen), z. B. aus
     ``series_align()``. Gemeldet werden: fehlende oder nicht lesbare Daten (z. B. Leerzeile am Dateiende),
-    doppelte oder unsortierte Daten, Kalenderlücken über 5 Tage, fehlende Werte innerhalb der Laufzeit, Sprünge,
+    doppelte oder unsortierte Daten, Kalenderlücken (seit 1.6.5 über max(5, 1,5 × Median der Datumsabstände)
+    Tage, also bei Tagesdaten über 5, bei Wochendaten über 10,5, bei Monatsdaten über rund 46 Tage), fehlende
+    Werte innerhalb der Laufzeit, Sprünge,
     wahrscheinliche Splits (Sprung nahe einem ganzzahligen Verhältnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne
     Rücklauf), Spikes (Sprung mit sofortigem Rücklauf, typischer Datenfehler), Werte <= 0 und stehende Kurse. Die
     Funktion ändert die Daten nicht.
@@ -988,7 +999,8 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
           ``nonpositive`` (Anzahl Werte <= 0).
         - issues: DataFrame je Fund: ``column``, ``date``, ``type`` (Art des Funds), ``value`` (Kurs) und ``info``
           (bei Sprüngen die Veränderung in Prozent, bei Kalenderlücken die Tage, bei stehenden Kursen die Zeilen).
-        - settings: benannter Vektor ``jump``, ``stale``, ``revert``.
+        - settings: benannter Vektor ``jump``, ``stale``, ``revert`` und (seit 1.6.5) ``gap`` (verwendete Schwelle der
+          Kalenderlücke in Tagen).
 
         ``print()`` zeigt die Zusammenfassung und die ersten ``max_issues`` (Standard 25) Funde.
 
@@ -1043,7 +1055,11 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
     dg = np.diff(dd)
     if (dg < 0).any():
         add("date", okd[np.flatnonzero(dg < 0)[0] + 1], "Datum nicht sortiert", _NAN)
-    for i in np.flatnonzero(dg > 5):
+    # seit 1.6.5 (CR2-B-6, Entscheidung 185 K24): Kalenderlücke, wenn der Abstand größer ist als
+    # max(5, 1.5 * Median der positiven Abstände) Tage (Tagesdaten 5 wie bisher, Wochen 10.5, Monate rund 46)
+    dpos = dg[~np.isnan(dg) & (dg > 0)]
+    gap = max(5.0, 1.5 * float(r_median(dpos))) if len(dpos) else 5.0
+    for i in np.flatnonzero(dg > gap):
         add("date", okd[i + 1], "Kalenderl\u00fccke (Tage)", float(dg[i]))
     cand = [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0] + [1.0 / k for k in (2, 3, 4, 5, 6, 7, 8, 9, 10)]
     rows = []
@@ -1061,7 +1077,7 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
         for i in npos[:20]:
             add(k, i, "Wert <= 0", float(v[i]))
         x = v[ok]
-        with np.errstate(invalid="ignore", divide="ignore"):
+        with np.errstate(all="ignore"):   # seit 1.6.5 (CR2-B-10) auch Überlauf ohne numpy-Warnung
             r = x[1:] / x[:-1] - 1
             r[~((x[1:] > 0) & (x[:-1] > 0))] = _NAN
         ri = ok[1:]
@@ -1072,7 +1088,8 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
             if j in skip:
                 continue
             nxt = float(r[j + 1]) if j < len(r) - 1 else _NAN
-            ratio = float(x[j] / x[j + 1])
+            with np.errstate(all="ignore"):
+                ratio = float(x[j] / x[j + 1])
             near = cand[_which_min([abs(_libm.log(ratio / c)) for c in cand], -1)]
             rj = float(r[j])
             if (not math.isnan(nxt) and _rsign(nxt) != _rsign(rj)
@@ -1130,7 +1147,7 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
     res = SimLevDataCheck()
     res["summary"] = S
     res["issues"] = I
-    res["settings"] = pd.Series([float(jump), float(stale), float(revert)], index=["jump", "stale", "revert"])
+    res["settings"] = pd.Series([float(jump), float(stale), float(revert), gap], index=["jump", "stale", "revert", "gap"])
     return res
 
 
@@ -1293,6 +1310,9 @@ def series_convert_currency(data, columns, fx, *, method=("divide", "multiply"),
     und Kursniveaus (z. B. aus ``series_align()``). Je Zeile wird der Kurs durch den Wechselkurs geteilt
     (``"divide"``) oder mit ihm multipliziert (``"multiply"``); eine Kurssicherung wird nicht abgebildet.
 
+    Seit 1.6.5 ergibt eine Stufentabelle als ``fx``, die erst nach dem ersten Datentag beginnt, eine Warnung
+    (davor gilt ihr erster Wert).
+
     Args:
         data: DataFrame mit Spalte ``date`` und den Kursspalten.
         columns: Zeichenvektor der umzurechnenden Spalten.
@@ -1330,13 +1350,14 @@ def series_convert_currency(data, columns, fx, *, method=("divide", "multiply"),
         if c not in nms and c not in miss:
             miss.append(c)
     if miss:
-        raise ValueError("series_convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s)."
-                         % (", ".join("'%s'" % m for m in miss), ", ".join(nms)))
+        _chk().chk_stop("a.m_series_convert_currency", ", ".join("'%s'" % m for m in miss), ", ".join(nms))
     _e5_numcols(data, columns, fn)
     C.chk_nofactor(fx, fn, "fx")
     fx = C.chk_scalar(fx) if isinstance(fx, (list, tuple)) and len(fx) == 1 and isinstance(fx[0], str) else fx
     if isinstance(fx, str) and fx in nms:
         _e5_numcols(data, [fx], fn)
+    from .bonds import _step_start_warn
+    _step_start_warn(fx, data, fn, "fx")   # seit 1.6.5 (CR2-V3-4 Punkt 4, Entscheidung 189)
     f = _resolve_series(fx, data, "fx")
     with np.errstate(invalid="ignore"):
         bad = np.flatnonzero(~np.isfinite(f) | (f <= 0))
@@ -1354,7 +1375,7 @@ def series_convert_currency(data, columns, fx, *, method=("divide", "multiply"),
 def index_total_return(price, *, dividends=None, yield_=None, withholding=0, dates=None, start=None, **kw):
     """Total-Return-Index aus Kursindex und Ausschüttungen.
 
-    r_t = fracP_t + D_t (1 - w)P_t-1 - 1 + (y_t)/(100)(1-w)(Δ t)/(365.25) mit Ausschüttung je Anteil D_t am
+    r_t = (P_t + D_t (1 - w)) / P_{t-1} - 1 + y_t/100 · (1 - w) · Δt/365.25 mit Ausschüttung je Anteil D_t am
     Ex-Tag, Quellensteuer w und alternativ laufend aufgezinster Dividendenrendite y_t (Prozent p. a.). Δ t ist der
     Abstand zur Vorzeile in Kalendertagen.
 
@@ -1426,6 +1447,11 @@ def index_total_return(price, *, dividends=None, yield_=None, withholding=0, dat
     w = withholding / 100
     if np.isnan(p).any():
         p = _fill_na(p, "locf")
+    # seit 1.6.5 (CR2-I-4, Entscheidung 189): Kurse endlich und > 0 (bis 1.6.4 still NaN, mit numpy-Rohwarnung)
+    with np.errstate(invalid="ignore"):
+        bad = np.flatnonzero(~np.isnan(p) & (np.isinf(p) | (p <= 0)))
+    if bad.size:
+        C.chk_stop("a.werte_positiv", fn, "price", int(bad[0]) + 1)
     if dividends is None:
         D = np.zeros(n)
     else:
@@ -1437,7 +1463,7 @@ def index_total_return(price, *, dividends=None, yield_=None, withholding=0, dat
         if len(dd) != n:
             raise ValueError("index_total_return: dates hat L\u00e4nge %d, price %d." % (len(dd), n))
         if np.isnan(dd).any() or (np.diff(dd) < 0).any():
-            raise ValueError("index_total_return: dates m\u00fcssen vollst\u00e4ndig und aufsteigend sortiert sein (wie price).")
+            _chk().chk_stop("a.m_index_total_return")
         dt = np.concatenate([[0.0], np.diff(dd)])
     else:
         dt = np.ones(n)
@@ -1462,26 +1488,47 @@ def _cpi_level(cpi, data, dts, what):
     dts_days = _days(dts)
     if isinstance(cpi, str):
         if cpi not in _names(data):
-            raise ValueError("%s: Spalte '%s' fehlt im Datensatz." % (what, cpi))
-        return _fill_na(_as_numeric(_col(data, cpi)), "locf", keep_leading=True)
+            _chk().chk_stop("a.m_cpi_level", what, cpi)
+        v0 = _as_numeric(_col(data, cpi))
+        ok = np.flatnonzero(~np.isnan(np.asarray(v0, dtype=np.float64)))
+        _cpi_end_warn(float(dts_days[ok[-1]]) if ok.size else None, dts_days, what)
+        return _fill_na(v0, "locf", keep_leading=True)
     cpi = _as_frame(cpi)
-    first = None
+    first = last = None
     if isinstance(cpi, pd.DataFrame):
         nm = _names(cpi)
         dcol = "date" if "date" in nm else nm[0]
         fd = _days(_to_date(_col(cpi, dcol), "%s: Datum" % what))
         fd = fd[~np.isnan(fd)]
         first = float(np.min(fd)) if len(fd) else math.inf
+        last = float(np.max(fd)) if len(fd) else None
     elif _is_named_numeric(cpi):
         names, _ = _named_parts(cpi)
         nd = _names_as_dates_optional(names)
         if not np.isnan(nd).any():
             first = float(np.min(nd))
+            last = float(np.max(nd))
     v = _resolve_series(cpi, pd.DataFrame({"date": _as_dates(dts_days)}), what)
     if first is not None:
         v = np.array(v, dtype=np.float64)
         v[dts_days < first] = _NAN
+    _cpi_end_warn(last, dts_days, what)
     return v
+
+
+def _cpi_end_warn(last, dts_days, what):
+    """Preisindex endet mehr als 92 Tage vor dem letzten Datum der Reihe: Warnung (seit 1.6.5, CR2-X5-1, Entscheidung
+    189; R ``.cpi_end_warn``); danach gilt sein letzter Stand."""
+    d = np.asarray(dts_days, dtype=np.float64)
+    if last is None or d.size == 0 or np.isnan(d).all():
+        return
+    d1 = float(np.nanmax(d))
+    gap = d1 - float(last)
+    if math.isfinite(gap) and gap > 92:
+        import warnings
+        from ._dates import fmt_date
+        warnings.warn(_chk().chk_msg("e.preisindex_ende", what, fmt_date(int(last)), "%.0f" % gap, fmt_date(int(d1))),
+                      UserWarning, stacklevel=3)
 
 
 def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
@@ -1492,6 +1539,8 @@ def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
     Niveau (z. B. Verbraucherpreisindex), keine Inflationsrate. Die realen Spalten kommen als neue Spalten hinzu
     und können wie Kursspalten in ``simulation()`` oder ``result_analysis()`` verwendet werden; für die reale
     Auswertung fertiger Ergebnisse hat ``result_analysis()`` ein eigenes Argument ``inflation``.
+
+    Seit 1.6.5 muss der Preisindex endliche Werte > 0 haben und ``suffix`` darf nicht leer sein (sonst Fehler).
 
     Args:
         data: DataFrame mit Spalte ``date`` und den Spalten aus ``columns``.
@@ -1531,12 +1580,19 @@ def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
         _e5_numcols(data, [cpi], fn)
     base_date = C.chk_date1(base_date, fn, "base_date", null_ok=True)
     suffix = C.chk_text1(suffix, fn, "suffix")
+    if suffix == "":   # seit 1.6.5 (CR2-V1-4; bis 1.6.4 überschrieb "" die Spalten)
+        C.chk_stop("name", fn, "suffix")
     data = _as_frame(data)
     dts = _days(_to_date(_col(data, "date"), "series_deflate: data$date"))
     c0 = _cpi_level(cpi, data, dts, "cpi")
+    # seit 1.6.5 (CR2-V1-4): Preisindex endlich und > 0 (bis 1.6.4 Inf mit numpy-Rohwarnung bzw. falsches Vorzeichen)
+    with np.errstate(invalid="ignore"):
+        bad = np.flatnonzero(~np.isnan(c0) & (np.isinf(c0) | (c0 <= 0)))
+    if bad.size:
+        C.chk_stop("a.werte_positiv", fn, "cpi", int(bad[0]) + 1)
     known = np.flatnonzero(~np.isnan(c0))
     if not len(known):
-        raise ValueError("series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
+        _chk().chk_stop("a.m_series_deflate")
     if known[0] > 0:
         message("Hinweis: series_deflate: Preisindex erst ab %s bekannt; %d Zeilen davor bleiben NA."
                 % (_date_str(dts[known[0]]), known[0]))
@@ -1546,8 +1602,7 @@ def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
         bd = _days(_to_date(base_date, "base_date"))
         b = _which_min(list(np.abs(dts - bd[0])), -1)
     if math.isnan(c0[b]):
-        raise ValueError("series_deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen."
-                         % (_date_str(dts[b]), _date_str(dts[known[0]])))
+        _chk().chk_stop("a.m_series_deflate_2", _date_str(dts[b]), _date_str(dts[known[0]]))
     data = data.copy()
     for k in columns:
         data[k + suffix] = _as_numeric(_col(data, k)) / c0 * c0[b]
@@ -1617,7 +1672,7 @@ def series_splice(*args, dates=None, **series):
     # seit 1.6.4 (K42 E5): Vektoren numerisch und gleich lang wie dates (B-047)
     if not all(isinstance(_as_frame(v), pd.DataFrame) for v in src.values()):
         if dates is None:
-            raise ValueError("series_splice: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
+            _chk().chk_stop("a.m_series_splice")
         C.chk_nofactor(dates, fn, "dates")
         nd = 1 if isinstance(dates, str) or np.ndim(dates) == 0 else len(dates)
         for k, v in src.items():
@@ -1628,6 +1683,13 @@ def series_splice(*args, dates=None, **series):
             if (1 if np.ndim(v) == 0 else len(v)) != nd:
                 C.chk_stop("laenge", fn, k, C.chk_fmt(nd))
     Fl = None
+    # seit 1.6.5 (CR2-C-5): je Reihe mindestens eine Zeile
+    if all(isinstance(_as_frame(v), pd.DataFrame) for v in src.values()):
+        for k, v in src.items():
+            if _as_frame(v).shape[0] == 0:
+                C.chk_stop("zeilen_keine", fn, "'%s'" % k)
+    elif nd == 0:
+        C.chk_stop("zeilen_keine", fn, "dates")
     if all(isinstance(_as_frame(v), pd.DataFrame) for v in src.values()):
         al = series_align(**{k: _as_frame(v) for k, v in src.items()}, range="all")
         # Quelle mit mehreren Wertspalten (seit 1.6.4 Meldung wie R und Julia, T3-N7; bis 1.6.3 KeyError)
@@ -1639,10 +1701,17 @@ def series_splice(*args, dates=None, **series):
         Fl = np.column_stack([al.attrs["filled"][k].to_numpy(dtype=bool) for k in names])
     else:
         if dates is None:
-            raise ValueError("series_splice: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
+            _chk().chk_stop("a.m_series_splice")
         V = np.column_stack([_as_numeric(v) for v in src.values()])
         dts = None
     n = V.shape[0]
+    # seit 1.6.5 (CR2-C-5): Werte endlich und > 0 oder NA (bis 1.6.4 ungeprüft verkettet)
+    for j in range(V.shape[1]):
+        with np.errstate(invalid="ignore"):
+            bad = np.flatnonzero(~np.isnan(V[:, j]) & (np.isinf(V[:, j]) | (V[:, j] <= 0)))
+        if bad.size:
+            dd = dts if dts is not None else _days(_to_date(dates, "series_splice: dates"))
+            C.chk_stop("a.werte_positiv_datum", fn, "'%s'" % names[j], fmt_date(int(dd[int(bad[0])])))
     with np.errstate(invalid="ignore", divide="ignore"):
         Rm = np.vstack([np.full((1, V.shape[1]), _NAN), V[1:, :] / V[:-1, :] - 1]) if n else V.copy()
     p = V[:, 0].copy()
@@ -1666,7 +1735,7 @@ def series_splice(*args, dates=None, **series):
     r = np.where(has, Rm[np.arange(n), np.maximum(pick, 0)], _NAN)
     nz = np.flatnonzero(~np.isnan(p))
     if not len(nz):
-        raise ValueError("series_splice: Die erste Reihe hat keine Werte.")
+        _chk().chk_stop("a.m_series_splice_2")
     a = int(nz[0])
     lv = np.full(n, _NAN)
     lv[a] = p[a]
@@ -1721,8 +1790,9 @@ def strategy_from_weights(weights, **kwargs):
         **kwargs: Weitere Argumente für ``asset_config()`` (z. B. ``asset_class``, ``spread`` in Prozent,
             ``partial_exemption`` in Prozent). Ein unbenannter einzelner Wert gilt für alle Assets; benannte
             Vektoren werden je Asset zugeordnet, auch mit einem einzigen Element wie ``partial_exemption =
-            {"aktien": 30}`` (fehlende Assets behalten den Standardwert, Namen ohne passendes Asset werden
-            ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset ist, gilt für alle Assets.
+            {"aktien": 30}`` (fehlende Assets behalten den Standardwert). Seit 1.6.5 sind Namen, die kein Asset
+            sind, und doppelte Namen ein Fehler (bis 1.6.4 still übergangen; ein einzelner benannter Wert mit
+            fremdem Namen galt für alle Assets).
             Seit 1.6.4 ist ein unbekanntes Argument oder share (setzt die Funktion aus weights) ein Fehler mit
             einheitlicher Meldung.
 
@@ -1746,7 +1816,7 @@ def strategy_from_weights(weights, **kwargs):
     from .config import _AC_MSG_WRAPPER_SIGNAL, asset_config, create_strategy
     nms, vals = _named(weights)
     if nms is None or any(k is None or k == "" for k in nms):
-        raise ValueError("weights muss benannt sein.")
+        _chk().chk_stop("a.m_strategy_from_weights")
     u = _dup_names(nms)
     if u:
         raise ValueError("weights: doppelte Namen %s; jedes Asset nur einmal angeben." % ", ".join("'%s'" % k for k in u))
@@ -1754,10 +1824,11 @@ def strategy_from_weights(weights, **kwargs):
     chk_numvec(vals, "strategy_from_weights", "weights")   # seit 1.6.4 (bis 1.6.3: Text als Zahl gelesen)
     w = np.array([_NAN if _isna_scalar(v) else float(v) for v in vals], dtype=np.float64)
     if np.isnan(w).any() or (w <= 0).any():
-        raise ValueError("Gewichte m\u00fcssen positiv sein (Assets mit Gewicht 0 weglassen).")
+        _chk().chk_stop("a.m_strategy_from_weights_2")
     s = r_sum(w)
+    # seit 1.6.5 (CR2-E-6, CR2-X3-1) mit 8 Stellen und R-Zahlform (bis 1.6.4 %.4f, unendlich als "inf")
     if abs(s - 1) > 1e-6:
-        raise ValueError("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%)." % s)
+        raise ValueError(r_sprintf("Gewichte summieren sich zu %.8g; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", s))
 
     # seit 1.6.4 (Entscheidung 21): Argumente für asset_config() vor dem Aufruf prüfen (bis 1.6.3 TypeError); share
     # setzt die Funktion selbst
@@ -1770,9 +1841,28 @@ def strategy_from_weights(weights, **kwargs):
         kwargs = dict(kwargs)
         wmap = _sfw_wrappers(kwargs.pop("wrapper"), nms)
 
+    # Benannt -> je Asset (auch bei einem Element); unbenannt ein Wert für alle. Seit 1.6.5 (CR2-E-5, Entscheidung
+    # 185 K30) sind Namen, die kein Asset sind, und doppelte Namen ein Fehler (bis 1.6.4 still übergangen; ein
+    # einzelner benannter Wert mit fremdem Namen galt für alle)
     def per_asset(v):
-        vn, vv = _named(v)
-        return vn is not None and (len(vv) > 1 or (len(vv) == 1 and vn[0] in nms))
+        return _named(v)[0] is not None
+
+    for key, v in kwargs.items():
+        vn = _named(v)[0]
+        if vn is None:
+            continue
+        vn = ["NA" if k is None else k for k in vn]
+        dup = _dup_names(vn)
+        if dup:
+            C = _chk()
+            C.chk_stop("a.sfw_doppelt", "strategy_from_weights", key, ", ".join("'%s'" % k for k in dup))
+        unk = []
+        for k in vn:
+            if k not in nms and k not in unk:
+                unk.append(k)
+        if unk:
+            C = _chk()
+            C.chk_stop("a.sfw_fremd", "strategy_from_weights", key, ", ".join("'%s'" % k for k in unk), ", ".join(nms))
 
     def scalar(v):
         if isinstance(v, Mapping) and len(v) == 1:
@@ -1832,8 +1922,7 @@ def _sfw_wrappers(wv, assets):
     if _is_wrapper(wv):
         return {nm: wv for nm in assets}
     if isinstance(wv, pd.DataFrame) or not isinstance(wv, (Mapping, pd.Series, list, tuple)):
-        raise ValueError("wrapper muss ein Objekt aus wrapper_config() (gilt f\u00fcr alle Assets) oder eine benannte "
-                         "Liste solcher Objekte sein (Name = Asset).")   # seit 1.6.4 ohne Klasse
+        _chk().chk_stop("a.m_sfw_wrappers_2")   # seit 1.6.4 ohne Klasse
     if len(wv) == 0:
         return {}
     nm, vals = _named(wv) if not isinstance(wv, (list, tuple)) else (None, list(wv))
@@ -1850,7 +1939,7 @@ def _sfw_wrappers(wv, assets):
                                                            else "sind keine Assets der Strategie", ", ".join(assets)))
     for k, v in zip(nm, vals):
         if not _is_wrapper(v):
-            raise ValueError("wrapper: Eintrag '%s' muss ein Objekt aus wrapper_config() sein." % k)
+            _chk().chk_stop("a.m_sfw_wrappers", k)
     return dict(zip(nm, vals))
 
 
@@ -1865,7 +1954,7 @@ _PORTFOLIO_TEMPLATES = {
 }
 
 
-def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argumentname
+def portfolio_template(name=None, *, map=None, **kwargs):  # noqa: A002 - R-Argumentname
     """Portfolio-Vorlagen.
 
     Bekannte statische Allokationen mit Rollen-Namen (z. B. ``stocks``, ``long_bonds``, ``gold``). Über ``map``
@@ -1907,13 +1996,12 @@ def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argu
     """
     if name is None:
         if map is not None or kwargs:
-            raise ValueError("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name "
-                             "liefert portfolio_template() die Liste der Vorlagen.")
+            _chk().chk_stop("a.m_portfolio_template")
         return _template_list()
     name = _chk().chk_name1(name, "portfolio_template", "name")   # seit 1.6.4 (K42 E5)
     w = _PORTFOLIO_TEMPLATES.get(name)
     if w is None:
-        raise ValueError("Unbekannte Vorlage '%s'. Verf\u00fcgbar: %s" % (name, ", ".join(_PORTFOLIO_TEMPLATES)))
+        _chk().chk_stop("a.m_portfolio_template_2", name, ", ".join(_PORTFOLIO_TEMPLATES))
     roles = list(w.keys())
     vals = list(w.values())
     if map is not None:
@@ -1921,14 +2009,13 @@ def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argu
         mvals = list(map.values()) if isinstance(map, Mapping) else list(np.asarray(map, dtype=object).ravel())
         if mn is None or any(k is None or k == "" for k in mn) or \
                 not all(isinstance(v, str) and v != "" for v in mvals):
-            raise ValueError("map muss benannt sein: Rolle -> Spaltenname, z. B. c(stocks = \"msci_world\").")
+            _chk().chk_stop("a.m_portfolio_template_3")
         unk = []
         for k in mn:
             if k not in roles and k not in unk:
                 unk.append(k)
         if unk:
-            raise ValueError("map: unbekannte Rolle(n) %s f\u00fcr Vorlage '%s'; Rollen: %s."
-                             % (", ".join("'%s'" % k for k in unk), name, ", ".join(roles)))
+            _chk().chk_stop("a.m_portfolio_template_4", ", ".join("'%s'" % k for k in unk), name, ", ".join(roles))
         lookup = {}
         for k, v in zip(mn, mv):
             lookup.setdefault(k, v)

@@ -18,8 +18,11 @@ const DA = SimLev.DeepAnalysis
 const _NA = SimLev.NA
 
 "`is.numeric(x) && is.null(dim(x))`."
+# seit 1.6.5 (CR2-X27-1): auch Vector{Any} aus Zahlen (ohne Wahrheitswerte) bzw. missing, wie Python
 _is_num_vector(x) = DA._isnum_el(x) ||
-                    (x isa AbstractVector && nonmissingtype(eltype(x)) <: Real && !(nonmissingtype(eltype(x)) <: Bool))
+                    (x isa AbstractVector && nonmissingtype(eltype(x)) <: Real && !(nonmissingtype(eltype(x)) <: Bool)) ||
+                    (x isa AbstractVector && !isempty(x) && !(x isa SimLev.RFrame) &&
+                     all(e -> e === missing || (e isa Real && !(e isa Bool)), x))
 
 "Periodenrenditen aus Ergebnis, data.frame oder Vektor (`.ret_from`): `RList(r, date)`."
 function _ret_from(x, frequency, inflation = nothing)
@@ -35,7 +38,7 @@ function _ret_from(x, frequency, inflation = nothing)
         e = DA._last_of_key(key)
         d = s.date[e]; v = s.value[e]
     end
-    SimLev.RList("r" => DA._ratio_m1(v), "date" => DA._dates(d[2:end]))
+    SimLev.RList("r" => DA._ratio_m1(v), "date" => DA._dates(d[2:end]), "lvl" => v, "ldate" => DA._dates(d))
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -87,6 +90,16 @@ function _factor_codes(res)
 end
 "`cut(x, k, labels = FALSE)` → Codes 1..k."
 _cut_n(x, k) = DA._vecf(SimLev.RStats.cut(collect(Float64, x), Int(k); labels = false))
+
+# Langfristige Kovarianz mit Bartlett-Gewichten (R .sa_lrv, seit 1.6.5, CR2-5)
+function _sa_lrv(a, b, L)
+    n = length(a); s = SimLev.r_sum(a .* b)
+    for l in 1:L
+        l < n || continue
+        s = s + (1 - l / (L + 1)) * (SimLev.r_sum(a[l+1:n] .* b[1:n-l]) + SimLev.r_sum(b[l+1:n] .* a[1:n-l]))
+    end
+    s
+end
 
 function _st(z)
     n = length(z); m = SimLev.r_mean(z); sd = SimLev.r_sd(z)
@@ -290,10 +303,12 @@ function signal_analysis(data, signal, target; horizon = 21, step = nothing, bin
     rn = string.(findall(cc))
     dd = d[t0][cc]; sv = sig[t0][cc]; fw = fwd[cc]; s2v = s2 === nothing ? nothing : s2[cc]
     length(sv) < 20 && DA._stop(DA._sp("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorwärtsrendite.", length(sv)))
-    length(unique(sv)) < 2 && DA._stop("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche möglich.")
+    # seit 1.6.5 (CR2-X37-1): -0.0 und 0.0 sind ein Wert (wie R und Python); nur für unique und Bereichsgrenzen
+    svu = sv .+ 0.0
+    length(unique(svu)) < 2 && DA._stop("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche möglich.")
     ppy = (n - 1) / ((d[n] - d[1]) / 365.25)
     ann(m) = SimLev._pow1m(m, ppy / horizon)
-    codes, lv = _cut(sv, _cut_breaks(sv, breaks === nothing ? Float64(DA._first(bins)) : 0.0, breaks))
+    codes, lv = _cut(sv, _cut_breaks(svu, breaks === nothing ? Float64(DA._first(bins)) : 0.0, breaks))
     rows_ = Vector{Any}[]
     for (j, lab) in enumerate(lv)
         sel = codes .== j
@@ -307,8 +322,31 @@ function signal_analysis(data, signal, target; horizon = 21, step = nothing, bin
     lo = fw[codes .== 1]; hi = fw[codes .== length(lv)]
     tstat, pval = (length(lo) > 2 && length(hi) > 2) ? _welch(hi, lo) : (_NA, _NA)
     spread = SimLev.RVector([SimLev.r_mean(hi) - SimLev.r_mean(lo), tstat, pval]; names = ["difference", "t", "p"])
+    ov = _st(fw)
+    # seit 1.6.5 (CR2-5, K3): bei step < horizon Newey-West-Standardfehler (Bartlett, Lag ceiling(horizon / step) - 1)
+    if step < horizon
+        L = Int(cld(horizon, step)) - 1
+        zb(j) = (z = zeros(length(fw)); sel = codes .== j; z[sel] = fw[sel] .- SimLev.r_mean(fw[sel]); z)
+        tv = copy(tab["t"]); r = 0
+        for j in eachindex(lv)
+            any(codes .== j) || continue
+            r += 1; z = zb(j)
+            tv[r] = tab["mean"][r] / sqrt(_sa_lrv(z, z, L) / tab["n"][r]^2)
+        end
+        tab["t"] = tv
+        z0 = fw .- ov[2]
+        ov[6] = ov[2] / sqrt(_sa_lrv(z0, z0, L) / Float64(length(fw))^2)
+        if length(lo) > 2 && length(hi) > 2
+            zh = zb(length(lv)); zl = zb(1)
+            v = _sa_lrv(zh, zh, L) / Float64(length(hi))^2 + _sa_lrv(zl, zl, L) / Float64(length(lo))^2 -
+                2 * _sa_lrv(zh, zl, L) / (Float64(length(hi)) * length(lo))
+            tt = spread["difference"] / sqrt(v)
+            spread = SimLev.RVector([spread["difference"], tt, 2 * SimLev.SLib.pnorm([-abs(tt)])[1]];
+                                    names = ["difference", "t", "p"])
+        end
+    end
     fit = nothing
-    if degree > 0 && length(unique(sv)) > degree + 1
+    if degree > 0 && length(unique(svu)) > degree + 1
         dfl = SimLev.RFrame("signal" => sv, "forward" => fw; rownames = rn)
         model, r2 = _poly_lm(dfl, Int(degree))
         fit = SimLev.RList("model" => model, "r_squared" => r2)
@@ -329,7 +367,7 @@ function signal_analysis(data, signal, target; horizon = 21, step = nothing, bin
     end
     t2 = nothing; bin2 = nothing
     if s2v !== nothing
-        codes2, lv2 = _cut(s2v, _cut_breaks(s2v, Float64(bins2), nothing))
+        codes2, lv2 = _cut(s2v, _cut_breaks(s2v .+ 0.0, Float64(bins2), nothing))
         Mm = fill(_NA, length(lv), length(lv2)); Mn = zeros(Int, length(lv), length(lv2))
         for i in eachindex(lv), j in eachindex(lv2)
             z = fw[(codes .== i) .& (codes2 .== j)]
@@ -344,7 +382,7 @@ function signal_analysis(data, signal, target; horizon = 21, step = nothing, bin
     s2v === nothing || (out["signal2"] = s2v)
     out["bin"] = SimLev.RFmt.RFactor(codes, lv)
     bin2 === nothing || (out["bin2"] = bin2)
-    SimLev.RList("bins" => tab, "overall" => SimLev.RVector(_st(fw); names = _ST_NAMES), "spread" => spread,
+    SimLev.RList("bins" => tab, "overall" => SimLev.RVector(ov; names = _ST_NAMES), "spread" => spread,
                  "splits" => spl, "table2d" => t2, "fit" => fit, "data" => out, "horizon" => horizon, "step" => step,
                  "target" => String(target), "signal_name" => signal isa AbstractString ? String(signal) : "signal";
                  class = ["SimLevSignalAnalysis"])
@@ -470,13 +508,14 @@ const _SHARPE_NAMES = ["sharpe_x", "sharpe_y", "difference", "se", "z", "p_value
 
 """
     sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"],
-                B = 2000, block = nothing, ppy = nothing, seed = nothing)
+                B = 2000, block = nothing, ppy = nothing, seed = nothing, studentize = true, kernel = nothing,
+                prewhiten = nothing)
 
 Test auf gleiche Sharpe Ratios (Ledoit & Wolf 2008).
 
 Prüft, ob sich die Sharpe Ratios zweier Strategien unterscheiden, robust gegen Autokorrelation,
 Heteroskedastie und dicke Ränder (Ledoit & Wolf 2008): mit der Delta-Methode und Newey-West-Kovarianz
-(`"hac"`) oder einem stationären Block-Bootstrap der Renditepaare (`"bootstrap"`). Der klassische
+(`"hac"`) oder einem Block-Bootstrap der Renditepaare (`"bootstrap"`, seit 1.6.5 studentisiert und zirkulär). Der klassische
 Jobson-Korkie-Test unterstellt Normalverteilung und unabhängige Renditen und ist für Finanzdaten zu
 optimistisch.
 
@@ -491,16 +530,21 @@ optimistisch.
     von Periodenende zu Periodenende der `frequency` gebildet und nur gemeinsame Perioden-Enddaten verwendet.
 - `frequency`: Periodenlänge: `"week"` (Standard, ISO-Wochen), `"day"` oder `"month"`. Bei Vektor-Eingabe
   bestimmt sie nur den Standardwert von `ppy`.
-- `method`: `"hac"` (Standard): Delta-Methode mit Newey-West-Kovarianz (Bartlett-Kern, Lag ⌊ 4 (T/100)^2/9 ⌋);
-  `"bootstrap"`: stationärer Block-Bootstrap der Renditepaare (Standardfehler = Standardabweichung der
-  Bootstrap-Differenzen, p-Wert = Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5- und
-  97.5-%-Quantil der Bootstrap-Differenzen).
+- `method`: "hac" (Standard): Delta-Methode mit HAC-Kovarianz (Standard Newey-West, Bartlett-Kern, Lag ⌊4
+  (T/100)^(2/9)⌋; siehe kernel, prewhiten); "bootstrap": seit 1.6.5 studentisierter zirkulärer Block-Bootstrap der
+  Renditepaare nach Ledoit & Wolf (2008, Abschnitt 3.2.2, siehe studentize und Details); mit studentize = `false`
+  stationärer Block-Bootstrap wie bis 1.6.4 (Standardfehler = Standardabweichung der Bootstrap-Differenzen, p-Wert =
+  Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5- und 97.5-%-Quantil der Bootstrap-Differenzen).
 - `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur bei `method = "bootstrap"`.
   Seit 1.6.4 höchstens 10^8.
-- `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
-  Blöcke laufen zyklisch über das Ende); `nothing` (Standard) = `max(2, round(T^(1/3)))` mit T = Anzahl
-  Renditepaare. Nur bei `method = "bootstrap"`.
-  Seit 1.6.4 eine Zahl ≥ 1.
+- `block`: Blocklänge in Perioden: mit studentize = `true` die feste Länge b der Blöcke des zirkulären
+  Block-Bootstraps (ganze Zahl), sonst die mittlere Blocklänge des stationären Bootstraps (geometrisch verteilte
+  Blocklängen, Blöcke laufen zyklisch über das Ende); `nothing` (Standard) = max(2, round(T^(1/3))) mit T = Anzahl
+  Renditepaare. Nur bei method = "bootstrap".
+  Seit 1.6.4 eine Zahl ≥ 1. Mit studentize = `true` seit 1.6.5 höchstens T/4: die Block-Kovarianz Ψ* braucht
+  mindestens 4 Blöcke (l = floor(T/b) ≥ 4, sonst Fehler; bei weniger Blöcken ist sie singulär und p-Wert und
+  Intervall sind unbrauchbar). Die Güte des Tests sinkt schon vorher mit wachsender Blocklänge; T/4 ist nur die
+  Mindestbedingung.
 - `ppy`: Perioden je Jahr für die Annualisierung. `nothing` (Standard) = bei Vektoren 252 (`"day"`), 52
   (`"week"`) bzw. 12 (`"month"`); bei Ergebnissen und Tabelle (RFrame) aus den gemeinsamen Daten geschätzt:
   (Anzahl Perioden - 1) / (Zeitspanne in Tagen / 365.25).
@@ -509,6 +553,17 @@ optimistisch.
   Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau
   einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe
   liefern dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+- `studentize`: Logisch (seit 1.6.5, Standard `true`): bei method = "bootstrap" der studentisierte zirkuläre
+  Block-Bootstrap nach Ledoit & Wolf (2008); `false` = der nicht studentisierte stationäre Block-Bootstrap bis 1.6.4
+  (bitgleich).
+- `kernel`: Kern der HAC-Kovarianz (seit 1.6.5): "bartlett" (Lag ⌊4 (T/100)^(2/9)⌋) oder "qs" (Quadratic Spectral mit
+  automatischer Bandbreite S_T = 1.3221 (α(2) T)^(1/5) nach Andrews 1991 aus AR(1)-Näherungen je Moment). `nothing`
+  (Standard) = "bartlett" bei method = "hac" (bitgleich zu 1.6.4 außer 142), "qs" beim studentisierten Bootstrap
+  (Standardfehler der Ausgangsstichprobe wie bei Ledoit & Wolf 2008).
+- `prewhiten`: Logisch (seit 1.6.5): Prewhitening mit einem VAR(1) nach Andrews & Monahan (1992). `nothing` (Standard)
+  = `false` bei method = "hac", `true` beim studentisierten Bootstrap. Außer bei Bartlett ohne Prewhitening
+  (Newey-West wie bisher) rechnet SimLev den Schätzer von Ledoit & Wolf (2008, Abschnitt 3.1) mit dem Faktor T/(T -
+  4).
 
 # Rückgabe
 Benannter numerischer Vektor: `sharpe_x`, `sharpe_y` (Sharpe Ratios p. a.), `difference` (`sharpe_x -
@@ -523,9 +578,21 @@ Zinses, annualisiert mit √(ppy).
 Mindestens 10 gemeinsame Renditepaare sind nötig, und keine der beiden Reihen darf die Varianz 0 haben (sonst
 Fehler). Identische Reihen ergeben `difference = 0`, `se = 0`, `z = 0` und `p_value = 1`.
 
+Studentisierter Bootstrap (Standard bei method = "bootstrap" seit 1.6.5, Ledoit & Wolf 2008, Abschnitt 3.2.2 und
+Bemerkung 3.2): Δ = μ_x/σ_x - μ_y/σ_y; Standardfehler s(Δ) = √(∇f' Ψ ∇f / T) (Gl. 5) mit der HAC-Kovarianz der Momente
+(r_x, r_y, r_x^2, r_y^2); Teststatistik d = |Δ| / s(Δ). Je Wiederholung m werden Blöcke der festen Länge b mit
+gleichverteiltem Start zyklisch gezogen; der Standardfehler der Stichprobe ist s(Δ^*_m) aus Ψ^* = l^-1 Σ_j ζ_j ζ_j',
+ζ_j = b^(-1/2) Σ_{t=1..b} y^*_{(j-1)b+t}, l = ⌊T/b⌋ (Gl. 8), d^*_m = |Δ^*_m - Δ| / s(Δ^*_m). p-Wert (#{d^*_m ≥ d} +
+1)/(B + 1) (Gl. 9), Intervall Δ ± z^*_0.95 s(Δ) mit dem 95-%-Quantil der d^*_m (Gl. 7); se ist s(Δ), z = difference /
+se. Die Blocklänge wählt SimLev nicht datenabhängig (die Kalibrierung von Ledoit & Wolf, Algorithmus 3.1, ist nicht
+umgesetzt).
+
 # Literatur
 Ledoit, O. & Wolf, M. (2008), Robust performance hypothesis testing with the Sharpe ratio, Journal of
 Empirical Finance 15(5), 850-859.
+Andrews, D. W. K. (1991), Heteroskedasticity and autocorrelation consistent covariance matrix estimation, Econometrica
+59(3), 817-858. Andrews, D. W. K. & Monahan, J. C. (1992), An improved heteroskedasticity and autocorrelation
+consistent covariance matrix estimator, Econometrica 60(4), 953-966.
 
 # Beispiel
 ```julia
@@ -538,8 +605,21 @@ d["b"] = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(rng, n))
 println(sharpe_test(RFrame("date" => d["date"], "a" => d["a"]), RFrame("date" => d["date"], "b" => d["b"])))
 ```
 """
+# Langfristkovarianz für sharpe_test (R `.st_hac`, seit 1.6.5, Entscheidung 177): Bartlett ohne Prewhitening wie bisher
+# (Newey-West), sonst Schätzer nach Ledoit & Wolf (2008, Abschnitt 3.1) im Kern (research_vec op 8)
+function _st_hac(Y, kernel, prewhiten)
+    kernel == "bartlett" && !prewhiten && return _hac_cov(Y)
+    Y = Matrix{Float64}(Y)
+    T, k = size(Y)
+    o = SimLev.SignalsCore.research_vec(8, vec(Y), Float64[T, k, kernel == "qs" ? 2 : 1, prewhiten ? 1 : 0], k * k + 2)
+    o[k*k+1] == 1 && SimLev.chk_stop("b2b.st_prewhiten", "sharpe_test")
+    o[k*k+1] == 2 && SimLev.chk_stop("b2b.st_bandbreite", "sharpe_test")
+    return reshape(o[1:k*k], k, k)
+end
+
 function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"], B = 2000,
-                     block = nothing, ppy = nothing, seed = nothing)
+                     block = nothing, ppy = nothing, seed = nothing, studentize = true, kernel = nothing,
+                     prewhiten = nothing)
     SimLev.DataPrep._e5_match_arg(frequency, ("week", "day", "month"), "sharpe_test", "frequency")   # seit 1.6.4 (K43 T2-N4) Prüfung vor match.arg (Meldung auswahl)
     SimLev.DataPrep._e5_match_arg(method, ("hac", "bootstrap"), "sharpe_test", "method")
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
@@ -551,15 +631,33 @@ function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac"
     ppy = SimLev.chk_num1(ppy, "sharpe_test", "ppy"; lo = 0, lo_open = true, null_ok = true)
     seed = SimLev.chk_scalar(seed)
     seed === nothing || SimLev.SLib.check_seed(seed, "sharpe_test")
+    # seit 1.6.5 (Entscheidung 177): studentisierter zirkulärer Block-Bootstrap (Standard), Kern und Prewhitening
+    studentize = SimLev.chk_bool1(studentize, "sharpe_test", "studentize")
+    kernel = SimLev.chk_scalar(kernel)
+    kernel === nothing || SimLev.DataPrep._e5_match_arg(kernel, ("bartlett", "qs"), "sharpe_test", "kernel")
+    prewhiten = SimLev.chk_scalar(prewhiten)
+    prewhiten === nothing || (prewhiten = SimLev.chk_bool1(prewhiten, "sharpe_test", "prewhiten"))
+    stud = method == "bootstrap" && studentize
+    kernel = kernel === nothing ? (stud ? "qs" : "bartlett") : String(kernel)
+    prewhiten = prewhiten === nothing ? stud : prewhiten
+    stud && block !== nothing && block != trunc(block) && SimLev.chk_stop("b2b.st_block_ganz", "sharpe_test")
     _no_list(x, "x"); _no_list(y, "y")
     a = _ret_from(x, frequency); b = _ret_from(y, frequency)
     (a["date"] === nothing) != (b["date"] === nothing) &&
         DA._stop("sharpe_test: x und y müssen dieselbe Art sein: beide Renditevektoren oder beide Kursreihen/Ergebnisse (data.frame bzw. SimLevResult).")
     if a["date"] !== nothing
-        da = DA._days(a["date"]); db = DA._days(b["date"])
-        sb = Set(db)
-        common = unique([v for v in da if v in sb])
-        ra = a["r"][DA._match(common, da)]; rb = b["r"][DA._match(common, db)]
+        # seit 1.6.5 (CR2-H-2): erst die gemeinsamen Perioden-Enddaten, dann die Renditen zwischen ihnen
+        la = DA._days(a["ldate"]); lb = DA._days(b["ldate"])
+        sb = Set(lb)
+        cl = unique([v for v in la if v in sb])
+        sc = Set(cl)
+        nskip = length(setdiff(Set(la), sc)) + length(setdiff(Set(lb), sc))
+        nskip > 0 && DA._message(SimLev.chk_msg("b2.st_luecke", "sharpe_test", nskip))
+        va = Float64.(a["lvl"])[DA._match(cl, la)]; vb = Float64.(b["lvl"])[DA._match(cl, lb)]
+        m = length(cl)
+        ra = m > 1 ? va[2:end] ./ va[1:end-1] .- 1 : Float64[]
+        rb = m > 1 ? vb[2:end] ./ vb[1:end-1] .- 1 : Float64[]
+        common = cl[2:end]
         ppy === nothing && (ppy = (length(common) - 1) / ((maximum(common) - minimum(common)) / 365.25))
     else
         length(a["r"]) != length(b["r"]) &&
@@ -579,26 +677,58 @@ function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac"
     if length(ra) == length(rb) && all(ra .== rb)          # identical(): -0 == 0
         return SimLev.RVector([_sr(ra) * sqrt(ppy), _sr(rb) * sqrt(ppy), 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, Float64(Tn)]; names = _SHARPE_NAMES)
     end
-    if method == "hac"
+    if method == "hac" || stud
         mu = [SimLev.r_mean(ra), SimLev.r_mean(rb)]
         g = [SimLev.r_mean(ra .* ra), SimLev.r_mean(rb .* rb)]
-        v1 = SimLev.r_pow(g[1] - mu[1] * mu[1], 1.5); v2 = SimLev.r_pow(g[2] - mu[2] * mu[2], 1.5)
+        # seit 1.6.5 (Entscheidung 142): Schwankung über die Abweichungen vom Mittel
+        v1 = SimLev.r_pow(SimLev.r_mean((ra .- mu[1]) .^ 2), 1.5); v2 = SimLev.r_pow(SimLev.r_mean((rb .- mu[2]) .^ 2), 1.5)
         grad = [g[1] / v1, -g[2] / v2, -0.5 * mu[1] / v1, 0.5 * mu[2] / v2]
-        Psi = _hac_cov(hcat(ra, rb, ra .* ra, rb .* rb))
+        Psi = _st_hac(hcat(ra, rb, ra .* ra, rb .* rb), kernel, prewhiten)
         q = _matprod(_matprod(reshape(grad, 1, 4), Psi), reshape(grad, 4, 1))
         se = sqrt(q[1] / Tn)
         z = d0 / se
         p = 2 * SimLev.SLib.pnorm(-abs(z))
         qq = SimLev.SLib.qnorm(0.975)
         ci = [d0 + (-1 * qq) * se, d0 + (1 * qq) * se]
-    else
+    end
+    if stud
+        # seit 1.6.5 (Entscheidung 177): studentisierter zirkulärer Block-Bootstrap nach Ledoit & Wolf (2008,
+        # Abschnitt 3.2.2, Bemerkung 3.2; Gl. 7-9), R: gleicher Weg
         block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
+        block > Tn && SimLev.chk_stop("b2.st_block", "sharpe_test", Tn)
+        # seit 1.6.5 (PR2-1): mindestens 4 Blöcke (l = floor(T / b) >= 4), sonst ist die 4x4-Block-Kovarianz singulär
+        4 * block > Tn && SimLev.chk_stop("pf2.st_bloecke", "sharpe_test", Tn ÷ 4, Tn)
+        S = _main_stream(seed, "sharpe_test")
+        par = Float64[Tn, block]
+        dk = SimLev.SignalsCore.research_vec(9, vcat(ra, rb), par, 2)[1]
+        ds = Vector{Float64}(undef, Int(B))
+        nz = 0
+        for i in 1:Int(B)
+            kk = Vector{Int}(SimLev.SLib.boot_idx_block(Tn, Tn, Int(block), true; stream = S))
+            o = SimLev.SignalsCore.research_vec(9, vcat(ra[kk], rb[kk]), par, 2)
+            if isnan(o[1]) || !(o[2] > 0)
+                nz += 1; ds[i] = NaN; continue
+            end
+            ds[i] = abs(o[1] - dk) / o[2]
+        end
+        nz > 0 && SimLev.chk_stop("b2.st_var0", "sharpe_test", nz, Int(B))
+        p = (count(>=(abs(dk) / se), ds) + 1) / (Int(B) + 1)
+        q95 = DA._quantile(ds, [0.95])[1]
+        ci = [d0 + (-1 * q95) * se, d0 + (1 * q95) * se]
+    elseif method == "bootstrap"
+        block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
+        block > Tn && SimLev.chk_stop("b2.st_block", "sharpe_test", Tn)   # seit 1.6.5 (CR2-H-1)
         S = _main_stream(seed, "sharpe_test")
         dbs = Vector{Float64}(undef, Int(B))
+        nz = 0
         for i in 1:Int(B)
             k = _boot_idx(Tn, Tn, block, S)
+            if SimLev.r_sd(ra[k]) == 0 || SimLev.r_sd(rb[k]) == 0
+                nz += 1; dbs[i] = NaN; continue
+            end
             dbs[i] = _sr(ra[k]) - _sr(rb[k])
         end
+        nz > 0 && SimLev.chk_stop("b2.st_var0", "sharpe_test", nz, Int(B))
         se = SimLev.r_sd(dbs)
         z = d0 / se
         p = DA._mean_lgl(abs.(dbs .- d0) .>= abs(d0))
@@ -704,9 +834,18 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
         barr = benchmark isa SimLev.RVector ? benchmark.values : benchmark isa Union{AbstractVector,Tuple} ? collect(benchmark) : Any[benchmark]
         if length(barr) == 1
             e = barr[1]
-            j = e isa AbstractString ? (e in cn ? findfirst(==(e), cn) : nothing) :
-                (e isa Real && !(e isa Bool) && isfinite(Float64(e)) && Float64(e) == trunc(Float64(e))) ? Int(Float64(e)) : nothing
-            (j === nothing || j < 1 || j > size(R, 2)) && DA._stop("benchmark: unbekannte Spalte.")
+            # seit 1.6.5 (CR2-D-5, K7): Nummer = Spalte der Eingabe (bei einer Suche die id); leere Spalte: Fehler
+            j = if e isa AbstractString
+                e in cn ? findfirst(==(e), cn) : nothing
+            else
+                j0 = (e isa Real && !(e isa Bool) && isfinite(Float64(e)) && Float64(e) == trunc(Float64(e))) ? Float64(e) : nothing
+                cols = Float64[Float64(c) for c in (DA._rget(rr, "cols") isa SimLev.RVector ? DA._rget(rr, "cols").values : DA._rget(rr, "cols"))]
+                jj = j0 === nothing ? nothing : findfirst(==(j0), cols)
+                jj === nothing && j0 !== nothing && 1 <= j0 <= maximum(cols) &&
+                    SimLev.chk_stop("b2.bench_leer", "overfit_reality_check")
+                jj
+            end
+            j === nothing && SimLev.chk_stop("b2.bench_spalte", "overfit_reality_check")
             b = R[:, j]
             keepc = [i for i in 1:size(R, 2) if i != j]
             R = R[:, keepc]; cn = cn[keepc]
@@ -715,6 +854,12 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
         end
     end
     length(b) != size(R, 1) && SimLev.chk_stop("rs.benchmark_laenge", "overfit_reality_check")
+    # seit 1.6.5 (CR2-X9-1): Inf in der Vergleichsreihe Fehler, Perioden mit NA/NaN entfallen für alle
+    any(isinf, b) && SimLev.chk_stop("b2.bench_inf", "overfit_reality_check")
+    if any(isnan, b)
+        okb = .!isnan.(b); R = R[okb, :]; b = b[okb]
+    end
+    size(R, 1) < 3 && SimLev.chk_stop("b2.rc_perioden", "overfit_reality_check")   # seit 1.6.5 (CR2-D-6)
     D = R .- b
     Tn, K = size(D)
     fbar = DA._col_means(D)
@@ -757,7 +902,8 @@ end
 
 "`print.SimLevRealityCheck`."
 function _print_rc(io::IO, x)
-    print(io, DA._sp("Reality Check und SPA: %d Strategien, %d Perioden, B = %d\n", Int(x["k"]), Int(x["n"]), Int(x["B"])))
+    print(io, DA._sp("Reality Check und SPA: %d %s, %d Perioden, B = %d\n", Int(x["k"]),
+                     Int(x["k"]) == 1 ? "Strategie" : "Strategien", Int(x["n"]), Int(x["B"])))
     print(io, DA._sp("  Beste Strategie: %s (mittlere Überrendite %.4f je Periode)\n", string(x["best"]), DA._rmax(DA._f64(x["mean_excess"]))))
     print(io, DA._sp("  p-Wert Reality Check (White):   %.3f\n  p-Wert SPA (Hansen, konsistent): %.3f  [untere %.3f, obere %.3f]\n",
                      x["p_rc"], x["p_spa"], x["p_spa_lower"], x["p_spa_upper"]))
@@ -775,7 +921,7 @@ end
 Mindestlänge einer Historie (Minimum Track Record Length, Bailey & López de Prado 2012).
 
 Wie viele Perioden braucht es, um mit Wahrscheinlichkeit `prob` sagen zu können, dass die wahre Sharpe Ratio
-über `target` liegt? MinTRL = 1 + (1 - γ_3 SR + (γ_4 - 1)/(4)SR^2) (fracz_probSR - SR^*)^2 Dabei sind SR und
+über `target` liegt? MinTRL = 1 + (1 - γ_3 SR + (γ_4 - 1)/(4)SR^2) ((z_prob)/(SR - SR^*))^2 Dabei sind SR und
 SR^* Sharpe Ratios je Periode (Mittelwert / Standardabweichung, ohne Abzug eines risikolosen Zinses), γ_3 die
 Schiefe und γ_4 die Wölbung (nicht Exzess) der Renditen. Eingabe ist ein Renditevektor oder eine fertige
 Simulation bzw. Kursreihe.
@@ -890,6 +1036,12 @@ Handelstagsdaten ohne Wert vom 01.01. also mit dem zweiten). Ein unvollständige
 (früher wurde es wie ein volles Jahr annualisiert); als vollständig gilt es, wenn das Datenende höchstens um
 die größte Zeilenlücke der Reihe (höchstens 7 Tage) vor dem 31.12. liegt, bei Handelstagen also z. B. der
 30.12. Die Daten werden nach Datum sortiert, doppelte Daten wie in `result_analysis()` behandelt.
+Seit 1.6.5 zählt die Haltedauer in Kalenderjahren: fehlt ein Kalenderjahr in den Daten, bleiben die Zellen,
+die es als Start- oder Endjahr brauchen, leer (bis 1.6.4 zählten die Zeilen der Jahresend-Tabelle). Bei groben
+Daten (mittlerer Zeilenabstand über 7 Tage, z. B. Monatsdaten am Monatsersten) ist das Jahresende der letzte Wert
+im Dezember und das erste, unvollständige Jahr entfällt; bei Jahresdaten (eine Zeile je Jahr) entfällt das erste
+Jahr. Fallen alle Zeilen auf den 1.1. (Jahresdaten zum Jahresanfang), gilt jeder Wert als Jahresende des Vorjahres:
+die Rendite vom 1.1.2010 zum 1.1.2011 steht in der Zeile 2010 (bis 1.6.4 und bei anderen Daten das Jahr des Datums).
 
 # Beispiel
 ```julia
@@ -909,24 +1061,42 @@ function result_heatmap(x; inflation = nothing, max_years = 30)
     s = DA._da_series(x, "x")
     inflation === nothing || (s = DA._da_deflate(s, inflation))
     d = s.date
-    yr = DA._key_year(d); m = length(yr)
+    # seit 1.6.5 (CR2-N-1, Entscheidung 195 F2 Weg b): alle Zeilen am 1.1. → Wert gilt als Jahresende des Vorjahres
+    jan1 = length(d) > 1 && all(t -> (q = DA._date1(t); Dates.month(q) == 1 && Dates.day(q) == 1), d)
+    dt = jan1 ? d .- 1 : d
+    yr = DA._key_year(dt); m = length(yr)
     e = DA._last_of_key(yr)
     keep = vcat(true, .!s.filled[2:end])
     dk = d[keep]
-    tol = min(7.0, DA._rmax(Float64[dk[i] - dk[i-1] for i in 2:length(dk)]))
+    gaps = Float64[dk[i] - dk[i-1] for i in 2:length(dk)]
+    tol = min(7.0, DA._rmax(gaps))
     dec31 = DA._day1(Date(yr[m], 12, 31))
-    dec31 - d[m] >= tol && (e = e[1:end-1])
+    # seit 1.6.5 (CR2-N-1): Haltedauer nach Kalenderjahren, grobe Daten mit Dezemberwert (R result_heatmap)
+    coarse = !isempty(gaps) && _median(gaps) > 7
+    annual = length(unique(yr)) == m
+    last_ok = dec31 - dt[m] < tol
     v = s.value
-    base = vcat(v[1], v[e]); years = vcat(yr[1] - 1, yr[e])
-    d1 = DA._date1(d[1])
-    if !(Dates.month(d1) == 1 && Dates.day(d1) == 1)
-        base = v[e]; years = yr[e]
+    ok = if coarse && !annual
+        Bool[Dates.month(DA._date1(d[i])) == 12 for i in e]
+    else
+        vcat(fill(true, length(e) - 1), last_ok)
     end
-    ny = length(base) - 1
+    ye = Int[yr[i] for (i, o) in zip(e, ok) if o]; ve = Float64[v[i] for (i, o) in zip(e, ok) if o]
+    d1 = DA._date1(d[1])
+    if !coarse && Dates.month(d1) == 1 && Dates.day(d1) == 1
+        ye = vcat(yr[1] - 1, ye); ve = vcat(v[1], ve)
+    end
+    ny = isempty(ye) ? 0 : maximum(ye) - minimum(ye)
     ny < 1 && DA._stop("result_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.")
+    years = collect(minimum(ye):(minimum(ye) + ny))
+    base = fill(_NA, ny + 1)
+    for (yv, vv) in zip(ye, ve)
+        base[yv - years[1] + 1] = vv
+    end
     H = Int(min(max_years, ny))
     M = fill(_NA, ny, H)
     for i in 1:ny, h in 1:min(H, ny - i + 1)
+        (isnan(base[i]) || isnan(base[i+h])) && continue
         M[i, h] = SimLev._cagr_q(base[i+h] / base[i], h)
     end
     Mn = SimLev.NamedMat(M; rownames = string.(years[2:end]), colnames = string.(1:H))
@@ -973,7 +1143,8 @@ function _plot_heatmap(x)
     for i in eachindex(yrs), h in 1:H
         v = M[i, h]; isfinite(v) || continue
         v = clamp(v, -lim, lim)
-        c = pal[clamp(round(Int, (v + lim) / (2 * lim) * 50) + 1, 1, 51)]
+        # seit 1.6.5 (CR2-N-2): ohne Wertänderung (lim = 0) die mittlere Farbstufe
+        c = lim == 0 ? pal[26] : pal[clamp(round(Int, (v + lim) / (2 * lim) * 50) + 1, 1, 51)]
         _ana_rect(s, p, yrs[i] - 0.5, h - 0.5, yrs[i] + 0.5, h + 0.5; fill = c)
         push!(sy, yrs[i]); push!(hy, h); push!(vv, Mm.data[i, h])
     end

@@ -153,6 +153,7 @@ extern "C" SEXP C_wd_tariff_compact(SEXP s_M, SEXP s_ny) {
   return sl::call([&]() {
     sl::NumMat M = sl::num_mat(s_M);
     if (M.nrow() != (int) simlev::TR_N) sl::stop("wd_tariff_compact: %d statt %d Zeilen", M.nrow(), (int) simlev::TR_N);
+    if (sl::as_int(s_ny) < 0) sl::stop("wd_tariff_compact: Abmessungen passen nicht");   // seit 1.6.5 (CR1-Y9-1)
     const int64_t n = simlev::wd_tariff_count(M.ncol(), M.ptr);
     sl::NumMat out = sl::new_mat((int) n, (int) simlev::TR_N + 1);
     simlev::wd_tariff_compact(M.ncol(), M.ptr, sl::as_int(s_ny), n, out.ptr);

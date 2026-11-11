@@ -1,6 +1,6 @@
 {
  "language": "Python",
- "stand": "2026-11-08 – 1.6.4: Standard cores auto (Planer)",
+ "stand": "2026-11-10 – 1.6.5 Paket B2b: sharpe_test nach Ledoit & Wolf, print(param_range)",
  "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -97,7 +97,8 @@
    {"name": "L", "kind": "keyword_only", "default": "None"},
    {"name": "country_weights", "kind": "keyword_only", "default": "None"},
    {"name": "target", "kind": "keyword_only", "default": "None"},
-   {"name": "seed", "kind": "keyword_only", "default": "None"}
+   {"name": "seed", "kind": "keyword_only", "default": "None"},
+   {"name": "periods", "kind": "keyword_only", "default": "None"}
   ],
   "bootstrap_probability": [
    {"name": "study", "kind": "positional_or_keyword", "default": null},
@@ -258,7 +259,9 @@
    {"name": "metric", "kind": "keyword_only", "default": "('sharpe', 'sortino', 'geometric', 'mean')"},
    {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
    {"name": "dates", "kind": "keyword_only", "default": "None"},
-   {"name": "risk_free", "kind": "keyword_only", "default": "0"}
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "n_splits", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
   ],
   "overfit_reality_check": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
@@ -277,7 +280,8 @@
    {"name": "anchored", "kind": "keyword_only", "default": "False"},
    {"name": "metric", "kind": "keyword_only", "default": "('sharpe', 'sortino', 'geometric', 'mean')"},
    {"name": "select", "kind": "keyword_only", "default": "('best', 'plateau')"},
-   {"name": "risk_free", "kind": "keyword_only", "default": "0"}
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "correlation", "kind": "keyword_only", "default": "('spearman', 'kendall', 'pearson')"}
   ],
   "param_bootstrap": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
@@ -385,7 +389,8 @@
    {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
    {"name": "resample", "kind": "keyword_only", "default": "0"},
    {"name": "block", "kind": "keyword_only", "default": "None"},
-   {"name": "seed", "kind": "keyword_only", "default": "None"}
+   {"name": "seed", "kind": "keyword_only", "default": "None"},
+   {"name": "cvar_coarse", "kind": "keyword_only", "default": "True"}
   ],
   "portfolio_returns": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -410,7 +415,7 @@
    {"name": "kwargs", "kind": "var_keyword", "default": null}
   ],
   "portfolio_template": [
-   {"name": "name", "kind": "keyword_only", "default": "None"},
+   {"name": "name", "kind": "positional_or_keyword", "default": "None"},
    {"name": "map", "kind": "keyword_only", "default": "None"},
    {"name": "kwargs", "kind": "var_keyword", "default": null}
   ],
@@ -442,7 +447,8 @@
    {"name": "lev_col", "kind": "keyword_only", "default": "'target_leverage'"},
    {"name": "vol_col", "kind": "keyword_only", "default": "'sigma_ewma'"},
    {"name": "triggers", "kind": "keyword_only", "default": "None"},
-   {"name": "out_col", "kind": "keyword_only", "default": "'rebal_trigger'"}
+   {"name": "out_col", "kind": "keyword_only", "default": "'rebal_trigger'"},
+   {"name": "combine", "kind": "keyword_only", "default": "'or'"}
   ],
   "regime_hmm": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -617,7 +623,8 @@
    {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
    {"name": "dates", "kind": "keyword_only", "default": "None"},
    {"name": "risk_free", "kind": "keyword_only", "default": "0"},
-   {"name": "rho_method", "kind": "keyword_only", "default": "('cor', 'linear')"}
+   {"name": "rho_method", "kind": "keyword_only", "default": "('cor', 'linear')"},
+   {"name": "expected_max", "kind": "keyword_only", "default": "('exact', 'bailey')"}
   ],
   "sharpe_haircut": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
@@ -626,7 +633,8 @@
    {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
    {"name": "dates", "kind": "keyword_only", "default": "None"},
    {"name": "risk_free", "kind": "keyword_only", "default": "0"},
-   {"name": "ppy", "kind": "keyword_only", "default": "52"}
+   {"name": "ppy", "kind": "keyword_only", "default": "52"},
+   {"name": "distribution", "kind": "keyword_only", "default": "('t', 'normal')"}
   ],
   "sharpe_min_track_record": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
@@ -648,7 +656,10 @@
    {"name": "B", "kind": "keyword_only", "default": "2000"},
    {"name": "block", "kind": "keyword_only", "default": "None"},
    {"name": "ppy", "kind": "keyword_only", "default": "None"},
-   {"name": "seed", "kind": "keyword_only", "default": "None"}
+   {"name": "seed", "kind": "keyword_only", "default": "None"},
+   {"name": "studentize", "kind": "keyword_only", "default": "True"},
+   {"name": "kernel", "kind": "keyword_only", "default": "None"},
+   {"name": "prewhiten", "kind": "keyword_only", "default": "None"}
   ],
   "signal_analysis": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -715,7 +726,8 @@
   ],
   "sim_costs": [
    {"name": "order_fee", "kind": "keyword_only", "default": "None"},
-   {"name": "dca_fee", "kind": "keyword_only", "default": "None"}
+   {"name": "dca_fee", "kind": "keyword_only", "default": "None"},
+   {"name": "custody_fee", "kind": "keyword_only", "default": "None"}
   ],
   "simlev_seed": [
    {"name": "seed", "kind": "positional_or_keyword", "default": "None"}
@@ -807,7 +819,8 @@
    {"name": "lookbacks", "kind": "keyword_only", "default": "(1, 3, 6, 12)"},
    {"name": "type", "kind": "keyword_only", "default": "('average', '13612w')"},
    {"name": "every", "kind": "keyword_only", "default": "('month', 'week', 'quarter')"},
-   {"name": "weighting", "kind": "keyword_only", "default": "('equal', 'inverse_vol')"}
+   {"name": "weighting", "kind": "keyword_only", "default": "('equal', 'inverse_vol')"},
+   {"name": "vol_window", "kind": "keyword_only", "default": "63"}
   ],
   "tactical_rules": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -833,7 +846,19 @@
    {"name": "window", "kind": "keyword_only", "default": "63"},
    {"name": "max_exposure", "kind": "keyword_only", "default": "1"},
    {"name": "every", "kind": "keyword_only", "default": "('month', 'week', 'day', 'quarter')"},
-   {"name": "ppy", "kind": "keyword_only", "default": "None"}
+   {"name": "ppy", "kind": "keyword_only", "default": "None"},
+   {"name": "risk", "kind": "keyword_only", "default": "('sd', 'downside', 'es', 'var', 'lpm')"},
+   {"name": "estimator", "kind": "keyword_only", "default": "('window', 'ewma')"},
+   {"name": "alpha", "kind": "keyword_only", "default": "0.05"},
+   {"name": "lpm_order", "kind": "keyword_only", "default": "1"},
+   {"name": "lambda_", "kind": "keyword_only", "default": "0.94"},
+   {"name": "exponent", "kind": "keyword_only", "default": "1"},
+   {"name": "min_exposure", "kind": "keyword_only", "default": "0"},
+   {"name": "risk_floor", "kind": "keyword_only", "default": "None"},
+   {"name": "reference", "kind": "keyword_only", "default": "('fixed', 'median')"},
+   {"name": "cushion", "kind": "keyword_only", "default": "None"},
+   {"name": "cushion_window", "kind": "keyword_only", "default": "252"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
   ],
   "tail_covar": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},
@@ -871,6 +896,12 @@
   "tax_tariff": [
    {"name": "file", "kind": "keyword_only", "default": "None"}
   ],
+  "view_cor": [
+   {"name": "var1", "kind": "positional_or_keyword", "default": null},
+   {"name": "var2", "kind": "positional_or_keyword", "default": null},
+   {"name": "value", "kind": "positional_or_keyword", "default": null},
+   {"name": "op", "kind": "keyword_only", "default": "('=', '<=', '>=')"}
+  ],
   "view_mean": [
    {"name": "var", "kind": "positional_or_keyword", "default": null},
    {"name": "value", "kind": "positional_or_keyword", "default": null},
@@ -880,6 +911,9 @@
    {"name": "expr", "kind": "positional_or_keyword", "default": null},
    {"name": "value", "kind": "positional_or_keyword", "default": null},
    {"name": "op", "kind": "keyword_only", "default": "('=', '<=', '>=')"}
+  ],
+  "view_rank": [
+   {"name": "vars", "kind": "positional_or_keyword", "default": null}
   ],
   "view_vol": [
    {"name": "var", "kind": "positional_or_keyword", "default": null},
@@ -896,7 +930,8 @@
    {"name": "wrap", "kind": "keyword_only", "default": "False"},
    {"name": "cape", "kind": "keyword_only", "default": "None"},
    {"name": "base_rate", "kind": "keyword_only", "default": "None"},
-   {"name": "inflation_type", "kind": "keyword_only", "default": "('level', 'rate_pa')"}
+   {"name": "inflation_type", "kind": "keyword_only", "default": "('level', 'rate_pa')"},
+   {"name": "periods", "kind": "keyword_only", "default": "None"}
   ],
   "withdrawal_horizon": [
    {"name": "type", "kind": "keyword_only", "default": "('fixed', 'uniform', 'discrete', 'normal', 'triangular', 'sample')"},
@@ -979,7 +1014,8 @@
    {"name": "loss_carryforward", "kind": "keyword_only", "default": "0.0"},
    {"name": "gamma", "kind": "keyword_only", "default": "2"},
    {"name": "keep_paths", "kind": "keyword_only", "default": "True"},
-   {"name": "horizon", "kind": "keyword_only", "default": "None"}
+   {"name": "horizon", "kind": "keyword_only", "default": "None"},
+   {"name": "periods", "kind": "keyword_only", "default": "None"}
   ],
   "wrapper_config": [
    {"name": "strategy", "kind": "positional_or_keyword", "default": null},

@@ -7,7 +7,7 @@
 # .sim_from_blocks() in die internen Werte der Engine (dca_mode, balance_*, tax_mode ...); die Rechnung
 # selbst ist unveraendert.
 #
-#   sim_costs(order_fee, dca_fee)                                   -> costs
+#   sim_costs(order_fee, dca_fee, custody_fee)                      -> costs
 #   dca_plan(value, span, days, unit, anchor, start, skip, fill_deficits)          -> dca
 #   rebalance_plan(span, days, unit, anchor, start, skip, thresh, thresh_type,
 #                  event_col, event_mode, event_weight)              -> rebalance
@@ -26,21 +26,20 @@
 .blk_num <- function(who, x, arg, what, min = 0, null_ok = FALSE) {
   if (is.null(x) && null_ok) return(invisible(NULL))
   if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || (!is.null(min) && x < min))
-    stop(sprintf("%s: '%s' muss %s sein.", who, arg, what), call. = FALSE)
+    chk_stop("a.m_blk_num", who, arg, what)
   invisible(NULL)
 }
 
 .blk_lgl <- function(who, x, arg) {
   if (!is.logical(x) || length(x) != 1L || is.na(x))
-    stop(sprintf("%s: '%s' muss TRUE oder FALSE sein.", who, arg), call. = FALSE)
+    chk_stop("a.m_blk_lgl", who, arg)
   invisible(NULL)
 }
 
 # Anteil statt Prozent: Warnung wie in simulation()
 .blk_frac_warn <- function(who, x, arg, hi = 1) {
   if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
-    warning(sprintf("%s: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                    who, arg, format(x), format(x), format(x * 100)), call. = FALSE)
+    warning(chk_msg("e.prozent_anteil", who, arg, format(x), format(x), format(x * 100)), call. = FALSE)
   invisible(NULL)
 }
 
@@ -49,10 +48,9 @@
 .blk_days <- function(who, x) {
   if (is.null(x)) return(NULL)
   if (!is.numeric(x) || !is.null(dim(x)) || !length(x) || anyNA(x) || any(x < 1 | x > 31 | x != round(x)))
-    stop(sprintf("%s: days muss ganze Zahlen von 1 bis 31 enthalten.", who), call. = FALSE)
+    chk_stop("a.m_blk_days", who)
   if (anyDuplicated(x)) {
-    warning(sprintf("%s: days enth\u00e4lt doppelte Tage (%s); jeder Tag ergibt nur einen Termin, verwendet wird days = %s.",
-                    who, paste(format(x), collapse = ", "), paste(deparse(unique(x)), collapse = "")), call. = FALSE)
+    warning(chk_msg("a.m_blk_days_2", who, paste(vapply(x, .blk_fmt, ""), collapse = ", "), paste(deparse(as.double(unique(x))), collapse = "")), call. = FALSE)   # seit 1.6.5 (CR2-F-2) je Tag ohne Fuell-Leerzeichen; Tage als Zahl ohne "L" (CR2-X6-3, Paket E)
     x <- unique(x)
   }
   x
@@ -62,10 +60,12 @@
 # Faktor, Laenge 1 (A-075: bis 1.6.3 bei einem Vektor die Meldung je Element), Meldung ohne Eingabewert)
 .blk_start <- function(who, x) {
   if (is.null(x)) return(invisible(NULL))
+  # seit 1.6.5 (Entscheidung 185 K27) Text nach der Regel von .to_date() (bis 1.6.4 as.Date: "05-01-2024" still als
+  # Jahr 5, "2024-01-011" als 01.01.2024)
   d <- if (length(x) == 1L && (inherits(x, c("Date", "POSIXt")) || is.character(x)))
-         tryCatch(as.Date(x), error = function(e) NA) else NA
+         tryCatch(.to_date(x, paste0(who, ": start"), strict = FALSE), error = function(e) NA) else NA
   if (length(d) != 1L || !is.finite(unclass(d)))
-    stop(sprintf("%s: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", who), call. = FALSE)
+    chk_stop("a.m_blk_start", who)
   invisible(NULL)
 }
 
@@ -75,7 +75,7 @@
 
 .blk_check <- function(x, cls, arg, ctor) {
   if (!is.null(x) && !inherits(x, cls))
-    stop(sprintf("simulation: %s muss NULL oder ein Objekt aus %s() sein.", arg, ctor), call. = FALSE)   # seit 1.6.4 ohne Klasse
+    chk_stop("a.m_blk_check", arg, ctor)   # seit 1.6.4 ohne Klasse
   invisible(NULL)
 }
 
@@ -87,20 +87,33 @@
   for (k in names(rows)) cat("  ", format(paste0(k, ":"), width = w), " ", rows[[k]], "\n", sep = "")
 }
 
-.blk_fmt <- function(x) format(x, digits = 15)
+# seit 1.6.5 (CR2-W2-3) ohne Exponentenschreibweise bis 1e15 (bis 1.6.4 "1e+05 EUR")
+.blk_fmt <- function(x) {
+  if (length(x) == 1L && is.numeric(x) && is.finite(x) && (x == 0 || (abs(x) >= 1e-4 && abs(x) < 1e15)))
+    format(x, digits = 15, scientific = FALSE)
+  else format(x, digits = 15)
+}
 
 .blk_fee_text <- function(x) {
   if (is.null(x)) return("keine")
   if (is.numeric(x)) return(sprintf("%s EUR je Order", .blk_fmt(x)))
+  # seit 1.6.5 (CR2-G-5): Nullbetraege und max = Inf erscheinen nicht (bis 1.6.4 "0 EUR + 0.2 % (mindestens 0 EUR)",
+  # "0.1 % (hoechstens Inf EUR)")
   p <- character(0)
-  if (!is.null(x$fixed)) p <- c(p, sprintf("%s EUR", .blk_fmt(x$fixed)))
-  if (!is.null(x$percent)) p <- c(p, sprintf("%s %%", .blk_fmt(x$percent)))
+  if (!is.null(x$fixed) && !identical(as.numeric(x$fixed), 0)) p <- c(p, sprintf("%s EUR", .blk_fmt(x$fixed)))
+  if (!is.null(x$percent) && !identical(as.numeric(x$percent), 0)) p <- c(p, sprintf("%s %%", .blk_fmt(x$percent)))
   s <- if (length(p)) paste(p, collapse = " + ") else "0 EUR"
   g <- character(0)
-  if (!is.null(x$min)) g <- c(g, sprintf("mindestens %s EUR", .blk_fmt(x$min)))
-  if (!is.null(x$max)) g <- c(g, sprintf("h\u00f6chstens %s EUR", .blk_fmt(x$max)))
+  if (!is.null(x$min) && !identical(as.numeric(x$min), 0)) g <- c(g, sprintf("mindestens %s EUR", .blk_fmt(x$min)))
+  if (!is.null(x$max) && !identical(as.numeric(x$max), Inf)) g <- c(g, sprintf("h\u00f6chstens %s EUR", .blk_fmt(x$max)))
   if (length(g)) s <- sprintf("%s (%s)", s, paste(g, collapse = ", "))
   s
+}
+
+# Depotgebuehr (seit 1.6.5): Zahl = fester Betrag je Jahr, sonst wie .blk_fee_text mit Prozent p. a. des Depotwerts
+.blk_custody_text <- function(x) {
+  s <- if (is.numeric(x)) sprintf("%s EUR", .blk_fmt(x)) else sub(" %", " % des Depotwerts", .blk_fee_text(x), fixed = TRUE)
+  sprintf("%s je Jahr (am 31.12., im ersten und im letzten Jahr anteilig)", s)
 }
 
 .blk_sched_text <- function(span, unit, days, anchor) {
@@ -122,17 +135,22 @@
 #' Kosten fuer simulation()
 #' @export
 #' @noRd
-sim_costs <- function(order_fee = NULL, dca_fee = NULL) {
+sim_costs <- function(order_fee = NULL, dca_fee = NULL, custody_fee = NULL) {
   .fee_spec(order_fee, "sim_costs", "order_fee"); .fee_spec(dca_fee, "sim_costs", "dca_fee")
-  structure(list(order_fee = order_fee, dca_fee = dca_fee), class = "SimLevSimCosts")
+  .fee_spec(custody_fee, "sim_costs", "custody_fee")   # seit 1.6.5 (Entscheidung 150): jaehrliche Depotgebuehr
+  # Feld custody_fee nur, wenn gesetzt (ohne Depotgebuehr derselbe Baustein wie bis 1.6.4)
+  structure(c(list(order_fee = order_fee, dca_fee = dca_fee), if (!is.null(custody_fee)) list(custody_fee = custody_fee)),
+            class = "SimLevSimCosts")
 }
 
 #' @export
 #' @noRd
 print.SimLevSimCosts <- function(x, ...) {
   .blk_print("Kosten (sim_costs)",
-             list("Ordergeb\u00fchr" = .blk_fee_text(x$order_fee),
-                  "Sparplan-Geb\u00fchr" = if (is.null(x$dca_fee)) "wie Ordergeb\u00fchr" else .blk_fee_text(x$dca_fee)))
+             c(list("Ordergeb\u00fchr" = .blk_fee_text(x$order_fee),
+                    "Sparplan-Geb\u00fchr" = if (is.null(x$dca_fee)) "wie Ordergeb\u00fchr" else .blk_fee_text(x$dca_fee)),
+               # seit 1.6.5: Depotgebuehr nur, wenn gesetzt (sonst Druck wie bisher)
+               if (!is.null(x$custody_fee)) list("Depotgeb\u00fchr" = .blk_custody_text(x$custody_fee))))
   invisible(x)
 }
 
@@ -148,8 +166,7 @@ dca_plan <- function(value, span, days = NULL, unit = c("month", "quarter", "yea
   if (missing(span)) span <- NULL
   .one <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
   if (!.one(value) || value <= 0)
-    stop(sprintf("%s: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR).", who),
-         call. = FALSE)
+    chk_stop("a.m_one", who)
   days <- .blk_days(who, days)
   unit <- match.arg(unit); anchor <- match.arg(anchor)
   # seit 1.6.4 Obergrenze (A-009); seit K43 T1-R6 eine Meldung (ganz_bis) statt zweier Formen
@@ -195,12 +212,12 @@ rebalance_plan <- function(span = NULL, days = NULL, unit = c("month", "quarter"
   .blk_frac_warn(who, thresh, "thresh", hi = 0.2)
   thresh_type <- match.arg(thresh_type)
   if (is.null(event_col) && !missing(event_mode))
-    warning("rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert.", call. = FALSE)
+    warning(chk_msg("a.m_rebalance_plan"), call. = FALSE)
   event_mode <- match.arg(event_mode)
   if (!is.null(event_col) && (!is.character(event_col) || length(event_col) != 1L || is.na(event_col) || !nzchar(event_col)))
-    stop("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.", call. = FALSE)
+    chk_stop("a.m_rebalance_plan_2")
   if (is.null(event_col) && !is.null(event_weight))
-    warning("rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert.", call. = FALSE)
+    warning(chk_msg("a.m_rebalance_plan_3"), call. = FALSE)
   # seit 1.6.4 (A-049): event_weight benannt, je Asset ein Spaltenname (die Spalten prueft simulation())
   if (!is.null(event_weight)) {
     ew <- if (is.list(event_weight) && !is.data.frame(event_weight)) event_weight
@@ -246,7 +263,7 @@ split_rule <- function(thresh) {
   if (missing(thresh)) thresh <- NULL
   st <- unlist(thresh)
   if (!is.numeric(st) || length(st) != 2L || anyNA(st))
-    stop("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der L\u00e4nge 2 sein.", call. = FALSE)   # seit 1.6.4 ohne Eingabewert
+    chk_stop("a.m_split_rule")   # seit 1.6.4 ohne Eingabewert
   if (!(st[1] < 100 && 100 < st[2]))
     warning(sprintf(paste0("split_rule: thresh = c(%s, %s) schlie\u00dft den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). ",
                            "Ein Split setzt den Kurs auf 100; liegt 100 au\u00dferhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split ",
@@ -274,9 +291,9 @@ income_rate <- function(marginal_rate, soli_rate = 0) {
   .blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
   .blk_frac_warn(who, marginal_rate, "marginal_rate")
   if (marginal_rate > 50)
-    stop("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr 42 %).",
-         call. = FALSE)
+    chk_stop("e.grenzsteuersatz")
   .blk_num(who, soli_rate, "soli_rate", "eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5.5; 0 = ohne Soli)")
+  .blk_frac_warn(who, soli_rate, "soli_rate")   # seit 1.6.5 (CR2-V2-3)
   structure(list(marginal_rate = marginal_rate, soli_rate = soli_rate), class = "SimLevIncomeRate")
 }
 
@@ -285,13 +302,11 @@ income_rate <- function(marginal_rate, soli_rate = 0) {
 #' @noRd
 income_tariff <- function(taxable_income, tariff = NULL) {
   if (missing(taxable_income) || is.null(taxable_income))
-    stop("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Ertr\u00e4ge der Simulation) fehlt.",
-         call. = FALSE)
+    chk_stop("a.m_income_tariff")
   .check_taxable_income(taxable_income, integer(0), who = "income_tariff", plan_ok = TRUE)   # auch je Planjahr
   if (!is.null(tariff) && !inherits(tariff, "SimLevTaxTariff")) {
     if (is.character(tariff) && length(tariff) == 1L && !is.na(tariff)) tariff <- tax_tariff(tariff)
-    else stop("income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.",
-              call. = FALSE)
+    else chk_stop("a.m_income_tariff_2")
   }
   structure(list(taxable_income = taxable_income, tariff = tariff), class = "SimLevIncomeTariff")
 }
@@ -304,8 +319,7 @@ harvest_rule <- function(day = "12-15", loss_pot = TRUE) {
   # seit 1.6.4 Monat 01-12 und Tag 01-31 (Entscheidung 35; bis 1.6.3 z. B. "00-15" = ab Jahresbeginn, "13-01" = nie)
   if (!is.character(day) || length(day) != 1L || is.na(day) ||
       !grepl("^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", day) || day >= "12-31")
-    stop("harvest_rule: day im Format 'MM-TT' (Monat 01 bis 12, Tag 01 bis 31) und vor dem 31.12. angeben (z. B. '12-15').",
-         call. = FALSE)   # seit 1.6.4 mit den Bereichen (F8)
+    chk_stop("a.m_harvest_rule")   # seit 1.6.4 mit den Bereichen (F8)
   .blk_lgl("harvest_rule", loss_pot, "loss_pot")
   structure(list(day = day, loss_pot = loss_pot), class = "SimLevHarvestRule")
 }
@@ -362,40 +376,34 @@ tax_profile <- function(rate = 26.375, church_tax = 0, sparer_pauschbetrag = 100
                         base_rate = NULL, guenstigerpruefung = FALSE, income = NULL, harvest = NULL) {
   who <- "tax_profile"
   if (!is.numeric(rate) || length(rate) != 1L || is.na(rate) || rate < 0 || rate > 100)
-    stop("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr 26,375 %).",
-         call. = FALSE)
+    chk_stop("e.steuersatz")
   .blk_frac_warn(who, rate, "rate")
   if (!is.null(church_tax)) {
     if (!is.numeric(church_tax) || length(church_tax) != 1L || is.na(church_tax) || church_tax < 0 || church_tax > 100)
-      stop("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).", call. = FALSE)
+      chk_stop("a.m_tax_profile")
     if (church_tax > 0 && church_tax < 1)
-      warning(sprintf("tax_profile: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                      format(church_tax), format(church_tax), format(church_tax * 100)), call. = FALSE)
+      warning(chk_msg("e.kirchensteuer_anteil", format(church_tax), format(church_tax), format(church_tax * 100)),
+              call. = FALSE)
     else if (church_tax > 9)
-      warning(sprintf("tax_profile: church_tax = %s %% ist ungew\u00f6hnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %%).",
-                      format(church_tax)), call. = FALSE)
+      warning(chk_msg("e.kirchensteuer_hoch", format(church_tax)), call. = FALSE)
     if (church_tax > 0 && !missing(rate))
-      stop("tax_profile: rate und church_tax schlie\u00dfen sich aus; rate gilt nur ohne Kirchensteuer (mit church_tax gilt der Satz nach \u00a7 32d Abs. 1 EStG).",
-           call. = FALSE)
+      chk_stop("a.m_tax_profile_2")
   }
   .blk_num(who, sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000; 0 = ohne)")
   .blk_num(who, private_sale_threshold, "private_sale_threshold", "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
   if (is.character(base_rate)) {
     if (length(base_rate) != 1L || is.na(base_rate) || !nzchar(base_rate))
-      stop("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein.",
-           call. = FALSE)
+      chk_stop("a.m_tax_profile_3")
   } else {
     if (!is.null(base_rate) && (!is.numeric(base_rate) || length(base_rate) != 1L || !is.finite(base_rate)))
-      stop("tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein.",
-           call. = FALSE)
+      chk_stop("a.m_tax_profile_3")
     .blk_frac_warn(who, base_rate, "base_rate", hi = 0.05)
   }
   .blk_lgl(who, guenstigerpruefung, "guenstigerpruefung")
   if (!is.null(income) && !inherits(income, c("SimLevIncomeRate", "SimLevIncomeTariff")))
-    stop("tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schlie\u00dfen sich aus).",
-         call. = FALSE)
+    chk_stop("a.m_tax_profile_4")
   if (!is.null(harvest) && !inherits(harvest, "SimLevHarvestRule"))
-    stop("tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein.", call. = FALSE)
+    chk_stop("a.m_tax_profile_5")
   structure(list(rate = rate, church_tax = church_tax, sparer_pauschbetrag = sparer_pauschbetrag,
                  private_sale_threshold = private_sale_threshold, base_rate = base_rate,
                  guenstigerpruefung = guenstigerpruefung, income = income, harvest = harvest),
@@ -430,9 +438,9 @@ funds_costs <- function(fee = 0.95, performance_fee = 5) {
   for (a in c("fee", "performance_fee")) {
     x <- get(a)
     if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0 || x > 100)
-      stop(sprintf("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s).",
-                   a, if (a == "fee") "0.95 f\u00fcr 0,95 % p. a." else "5 f\u00fcr 5 %"), call. = FALSE)
+      chk_stop("a.m_funds_costs", a, if (a == "fee") "0.95 f\u00fcr 0,95 % p. a." else "5 f\u00fcr 5 %")
   }
+  .blk_frac_warn("funds_costs", performance_fee, "performance_fee")   # seit 1.6.5 (CR2-V2-3); fee nicht (0.95 ueblich)
   structure(list(fee = fee, performance_fee = performance_fee), class = "SimLevFundsCosts")
 }
 
@@ -465,6 +473,7 @@ print.SimLevFundsCosts <- function(x, ...) {
   .blk_check(splits, "SimLevSplitRule", "splits", "split_rule")
   .blk_check(tax, "SimLevTaxProfile", "tax", "tax_profile")
   a <- list(order_fee = costs$order_fee, dca_fee = costs$dca_fee)
+  if (!is.null(costs$custody_fee)) a$custody_fee <- costs$custody_fee   # seit 1.6.5 (Entscheidung 150)
   if (!is.null(dca))
     a <- c(a, list(dca_mode = TRUE, dca_value = dca$value, dca_span = dca$span, dca_days = dca$days,
                    dca_unit = dca$unit, dca_anchor = dca$anchor, dca_start = dca$start, dca_skip = dca$skip,
@@ -512,8 +521,10 @@ print.SimLevFundsCosts <- function(x, ...) {
               "liquidate", "details")
 .SIM_BLOCKS <- c(costs = "sim_costs", dca = "dca_plan", rebalance = "rebalance_plan", splits = "split_rule",
                  tax = "tax_profile")
+.SIM_BLOCK_CLASS <- c(costs = "SimLevSimCosts", dca = "SimLevDcaPlan", rebalance = "SimLevRebalancePlan",
+                      splits = "SimLevSplitRule", tax = "SimLevTaxProfile")
 .SIM_BLOCK_PARAMS <- list(
-  sim_costs = c("order_fee", "dca_fee"),
+  sim_costs = c("order_fee", "dca_fee", "custody_fee"),
   dca_plan = c("value", "span", "days", "unit", "anchor", "start", "skip", "fill_deficits"),
   rebalance_plan = c("span", "days", "unit", "anchor", "start", "skip", "thresh", "thresh_type", "event_col",
                      "event_mode", "event_weight"),
@@ -599,17 +610,14 @@ print.SimLevFundsCosts <- function(x, ...) {
     if (!is.na(i)) {
       path <- .SIM_FLAT[i, "path"]; hint <- .SIM_FLAT[i, "hint"]
       if (!nzchar(hint)) hint <- .sim_path_hint(path)
-      stop(sprintf("%s: %s gibt es nicht mehr; bitte %s%s.", who, k, hint,
-                   if (nzchar(path)) sprintf(" (Pfad \"%s\")", path) else ""), call. = FALSE)
+      chk_stop("a.m_sim_check_names", who, k, hint, if (nzchar(path)) sprintf(" (Pfad \"%s\")", path) else "")
     }
     if (grepl(".", k, fixed = TRUE)) {
       if (!.sim_path_ok(k))
-        stop(sprintf("%s: unbekannter Pfad \"%s\"; m\u00f6glich sind die Bausteine mit ihren Parametern: %s.",
-                     who, k, .sim_path_text()), call. = FALSE)
+        chk_stop("a.m_sim_check_names_2", who, k, .sim_path_text())
       next
     }
-    stop(sprintf("%s: unbekanntes Argument %s f\u00fcr simulation(); m\u00f6glich sind %s sowie Pfade zu Parametern der Bausteine (z. B. \"dca.value\").",
-                 who, if (nzchar(k)) k else "ohne Namen", paste(.SIM_TOP, collapse = ", ")), call. = FALSE)
+    chk_stop("a.m_sim_check_names_3", who, if (nzchar(k)) k else "ohne Namen", paste(.SIM_TOP, collapse = ", "))
   }
   invisible(NULL)
 }
@@ -649,6 +657,10 @@ print.SimLevFundsCosts <- function(x, ...) {
   blk <- vapply(parts, `[`, "", 1L)
   for (b in unique(blk)) {
     ctor <- .SIM_BLOCKS[[b]]
+    # seit 1.6.5 (CR2-F-1): ein Wert, der kein Baustein ist, ist ein Fehler (bis 1.6.4 in R still durch die
+    # Standardwerte ersetzt, Python und Julia Rohfehler)
+    if (!is.null(args[[b]]) && !inherits(args[[b]], .SIM_BLOCK_CLASS[[b]]))
+      chk_stop("a.m_sim_args_set", who, b, ctor)
     f <- .sim_fields(args[[b]]); set <- character(0)
     idx <- which(blk == b)
     for (j in idx[lengths(parts[idx]) == 2L]) { k <- parts[[j]][2]; f[k] <- list(over[[paths[j]]]); set <- c(set, k) }
@@ -661,9 +673,7 @@ print.SimLevFundsCosts <- function(x, ...) {
       sctor <- if (!is.na(bctor) && all(keys %in% .SIM_BLOCK_PARAMS[[bctor]])) bctor
                else Filter(function(cn) all(keys %in% .SIM_BLOCK_PARAMS[[cn]]), .SIM_SUB[[s]])
       if (!length(sctor))
-        stop(sprintf("%s: die Pfade %s passen zu keinem Baustein f\u00fcr %s (%s).", who,
-                     paste0("\"", paths[jj], "\"", collapse = ", "), s, paste0(.SIM_SUB[[s]], "()", collapse = ", ")),
-             call. = FALSE)
+        chk_stop("a.m_sim_args_set_2", who, paste0("\"", paths[jj], "\"", collapse = ", "), s, paste0(.SIM_SUB[[s]], "()", collapse = ", "))
       sctor <- sctor[[1]]
       sf <- if (identical(sctor, bctor)) .sim_fields(base) else list()
       for (j in jj) sf[parts[[j]][3]] <- list(over[[paths[j]]])
@@ -677,4 +687,8 @@ print.SimLevFundsCosts <- function(x, ...) {
 #' simulation() mit sim_args aufrufen
 #' @keywords internal
 #' @noRd
-.sim_call <- function(data, strategy, args) do.call(simulation, c(list(data = data, strategy = strategy), args))
+.sim_call <- function(data, strategy, args) {
+  # seit 1.6.5 (Paket E, Entscheidung 176): in einer Studie ueber den Studienkern (R/sim_prepared.R), bitgleich
+  if (isTRUE(.sim_study_env$on)) return(.sim_call_study(data, strategy, args))
+  do.call(simulation, c(list(data = data, strategy = strategy), args))
+}

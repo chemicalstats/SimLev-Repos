@@ -16,17 +16,20 @@ series_leverage(
 }
 \arguments{
 \item{data}{data.frame mit Spalte \code{date} und der Indexspalte.
-Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).}
+Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).
+Seit 1.6.5 muss \code{date} aufsteigend und ohne \code{NA} sein.}
 
 \item{index}{Spaltenname des Index (Niveau, nicht Rendite; Luecken werden
 mit dem letzten Wert gefuellt).
-Seit 1.6.4 geprueft: Zahlenspalte in data (kein Faktor).}
+Seit 1.6.4 geprueft: Zahlenspalte in data (kein Faktor). Seit 1.6.5 nach dem Auffuellen endlich und
+> 0 (sonst Fehler mit Zeile).}
 
 \item{leverage}{Hebel L als Zahl (Standard 2; negativ fuer Short).}
 
 \item{rate}{Finanzierungszins in Prozent p. a. (Standard 0): Skalar,
 Spaltenname, Vektor der Laenge \code{nrow(data)},
-\code{data.frame(date, value)} oder benannter Vektor mit Datumsnamen.}
+\code{data.frame(date, value)} oder benannter Vektor mit Datumsnamen.
+Seit 1.6.5 ohne fehlende Werte (Luecke ist ein Fehler).}
 
 \item{expense}{TER in Prozent p. a. (Standard 0).}
 

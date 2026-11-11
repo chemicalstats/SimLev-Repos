@@ -204,6 +204,42 @@ static PyObject *slc_sample(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+/* Länderblöcke von bootstrap_pooled (seit 1.6.5, Paket E, K40/CR2-6; simlev/planning.py über _lib.pooled_draw):
+ * slc_pooled_draw(state, ctry_out int32[nper n], row_out int32[nper n], nr int64[nc], cw float64[nc], L, nper, n) */
+static PyObject *slc_pooled_draw(PyObject *self, PyObject *args)
+{
+    PyObject *st, *oc, *orw, *onr, *ocw;
+    double L;
+    long long nper, n;
+    Py_buffer v, bc, br, bn, bw;
+    sl_rng r;
+    sl_ctx cx;
+    int rc;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OOOOOdLL", &st, &oc, &orw, &onr, &ocw, &L, &nper, &n)) return NULL;
+    if (get_state(st, &v, &r) < 0) return NULL;
+    if (get_buf(oc, &bc, 1, 4, "il", "ctry (int32)") < 0) { PyBuffer_Release(&v); return NULL; }
+    if (get_buf(orw, &br, 1, 4, "il", "row (int32)") < 0) { PyBuffer_Release(&v); PyBuffer_Release(&bc); return NULL; }
+    if (get_buf(onr, &bn, 0, 8, "ql", "nr (int64)") < 0) {
+        PyBuffer_Release(&v); PyBuffer_Release(&bc); PyBuffer_Release(&br); return NULL;
+    }
+    if (get_buf(ocw, &bw, 0, 8, "d", "cw (float64)") < 0) {
+        PyBuffer_Release(&v); PyBuffer_Release(&bc); PyBuffer_Release(&br); PyBuffer_Release(&bn); return NULL;
+    }
+    if (NITEMS(bc) != nper * n || NITEMS(br) != nper * n || NITEMS(bw) != NITEMS(bn)) {
+        PyBuffer_Release(&v); PyBuffer_Release(&bc); PyBuffer_Release(&br); PyBuffer_Release(&bn); PyBuffer_Release(&bw);
+        PyErr_SetString(PyExc_ValueError, "pooled_draw: Längen passen nicht");
+        return NULL;
+    }
+    ctx_init(&cx);
+    rc = sl_pooled_draw(&cx, &r, (int64_t) NITEMS(bn), (const int64_t *) bn.buf, (const double *) bw.buf, L,
+                        (int64_t) nper, (int64_t) n, (int32_t *) bc.buf, (int32_t *) br.buf);
+    if (rc == SL_OK) put_state(&v, &r);
+    PyBuffer_Release(&v); PyBuffer_Release(&bc); PyBuffer_Release(&br); PyBuffer_Release(&bn); PyBuffer_Release(&bw);
+    if (finish(&cx, rc) < 0) return NULL;
+    Py_RETURN_NONE;
+}
+
 /* ── Verteilungen: (x, out, Parameter ...) ── */
 
 typedef int (*unary_fn)(sl_ctx *, int64_t, const double *, double *);
@@ -276,6 +312,8 @@ PyMethodDef simlev_ext_slc_methods[] = {
     {"slc_rgeom", slc_rgeom, METH_VARARGS, "slc_rgeom(state, out, p)"},
     {"slc_rchisq", slc_rchisq, METH_VARARGS, "slc_rchisq(state, out, df)"},
     {"slc_sample", slc_sample, METH_VARARGS, "slc_sample(state, out_int32, n, replace, prob_or_None)"},
+    {"slc_pooled_draw", slc_pooled_draw, METH_VARARGS,
+     "slc_pooled_draw(state, ctry_int32, row_int32, nr_int64, cw, L, nper, n)  (bootstrap_pooled, seit 1.6.5)"},
     {"slc_pnorm", slc_pnorm, METH_VARARGS, "slc_pnorm(x, out, mu, sd, lower)"},
     {"slc_qnorm", slc_qnorm, METH_VARARGS, "slc_qnorm(p, out, mu, sd, lower)"},
     {"slc_dnorm", slc_dnorm, METH_VARARGS, "slc_dnorm(x, out, mu, sd, log)"},

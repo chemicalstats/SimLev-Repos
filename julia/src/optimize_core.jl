@@ -15,6 +15,7 @@ module OptimizeCore
 
 import ..SimLev
 using ..SimLev: CAbi, LIBSLC
+using ..SimLev: chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 
 export proj_box_simplex, qp_box_simplex, min_cvar_core, min_cdar_core
 
@@ -33,7 +34,7 @@ _mat(x::Real) = fill(Float64(x), 1, 1)
 
 # Schutz vor Zugriffen außerhalb der Felder (Meldungen wie die Python-Hülle)
 function _need(v::Vector{Float64}, n::Int, fn::String, name::String)
-    length(v) >= n || error("$fn: '$name' ist zu kurz ($(length(v)) statt mindestens $n).")
+    length(v) >= n || chk_stop("c.m_need", fn, name, length(v), n)
     return v
 end
 
@@ -87,7 +88,7 @@ function min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit)
     fn = "min_cvar_core"
     lo = _need(_fl(lo), N, fn, "lo"); hi = _need(_fl(hi), N, fn, "hi"); w0 = _need(_fl(w0), N, fn, "w0")
     sc = _fl(scales)
-    out = Vector{Float64}(undef, N)
+    out = Vector{Float64}(undef, N + 1)        # seit 1.6.5: N Gewichte + Grenzmerker (K39)
     CAbi.check(ccall((:simlev_c_min_cvar_core, LIBSLC), Cint,
                      (Ptr{Float64}, Int64, Int64, Float64, Ptr{Float64}, Int64, Ptr{Float64}, Int64, Ptr{Float64},
                       Int64, Float64, Ptr{Float64}, Int64, Int64, Ptr{Float64}),

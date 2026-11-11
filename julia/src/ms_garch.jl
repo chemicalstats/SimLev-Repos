@@ -24,54 +24,25 @@ const RList = SimLev.RList
 function _ms_garch_check(K, model)
     mv = model isa AbstractVector || model isa Tuple ? collect(model) : [model]
     ok_m = length(mv) == 1 && mv[1] isa AbstractString && mv[1] in ("sGARCH", "gjrGARCH")
-    ok_m || error("MS-GARCH: Varianzmodell je Regime (params ms_garch_model, ms_ar_garch_model bzw. tvtp_garch_model) " *
-                  "muss \"sGARCH\" oder \"gjrGARCH\" sein.")   # seit 1.6.4 ohne Wert
+    ok_m || SimLev.chk_stop("b1.m_ms_garch_check")   # seit 1.6.4 ohne Wert
     kv = K isa AbstractVector || K isa Tuple ? collect(K) : [K]
     ok_k = length(kv) == 1 && kv[1] isa Real && !(kv[1] isa Bool)
     if ok_k
         k0 = Float64(kv[1])
         ok_k = isfinite(k0) && k0 == Float64(SimLev.RFmt.r_round(k0)) && 2 <= k0 <= 64   # seit 1.6.4 bis 64 (B-097)
     end
-    ok_k || error("MS-GARCH: Anzahl Regime (params ms_n_regimes, ms_ar_n_regimes bzw. tvtp_n_regimes) muss eine " *
-                  "ganze Zahl >= 2 und <= 64 sein.")   # seit 1.6.4 ohne Wert
+    ok_k || SimLev.chk_stop("b1.m_ms_garch_check_2")   # seit 1.6.4 ohne Wert
     return true
 end
 
 """
-Stationäre Verteilung einer Übergangsmatrix (`.ms_garch_stat`): Potenziteration
-wie für `pi_` in `.prepare_ms_info` (Start gleichverteilt, höchstens 1000
-Schritte, Abbruch bei maximaler Änderung < 1e-12). `pi_ %m% P` in der
-Reihenfolge des slc-Matrixprodukts (je Element ab 0,0 aufsteigend summiert;
-bei nicht endlichen Werten `SLib.matmul`).
+Stationäre Verteilung einer Übergangsmatrix (`.ms_garch_stat`): seit 1.6.5
+(CR2-M-1, Entscheidung 189) direkt im Kern gelöst (`sl_msgarch_stat`; nur bei
+singulärem System die Potenziteration bis 1.6.4), wie R `.sl_msgarch_stat`.
 """
 function _ms_garch_stat(P)
     P = Matrix{Float64}(P isa SimLev.NamedMat ? P.data : P)
-    K = size(P, 1)
-    pi_ = fill(1 / K, K)
-    fin = all(isfinite, P)
-    for _ in 1:1000
-        p2 = Vector{Float64}(undef, K)
-        if fin && all(isfinite, pi_)
-            for j in 1:K
-                s = 0.0
-                for i in 1:K
-                    s = s + P[i, j] * pi_[i]
-                end
-                p2[j] = s
-            end
-        else
-            p2 = Float64.(vec(collect(SimLev.SLib.matmul(reshape(pi_, 1, K), P))))
-        end
-        mx = -Inf
-        for i in 1:K
-            dv = abs(p2[i] - pi_[i])
-            isnan(dv) && error("missing value where TRUE/FALSE needed")
-            dv > mx && (mx = dv)
-        end
-        mx < 1e-12 && break
-        pi_ = p2
-    end
-    return pi_
+    return SimLev.SLib.msgarch_stat(P)
 end
 
 

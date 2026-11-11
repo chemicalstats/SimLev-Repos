@@ -57,7 +57,7 @@ bool get_prep(PyObject* o, ext::Buf* b, Py_ssize_t n, Py_ssize_t na, simlev_prep
  *   prep: (pi int32[PI_N], pd float64[PD_N], start float64[na], filled int32[n]/None, event int32[n]/None,
  *   d_days float64/None, d_dcode int32/None, b_days, b_dcode); day float64[n]; prices, sig_buy, sig_sell: Listen je
  *   Asset (float64[n]); event_w, base_rates: None oder Liste je Asset (None bzw. float64[n]); ai int32[AI_N na]
- *   (Startindizes setzt die Vorbereitung), ad float64[AD_N na], ci int32[CI_N], cd float64[CD_N], fees float64[10],
+ *   (Startindizes setzt die Vorbereitung), ad float64[AD_N na], ci int32[CI_N], cd float64[CD_N], fees float64[15] (seit 1.6.5 mit Depotgebuehr),
  *   tot0 float64[TT_N], tariff_par float64[], zve float64[2 k] (Jahr, zvE); reports: Liste von 5 na beschreibbaren
  *   float64[n] (worth, money, flows, total, share je Asset).
  * Rueckgabe: (status [8 na], totals [TT_N], lots je Asset [7 k], sells je Asset [8 k], taxes je Asset [8 k],
@@ -67,65 +67,82 @@ bool get_prep(PyObject* o, ext::Buf* b, Py_ssize_t n, Py_ssize_t na, simlev_prep
  *   Zahlenfelder als bytearray (float64). Der Kern laeuft ohne GIL.
  * Seit 1.6.4 ohne das optionale 17. Argument compact (kompakte Lot-Ausgabe von 1.6.3, ohne Aufrufer) und ohne
  *   refund_due in der Rueckgabe (ohne Leser). */
-PyObject* e_engine_run(PyObject*, PyObject* a) {
+// Eingabe von sim_engine_run mit den Puffern, auf die Input und PrepFlat zeigen (seit 1.6.5 eigene Hilfe, gemeinsam
+// fuer sim_engine_run und sim_run_prepared)
+struct EngineArgs {
+    ext::Buf bday, bai, bad, bci, bcd, bfees, btot0, btp, bzve, bprep[9];
+    std::vector<ext::Buf> bufs;
+    std::vector<const double*> pp, psb, pss, pew, pbr;
+    std::vector<double*> prep;
+    simlev_engine::Input I;
+    simlev_prepare::PrepFlat F;
+    Py_ssize_t n = 0, na = 0;
+};
+
+bool engine_args(PyObject* a, EngineArgs& X) {
     using namespace simlev_engine;
     PyObject *o_prep, *o_day, *o_prices, *o_sb, *o_ss, *o_ew, *o_br, *o_ai, *o_ad, *o_ci, *o_cd, *o_fees, *o_tot0,
         *o_tp, *o_zve, *o_rep;
     if (!PyArg_UnpackTuple(a, "sim_engine_run", 16, 16, &o_prep, &o_day, &o_prices, &o_sb, &o_ss, &o_ew, &o_br, &o_ai,
                            &o_ad, &o_ci, &o_cd, &o_fees, &o_tot0, &o_tp, &o_zve, &o_rep))
-        return nullptr;
+        return false;
     const char* fn = "sim_engine_run";
     if (!PyList_Check(o_prices) || !PyList_Check(o_sb) || !PyList_Check(o_ss) || !PyList_Check(o_rep) ||
         (o_ew != Py_None && !PyList_Check(o_ew)) || (o_br != Py_None && !PyList_Check(o_br))) {
         PyErr_SetString(PyExc_TypeError, "sim_engine_run: Listen erwartet");
-        return nullptr;
+        return false;
     }
     const Py_ssize_t na = PyList_GET_SIZE(o_prices);
-    ext::Buf bday, bai, bad, bci, bcd, bfees, btot0, btp, bzve, bprep[9];
-    if (!ext::get(o_day, bday, 'd', false, fn, "day")) return nullptr;
+    ext::Buf &bday = X.bday, &bai = X.bai, &bad = X.bad, &bci = X.bci, &bcd = X.bcd, &bfees = X.bfees, &btot0 = X.btot0,
+             &btp = X.btp, &bzve = X.bzve, *bprep = X.bprep;
+    if (!ext::get(o_day, bday, 'd', false, fn, "day")) return false;
     const Py_ssize_t n = bday.n;
-    simlev_prepare::PrepFlat F;
+    X.n = n; X.na = na;
+    simlev_prepare::PrepFlat& F = X.F;
     if (!get_prep(o_prep, bprep, n, na, F, fn) ||
         !ext::get(o_ai, bai, 'i', false, fn, "ai", AI_N * na) || !ext::get(o_ad, bad, 'd', false, fn, "ad", AD_N * na) ||
         !ext::get(o_ci, bci, 'i', false, fn, "ci", CI_N) ||
-        !ext::get(o_cd, bcd, 'd', false, fn, "cd", CD_N) || !ext::get(o_fees, bfees, 'd', false, fn, "fees", 10) ||
+        !ext::get(o_cd, bcd, 'd', false, fn, "cd", CD_N) || !ext::get(o_fees, bfees, 'd', false, fn, "fees", 15) ||
         !ext::get(o_tot0, btot0, 'd', false, fn, "tot0", TT_N) || !ext::get(o_tp, btp, 'd', false, fn, "tariff_par") ||
         !ext::get(o_zve, bzve, 'd', false, fn, "zve"))
-        return nullptr;
+        return false;
     if (PyList_GET_SIZE(o_sb) != na || PyList_GET_SIZE(o_ss) != na || PyList_GET_SIZE(o_rep) != 5 * na ||
         (o_ew != Py_None && PyList_GET_SIZE(o_ew) != na) || (o_br != Py_None && PyList_GET_SIZE(o_br) != na) ||
         bzve.n % 2 != 0) {
         PyErr_SetString(PyExc_ValueError, "sim_engine_run: Listen passen nicht zur Zahl der Assets");
-        return nullptr;
+        return false;
     }
-    std::vector<ext::Buf> bufs((std::size_t) (10 * na));
-    std::vector<const double*> pp((std::size_t) na), psb((std::size_t) na), pss((std::size_t) na),
-        pew((std::size_t) na, nullptr), pbr((std::size_t) na, nullptr);
-    std::vector<double*> prep((std::size_t) (5 * na));
+    std::vector<ext::Buf>& bufs = X.bufs;
+    bufs = std::vector<ext::Buf>((std::size_t) (10 * na));
+    std::vector<const double*>&pp = X.pp, &psb = X.psb, &pss = X.pss, &pew = X.pew, &pbr = X.pbr;
+    pp.assign((std::size_t) na, nullptr); psb.assign((std::size_t) na, nullptr); pss.assign((std::size_t) na, nullptr);
+    pew.assign((std::size_t) na, nullptr); pbr.assign((std::size_t) na, nullptr);
+    std::vector<double*>& prep = X.prep;
+    prep.assign((std::size_t) (5 * na), nullptr);
     for (Py_ssize_t k = 0; k < na; k++) {
         ext::Buf* b = &bufs[(std::size_t) (10 * k)];
         PyObject *osb = PyList_GET_ITEM(o_sb, k), *oss = PyList_GET_ITEM(o_ss, k);   // None: keine Signalspalte (seit 1.6.1)
         if (!ext::get(PyList_GET_ITEM(o_prices, k), b[0], 'd', false, fn, "prices", n) ||
             (osb != Py_None && !ext::get(osb, b[1], 'd', false, fn, "sig_buy", n)) ||
             (oss != Py_None && !ext::get(oss, b[2], 'd', false, fn, "sig_sell", n)))
-            return nullptr;
+            return false;
         pp[k] = b[0].d();
         psb[k] = osb == Py_None ? nullptr : b[1].d();
         pss[k] = oss == Py_None ? nullptr : b[2].d();
         if (o_ew != Py_None && PyList_GET_ITEM(o_ew, k) != Py_None) {
-            if (!ext::get(PyList_GET_ITEM(o_ew, k), b[3], 'd', false, fn, "event_w", n)) return nullptr;
+            if (!ext::get(PyList_GET_ITEM(o_ew, k), b[3], 'd', false, fn, "event_w", n)) return false;
             pew[k] = b[3].d();
         }
         if (o_br != Py_None && PyList_GET_ITEM(o_br, k) != Py_None) {
-            if (!ext::get(PyList_GET_ITEM(o_br, k), b[4], 'd', false, fn, "base_rates", n)) return nullptr;
+            if (!ext::get(PyList_GET_ITEM(o_br, k), b[4], 'd', false, fn, "base_rates", n)) return false;
             pbr[k] = b[4].d();
         }
         for (int j = 0; j < 5; j++) {
-            if (!ext::get(PyList_GET_ITEM(o_rep, 5 * k + j), b[5 + j], 'd', true, fn, "reports", n)) return nullptr;
+            if (!ext::get(PyList_GET_ITEM(o_rep, 5 * k + j), b[5 + j], 'd', true, fn, "reports", n)) return false;
             prep[(std::size_t) (5 * k + j)] = b[5 + j].d();
         }
     }
-    Input I;
+    Input& I = X.I;
     I.n = n; I.na = na; I.day = bday.d();
     I.price = pp.data(); I.sig_buy = psb.data(); I.sig_sell = pss.data();
     I.event_w = o_ew != Py_None ? pew.data() : nullptr;
@@ -133,13 +150,12 @@ PyObject* e_engine_run(PyObject*, PyObject* a) {
     I.ai = bai.i(); I.ad = bad.d(); I.ci = bci.i(); I.cd = bcd.d(); I.fees = bfees.d();
     I.tot0 = btot0.d(); I.tariff_par = btp.d(); I.n_tariff_par = btp.n; I.zve = bzve.d(); I.n_zve = bzve.n / 2;
     I.reports = prep.data();
-    Engine E;
-    if (E.setup_prepared(I, F) != 0) {
-        PyErr_SetString(PyExc_ValueError, "sim_engine_run: Eingabe passt nicht");
-        return nullptr;
-    }
-    int rc = 0;
-    if (!ext::run([&]() { rc = E.run(); })) return nullptr;
+    return true;
+}
+
+// Rueckgabe von sim_engine_run aus dem Engine-Objekt nach dem Lauf (rc: Rueckgabe von Engine::run)
+PyObject* engine_out(simlev_engine::Engine& E, int rc, Py_ssize_t n, Py_ssize_t na) {
+    using namespace simlev_engine;
     double* p;
     PyObject* status = ext::new_doubles(8 * na, &p);
     if (status) E.status_out(p);
@@ -230,6 +246,20 @@ PyObject* e_engine_run(PyObject*, PyObject* a) {
                          ks, evs, err, flags);
 }
 
+
+PyObject* e_engine_run(PyObject*, PyObject* a) {
+    EngineArgs X;
+    if (!engine_args(a, X)) return nullptr;
+    simlev_engine::Engine E;
+    if (E.setup_prepared(X.I, X.F) != 0) {
+        PyErr_SetString(PyExc_ValueError, "sim_engine_run: Eingabe passt nicht");
+        return nullptr;
+    }
+    int rc = 0;
+    if (!ext::run([&]() { rc = E.run(); })) return nullptr;
+    return engine_out(E, rc, X.n, X.na);
+}
+
 /* calculate_dates_flags() ueber den Kern (prepare_core_impl.h, dates_flags):
  *   sim_dates_flags(dates float64[n], si int32[SI_N], start, days float64/None, dcode int32/None, liquidate)
  *   -> bytearray int32[n] (0/1) */
@@ -274,6 +304,32 @@ PyObject* doubles_of(const double* x, std::size_t n) {
     PyObject* o = ext::new_doubles((Py_ssize_t) n, &p);
     if (o) for (std::size_t i = 0; i < n; i++) p[i] = x[i];
     return o;
+}
+
+// Rueckgabe von sim_evaluate (seit 1.6.5 eigene Hilfe, gemeinsam fuer sim_evaluate und sim_run_prepared)
+PyObject* eval_out(const simlev_eval::Result& R) {
+    using namespace simlev_eval;
+    PyObject* um = PyList_New((Py_ssize_t) R.um.size());
+    if (!um) return nullptr;
+    for (std::size_t i = 0; i < R.um.size(); i++) {
+        const Row& u = R.um[i];
+        PyObject* t = Py_BuildValue("(iiiddd)", u.metric, u.reason, u.detail, u.v[0], u.v[1], u.v[2]);
+        if (!t) {
+            Py_DECREF(um);
+            return nullptr;
+        }
+        PyList_SET_ITEM(um, (Py_ssize_t) i, t);
+    }
+    return Py_BuildValue("(NNNN(ddd)NN(iii)NN((iiiddd)(iiiddd))NN(ii))",
+                         doubles_of(R.total_worth.data(), R.total_worth.size()),
+                         doubles_of(R.twr_index.data(), R.twr_index.size()),
+                         doubles_of(R.invested.data(), R.invested.size()),
+                         doubles_of(R.drawdowns.data(), R.drawdowns.size()), R.cagr, R.ttwror, R.open_tax_debt,
+                         PyBool_FromLong(R.has_ext_flows), doubles_of(R.stats, ST_N), R.skew_lgl, R.kurt_lgl,
+                         R.longest_dd, doubles_of(R.buys.data(), R.buys.size()),
+                         doubles_of(R.sells.data(), R.sells.size()), R.why_set[0], R.why[0].reason, R.why[0].detail,
+                         R.why[0].v[0], R.why[0].v[1], R.why[0].v[2], R.why_set[1], R.why[1].reason, R.why[1].detail,
+                         R.why[1].v[0], R.why[1].v[1], R.why[1].v[2], um, msgs_tuple(R.msgs), R.err_site, R.err_phase);
 }
 
 /* Auswertung von simulation() (core/evaluate_core_impl.h). Aufruf aus simlev/_sim_evaluate.py:
@@ -336,27 +392,7 @@ PyObject* e_evaluate(PyObject*, PyObject* a) {
         PyErr_SetString(PyExc_ValueError, "sim_evaluate: Eingabe passt nicht");
         return nullptr;
     }
-    PyObject* um = PyList_New((Py_ssize_t) R.um.size());
-    if (!um) return nullptr;
-    for (std::size_t i = 0; i < R.um.size(); i++) {
-        const Row& u = R.um[i];
-        PyObject* t = Py_BuildValue("(iiiddd)", u.metric, u.reason, u.detail, u.v[0], u.v[1], u.v[2]);
-        if (!t) {
-            Py_DECREF(um);
-            return nullptr;
-        }
-        PyList_SET_ITEM(um, (Py_ssize_t) i, t);
-    }
-    return Py_BuildValue("(NNNN(ddd)NN(iii)NN((iiiddd)(iiiddd))NN(ii))",
-                         doubles_of(R.total_worth.data(), R.total_worth.size()),
-                         doubles_of(R.twr_index.data(), R.twr_index.size()),
-                         doubles_of(R.invested.data(), R.invested.size()),
-                         doubles_of(R.drawdowns.data(), R.drawdowns.size()), R.cagr, R.ttwror, R.open_tax_debt,
-                         PyBool_FromLong(R.has_ext_flows), doubles_of(R.stats, ST_N), R.skew_lgl, R.kurt_lgl,
-                         R.longest_dd, doubles_of(R.buys.data(), R.buys.size()),
-                         doubles_of(R.sells.data(), R.sells.size()), R.why_set[0], R.why[0].reason, R.why[0].detail,
-                         R.why[0].v[0], R.why[0].v[1], R.why[0].v[2], R.why_set[1], R.why[1].reason, R.why[1].detail,
-                         R.why[1].v[0], R.why[1].v[1], R.why[1].v[2], um, msgs_tuple(R.msgs), R.err_site, R.err_phase);
+    return eval_out(R);
 }
 
 /* xirr_rate (.xirr_rate) ueber den Kern: sim_xirr(t float64[k], amount float64[k], end_value, horizon)
@@ -373,6 +409,67 @@ PyObject* e_xirr(PyObject*, PyObject* a) {
     return Py_BuildValue("(dN)", v, msgs_tuple(m));
 }
 
+/* Vorbereiteter Kernlauf (seit 1.6.5, Paket E, Entscheidung 176; core/evaluate_core_impl.h simlev_run::run_prepared):
+ * Tagesengine und Auswertung in einem Aufruf. Aufruf aus simlev/_sim_prepared.py:
+ *   sim_run_prepared(engine, ev)
+ *   engine: Tupel mit den 16 Argumenten von sim_engine_run; ev: (day float64[n], filled int32[n] oder None,
+ *   sc float64[3] (start_date, stopp_date, start_value), rf float64[] oder None, rf_ok 0/1).
+ * Rueckgabe: (Rueckgabe von sim_engine_run, Rueckgabe von sim_evaluate bzw. None nach einem Abbruch der Engine). */
+PyObject* e_run_prepared(PyObject*, PyObject* a) {
+    PyObject *o_eng, *o_ev;
+    if (!PyArg_UnpackTuple(a, "sim_run_prepared", 2, 2, &o_eng, &o_ev)) return nullptr;
+    if (!PyTuple_Check(o_eng) || !PyTuple_Check(o_ev) || PyTuple_GET_SIZE(o_ev) != 5) {
+        PyErr_SetString(PyExc_TypeError, "sim_run_prepared: Tupel erwartet");
+        return nullptr;
+    }
+    EngineArgs X;
+    if (!engine_args(o_eng, X)) return nullptr;
+    const char* fn = "sim_run_prepared";
+    PyObject *o_day = PyTuple_GET_ITEM(o_ev, 0), *o_filled = PyTuple_GET_ITEM(o_ev, 1), *o_sc = PyTuple_GET_ITEM(o_ev, 2),
+             *o_rf = PyTuple_GET_ITEM(o_ev, 3);
+    const long rf_ok = PyLong_AsLong(PyTuple_GET_ITEM(o_ev, 4));
+    if (rf_ok == -1 && PyErr_Occurred()) return nullptr;
+    ext::Buf bday, bfi, bsc, brf;
+    if (!ext::get(o_day, bday, 'd', false, fn, "day", X.n) || !get_opt(o_filled, bfi, 'i', fn, "filled", X.n) ||
+        !ext::get(o_sc, bsc, 'd', false, fn, "sc", 3) || !get_opt(o_rf, brf, 'd', fn, "rf"))
+        return nullptr;
+    simlev_run::EvalStatic S;
+    S.day = bday.d();
+    S.filled = o_filled != Py_None ? bfi.i() : nullptr;
+    S.start_date = bsc.d()[0]; S.stopp_date = bsc.d()[1]; S.start_value = bsc.d()[2];
+    if (o_rf != Py_None) {
+        S.rf = brf.d();
+        S.n_rf = brf.n;
+    }
+    S.rf_ok = (int) rf_ok;
+    simlev_engine::Engine E;
+    simlev_eval::Result R;
+    int rc = 0;
+    if (!ext::run([&]() { rc = simlev_run::run_prepared(E, X.I, X.F, S, R); })) return nullptr;
+    if (rc == 1) {
+        PyErr_SetString(PyExc_ValueError, "sim_engine_run: Eingabe passt nicht");
+        return nullptr;
+    }
+    if (rc == 3) {
+        PyErr_SetString(PyExc_ValueError, "sim_evaluate: Eingabe passt nicht");
+        return nullptr;
+    }
+    PyObject* eo = engine_out(E, rc == 2 ? 1 : 0, X.n, X.na);
+    if (!eo) return nullptr;
+    PyObject* vo;
+    if (rc == 0) {
+        vo = eval_out(R);
+        if (!vo) {
+            Py_DECREF(eo);
+            return nullptr;
+        }
+    } else {
+        Py_INCREF(Py_None);
+        vo = Py_None;
+    }
+    return Py_BuildValue("(NN)", eo, vo);
+}
+
 }  // namespace
 
 PyMethodDef simlev_ext_engine_methods[] = {
@@ -385,6 +482,9 @@ PyMethodDef simlev_ext_engine_methods[] = {
     {"sim_evaluate", e_evaluate, METH_VARARGS,
      "sim_evaluate(total, flows, worth, money, price, day, filled, sc, status_money, n_buys, n_sells, rf, rf_ok)\n"
      "  -> Auswertung von simulation()"},
+    {"sim_run_prepared", e_run_prepared, METH_VARARGS,
+     "sim_run_prepared(engine, ev) -> (Rueckgabe von sim_engine_run, Rueckgabe von sim_evaluate bzw. None)\n"
+     "  (vorbereiteter Kernlauf: Tagesengine und Auswertung in einem Aufruf, seit 1.6.5)"},
     {"sim_xirr", e_xirr, METH_VARARGS,
      "sim_xirr(t, amount, end_value, horizon) -> (Wert, Warnungen)  (interner Zinsfuss)"},
     {nullptr, nullptr, 0, nullptr}

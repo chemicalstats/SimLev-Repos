@@ -59,7 +59,8 @@ asset_config(
   \item{partial_exemption}{
     Numerisch. Teilfreistellungssatz nach § 20 Abs. 1 InvStG
     \strong{in Prozent} (0 bis 100; z. B. \code{30} für Aktien-ETFs,
-    \code{15} für Mischfonds). Wirkt nur im Regime
+    \code{15} für Mischfonds; Aktienfonds legen fortlaufend mehr als 50 \%, Mischfonds
+    mindestens 25 \% in Aktien an, § 2 Abs. 6 und 7 InvStG). Wirkt nur im Regime
     \code{"investment_fund"}. Werte zwischen 0 und 1 (vermutlich ein Anteil
     statt Prozent, z. B. \code{0.3}) werden mit Warnung angenommen.
     Standard: \code{0}.

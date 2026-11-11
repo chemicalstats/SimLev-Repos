@@ -131,7 +131,9 @@ export_dashboard(
     \code{end_value}, \code{invested} (EUR; Startwert
     plus Einzahlungen, brutto), \code{total_return_twr} (zeitgewichtete
     Gesamtrendite: mit Sparplan letzter Wert von \code{twr_index} minus 1,
-    sonst Endwert / Depotwert am Starttag - 1), \code{return_on_invested}
+    sonst Endwert / \code{invested[1]} - 1, also Bezug Startkapital plus
+    Rate des Starttags brutto; seit 1.6.5 zählen die Kaufkosten am
+    Starttag mit), \code{return_on_invested}
     ((Endwert - Eingezahlt) / Eingezahlt), \code{total_return}
     (gleichwertiger Alias für \code{total_return_twr}), \code{cagr},
     \code{ttwror} (Anteile; mit Sparplan ist \code{cagr} geldgewichtet),

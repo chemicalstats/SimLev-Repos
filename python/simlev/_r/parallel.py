@@ -73,9 +73,9 @@ def _ncores(cores) -> int:
 
 def par_lapply(X, FUN, cores=1):
     """Gegenstück zu ``.par_lapply(X, FUN, cores)`` in R; Ergebnis als Liste. ``cores = "auto"`` (seit 1.6.4):
-    :func:`_auto`. Eine feste Zahl ≥ 2 verteilt seit 1.6.4 (Entscheidung 133) über denselben Weg wie ``"auto"``, nur
-    ohne Messung: :func:`_forked` mit min(cores, Elemente) Kindern; ohne ``fork`` nacheinander wie ``cores = 1`` (bis
-    dahin ``_sequential``: Warnungen verworfen)."""
+    :func:`_auto`. Eine feste Zahl ≥ 2 ist seit 1.6.5 (Entscheidungen 140, 179) der Höchstwert der automatischen
+    Wahl: :func:`_auto` mit höchstens ``cores`` Läufen (1.6.4, Entscheidung 133: :func:`_forked` mit min(cores,
+    Elemente) Kindern ohne Messung); ohne ``fork`` nacheinander wie ``cores = 1``."""
     X = list(X)
     if isinstance(cores, str) and cores == "auto":
         return _auto(X, FUN)
@@ -84,10 +84,10 @@ def par_lapply(X, FUN, cores=1):
     n = min(_ncores(cores), len(X))
     if n < 2 or not fork_available():           # mclapply: cores < 2 -> lapply
         return [_unit(FUN, x) for x in X]
-    return _forked(X, FUN, n)
+    return _auto(X, FUN, max_runs=_ncores(cores))
 
 
-def _auto(X, FUN):
+def _auto(X, FUN, max_runs=None):
     """``cores = "auto"`` (seit 1.6.4, Entscheidungen 41b/41c; wie R ``.par_lapply_auto``). Ergebnis, Ausgaben,
     Warnungen und Fehler wie ``cores = 1``:
 
@@ -133,7 +133,8 @@ def _auto(X, FUN):
         ub = len(pickle.dumps(sel, protocol=pickle.HIGHEST_PROTOCOL)) / len(sel)
     except Exception:  # noqa: BLE001 - nicht pickelbar: Größe unbekannt
         ub = 0.0
-    c, cap = _lib.par_plan(n - k, u, ub, 1)
+    np_ = _lib.nprocs()
+    c, cap = _lib.par_plan(n - k, u, ub, 1, nprocs_=np_, max_runs=np_ if max_runs is None else min(np_, int(max_runs)))
     _PAR_LAST[0] = (k, c, cap)
     if c < 2:
         res.extend(_unit(FUN, x) for x in X[k:])

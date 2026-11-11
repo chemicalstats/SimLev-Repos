@@ -270,6 +270,18 @@ def sample(n, size=None, replace=False, prob=None, stream=None):
     return out
 
 
+def pooled_draw(nr, cw, L, nper, n, stream=None):
+    """Länderblöcke von ``bootstrap_pooled`` im Kern (seit 1.6.5, Paket E, K40/CR2-6; ``sl_pooled_draw``): Land und Zeile
+    je Periode und Pfad als int64-Felder (nper x n), dieselben Züge wie die Schleife bis 1.6.4."""
+    nper, n = int(nper), int(n)
+    c = np.empty(nper * n, dtype=np.int32)
+    r = np.empty(nper * n, dtype=np.int32)
+    _with_state(stream, _ext.slc_pooled_draw, c, r, np.ascontiguousarray(nr, dtype=np.int64),
+                np.ascontiguousarray(cw, dtype=np.float64), float(L), nper, n)
+    return (np.ascontiguousarray(c.reshape(n, nper).T, dtype=np.int64),
+            np.ascontiguousarray(r.reshape(n, nper).T, dtype=np.int64))
+
+
 # ── Verteilungen (Parameter skalar) ─────────────────────────────────────────
 
 def _apply(fn, x, *par):

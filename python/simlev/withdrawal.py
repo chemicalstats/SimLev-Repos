@@ -38,7 +38,7 @@ from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _keep
                         _wquantile, summary, plot)
 from ._util import _match_arg, _pmatch
 from ._pruefen import (chk_bool1, chk_col_nona, chk_cols, chk_date1, chk_df, chk_dots, chk_int1, chk_intvec, chk_is_factor,
-                       chk_max, chk_msg, chk_name1, chk_nofactor, chk_nona, chk_num1, chk_scalar, chk_stop)
+                       chk_max, chk_msg, chk_name1, chk_nofactor, chk_nona, chk_num1, chk_scalar, chk_stop, chk_fmt)
 from ._pruefen import SL_MAX_JAHRE, chk_jahre  # seit 1.6.4 (Entscheidungen 46 und 47)
 from .data_prep import _to_date
 from ._util import _fmt1, _pow_rec
@@ -283,8 +283,8 @@ def _cat_rule(x) -> str:
     elif t == "hebeler":
         ex = _sp("  Glättung:  %.0f %%, erwartete Realrendite %.2f %%\n", x["smoothing"], x["exp_return"])
     elif t == "vpw":
-        ex = _sp("  Alter %d bis %d, erwartete Realrendite %.2f %%\n", _as_integer(x["age"]), _as_integer(x["max_age"]),
-                 x["exp_return"])
+        ex = _sp("  Alter %s bis %s, erwartete Realrendite %.2f %%\n", _wd_fmt_betrag(x["age"]),
+                 _wd_fmt_betrag(x["max_age"]), x["exp_return"])
     elif t == "abw":
         ex = _sp("  Erwartete Realrendite %.2f %%, Zielvermögen %.0f\n", x["exp_return"], x["fv"])
     elif t == "cape":
@@ -298,8 +298,17 @@ def _cat_rule(x) -> str:
         ex = _sp("  Mindestens %.0f %% der Vorjahresentnahme\n", x["floor95"])
     out.append(ex)
     if x["min_real"] > 0 or math.isfinite(x["max_real"]):
-        out.append(_sp("  Grenzen:   %.0f bis %s (real)\n", x["min_real"], _fmt1(x["max_real"])))
+        # seit 1.6.5 (CR2-X6-3, CR2-W4-3): ohne Exponent und ohne Rundung auf ganze Zahlen
+        out.append(_sp("  Grenzen:   %s bis %s (real)\n", _wd_fmt_betrag(x["min_real"]), _wd_fmt_betrag(x["max_real"])))
     return "".join(out)
+
+
+def _wd_fmt_betrag(v) -> str:
+    """Betrag oder Alter in der Anzeige (seit 1.6.5; R ``.wd_fmt_betrag``)."""
+    v = float(v)
+    if math.isfinite(v) and v == math.floor(v) and abs(v) < 1e15:
+        return _sp("%.0f", v)
+    return _sp("%.15g", v)
 
 
 def _as_integer(x):
@@ -514,7 +523,9 @@ def withdrawal_rule(*, type=tuple(_WD_RULES), rate=4, ceiling=None, floor=None, 
     v = _num_vec(rate)
     if v is None or v.size != 1 or not math.isfinite(v[0]) or v[0] < 0 or v[0] > 100:
         _stop("withdrawal_rule: rate muss zwischen 0 und 100 Prozent liegen (z. B. 4).")
-    if 0 < rate < 0.2 and type in ("constant", "percent", "vanguard", "guyton_klinger"):
+    # seit 1.6.5 (CR2-B-9, K25) für alle Regeln, die rate nutzen
+    if 0 < rate < 0.2 and type in ("constant", "percent", "vanguard", "guyton_klinger", "floor_ceiling", "clyatt",
+                                   "ratchet", "endowment", "sensible"):
         _warn("rate wirkt wie eine Dezimalzahl. PROZENT-KONVENTION: 4 bedeutet 4 %.")
     chk(ceiling, "ceiling", 0, what="NULL oder eine Zahl >= 0 in Prozent (z. B. 20)", null_ok=True)
     chk(floor, "floor", 0, 100, what="NULL oder eine Zahl von 0 bis 100 in Prozent (z. B. 20)", null_ok=True)
@@ -552,8 +563,10 @@ def withdrawal_rule(*, type=tuple(_WD_RULES), rate=4, ceiling=None, floor=None, 
     frac = [("ceiling", _NAN if ceiling is None else float(ceiling)), ("floor", _NAN if floor is None else float(floor)),
             ("cut", float(cut)), ("raise", float(raise_)), ("smoothing", _NAN if smoothing is None else float(smoothing)),
             ("inflation_cap", float(inflation_cap)), ("extra", float(extra)), ("floor95", float(floor95)),
-            ("max_rate", float(max_rate))]
-    frac = [(k, v) for k, v in frac if not math.isnan(v) and 0 < v < 0.2]
+            ("max_rate", float(max_rate)), ("cape_a", float(cape_a))]
+    # seit 1.6.5 (CR2-B-9, K25): auch cape_a; smoothing und floor95 schon bei Werten > 0 und <= 1
+    frac = [(k, v) for k, v in frac if not math.isnan(v) and 0 < v and
+            (v <= 1 if k in ("smoothing", "floor95") else v < 0.2)]
     if frac:
         a = _fmtv([v for _, v in frac])
         b = _fmtv([100 * v for _, v in frac])
@@ -629,6 +642,27 @@ class WithdrawalPaths(RList):
     r_class = ("withdrawal_paths",)
 
 
+def _wd_check_level(v, dates, col, fn):
+    """Kurs- bzw. Indexniveaus: vorhandene Werte endlich und > 0, sonst Fehler mit Spalte und erstem Datum (seit 1.6.5;
+    R ``.wd_check_level``)."""
+    v = np.asarray(v, dtype=np.float64)
+    b = np.flatnonzero(~np.isnan(v) & (~np.isfinite(v) | (v <= 0)))
+    if len(b):
+        chk_stop("b1.niveau", fn, col, str(np.asarray(dates)[b[0]]))
+    return True
+
+
+def _chk_periods(years, periods, fn, null_years=False, default_years=30, ppy=12):
+    """periods (seit 1.6.5, Entscheidung 173; R ``.chk_periods``): None oder ganze Zahl >= 1, ausschließend zu years."""
+    if periods is None:
+        return None
+    periods = chk_int1(periods, fn, "periods")
+    chk_max(periods, SL_MAX_JAHRE * ppy, fn, "periods")
+    if (years is not None) if null_years else (years is None or float(years) != float(default_years)):
+        chk_stop("b1.years_periods", fn)
+    return periods
+
+
 def _is_wp(x) -> bool:
     return isinstance(x, WithdrawalPaths) or "withdrawal_paths" in getattr(x, "r_class", ())
 
@@ -641,7 +675,7 @@ def _df_col(data, name):
 
 @_quiet
 def withdrawal_cohorts(data, *, price="value", inflation=None, years=30, frequency=_DEF_FREQ, step=("month", "year"),
-                       wrap=False, cape=None, base_rate=None, inflation_type=_DEF_IT):
+                       wrap=False, cape=None, base_rate=None, inflation_type=_DEF_IT, periods=None):
     """Historische Entnahme-Kohorten bilden.
 
     Erzeugt rollierende Start-Kohorten (wie Bengen 1994 und die Trinity-Studie) aus einer historischen Kursreihe:
@@ -665,6 +699,9 @@ def withdrawal_cohorts(data, *, price="value", inflation=None, years=30, frequen
             (CPI-Niveau, z. B. HVPI) bzw. einer Ratenspalte (siehe ``inflation_type``).
         years: Länge jeder Kohorte in Jahren (Standard 30; intern 12 x ``years`` Monate). Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei ``"quarter"`` und ``"month"``
             (vorher jede Zahl, die ganze Perioden ergab, z. B. 2.5).
+        periods: Seit 1.6.5: Kohortenlänge in Perioden der gewählten ``frequency`` (ganze Zahl von 1 bis 100 x
+            Perioden je Jahr) statt ``years``; erlaubt Längen, die keine ganzen Jahre sind (z. B. 30 Monate).
+            ``years`` muss dann beim Standard 30 bleiben, sonst Fehler. ``None`` (Standard) = ``years`` gilt.
         frequency: Periodenlänge der Entnahme-Simulation: ``"year"`` (Standard), ``"quarter"`` oder ``"month"``.
         step: Abstand der Kohortenstarts: ``"month"`` (Standard; jede Kohorte beginnt einen Monat später) oder
             ``"year"`` (alle 12 Monate).
@@ -787,6 +824,10 @@ def withdrawal_cohorts(data, *, price="value", inflation=None, years=30, frequen
             str(mdates[gap[0]]), str(mdates[gap[0] + 1]),
             (" (Jahresdaten? Dann Jahresrenditen als Matrix Jahre x Kohorten an withdrawal_simulation() \u00fcbergeben)"
              if r_median(np.diff(mi).astype(np.float64)) >= 12 else "")))
+    # seit 1.6.5 (CR2-A-6): verwendete Monatsendkurse und Preisindexwerte endlich und > 0
+    _wd_check_level(mpx, mdates, price, fn)
+    if isinstance(inflation, str) and not infl_rate:
+        _wd_check_level(_fill_locf(col(inflation))[ends - 1], mdates, inflation, fn)
     if inflation is None:
         cpi = np.ones(len(ends))
     elif infl_rate:
@@ -814,8 +855,10 @@ def withdrawal_cohorts(data, *, price="value", inflation=None, years=30, frequen
     # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; bis 1.6.3
     # jede Zahl > 0, die ganze Perioden ergab, z. B. 2.5 bei Monaten)
     years = chk_jahre(years, fn, "years")
-    len_m = int(_r_round0(float(years) * 12))
+    # seit 1.6.5 (Entscheidung 173): Kohortenlänge wahlweise in Perioden von frequency (periods; years dann nur 30)
+    periods = _chk_periods(years, periods, fn, ppy=ppy)
     mpp = int(mpp)
+    len_m = int(_r_round0(float(years) * 12)) if periods is None else int(periods) * mpp
     if step == "month":
         starts = np.arange(1, nm + 1)
     else:
@@ -904,7 +947,8 @@ def result_index(x, *, base=100):
         M = np.column_stack(fls)
         fl = r_rowsums(M)   # C-Kern core/slc_rbase.cpp (long double wie R)
     elif fls:
-        fl = np.array([float(f[0]) for f in fls])
+        # seit 1.6.5 (CR2-O-3): ein Tag mit mehreren Assets: Summe der Zahlungen (bis 1.6.4 ein Wert je Asset, Rohfehler)
+        fl = np.array([r_sum(np.array([float(f[0]) for f in fls]))])
     else:
         fl = np.zeros(0)
     twr = _rget(x, "twr_index")
@@ -1293,7 +1337,12 @@ def withdrawal_perfect_rate(real_returns, *, legacy=0):
     if st == 3:
         _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
     if not lg_ok:
-        _stop("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 % des Startvermögens).")
+        chk_stop("e.legacy_anteil")   # seit 1.6.5 aus der Tabelle (193, Paket E)
+    # seit 1.6.5 (CR2-M-8): Totalverlust im letzten Jahr mit legacy > 0: PWR NA mit Hinweis
+    if float(lv[0]) > 0:
+        na_ = int((R[R.shape[0] - 1, :] == 0).sum())
+        if na_:
+            _message(chk_msg("b1.pwr_legacy", "withdrawal_perfect_rate", na_))
     return out
 
 
@@ -1357,24 +1406,30 @@ def _wd_lots(ol, report, sv, tol=1e-12):
         # negativer Geldbestand: seit 1.6.4 kein negativer Cash-Lot (A-062, Entscheidungen 87 und 104), sondern vom
         # ersten Verkauf abgezogen: der älteste Lot des wertgrößten Assets wird um den Fehlbetrag gemindert (reicht er
         # nicht, die nächsten Lots dieses Assets), Basis und Vorabpauschale anteilig; keine Steuer auf diesen Rest
+        # seit 1.6.5 (CR2-X7-3): reicht das wertgrößte Asset nicht, die nächstgrößeren; Gruppen danach lückenlos
         keep = [True] * len(n)
         rest = -cash
-        kmax = int(np.argmax(np.asarray(wvs, dtype=np.float64)))     # erstes Maximum wie which.max
-        for j in [i for i, gi in enumerate(group) if gi == kmax]:
+        wa = np.asarray(wvs, dtype=np.float64)
+        for kmax in sorted(range(len(wa)), key=lambda j: (-wa[j], j)):   # wie order(-wvs) (bei Gleichstand das erste)
+            for j in [i for i, gi in enumerate(group) if gi == kmax]:
+                if not rest > 0:
+                    break
+                take = min(n[j], rest)
+                f = (n[j] - take) / n[j]
+                n[j] = n[j] - take
+                basis[j] = basis[j] * f
+                vp[j] = vp[j] * f
+                rest = rest - take
+                if not n[j] > 0:
+                    keep[j] = False
             if not rest > 0:
                 break
-            take = min(n[j], rest)
-            f = (n[j] - take) / n[j]
-            n[j] = n[j] - take
-            basis[j] = basis[j] * f
-            vp[j] = vp[j] * f
-            rest = rest - take
-            if not n[j] > 0:
-                keep[j] = False
         n = [v for v, kp in zip(n, keep) if kp]
         basis = [v for v, kp in zip(basis, keep) if kp]
         vp = [v for v, kp in zip(vp, keep) if kp]
         group = [v for v, kp in zip(group, keep) if kp]
+        ug = list(dict.fromkeys(group))
+        group = [ug.index(v) for v in group]
     return {"n": np.array(n), "basis": np.array(basis), "vp": np.array(vp), "group": np.array(group, dtype=np.int64)}
 
 
@@ -1528,7 +1583,7 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
                           timing=("start", "end"), income=None, tax=None,
                           partial_exemption=_D30, base_rate=3.20, vorabpauschale=_D_TRUE,
                           sale_cost=_D0, cost_basis=_D100, loss_carryforward=_D0LC, gamma=2, keep_paths=True,
-                          horizon=None):
+                          horizon=None, periods=None):
     """Entnahme-Simulation über viele Pfade.
 
     Simuliert eine Entnahmeregel auf historischen Kohorten (``withdrawal_cohorts()``), Bootstrap-Pfaden
@@ -1685,6 +1740,10 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
             Restjahren der vollen Pfadlänge. Nicht zu verwechseln mit ``horizon`` in ``planning_goal()``
             (Perioden).
             Seit 1.6.4 als Zahl eine ganze Zahl von Jahren von 1 bis 100.
+        periods: Seit 1.6.5: Kürzung auf die ersten ``periods`` Zeilen (Perioden der Daten, ganze Zahl von 1 bis 1200)
+            statt ``years``; erlaubt Längen, die keine ganzen Jahre sind (z. B. 10 Quartale; das letzte Planjahr ist
+            dann unvollständig). Nur eines von ``years`` und ``periods`` angeben, sonst Fehler. Bei einem
+            ``SimLevResult`` zugleich die Kohortenlänge in Perioden. ``None`` (Standard) = ``years`` gilt.
 
     Eingaben (seit 1.6.4): Renditen müssen endlich sein (NA wird vor dem Median gemeldet); eine Inflationsmatrix
     muss endliche Zahlen > 0 enthalten; ``base_rate`` als Matrix nur Zahlen.
@@ -1901,8 +1960,7 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
 
     def frac(v, arg, hi=1.0, unit="%"):
         if _num1(v) and 0 < float(v) < hi:
-            _warn("withdrawal_simulation: %s = %s wird als %s %s gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-                  % (arg, _fmt1(v), _fmt1(v), unit, _fmt1(float(v) * 100)))
+            _warn(chk_msg("b1.m_frac", arg, _fmt1(v), _fmt1(v), unit, _fmt1(float(v) * 100)))
 
     chk(partial_exemption, "partial_exemption", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)", 0, 100)
     frac(partial_exemption, "partial_exemption")
@@ -1925,6 +1983,8 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
     # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; bis 1.6.3
     # jede Zahl > 0, die ganze Perioden ergab)
     years = chk_jahre(years, fn, "years", null_ok=True)
+    # seit 1.6.5 (Entscheidung 173): Laufzeit wahlweise in Perioden (periods), ausschließend zu years
+    periods = _chk_periods(years, periods, fn, null_years=True)
     if (not _e3_numarray(base_rate)) if br_is_mat else (not _num1(base_rate)):
         chk_stop("ut2.base_rate", "withdrawal_simulation")
     if isinstance(income, Mapping) and income.get("amount") is not None and \
@@ -1979,10 +2039,7 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
                     lots = _wd_lots(ol, report, sv)
             else:
                 if tax_mode == "person":
-                    _warn("cost_basis: Näherung 100 x (Startwert brutto + Einzahlungen) / Endwert, da das "
-                          "Ansparergebnis keine offenen Lots enthält (simulation() ohne tax = tax_profile() oder "
-                          "älteres Ergebnis); realisierte Gewinne und Cash zählen dabei als stille Reserven. "
-                          "Für genaue Werte die Ansparphase mit tax = tax_profile() rechnen oder cost_basis angeben.")
+                    _warn(chk_msg("b1.m_frac_4"))
                 inv = _rget(sres, "invested")
                 inv = np.asarray(inv, dtype=np.float64).ravel() if inv is not None else np.zeros(0)
                 start_gross = float(inv[0]) if len(inv) else float(acc["worth"].to_numpy()[0])
@@ -2077,13 +2134,13 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         src_taxed = _num1(tp) and float(tp) > 0
         if not (_is_num(inflation)):
             chk_stop("rs.infl_prozent", "withdrawal_simulation", "SimLevResult")
-        x = withdrawal_cohorts(x, inflation=inflation, years=30 if years is None else years,
-                               frequency=_match_arg(freq_arg, _DEF_FREQ))
+        x = withdrawal_cohorts(x, inflation=inflation, years=30 if years is None or periods is not None else years,
+                               frequency=_match_arg(freq_arg, _DEF_FREQ), periods=periods)
     elif "SimLevWrapperNav" in (getattr(x, "r_class", None) or ()):   # Anteilswert eines Fonds-Wrappers (wrapper_nav())
         if not (_is_num(inflation)):
             chk_stop("rs.infl_prozent", "withdrawal_simulation", "SimLevWrapperNav")
-        x = withdrawal_cohorts(x, price="nav", inflation=inflation, years=30 if years is None else years,
-                               frequency=_match_arg(freq_arg, _DEF_FREQ))
+        x = withdrawal_cohorts(x, price="nav", inflation=inflation, years=30 if years is None or periods is not None else years,
+                               frequency=_match_arg(freq_arg, _DEF_FREQ), periods=periods)
     elif isinstance(x, pd.DataFrame) and "date" in [str(c) for c in x.columns]:   # Kurstabelle
         _stop("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gewöhnliche "
               "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln "
@@ -2095,8 +2152,7 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
                             float(_get(_rget(r, "tax_report"), "total_taxes_paid")) > 0 for r in lst)
         x = withdrawal_paths(x, strategy=strategy, inflation=inflation, frequency=_match_arg(freq_arg, _DEF_FREQ))
     if src_taxed and tax_mode == "person" and vorabpauschale is True:
-        _warn("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); vorabpauschale = FALSE "
-              "oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelzählung.")
+        _warn(chk_msg("b1.m_quelle_steuer"))
     if not _is_wp(x):
         try:
             # wie R is.numeric: Text und Wahrheitswerte sind keine Renditen (seit 1.6.4; bisher von float() gelesen)
@@ -2139,8 +2195,8 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         base_rate = _as_matrix(base_rate)
         if xbase is None and base_rate.shape != R.shape:
             chk_stop("rs.base_dim", "withdrawal_simulation", R.shape[0], R.shape[1], base_rate.shape[0], base_rate.shape[1])
-    if years is not None:                                  # ganze Jahre (oben geprüft): ganze Zahl von Perioden
-        kr = min(R.shape[0], int(_r_round0(float(years) * ppy)))
+    if years is not None or periods is not None:          # ganze Jahre (oben geprüft): ganze Zahl von Perioden
+        kr = min(R.shape[0], int(_r_round0(float(years) * ppy)) if periods is None else int(periods))
         R = R[:kr, :]
         I = I[:kr, :]
         if xcape is not None:
@@ -2150,7 +2206,7 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         if br_is_mat:
             base_rate = base_rate[:kr, :]
     if R.shape[0] % ppy != 0:
-        _warn("Periodenzahl ist kein Vielfaches eines Jahres; letztes Planjahr unvollständig.")
+        _warn(chk_msg("b1.m_num1"))
     ny = -(-R.shape[0] // ppy)
     nfy = R.shape[0] // ppy
     if rule["type"] == "cape" and xcape is None:
@@ -2214,6 +2270,17 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         lots["group"] if lots is not None else np.zeros(0, dtype=np.int64),
         max(0.0, float(sparer_pauschbetrag) - spb_used1) if spb_used1 > 0 else -1.0, horizon is not None,
         tariff_par, zve)
+    # seit 1.6.5 (CR2-1): withdrawal_max_rate braucht ab dem zweiten Suchschritt nur die Erfolge je Pfad und die Gewichte
+    if _WD_FAST[0]:
+        succ = core["failed"] == 0
+        if horizon is not None:
+            H = np.minimum(_draw_horizon(horizon, R.shape[1]), ny)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                dy = np.ceil(core["depletion_period"] / ppy)
+            succ = np.isnan(dy) | (dy > H)
+        w = x.get("weights")
+        return {"paths": pd.DataFrame({"success": succ}),
+                "weights": np.ones(R.shape[1]) if w is None else np.asarray(w, dtype=np.float64)}
     sp = core["spending"]
     w0 = sp[0, :].copy()
     gamma = float(gamma)
@@ -2296,7 +2363,9 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
 
 # Argumente von withdrawal_simulation(), die withdrawal_max_rate() weiterreicht (ohne x, rule, keep_paths; R: formals)
 _WMR_ARGS = ("start_value", "inflation", "frequency", "strategy", "years", "timing", "income", "tax", "partial_exemption",
-             "base_rate", "vorabpauschale", "sale_cost", "cost_basis", "loss_carryforward", "gamma", "horizon")
+             "base_rate", "vorabpauschale", "sale_cost", "cost_basis", "loss_carryforward", "gamma", "horizon", "periods")
+# withdrawal_max_rate: nur Erfolge je Pfad ab dem zweiten Suchschritt (seit 1.6.5, CR2-1; R .wd_reuse$fast)
+_WD_FAST = [False]
 
 
 @_quiet
@@ -2352,7 +2421,7 @@ def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=
         hint = ""
         if _num1(success) and 1 < float(success) <= 100:
             hint = "; Prozentangaben durch 100 teilen"
-        _stop("withdrawal_max_rate: success muss ein Anteil mit 0 < success <= 1 sein (0.95 = 95 %%)%s." % hint)
+        chk_stop("e.success_anteil", hint)   # seit 1.6.5 aus der Tabelle (193, Paket E)
     if not _num1(lower) or not _num1(upper) or lower < 0 or upper > 100 or lower >= upper:
         _stop("withdrawal_max_rate: lower und upper müssen Raten in Prozent mit 0 <= lower < upper <= 100 sein.")
     if not _num1(tol) or float(tol) <= 0:
@@ -2376,7 +2445,11 @@ def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=
                 warnings.simplefilter("ignore")
                 if "x" not in state:   # Quelle einmal in Renditepfade umwandeln (seit 1.6.3; hängt nicht von der Rate ab)
                     state["x"] = _wd_source(x, kwargs)
-                s = withdrawal_simulation(state["x"], rule=rl, keep_paths=False, **kwargs)
+                _WD_FAST[0] = True     # seit 1.6.5 (CR2-1): nur Erfolge je Pfad
+                try:
+                    s = withdrawal_simulation(state["x"], rule=rl, keep_paths=False, **kwargs)
+                finally:
+                    _WD_FAST[0] = False
         state["first"] = False
         return _weighted_mean(s["paths"]["success"].to_numpy(dtype=np.float64), s["weights"])
 
@@ -2385,6 +2458,10 @@ def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=
         return _Rate(_NA, s_lo)
     s_up = f(upper)
     if s_up >= success:
+        # seit 1.6.5 (CR2-F-10, K22): Hinweis, dass das Ergebnis die Suchgrenze ist
+        nie = rule["type"] == "percent" or (rule["type"] == "endowment" and float(rule["min_real"]) == 0)
+        _warn(chk_msg("b1.wmr_grenze", "withdrawal_max_rate", chk_fmt(upper),
+                      chk_msg("b1.wmr_nie", rule["type"]) if nie else ""))
         return _Rate(upper, s_up)
     while upper - lower > tol:
         mid = (lower + upper) / 2
@@ -2409,12 +2486,13 @@ def _wd_source(x, kw):
     inflation = 0 if inflation is None else inflation
     freq = kw.get("frequency", _DEF_FREQ)
     years = kw.get("years")
+    periods = kw.get("periods")
     if _is_result(x):
-        return withdrawal_cohorts(x, inflation=inflation, years=30 if years is None else years,
-                                  frequency=_match_arg(freq, _DEF_FREQ))
+        return withdrawal_cohorts(x, inflation=inflation, years=30 if years is None or periods is not None else years,
+                                  frequency=_match_arg(freq, _DEF_FREQ), periods=periods)
     if "SimLevWrapperNav" in (getattr(x, "r_class", None) or ()):
-        return withdrawal_cohorts(x, price="nav", inflation=inflation, years=30 if years is None else years,
-                                  frequency=_match_arg(freq, _DEF_FREQ))
+        return withdrawal_cohorts(x, price="nav", inflation=inflation, years=30 if years is None or periods is not None else years,
+                                  frequency=_match_arg(freq, _DEF_FREQ), periods=periods)
     if isinstance(x, pd.DataFrame) and "date" in [str(c) for c in x.columns]:
         return x
     if _is_study(x) or _is_result_list(x):
@@ -2601,6 +2679,20 @@ def _plot_wd(x, probs=(0.05, 0.25, 0.5, 0.75, 0.95), width=900, height=380):
         out.append("<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" fill=\"none\" stroke=\"black\"/>\n"
                    % (_jl_str(ox + ml), _jl_str(mt), _jl_str(aw), _jl_str(ah)))
         out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\">Jahr</text>\n" % (_jl_str(ox + ml + aw / 2), _jl_str(height - 10)))
+        # seit 1.6.5 (CR2-L-1): Achsenmarken mit Zahlen (r_pretty) und y-Beschriftung wie R (bis 1.6.4 ohne)
+        from .svg import r_pretty
+        for tv in r_pretty(float(xlo), float(xhi)):
+            if xlo <= tv <= xhi:
+                out.append("<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"black\"/><text x=\"%.2f\" y=\"%.2f\" "
+                           "text-anchor=\"middle\">%s</text>\n" % (sx(tv), mt + ah, sx(tv), mt + ah + 5, sx(tv), mt + ah + 18,
+                                                                 r_sprintf("%g", float(tv))))
+        for tv in r_pretty(ylo, yhi):
+            if ylo <= tv <= yhi:
+                out.append("<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"black\"/><text x=\"%.2f\" y=\"%.2f\" "
+                           "text-anchor=\"end\" dominant-baseline=\"middle\">%s</text>\n"
+                           % (ox + ml - 5, sy(tv), ox + ml, sy(tv), ox + ml - 8, sy(tv), r_sprintf("%g", float(tv))))
+        out.append("<text x=\"%.2f\" y=\"%.2f\" text-anchor=\"middle\" transform=\"rotate(-90 %.2f %.2f)\">Tsd. "
+                   "(Startkaufkraft)</text>\n" % (ox + 14, mt + ah / 2, ox + 14, mt + ah / 2))
         for i in range(k // 2):
             up = ["%.2f,%.2f" % (sx(xs[j]), sy(Q[i, j])) for j in range(len(xs)) if math.isfinite(Q[i, j])]
             dn = ["%.2f,%.2f" % (sx(xs[j]), sy(Q[k - 1 - i, j])) for j in reversed(range(len(xs))) if math.isfinite(Q[k - 1 - i, j])]
@@ -2622,7 +2714,18 @@ class SimLevHorizon(RList):
     r_class = ("SimLevHorizon",)
 
     def format(self) -> str:
-        d = _draw_horizon(self, 20000)
+        # seit 1.6.5 (CR2-E-3, K32): mit seed = None Zufallszustand nach der Anzeige zurücksetzen (angezeigte Zahlen wie
+        # bisher; bis 1.6.4 verbrauchte schon das Anzeigen Zufallszahlen)
+        if self.get("seed") is None and self.get("type") != "fixed":
+            from . import _lib
+            _lib._global_check()
+            old = bytes(_lib._G)
+            try:
+                d = _draw_horizon(self, 20000)
+            finally:
+                _lib._G[:] = old
+        else:
+            d = _draw_horizon(self, 20000)
         return _sp("Laufzeit der Entnahmephase (%s): Mittel %.1f Jahre, Median %g, 90 %%-Quantil %g, Bereich %g bis %g",
                    self["type"], r_mean_int(d), r_median(d.astype(np.float64)), float(_quantile7(d, 0.9)[0]),
                    float(d.min()), float(d.max()))
@@ -2697,6 +2800,10 @@ def withdrawal_horizon(*, type=("fixed", "uniform", "discrete", "normal", "trian
     miss = [k for k in need if given[k] is None]
     if miss:
         _stop("withdrawal_horizon('%s') braucht: %s" % (type, ", ".join(miss)))
+    # seit 1.6.5 (CR2-E-4): Argumente, die der Typ nicht nutzt, mit Warnung und ohne Prüfung
+    unused = [k for k, v in given.items() if v is not None and k not in need]
+    if unused:
+        _warn(chk_msg("b1.hz_unbenutzt", "withdrawal_horizon('%s')" % type, ", ".join(unused), type))
     for k in need:
         v = given[k]
         multi = k == "prob" or (k == "years" and type in ("discrete", "sample"))
@@ -2719,8 +2826,10 @@ def withdrawal_horizon(*, type=("fixed", "uniform", "discrete", "normal", "trian
         yv, pv = _num_vec(years), _num_vec(prob)
         if len(yv) != len(pv) or (pv < 0).any() or r_sum(pv) <= 0:
             _stop("withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
-    if min is not None and max is not None and min > max:
+    if "min" in need and "max" in need and min > max:
         chk_stop("rs.min_max", fnt)
+    if type == "normal" and (mean < min or mean > max):
+        _warn(chk_msg("b1.hz_mean", fnt))   # seit 1.6.5 (CR2-E-4)
     if type == "triangular" and (mode < min or mode > max):
         chk_stop("ut2.mode", "withdrawal_horizon('triangular')")
     if type == "normal" and sd < 0:

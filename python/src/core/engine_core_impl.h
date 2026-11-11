@@ -140,7 +140,8 @@ struct Input {
   const double* st0 = nullptr;             // 8 je Asset (Status nach .sim_init_weights)
   const int32_t* ci = nullptr;             // CI_N
   const double* cd = nullptr;              // CD_N
-  const double* fees = nullptr;            // 10: order (on, fixed, percent, min, max), dca (dito)
+  const double* fees = nullptr;            // 15: order (on, fixed, percent, min, max), dca (dito), seit 1.6.5 Depotgebuehr
+                                           // (dito; percent als Anteil p. a. des Depotwerts)
   const double* tot0 = nullptr;            // TT_N
   const double* tariff_par = nullptr;      // Tarifparameter (tariff_core_impl.h); Laenge 0 = kein Tarifweg
   int64_t n_tariff_par = 0;
@@ -157,6 +158,8 @@ enum EventCode : int {
   EV_MAX_EMPTY = 4,     // Warnung von max(deviations, na.rm = TRUE) ohne Werte
   EV_TAX_UNPAID = 5,    // Warnung .pay_tax: Depot reicht nicht; d0 Betrag, d1 offen; aux Bezeichnung (LBL_*), Jahre
   EV_MARGINAL = 6,      // Warnung .handle_year_change: marginal_tax_rate fehlt; d0 Jahressaldo, d1 Freigrenze
+  EV_EVW_BAD = 7,       // Hinweis (seit 1.6.5, CR2-G-6/K36): event_weight an d0 Ereignistagen nicht verwendbar, erstmals am
+                        // Tag day (alle aktiven Assets mit Spalte; Wert nicht endlich oder Summe <= 0)
   EV_NA_COND = 100,     // Fehler: NA in einer Bedingung (site = Stelle)
   EV_SPLIT_RATIO = 101, // Fehler .perform_asset_split: ratio <= 0; d0 ratio
   EV_NONFINITE = 102,   // Fehler (seit 1.6.4, A-005, Entscheidung 103): Stueckzahl oder Depotwert unendlich; d0 Wert
@@ -195,6 +198,9 @@ enum EventCode : int {
   DT_P23_TAX = 230,     // .settle_p23: § 23-Steuer; v: Betrag
   DT_GP_REFUND = 231,   // .settle_gp: v: Erstattung
   DT_VP_SETTLE = 232,   // .settle_vp: v: Festsetzungstag, VP, nach TFS, SPB, Steuer
+  DT_PAY_OTHER = 233,   // seit 1.6.5 (MA1-2, M2): Zahlung aus dem Geldbestand eines anderen Assets; aux Bezeichnung, ints
+                        // Jahre; v: Betrag, Index des belasteten Assets (asset = das zahlende)
+  DT_CUSTODY = 234,     // seit 1.6.5 (Entscheidung 150): Depotgebuehr; v: Gebuehr, Depotwert, Anteil des Jahres
   DT_YC_HEAD = 240,     // .handle_year_change: v: altes, neues Jahr
   DT_YC_CARRY = 241,    // v: Verlustvortrag verwendet, verbleibend
   DT_YC_SUMMARY = 242,  // v: Jahr, Gewinne, Verluste, interne Verrechnung, Vortrag-Verrechnung, Netto
@@ -217,10 +223,11 @@ enum Reason : int {
   RS_LIQ = 4,           // "Liquidation:"
   RS_TAX = 5,           // "Steuerereignis:"
   RS_SPLIT = 6,         // "Split:"
-  RS_HARVEST = 7        // "Freibetrag:"
+  RS_HARVEST = 7,       // "Freibetrag:"
+  RS_CUSTODY = 8        // "Depotgebuehr:" (seit 1.6.5, PR1-2)
 };
 // Bezeichnungen der Steuerzahlungen (.pay_tax label)
-enum Label : int { LBL_VP = 0, LBL_P23 = 1, LBL_VERANLAGUNG = 2 };
+enum Label : int { LBL_VP = 0, LBL_P23 = 1, LBL_VERANLAGUNG = 2, LBL_CUSTODY = 3 };   // LBL_CUSTODY seit 1.6.5
 
 // Stellen (site) der Aufrufe bzw. Bedingungen (Anlass der Verkaeufe, sell_reason; bis R 1.3.0 ordnete R jeder
 // Stelle den Aufruf der Phase zu, seit 1.4.1 tragen die Bedingungen den Aufruf von simulation())
@@ -239,6 +246,7 @@ enum Site : int {
   S_SELL_TAX = 15,      // .pay_one (sim_actions.R): Zwangsverkauf fuer eine Zahlung
   S_SELL_SPLIT = 16,    // .sim_day_split: Spitzenausgleich
   S_SELL_HARVEST = 17,  // .perform_gain_harvest
+  S_SELL_CUSTODY = 20,  // .pay_one fuer die Depotgebuehr (seit 1.6.5, PR1-2; bis dahin S_SELL_TAX)
   // Aufrufe von .perform_asset_split in .sim_day_split (Abbruch EV_SPLIT_RATIO)
   S_SPLIT_FWD = 18,     // Split (ratio = Kurs / 100; 0, wenn der Kurs auf 0 unterlaeuft)
   S_SPLIT_REV = 19,     // Reverse-Split
@@ -459,7 +467,7 @@ class Engine {
   double balance_thresh = 0.0, dca_value = 0.0;
   double eff_rate = 0.0, marginal = 0.0, ps_threshold = 0.0, spb = 0.0, soli_factor = 1.0, church_k = 0.0;
   double split_lo = 0.0, split_hi = 0.0;
-  Fee fee_order{}, fee_dca{};
+  Fee fee_order{}, fee_dca{}, fee_cust{};   // fee_cust: Depotgebuehr (seit 1.6.5, Entscheidung 150)
   double fee_paid0 = 0.0;                  // .fee_env$paid vor dem Lauf
   double tot0[TT_N] = {0};
   // Tarifweg (tariff_env)
@@ -476,6 +484,7 @@ class Engine {
   std::vector<std::vector<TaxEntry>> taxes;
   Totals T;
   double fee_paid = 0.0, tax_unpaid = 0.0;
+  int ewb_n = 0, ewb_first = 0;            // seit 1.6.5 (K36): Ereignistage mit unbrauchbarem event_weight
   std::vector<std::array<double, simlev::TR_N>> rows;      // tariff_env$rows (Jahreszeilen)
   std::vector<std::pair<int, double>> ks;                  // tariff_env$ks (Jahr -> KiSt-Saldo), Reihenfolge wie R
   double refund_due = 0.0;
@@ -612,6 +621,7 @@ class Engine {
     zve_all = I.cd[CD_ZVE_ALL];
     fee_order = Fee{(int) I.fees[0], I.fees[1], I.fees[2], I.fees[3], I.fees[4]};
     fee_dca = Fee{(int) I.fees[5], I.fees[6], I.fees[7], I.fees[8], I.fees[9]};
+    fee_cust = Fee{(int) I.fees[10], I.fees[11], I.fees[12], I.fees[13], I.fees[14]};
     for (int k = 0; k < TT_N; k++) tot0[k] = I.tot0[k];
     std::vector<double> par(I.tariff_par ? I.tariff_par : (const double*) nullptr,
                             I.tariff_par ? I.tariff_par + I.n_tariff_par : (const double*) nullptr);
@@ -636,6 +646,7 @@ class Engine {
     T.ps_net_by.clear();
     fee_paid = fee_paid0;
     tax_unpaid = 0.0;
+    ewb_n = ewb_first = 0;
     rows.clear();
     ks.clear();
     refund_due = 0.0;
@@ -649,6 +660,7 @@ class Engine {
     try {
       run_days();
       close_years();
+      if (ewb_n > 0) warn(EV_EVW_BAD, 0, ewb_first, -1, (double) ewb_n);   // seit 1.6.5 (K36)
       // seit 1.6.4 (A-005): Ueberlauf nach der letzten Marktbewertung (Kaeufe, Steuern am Ende)
       for (int a = 0; a < na; a++)
         if (std::isinf(st[a].count) || std::isinf(st[a].money)) throw NAError(0, n, a, EV_NONFINITE, st[a].money);
@@ -793,10 +805,26 @@ class Engine {
       case S_SELL_LIQ: return RS_LIQ;
       case S_SELL_TAX: return RS_TAX;
       case S_SELL_SPLIT: return RS_SPLIT;
+      case S_SELL_CUSTODY: return RS_CUSTODY;
       default: return RS_HARVEST;
     }
   }
   bool has(int t, uint32_t f) const { return (flags[t - 1] & f) != 0; }
+  // seit 1.6.5 (A-031, Entscheidung 172): Rundungsrest-Grenze relativ zum Depotwert statt fester Betraege (bis 1.6.4
+  // money > 0 bei Handelskaeufen, also Kaeufe von rund 3e-16 Anteilen aus Rundungsresten; die festen 0,005/0,01 EUR
+  // beim Startkauf mit Gebuehr, beim Restkauf und bei der Restverteilung im Rebalancing bleiben vorerst, Frage F5). Depotwert: Geld > 0 und Wert
+  // der Bestaende zum Kurs des Tages (nicht endliche Kurse zaehlen nicht).
+  static constexpr double REST_REL = 1e-12;
+  double rest_floor(int t) const {
+    double v = 0.0;
+    for (int a = 0; a < na; a++) {
+      const double m = st[a].money;
+      if (m > 0) v += m;
+      const double w = st[a].count * pxp[a][t - 1];
+      if (std::isfinite(w) && w > 0) v += w;
+    }
+    return REST_REL * v;
+  }
   static const Fee* fee_ptr(const Fee& f) { return f.on ? &f : nullptr; }   // NULL = keine Gebuehr
   static double spread_buy(double price, double spread) { return price * (1 + spread / 2); }
   static double spread_sell(double price, double spread) { return price * (1 - spread / 2); }
@@ -1122,13 +1150,14 @@ class Engine {
     const Status& s = st[a];
     bool sig = false;
     const lgl is_sig = r_bool(A.style == 1), is_bnh = r_bool(A.style == 0);
-    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_lgl(A.sig_buy[t - 1])), r_gt(s.money, 0)), r_eq(s.count, 0)),
+    const double fl = rest_floor(t);   // seit 1.6.5 (A-031, Entscheidung 172) statt money > 0
+    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_lgl(A.sig_buy[t - 1])), r_gt(s.money, fl)), r_eq(s.count, 0)),
              C_BUYSIG_1, t, a))
       sig = true;
-    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_gt(s.count, 0)), r_gt(s.money, 0)), r_not(sig_true(A.sig_sell, t))),
+    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_gt(s.count, 0)), r_gt(s.money, fl)), r_not(sig_true(A.sig_sell, t))),
              C_BUYSIG_2, t, a))
       sig = true;
-    if (cond(simlev_r_and(is_bnh, r_gt(s.money, 0)), C_BUYSIG_3, t, a)) sig = true;
+    if (cond(simlev_r_and(is_bnh, r_gt(s.money, fl)), C_BUYSIG_3, t, a)) sig = true;
     return sig;
   }
   bool sell_signal(int a, int t) {
@@ -1250,7 +1279,18 @@ class Engine {
       has_exempt = 1;
     }
     sell_report(a, t, tc, tp, mp, tax);
-    if (person) fifo_consume(a, tc);
+    if (person) {
+      fifo_consume(a, tc);
+      // seit 1.6.5 (MA1-3): Verkauf des ganzen Bestands schliesst alle Lots (bis 1.6.4 blieb wegen der Rundung zwischen
+      // count und der Summe der Lot-Reste ein Lot von 1e-15 bis 1e-14 Stueck offen)
+      if (tc == available) {
+        for (Lot& b : buys[a]) {
+          if (b.remaining > 0 && b.has_vp) b.vp = 0.0;
+          b.remaining = 0.0;
+        }
+        front[a] = (int) buys[a].size() + 1;
+      }
+    }
     detail(DT_SELL, t, a, {tc, tp}, sell_reason(site));
     if (regime == RG_FUND || regime == RG_CG) detail(DT_SELL_GAIN, t, a, {gain, tax});
     sells[a].push_back(Sell{day[t - 1], tc, tp, gain, tax, exempt, regime, has_exempt});
@@ -1261,6 +1301,7 @@ class Engine {
     if (fees_on && has(t, F_DCA) && in[a].style == 0) {
       const double money = st[a].money;
       const double dca_part = simlev_r_min2(simlev_r_max2(0.0, rep[a].flows[t - 1]), money);
+      // 0.005 bleibt vorerst (Entscheidung 172, Frage F5 Paket A: relative Grenze 1e-12 kaufte Reste aus dem Rebalancing)
       if (t == 1 && cond(r_gt(money - dca_part, 0.005), C_BWF_START, t, a)) {
         fee_cur = fee_ptr(fee_order);
         st[a].money = money - dca_part;
@@ -1486,7 +1527,7 @@ class Engine {
     if (cond(r_gt(money, 0), C_PO_PART, t, a)) {
       remaining = simlev_sub(amount, money);
       st[a].money = 0.0;
-      detail(DT_PAY_PART, t, a, {money}, label, years);
+      if (money >= 0.005) detail(DT_PAY_PART, t, a, {money}, label, years);   // seit 1.6.5 (MA1-5): kein "0.00 EUR"
     }
     const double c0 = st[a].money;
     auto raised = [&]() { return simlev_sub(st[a].money, c0); };
@@ -1502,7 +1543,8 @@ class Engine {
         n_sell = simlev_r_max2(n_sell, fractions ? simlev_r_min2(c, 1e-6) : simlev_r_min2(1.0, c));
       }
       const double before = raised();
-      perform_sell(a, t, S_SELL_TAX, in[a].spread, true, n_sell, has_fp, fp);
+      // seit 1.6.5 (PR1-2): Verkauf fuer die Depotgebuehr mit eigenem Anlass "Depotgebuehr:" statt "Steuerereignis:"
+      perform_sell(a, t, label == LBL_CUSTODY ? S_SELL_CUSTODY : S_SELL_TAX, in[a].spread, true, n_sell, has_fp, fp);
       if (cond(r_le(raised(), before), C_PO_RAISED, t, a)) break;
     }
     const double shrt = simlev_sub(remaining, raised());
@@ -1518,26 +1560,69 @@ class Engine {
     return unpaid;
   }
 
+  // Reihenfolge der uebrigen Assets fuer Zahlungen: absteigend nach Wert (Bestand zum Kurs plus Geld > 0), NA zuletzt
+  // (order(-val) wie R); others: Assets ausser skip (-1: alle)
+  void pay_order(int skip, int t, std::vector<int>& others, std::vector<double>& val) const {
+    others.clear();
+    val.clear();
+    for (int b = 0; b < na; b++) {
+      if (b == skip) continue;
+      others.push_back(b);
+      val.push_back(simlev_add(simlev_mul(st[b].count, pxp[b][t - 1]), simlev_r_max2(0.0, st[b].money)));
+    }
+  }
+  static std::vector<int> pay_rank(const std::vector<double>& val) {
+    std::vector<int> ord(val.size());
+    for (std::size_t i = 0; i < ord.size(); i++) ord[i] = (int) i;
+    std::stable_sort(ord.begin(), ord.end(), [&](int i, int j) {   // order(-val): absteigend, NA zuletzt
+      const double x = -val[i], y = -val[j];
+      if (std::isnan(x)) return false;
+      if (std::isnan(y)) return true;
+      return x < y;
+    });
+    return ord;
+  }
+  // seit 1.6.5 (MA1-2, Entscheidung 186 M2): reicht das Geld des Assets nicht, zahlen zuerst die freien Geldbestaende
+  // der uebrigen Assets (Reihenfolge wie pay_order), erst danach wird verkauft; Rueckgabe: noch offener Betrag
+  double pay_cash_others(int a, double amount, int t, int label, const std::vector<int>* years) {
+    std::vector<int> others;
+    std::vector<double> val;
+    pay_order(a, t, others, val);
+    double rest = amount;
+    for (int i : pay_rank(val)) {
+      if (!(rest > 0)) break;
+      const int b = others[i];
+      const double m = st[b].money;
+      if (!(m > 0)) continue;
+      const double u = simlev_r_min2(m, rest);
+      st[b].money = simlev_sub(m, u);
+      rest = simlev_sub(rest, u);
+      if (u >= 0.005) detail(DT_PAY_OTHER, t, b, {u, (double) a}, label, years);
+    }
+    return rest;
+  }
+
   // .pay_tax: label (LBL_*) und Jahre der Veranlagung nur fuer die Warnung
   void pay_tax(int a, double amount, int t, int label, const std::vector<int>* years = nullptr) {
-    double unpaid = pay_one(a, amount, t, label, years);
+    double amt = amount;
+    // seit 1.6.5 (M2): fehlt dem Asset Geld, zuerst eigenes und dann freies Guthaben der uebrigen Assets (ohne Verkauf)
+    if (na > 1 && cond(r_lt(st[a].money, amt), C_PO_CASH, t, a)) {
+      const double own = st[a].money;
+      double rest = amt;
+      if (own > 0) {
+        rest = simlev_sub(amt, own);
+        st[a].money = 0.0;
+        if (own >= 0.005) detail(DT_PAY_PART, t, a, {own}, label, years);
+      }
+      rest = pay_cash_others(a, rest, t, label, years);
+      amt = rest;
+    }
+    double unpaid = amt > 0 ? pay_one(a, amt, t, label, years) : 0.0;
     if (cond(r_gt(unpaid, 1e-6), C_PT_UNPAID1, t, a)) {
       std::vector<int> others;
       std::vector<double> val;
-      for (int b = 0; b < na; b++) {
-        if (b == a) continue;
-        others.push_back(b);
-        val.push_back(simlev_add(simlev_mul(st[b].count, pxp[b][t - 1]), simlev_r_max2(0.0, st[b].money)));
-      }
-      std::vector<int> ord(others.size());
-      for (std::size_t i = 0; i < ord.size(); i++) ord[i] = (int) i;
-      std::stable_sort(ord.begin(), ord.end(), [&](int i, int j) {   // order(-val): absteigend, NA zuletzt
-        const double x = -val[i], y = -val[j];
-        if (std::isnan(x)) return false;
-        if (std::isnan(y)) return true;
-        return x < y;
-      });
-      for (int i : ord) {
+      pay_order(a, t, others, val);
+      for (int i : pay_rank(val)) {
         if (cond(r_le(unpaid, 1e-6), C_PT_DONE, t, a)) break;
         if (cond(r_not(r_gt(val[i], 0)), C_PT_VAL, t, a)) continue;
         unpaid = pay_one(others[i], unpaid, t, label, years);
@@ -1996,16 +2081,26 @@ class Engine {
     if (has_event_weight && has(t, F_EVENT)) {
       std::vector<double>& ow = rb_ow;
       ow.assign((std::size_t) k, 0.0);
-      bool all_finite = true;
+      bool all_finite = true, all_cols = true;
       for (int i = 0; i < k; i++) {
         const double* col = in[active[i]].event_w;
         ow[i] = col ? col[t - 1] : SIMLEV_NA_REAL;
+        if (!col) all_cols = false;
         if (!std::isfinite(ow[i])) all_finite = false;
       }
+      bool used = false;
       if (all_finite) {
         const double so = sl_r_sum(k, ow.data(), 0);
-        if (so > 0)
+        if (so > 0) {
           for (int i = 0; i < k; i++) targets[i] = ow[i] / so;
+          used = true;
+        }
+      }
+      // seit 1.6.5 (CR2-G-6, K36): Ereignistage zaehlen, an denen die Gewichte nicht verwendbar waren (ohne Spalte fuer
+      // ein Asset warnen die Hosts schon vorab)
+      if (!used && all_cols) {
+        if (ewb_n == 0) ewb_first = t;
+        ewb_n++;
       }
     }
     std::vector<char>& cash_only = rb_cash;
@@ -2104,7 +2199,7 @@ class Engine {
           else perform_buy(a, t, S_BUY_REBAL, RS_REBAL);
         }
       }
-      if (cond(r_gt(pool, 0.01), C_REB_POOL, t, -1)) {
+      if (cond(r_gt(pool, 0.01), C_REB_POOL, t, -1)) {   // bleibt vorerst (Entscheidung 172, Frage F5 Paket A)
         detail(DT_REB_REST, t, -1, {pool});
         for (int i = 0; i < k; i++) {
           const int a = active[i];
@@ -2114,6 +2209,9 @@ class Engine {
         }
       }
     }
+    // 0.005 bleibt vorerst (Entscheidung 172, Frage F5 Paket A): die Reste nach dem Verkauf im Rebalancing liegen bei
+    // rund 1e-9 des Depotwerts (Verkaufsstueckzahl mit Spread), nicht bei 1e-12; mit der relativen Grenze wuerden sie an
+    // jedem Termin als Kauf "0.00x" angelegt
     for (int a : active) {
       const lgl c = simlev_r_and(simlev_r_and(r_bool(!cash_only[a]), r_gt(st[a].money, 0.005)),
                           r_or(r_bool(in[a].style != 1), r_gt(st[a].count, 0)));
@@ -2141,6 +2239,10 @@ class Engine {
     if (regime != RG_FUND && regime != RG_CG) return;
     const double total = st[a].count;
     if (cond(r_le(total, 0), C_HV_TOTAL, t, a)) return;
+    // seit 1.6.5 (MA1-1, Entscheidung 186 M1): mit loss_pot = FALSE und Verlusttopf nicht ernten; der realisierte Gewinn
+    // ginge zuerst in den Topf (§ 20 Abs. 6 EStG), der Pauschbetrag bliebe ungenutzt (bis 1.6.4 verbrauchte die Ernte
+    // den Topf, mit Spread und Gebuehren)
+    if (!loss_pot && T.v[TT_LOSS_CG] > 0) return;
     const double room = simlev_add(use_spb ? T.v[TT_SPB_REM] : 0.0, loss_pot ? T.v[TT_LOSS_CG] : 0.0);
     if (cond(r_le(room, 0.01), C_HV_ROOM, t, a)) return;
     const double mp = pxp[a][t - 1];
@@ -2230,6 +2332,56 @@ class Engine {
     total_report(t);
   }
 
+  // seit 1.6.5 (Entscheidung 150): jaehrliche Depotgebuehr am 31.12.: fixed + percent * Depotwert des Tages (Geld und
+  // Bestaende zum Kurs), begrenzt auf min und max, im ersten (angebrochenen) Jahr anteilig nach Kalendertagen; ein
+  // angebrochenes letztes Jahr wird seit Entscheidung 194 am letzten Tag anteilig abgerechnet (last). Gezahlt wird zuerst aus den
+  // Geldbestaenden (Reihenfolge wie pay_order), dann durch Verkauf wie eine Steuerzahlung (mit Ordergebuehr und Steuer
+  // auf den Veraeusserungsgewinn; die Gebuehr selbst mindert keine Steuer, § 20 Abs. 9 EStG). Gezaehlt in fee_paid.
+  void day_custody(int t, bool last = false) {
+    const int yr = eng_year(day[t - 1]);
+    const double soy = (double) eng_days(yr, 1, 1), eoy = (double) eng_days(yr, 12, 31);
+    const double from = std::max(soy, std::floor(day[0]));
+    const double to = last ? std::floor(day[t - 1]) : eoy;   // letztes angebrochenes Jahr bis zum letzten Tag (194)
+    const double share = (to - from + 1.0) / (eoy - soy + 1.0);
+    double V = 0.0;
+    for (int a = 0; a < na; a++) {
+      const double w = simlev_mul(st[a].count, pxp[a][t - 1]);
+      if (std::isfinite(w)) V = simlev_add(V, w);
+      if (std::isfinite(st[a].money)) V = simlev_add(V, st[a].money);
+    }
+    if (!(V > 0)) return;
+    const double fee = simlev_mul(fee_amount(fee_cust, V), share);
+    if (!(fee > 0)) return;
+    fee_paid = fee_paid + fee;
+    detail(DT_CUSTODY, t, -1, {fee, V, share});
+    std::vector<int> others;
+    std::vector<double> val;
+    pay_order(-1, t, others, val);
+    const std::vector<int> ord = pay_rank(val);
+    double rest = fee;
+    for (int i : ord) {
+      if (!(rest > 0)) break;
+      const int b = others[i];
+      const double m = st[b].money;
+      if (!(m > 0)) continue;
+      const double u = simlev_r_min2(m, rest);
+      st[b].money = simlev_sub(m, u);
+      rest = simlev_sub(rest, u);
+      if (u >= 0.005) detail(DT_PAY_CASH, t, b, {u}, LBL_CUSTODY);
+    }
+    for (int i : ord) {
+      if (!(rest > 1e-6)) break;
+      const int b = others[i];
+      if (st[b].count > 0) rest = pay_one(b, rest, t, LBL_CUSTODY, nullptr);
+    }
+    if (rest > 1e-6) {
+      const int b0 = others[ord[0]];
+      st[b0].money = simlev_sub(st[b0].money, rest);
+      warn(EV_TAX_UNPAID, 0, t, b0, fee, rest, LBL_CUSTODY);
+    }
+    total_report(t);
+  }
+
   void day_liquidate(int t) {
     for (int a = 0; a < na; a++) {
       if (cond(r_gt(st[a].count, 0), C_LIQ_COUNT, t, a)) {
@@ -2261,8 +2413,14 @@ class Engine {
           if (in[a].start_idx <= t) active.push_back(a);
       }
       if (fees_on) fee_cur = fee_ptr(fee_order);
-      bool fast = true;
+      bool fast = true, dca_done = false;
       if (person && (f & F_VPSETTLE) && (!T.vp_pending.empty() || !T.p23_due.empty() || gp_pending())) {
+        // seit 1.6.5 (MA1-2, Entscheidung 186 M2): an einem Abrechnungstag mit Sparplantermin geht die Sparrate vor den
+        // Steuerzahlungen ein (bis 1.6.4 danach; die Steuer verkaufte dann Anteile, obwohl am selben Tag Geld kam)
+        if (f & F_DCA) {
+          day_dca(t);
+          dca_done = true;
+        }
         if (!T.vp_pending.empty()) settle_vp(t, nullptr);
         if (!T.p23_due.empty()) settle_p23(t);
         if (gp_pending()) settle_gp(t);
@@ -2281,7 +2439,7 @@ class Engine {
         day_split(t);
         fast = false;
       }
-      if (f & F_DCA) {
+      if ((f & F_DCA) && !dca_done) {
         day_dca(t);
         fast = false;
       }
@@ -2298,6 +2456,7 @@ class Engine {
       }
       if (f & F_TAXES) {
         day_assess_vp(t);
+        if (fee_cust.on) day_custody(t);   // seit 1.6.5 (Entscheidung 150)
         fast = false;
       }
       if (f & F_LIQ) {
@@ -2308,6 +2467,9 @@ class Engine {
       prev_end = t;
     }
     if (prev_end < n) batch_market_update(prev_end + 1, n);
+    // seit 1.6.5 (Entscheidung 194): Depotgebuehr des angebrochenen letzten Jahres am letzten Tag (endet der Zeitraum am
+    // 31.12., ist sie dort schon abgerechnet)
+    if (fee_cust.on && n >= 1 && std::floor(day[n - 1]) != (double) eng_days(eng_year(day[n - 1]), 12, 31)) day_custody(n, true);
   }
 
   // ── Abschluss des letzten Jahres (.sim_close_years) ──

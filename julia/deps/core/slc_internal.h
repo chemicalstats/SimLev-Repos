@@ -61,21 +61,24 @@ double slc_lgamma_pos(double x) SL_NOTHROW;               /* slc_special.cpp: x 
 
 #ifdef __cplusplus
 #include <algorithm>
-/* Quantil Typ 7 (Hyndman/Fan 1996, Definition 7) der n >= 1 Werte x, die dabei umgeordnet werden (nth_element):
- * xl + frac (xh - xl) mit den Ordnungsstatistiken xl, xh an h = (n - 1) p (0-basiert), bei frac == 0 oder p = 1 xl
- * ohne Rechnung. Nicht bitgleich zu stats::quantile: R rechnet mit dem Index 1 + (n - 1) p und (1 - h) xl + h xh und
- * weicht daher in den letzten Stellen ab (in R, Python und Julia gleich; Befund C-093, Umstellung in 1.6.5,
- * Entscheidung 66). Seit 1.6.3 eine Fassung für die Bandbreite (slc_kde.cpp, vorher quant7 auf sortierten Werten) und
- * CDaR (research_core_impl.h, quantile7). */
+/* Quantil Typ 7 (Hyndman/Fan 1996, Definition 7) der n >= 1 Werte x, die dabei umgeordnet werden (nth_element).
+ * Seit 1.6.5 wie stats::quantile in R 4.3.3 (Befund C-093, Entscheidung 66): Index 1 + (n - 1) p, lo = floor(Index),
+ * h = Index - lo, Ordnungsstatistiken xl = x(lo), xh = x(lo + 1) (1-basiert); bei h > 0 und xh != xl (1 - h) xl + h xh,
+ * sonst xl ohne Rechnung (bis 1.6.4 xl + frac (xh - xl) mit frac aus (n - 1) p, in den letzten Stellen anders).
+ * Eine Fassung fuer die Bandbreite (slc_kde.cpp), CDaR (research_core_impl.h, quantile7) und Serenity
+ * (evaluate_core_impl.h). */
 static inline double slc_quantile7(double *x, int64_t n, double p)
 {
-    const double h = (double) (n - 1) * p;
-    const int64_t lo = (int64_t) floor(h);
-    const double frac = h - (double) lo;
+    const double index = 1.0 + (double) (n - 1) * p;
+    const double lof = floor(index);
+    const int64_t lo = (int64_t) lof - 1;                       /* 0-basiert */
     std::nth_element(x, x + lo, x + n);
     const double xl = x[lo];
-    if (frac == 0.0 || lo + 1 >= n) return xl;
-    return xl + frac * (*std::min_element(x + lo + 1, x + n) - xl);
+    if (!(index > lof) || lo + 1 >= n) return xl;
+    const double xh = *std::min_element(x + lo + 1, x + n);
+    if (xh == xl) return xl;
+    const double h = index - lof;
+    return (1.0 - h) * xl + h * xh;
 }
 #endif
 

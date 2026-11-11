@@ -10,8 +10,14 @@
 "Pfad der mitgelieferten Tarifdatei (R: `system.file(\"extdata\", \"steuertarif.csv\")`)."
 default_tariff_file() = normpath(joinpath(@__DIR__, "..", "data", "steuertarif.csv"))
 
+# Felder einer CSV-Zeile wie read.csv(strip.white = TRUE): nur Leerzeichen und Tabulatoren ausserhalb der
+# Anfuehrungszeichen werden abgeschnitten; seit 1.6.5 (CR2-X16-1) bleibt der Inhalt eines Felds in
+# Anfuehrungszeichen unveraendert (bis 1.6.4 auch gekuerzt)
 function _split_csv_line(line::AbstractString)
-    out = String[]; cur = IOBuffer(); q = false
+    out = String[]; cur = Char[]; q = false
+    quoted = false; qend = 0
+    ws = (' ', '\t')
+    field() = quoted ? String(cur[1:qend]) * String(rstrip(String(cur[qend+1:end]), ws)) : String(strip(String(cur), ws))
     cs = collect(line)
     i = 1
     while i <= length(cs)
@@ -19,24 +25,28 @@ function _split_csv_line(line::AbstractString)
         if q
             if ch == '"'
                 if i < length(cs) && cs[i+1] == '"'
-                    write(cur, '"'); i += 1
+                    push!(cur, '"'); i += 1
                 else
                     q = false
+                    qend = length(cur)
                 end
             else
-                write(cur, ch)
+                push!(cur, ch)
             end
         elseif ch == '"'
+            (!quoted && isempty(strip(String(cur), ws))) && empty!(cur)   # Leerraum vor dem oeffnenden Anfuehrungszeichen
             q = true
+            quoted = true
         elseif ch == ','
-            push!(out, String(take!(cur)))
+            push!(out, field())
+            cur = Char[]; quoted = false; qend = 0
         else
-            write(cur, ch)
+            push!(cur, ch)
         end
         i += 1
     end
-    push!(out, String(take!(cur)))
-    return [String(strip(x, (' ', '\t'))) for x in out]   # wie read.csv(strip.white = TRUE): nur Leerzeichen und Tabulator
+    push!(out, field())
+    return out
 end
 
 """
@@ -105,7 +115,7 @@ println(tax_tariff())
 function tax_tariff(file_pos = nothing; file = file_pos)
     if file === nothing
         file = default_tariff_file()
-        isfile(file) || error("tax_tariff: Die mitgelieferte Datei extdata/steuertarif.csv wurde nicht gefunden (Paket unvollständig installiert?).")
+        isfile(file) || chk_stop("a.m_tax_tariff")
         # seit 1.6.3 je Prozess gemerkt (wie R und Python): Schlüssel Pfad, Größe, Änderungszeit; nur ohne Warnung;
         # je Aufruf eine Kopie
         stt = stat(file); key = (file, stt.size, stt.mtime)
@@ -127,16 +137,19 @@ const _TT_LOCK = ReentrantLock()
 "Tarifdatei lesen und prüfen (Rumpf von `tax_tariff`); `(Ergebnis, Warnung ausgegeben?)`."
 function _tax_tariff_read(file)
     warned = false
-    (file isa AbstractString) || error("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.")
+    (file isa AbstractString) || chk_stop("a.m_tax_tariff_read")
     file = String(file)
     # seit 1.6.4 (A-071, A-037): Ordner, Kodierung und Anführungszeichen vorab mit Meldung; ein UTF-8-BOM am
     # Dateianfang (Excel "CSV UTF-8") wird übergangen
     isdir(file) && chk_stop("e1.tarif_ordner", "tax_tariff", file)
-    isfile(file) || error("tax_tariff: Datei '$file' nicht gefunden.")
+    isfile(file) || chk_stop("a.m_tax_tariff_read_2", file)
     txt = read(file, String)
+    occursin('\0', txt) && chk_stop("a.tarif_nul", "tax_tariff", file)   # seit 1.6.5 (CR2-B-8), vor der Kodierung
     isvalid(txt) || chk_stop("e1.tarif_utf8", "tax_tariff", file)
     startswith(txt, "\ufeff") && (txt = txt[nextind(txt, 1):end])
-    raw = readlines(IOBuffer(txt))
+    # seit 1.6.5 (CR2-B-8): Zeilenende LF, CRLF oder nur CR wie R's readLines (bis 1.6.4 nur LF/CRLF)
+    raw = String.(split(txt, r"\r\n|\r|\n"))
+    !isempty(raw) && isempty(raw[end]) && pop!(raw)
     gl = [ln for ln in raw if occursin(r"^#\s*Geltung\s*:", ln)]
     # seit 1.6.4 (K43 T1-N6) wie R's trimws nur [ \t\r\n] abschneiden (bis dahin auch Unicode-Leerraum,
     # Entscheidung 27)
@@ -154,10 +167,10 @@ function _tax_tariff_read(file)
                   " und Punkt als Dezimalzeichen, z. B. 'zone,69879,0,1,0,0.42,-11135.63'.")
         end
         for i in 2:length(nf)
-            nf[i] != nf[1] && error("tax_tariff: In '$file' hat Datenzeile $(i - 1) insgesamt $(nf[i]) Felder, die Kopfzeile $(nf[1]). Dezimalzeichen ist der Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen.")
+            nf[i] != nf[1] && chk_stop("a.m_tax_tariff_read_6", file, i - 1, nf[i], nf[1])
         end
     end
-    isempty(body) && error("tax_tariff: Datei '$file' ist keine lesbare CSV-Datei (no lines available in input).")
+    isempty(body) && chk_stop("a.m_tax_tariff_read_5", file)
     header = _split_csv_line(body[1])
     rws = [_split_csv_line(ln) for ln in body[2:end]]
     d = Dict{String,Vector{String}}(h => String[j <= length(r) ? r[j] : "" for r in rws] for (j, h) in enumerate(header))
@@ -168,30 +181,30 @@ function _tax_tariff_read(file)
     isempty(miss) || error("tax_tariff: In '$file' fehlen die Spalten $(join(miss, ", ")) (erwartet: $(join(need, ","))).")
     art = lowercase.(d["art"])
     bad = findfirst(a -> !(a in ("zone", "soli")), art)
-    bad === nothing || error("tax_tariff: Datenzeile $bad hat ein ungültiges art; erlaubt sind \"zone\" und \"soli\".")
+    bad === nothing || chk_stop("a.m_tax_tariff_read_7", bad)
     # seit 1.6.4 Felder mit Nicht-ASCII-Zeichen als NA (A-038, C-022; wie R für fremde Ziffern)
     function num(col, rows)
         v = Float64[chk_as_num(d[col][i]) for i in rows]   # nur ASCII (Entscheidung 27, gemeinsame Hilfe)
         nb = findfirst(x -> !isfinite(x), v)
         if nb !== nothing
             i = rows[nb]
-            error("tax_tariff: Spalte '$col' in Datenzeile $i (art = $(art[i])) ist nicht numerisch bzw. nicht endlich.")
+            chk_stop("a.m_num_5", col, i, art[i])
         end
         v
     end
     zr = findall(==("zone"), art); sr = findall(==("soli"), art)
-    isempty(zr) && error("tax_tariff: Die Datei enthält keine Tarifzone (art = \"zone\").")
-    length(sr) == 1 || error("tax_tariff: Es muss genau eine soli-Zeile geben (gefunden: $(length(sr))).")
+    isempty(zr) && chk_stop("a.m_num")
+    length(sr) == 1 || chk_stop("a.m_num_6", length(sr))
     zd = Dict(c => num(c, zr) for c in ("ab", "bezug", "teiler", "a", "b", "c"))
     ab = zd["ab"]
-    ab[1] != 0 && error("tax_tariff: Die erste Zone muss bei ab = 0 beginnen.")
+    ab[1] != 0 && chk_stop("a.m_num_2")
     for k in 1:length(ab)-1
-        ab[k+1] - ab[k] <= 0 && error("tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone $(k + 1)).")
+        ab[k+1] - ab[k] <= 0 && chk_stop("a.m_num_7", k + 1)
     end
     k0 = findfirst(<=(0), zd["teiler"])
-    k0 === nothing || error("tax_tariff: teiler muss > 0 sein (Zone $k0).")
+    k0 === nothing || chk_stop("a.m_num_8", k0)
     soli = RList("freigrenze" => num("ab", sr)[1], "satz" => num("a", sr)[1], "milderung" => num("b", sr)[1])
-    soli["freigrenze"] < 0 && error("tax_tariff: Die Soli-Freigrenze (ab) darf nicht negativ sein.")
+    soli["freigrenze"] < 0 && chk_stop("a.m_num_3")
     for s in ("satz", "milderung")
         (soli[s] < 0 || soli[s] > 100) &&
             error("tax_tariff: Soli-$(s == "satz" ? "Zuschlagsatz (a)" : "Milderungssatz (b)") muss zwischen 0 und 100 Prozent liegen.")

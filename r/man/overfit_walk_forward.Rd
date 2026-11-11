@@ -14,7 +14,8 @@ overfit_walk_forward(
   anchored = FALSE,
   metric = c("sharpe", "sortino", "geometric", "mean"),
   select = c("best", "plateau"),
-  risk_free = 0
+  risk_free = 0,
+  correlation = c("spearman", "kendall", "pearson")
 )
 
 \method{print}{SimLevWalkForward}(x, ...)
@@ -60,6 +61,12 @@ wird als \code{risk_free / 100 / ppy} von jeder Tagesrendite abgezogen,
 auch auf \code{series} und die CAGR in \code{summary} (dann
 Ueberrenditen).}
 
+\item{correlation}{Seit 1.6.5 (lit1 W1, Entscheidung 192): Art der
+Walk-Forward-Korrelation je Fenster zwischen der In-Sample- und der
+Out-of-Sample-Kennzahl aller Punkte (Tinsley 2026): \code{"spearman"}
+(Standard), \code{"kendall"} oder \code{"pearson"}. NA bei weniger als drei
+Punkten mit Kennzahl oder ohne Streuung.}
+
 \item{...}{ungenutzt.}
 }
 \value{
@@ -88,6 +95,14 @@ vorherigen Datentag ohne den ersten Testtag - bei luecklosen
 Testfenstern die Spanne vom ersten bis zum letzten Testtag), \code{mean_oos_rank}, \code{efficiency}
 (mittlere OOS- durch mittlere IS-Kennzahl) und \code{switches}
 (Anzahl Wechsel des gewaehlten Punkts).}
+\item{\code{windows} (seit 1.6.5)}{zusaetzlich \code{wfc} (Walk-Forward-Korrelation
+der Kennzahlen aller Punkte), \code{oos_positive} (Anteil der Punkte mit
+OOS-Kennzahl > 0) und \code{is_pos_oos_neg} (Anteil mit IS > 0 und OOS < 0);
+\code{summary} zusaetzlich \code{mean_wfc} und \code{median_wfc}. Kennzahlen
+ohne Schwankung (Standardabweichung bzw. Abwaertsschwankung <= 1e-10 je Tag)
+sind NA (mit Warnung) und werden weder gewaehlt noch gerankt; Gleichstaende
+bis auf 1e-12 relativ zaehlen bei Auswahl (erster Punkt) und Rang (mittlerer
+Rang) als Gleichstand.}
 \item{\code{hindsight_id}, \code{metric}, \code{select},
 \code{train}, \code{test}, \code{anchored}, \code{params}}{Rueckschau-Punkt
 und Einstellungen.}

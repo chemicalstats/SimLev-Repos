@@ -20,7 +20,7 @@ end
 _first_obs(v) = (i = findfirst(!isnan, v); i === nothing ? length(v) : i)
 # Spalte als Vector{Float64} und erste Beobachtung (seit 1.6.1 eine Hilfe für beide Auslöser)
 const _TRIG_FN = "rebalance_trigger"
-const _TRIG_SUB_FIELDS = ("type", "threshold", "lev_col", "vol_col", "triggers", "df")
+const _TRIG_SUB_FIELDS = ("type", "threshold", "lev_col", "vol_col", "triggers", "df", "combine")
 
 "Spalte numerisch (eine Spalte nur aus NA zählt als Zahlenspalte, Entscheidung 14), ohne ±Inf; erster Wert."
 function _trig_series(df, name::AbstractString, arg::AbstractString)
@@ -39,7 +39,8 @@ end
 
 """
     rebalance_trigger(df, type; threshold = 10, lev_col = "target_leverage",
-                          vol_col = "sigma_ewma", triggers = nothing, out_col = "rebal_trigger")
+                          vol_col = "sigma_ewma", triggers = nothing, out_col = "rebal_trigger",
+                          combine = "or")
 
 Logische Trigger-Spalte für `simulation(..., rebalance=rebalance_plan(event_col=...))` vorberechnen.
 
@@ -55,14 +56,17 @@ Vier Trigger-Typen sind implementiert:
   als `threshold` ist.
 - `"vol_band"`: Trigger, wenn die Volatilität relativ zum letzten Rebalancing-Referenzwert um mehr als
   `threshold` abweicht.
-- `"combined"`: OR-Verknüpfung mehrerer Sub-Trigger-Specs aus `triggers`.
+- `"combined"`: OR-Verknüpfung mehrerer Sub-Trigger-Specs aus `triggers` (seit 1.6.5 mit `combine = "and"`
+  UND-Verknüpfung).
 
 Der Referenzwert (gehaltener Hebel bzw. Volatilität) ist der erste nicht fehlende Wert (in der Regel der erste
 Tag; bei führenden `NA`, etwa in der Anlaufphase einer EWMA-Volatilität, der erste Tag mit Wert; bis dahin
 wird nicht ausgelöst) und wird nur an Tagen fortgeschrieben, an denen dieser Trigger auslöst (nicht an
 kalendarischen Rebalancing-Tagen in `simulation`). Ausgelöst wird bei einer Abweichung *größer* als die
-Schwelle; `NA`-Werte lösen nicht aus. Bei `"rel_leverage"` und `"vol_band"` wird nicht ausgelöst, solange der
-Referenzwert 0 ist.
+Schwelle; `NA`-Werte lösen nicht aus. Seit 1.6.5 mit einer kleinen Toleranz, damit eine Abweichung genau auf der
+Schwelle nicht je nach Rundung auslöst (absolut: Abweichung größer als `threshold + 1e-12 * max(1, |Referenz|)`,
+relativ: größer als `threshold + 1e-12`). Bei `"rel_leverage"` und `"vol_band"` ersetzt seit 1.6.5 der erste Wert
+ungleich 0 einen Referenzwert 0, ohne auszulösen (bis 1.6.4 wurde dann nie mehr ausgelöst).
 
 # Argumente
 - `df`: `data.frame` mit täglichen Feldern (mindestens eine Zeile). Muss die relevanten numerischen Spalten
@@ -79,9 +83,16 @@ Referenzwert 0 ist.
   `"sigma_ewma"`.
 - `triggers`: Liste von Sub-Trigger-Specs (nur bei `type = "combined"`). Jeder Eintrag ist eine Liste mit
   `type` und ggf. `threshold` (in Prozent, fehlt er: `10`), `lev_col`, `vol_col`. Jeder Sub-Trigger führt
-  seinen eigenen Referenzwert; die Ergebnisse werden OR-verknüpft. Standard: `nothing`.
+  seinen eigenen Referenzwert; die Ergebnisse werden OR-verknüpft (zu `combine = "and"` siehe dort). `combine` ist
+  seit 1.6.5 als Feld erlaubt. Standard: `nothing`.
 - `out_col`: Character. Name der zu erzeugenden logischen Spalte in `df`. Standard: `"rebal_trigger"`.
   Seit 1.6.4 darf die Spalte in `df` noch nicht vorhanden sein (vorher still überschrieben).
+- `combine`: Character, nur bei `type = "combined"` (seit 1.6.5). `"or"` (Standard): ausgelöst, wenn ein
+  Sub-Trigger auslöst; jeder führt seinen eigenen Referenzwert. `"and"`: ausgelöst, wenn alle Sub-Trigger am
+  selben Tag ihre Schwelle überschreiten, gemessen gegen gemeinsame Referenzwerte, die an jedem Auslösetag für alle
+  Sub-Trigger fortgeschrieben werden; ein `NA` in einem Sub-Trigger verhindert die Auslösung. Mit `"and"` sind nur
+  die Typen `"abs_leverage"`, `"rel_leverage"` und `"vol_band"` als Sub-Trigger erlaubt (kein verschachteltes
+  `"combined"`).
 
 Seit 1.6.4 geprüft: `df` nur als `RFrame`; `threshold` eine einzelne endliche Zahl `>= 0`; Spaltennamen einzeln und
 nicht leer; die genutzte Spalte nur Zahlen oder NA (kein `Inf`); Teil-Trigger nur mit den Feldern `type`,
@@ -107,7 +118,7 @@ println(sum(d["rebal_trigger"]))     # Anzahl der Rebalancing-Tage
 function rebalance_trigger(df, type; threshold = 10,
                                lev_col = "target_leverage",
                                vol_col = "sigma_ewma",
-                               triggers = nothing, out_col = "rebal_trigger")
+                               triggers = nothing, out_col = "rebal_trigger", combine = "or")
     @nospecialize
     fn = _TRIG_FN
     # seit 1.6.4 Eingabeprüfung vor der Rechnung (A-013, A-036): df nur als RFrame (Entscheidung 6), type aus der
@@ -122,31 +133,34 @@ function rebalance_trigger(df, type; threshold = 10,
     lev_col = chk_name1(lev_col, fn, "lev_col")
     vol_col = chk_name1(vol_col, fn, "vol_col")
     out_col = chk_name1(out_col, fn, "out_col")
+    combine = chk_choice(combine, fn, "combine", ("or", "and"))   # seit 1.6.5 (Entscheidung 150)
     # seit 1.6.4 (Entscheidung 26): vorhandene Spalte nicht still überschreiben
     String(out_col) in names(df) && chk_stop("spalte_vorhanden", fn, out_col, "df", "out_col")
     thr = threshold / 100
     trig = falses(n)
-    if type == "abs_leverage" || type == "rel_leverage"
+    # Seit 1.6.5 (CR2-D-1, Entscheidung 185 K15) Vergleich mit kleiner Toleranz (absolut thr + 1e-12 * max(1,
+    # |Referenz|), relativ thr + 1e-12); seit 1.6.5 (CR2-D-2, K14) ersetzt bei rel_leverage/vol_band der erste Wert
+    # != 0 eine Referenz 0 (ohne auszulösen)
+    if type == "abs_leverage"
         lev, t0 = _trig_series(df, lev_col, "lev_col")
         held = lev[t0]
         for t in t0+1:n
             v = lev[t]
             isnan(v) && continue
-            if type == "abs_leverage"
-                if abs(v - held) > thr
-                    trig[t] = true; held = v
-                end
-            elseif held != 0 && abs(v / held - 1) > thr
+            if abs(v - held) > thr + 1e-12 * max(1.0, abs(held))
                 trig[t] = true; held = v
             end
         end
-    elseif type == "vol_band"
-        vol, t0 = _trig_series(df, vol_col, "vol_col")
-        ref = vol[t0]
+    elseif type == "rel_leverage" || type == "vol_band"
+        lev, t0 = type == "vol_band" ? _trig_series(df, vol_col, "vol_col") : _trig_series(df, lev_col, "lev_col")
+        held = lev[t0]
         for t in t0+1:n
-            v = vol[t]
-            if !isnan(v) && ref != 0 && abs(v / ref - 1) > thr
-                trig[t] = true; ref = v
+            v = lev[t]
+            isnan(v) && continue
+            if held == 0
+                v != 0 && (held = v)
+            elseif abs(v / held - 1) > thr + 1e-12
+                trig[t] = true; held = v
             end
         end
     else
@@ -165,12 +179,48 @@ function rebalance_trigger(df, type; threshold = 10,
             any(p -> p.first == "type" && p.second !== nothing, ps) || chk_stop("fehlt", fn, "triggers[[$i]]\$type")
             push!(subs, Dict{Symbol,Any}(Symbol(p.first) => p.second for p in ps if p.second !== nothing))   # R modifyList
         end
-        for kw in subs
+        leaves = Tuple{Bool,Float64,Vector{Float64}}[]
+        for (i, kw) in enumerate(subs)
             st = pop!(kw, :type, nothing)
             sdf = pop!(kw, :df, df)   # eigenes df eines Teil-Triggers (wie R; bis 1.6.3 übergangen)
             sub_df = rebalance_trigger(sdf, st; out_col = "..__sub__..", kw...)
             nrow(sub_df) == n || chk_stop("e1.trigger_df", fn, n)
-            trig .|= Bool.(_getcol(sub_df, "..__sub__.."))
+            if combine == "or"
+                trig .|= Bool.(_getcol(sub_df, "..__sub__.."))
+                continue
+            end
+            # "and" (seit 1.6.5, Entscheidung 150): nur einfache Teil-Trigger; Spalte und Schwelle im Teilaufruf geprüft
+            st == "combined" && chk_stop("a.trigger_und", fn, i)
+            isvol = st == "vol_band"
+            col = isvol ? get(kw, :vol_col, "sigma_ewma") : get(kw, :lev_col, "target_leverage")
+            v, _ = _trig_series(sdf, String(col), isvol ? "vol_col" : "lev_col")
+            push!(leaves, (st == "abs_leverage", Float64(get(kw, :threshold, 10)) / 100, v))
+        end
+        if combine == "and"
+            L = length(leaves)
+            ref = fill(NaN, L)
+            for t in 1:n
+                ok = true
+                for j in 1:L
+                    is_abs, th, vv = leaves[j]
+                    v = vv[t]
+                    if isnan(v)
+                        ok = false; continue
+                    end
+                    if isnan(ref[j]) || (!is_abs && ref[j] == 0)   # Referenz setzen
+                        (isnan(ref[j]) || v != 0) && (ref[j] = v)
+                        ok = false; continue
+                    end
+                    hit = is_abs ? abs(v - ref[j]) > th + 1e-12 * max(1.0, abs(ref[j])) : abs(v / ref[j] - 1) > th + 1e-12
+                    hit || (ok = false)
+                end
+                if ok
+                    trig[t] = true
+                    for j in 1:L
+                        ref[j] = leaves[j][3][t]
+                    end
+                end
+            end
         end
     end
     out = copy(df)

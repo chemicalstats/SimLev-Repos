@@ -23,7 +23,8 @@ withdrawal_simulation(
   loss_carryforward = 0,
   gamma = 2,
   keep_paths = TRUE,
-  horizon = NULL
+  horizon = NULL,
+  periods = NULL
 )
 }
 \arguments{
@@ -243,6 +244,8 @@ die ersten k Pfade (Spalten; k groesser als die Pfadzahl: alle). Gerechnet
 werden immer alle Pfade; \code{plot()} zeichnet den Vermoegensfaecher dann
 nur aus den behaltenen Pfaden (Titel mit \dQuote{erste k von n Pfaden}).
 Bei historischen Kohorten sind das die fruehesten Starts.}
+
+\item{periods}{Seit 1.6.5: Kuerzung auf die ersten \code{periods} Zeilen (Perioden der Daten, ganze Zahl von 1 bis 1200) statt \code{years}; erlaubt Laengen, die keine ganzen Jahre sind (z. B. 10 Quartale; das letzte Planjahr ist dann unvollstaendig). Nur eines von \code{years} und \code{periods} angeben, sonst Fehler. Bei einem \code{SimLevResult} zugleich die Kohortenlaenge in Perioden. \code{NULL} (Standard) = \code{years} gilt.}
 
 \item{horizon}{Optional Laufzeit je Pfad: Objekt aus \code{\link[=withdrawal_horizon]{withdrawal_horizon()}}
 (zufaellige Laufzeit in Jahren je Pfad) oder eine Zahl > 0 = feste Laufzeit in

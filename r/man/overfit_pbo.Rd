@@ -12,7 +12,9 @@ overfit_pbo(
   metric = c("sharpe", "sortino", "geometric", "mean"),
   frequency = c("week", "day", "month"),
   dates = NULL,
-  risk_free = 0
+  risk_free = 0,
+  n_splits = NULL,
+  seed = NULL
 )
 
 \method{print}{SimLevPBO}(x, ...)
@@ -72,6 +74,16 @@ abgezogen. \code{ppy} (Perioden je Jahr) wird aus dem Datum geschaetzt:
 (\code{"day"}), 52 (\code{"week"}) bzw. 12 (\code{"month"}).}
 
 \item{...}{ungenutzt.}
+
+\item{n_splits}{Seit 1.6.5 (E-T2-2, Entscheidung 196): Anzahl zufaellig gewaehlter
+Aufteilungen (ganze Zahl >= 1). \code{NULL} (Standard) = alle
+\eqn{\binom{S}{S/2}} Aufteilungen wie bisher; ist \code{n_splits} kleiner, werden so
+viele ohne Zuruecklegen aus dem SimLev-Zufallsstrom gezogen. Naeherung ohne
+Literaturquelle (eigene Herleitung): der Standardfehler der PBO ist etwa
+\eqn{\sqrt{p(1-p)/n_{splits}}}; der Druck nennt ihn.}
+
+\item{seed}{Startwert fuer die Zufallsauswahl (nur mit \code{n_splits}); wie bei
+[sharpe_test()].}
 }
 \value{
 Objekt der Klasse \code{SimLevPBO}, eine Liste mit

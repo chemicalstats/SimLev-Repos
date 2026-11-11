@@ -44,9 +44,18 @@ from ._meldungen import EINGABE
 from ._r.rformat import r_format1
 
 
+def _msg_val(v: Any) -> Any:
+    # seit 1.6.5 (CR2-W1-4): Folgen (Liste, Tupel, Feld) mit ", " verbunden, None als "" – wie R und Julia
+    if v is None:
+        return ""
+    if isinstance(v, (list, tuple, np.ndarray)):
+        return ", ".join(str(t) for t in v)
+    return v
+
+
 def chk_msg(key: str, *args: Any) -> str:
     """Text der Tabelle ``eingabe`` (nur ``%s``-Platzhalter)."""
-    return EINGABE[key] % args
+    return EINGABE[key] % tuple(_msg_val(a) for a in args)
 
 
 def chk_stop(key: str, *args: Any):
@@ -277,9 +286,11 @@ def chk_date1(x, fn, arg, null_ok=False):
         return x
     from ._sim_base import _as_date
     z = None
-    if isinstance(x, (str, _dt.date, np.datetime64)):
+    # seit 1.6.5 (CR2-X8-3): pd.NaT wie None (bis 1.6.4 Rohfehler aus toordinal); Tage vor dem 01.01.0001 (-719162)
+    # überall abgelehnt (Python kennt kein Jahr 0; bis 1.6.4 dort OverflowError, in R und Julia angenommen)
+    if x is not pd.NaT and isinstance(x, (str, _dt.date, np.datetime64)):
         z = _as_date(x)
-    if z is None:
+    if z is None or z < -719162:
         chk_stop("datum", fn, arg)
     return _dt.date(1970, 1, 1) + _dt.timedelta(days=int(z))
 
@@ -287,6 +298,10 @@ def chk_date1(x, fn, arg, null_ok=False):
 def chk_numvec(x, fn, arg, null_ok=False):
     """Numerischer Vektor (mindestens ein Wert; NA erlaubt, Namen erlaubt: ``dict``/``Series``)."""
     if x is None and null_ok:
+        return x
+    # seit 1.6.5 (CR2-V2-2): Feld oder Series mit Zahlentyp und mindestens einem Wert sofort (bis 1.6.4 je Element im
+    # Interpreter, bei sharpe_probabilistic 68–91 % der Laufzeit); Ergebnis und Meldungen gleich
+    if isinstance(x, (np.ndarray, pd.Series)) and x.dtype.kind in "fiu" and x.size >= 1:
         return x
     if isinstance(x, Mapping):
         vals = list(x.values())

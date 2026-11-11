@@ -58,9 +58,21 @@ _roll_cov(x, y, n) = SC.roll_cov_core(DP._as_numeric(x), DP._as_numeric(y), _asi
 Exponentieller gleitender Durchschnitt (Glättung 2/(n+1), Start mit dem
 einfachen Mittel der ersten `n` Werte); davor NA.
 """
+# Hinweis bei fehlenden Kursen für den exponentiellen Durchschnitt (seit 1.6.5, CR2-V1-5)
+function _sig_ema_na(x, fn)
+    i = findfirst(isnan, x)
+    i === nothing || @warn SimLev.chk_msg("b2.ema_na", fn, i)
+    nothing
+end
+
+# seit 1.6.5 (CR2-V1-5): führende NA werden übersprungen (Start mit dem SMA der ersten n vorhandenen Werte)
 function _ema(x, n)
-    n = _asint(n)
     x = DP._as_numeric(x)
+    f = findfirst(v -> !isnan(v), x)
+    if f !== nothing && f > 1
+        out = fill(NA, length(x)); out[f:end] = _ema(x[f:end], n); return out
+    end
+    n = _asint(n)
     m = length(x)
     out = fill(NA, m)
     (n < 1 || n > m) && return out
@@ -255,6 +267,7 @@ function signal_ema(x, n_ = nothing; n = 200, band = 0, lag = 0)
     fn = "signal_ema"
     _sig_x(x, fn); n = _sig_win(n, fn, "n"); band = chk_num1(band, fn, "band"; lo = 0); lag = _sig_win(lag, fn, "lag"; lo = 0)
     xv = DP._as_numeric(x)
+    _sig_ema_na(xv, fn)
     s = _ema(xv, n)
     return _sig_out(_cmp(>=, xv, s .* (1 + band / 100)), _cmp(<, xv, s .* (1 - band / 100)), lag)
 end
@@ -332,9 +345,10 @@ function signal_crossover(x, fast_ = nothing, slow_ = nothing; fast = 50, slow =
     fn = "signal_crossover"
     _sig_x(x, fn); fast = _sig_win(fast, fn, "fast"); slow = _sig_win(slow, fn, "slow")
     type_ = DP._match_arg(chk_scalar(type), ("sma", "ema"))
-    fast >= slow && error("fast muss kleiner als slow sein.")
+    fast >= slow && chk_stop("b2b.m_signal_crossover")
     band = chk_num1(band, fn, "band"; lo = 0); lag = _sig_win(lag, fn, "lag"; lo = 0)
     xv = DP._as_numeric(x)
+    type_ == "ema" && _sig_ema_na(xv, fn)
     f = type_ == "sma" ? _roll_mean(xv, fast) : _ema(xv, fast)
     s = type_ == "sma" ? _roll_mean(xv, slow) : _ema(xv, slow)
     return _sig_out(_cmp(>=, f, s .* (1 + band / 100)), _cmp(<, f, s .* (1 - band / 100)), lag)
@@ -499,7 +513,7 @@ function signal_drawdown(x, sell_dd_ = nothing, buy_dd_ = nothing; sell_dd = 20,
     buy_dd = chk_num1(buy_dd, fn, "buy_dd"; lo = 0, lo_open = true, hi = 100)
     window = _sig_win(window, fn, "window"; null_ok = true); lag = _sig_win(lag, fn, "lag"; lo = 0)
     x = DP._as_numeric(x)
-    buy_dd > sell_dd && error("buy_dd darf nicht größer als sell_dd sein.")
+    buy_dd > sell_dd && chk_stop("b2b.m_signal_drawdown")
     m = length(x)
     xp = Float64[isnan(v) ? -Inf : v for v in x]
     peak = Vector{Float64}(undef, m)
@@ -597,10 +611,12 @@ println(sum(signal_volatility(x, 20; threshold = 25)["buy"]))
 function signal_volatility(x, n_ = nothing; n = 20, threshold = 25, band = 0, ppy = 365.25, lag = 0)
     n_ === nothing || (n = n_)
     fn = "signal_volatility"
-    _sig_x(x, fn); n = _sig_win(n, fn, "n"); threshold = chk_num1(threshold, fn, "threshold"; lo = 0)
+    # seit 1.6.5 (CR2-R-4): n >= 2, Kurse > 0
+    _sig_x(x, fn); n = _sig_win(n, fn, "n"; lo = 2); threshold = chk_num1(threshold, fn, "threshold"; lo = 0)
     band = chk_num1(band, fn, "band"; lo = 0); ppy = chk_num1(ppy, fn, "ppy"; lo = 0, lo_open = true)
     lag = _sig_win(lag, fn, "lag"; lo = 0)
     x = DP._as_numeric(x)
+    any(v -> v <= 0, x) && chk_stop("b2.kurs_positiv", fn)
     m = length(x)
     lx = Float64[SimLev.RLibm.log(v) for v in x]
     r = m == 0 ? Float64[] : vcat(NA, Float64[lx[i] - lx[i-1] for i in 2:m])
@@ -621,20 +637,27 @@ function _sig_vals(v)
     v isa RVector && (v = v.values)
     v isa Union{Bool,Real} && (v = [v])
     (v isa AbstractVector && !(v isa AbstractVector{<:Pair})) || return nothing
-    out = Union{Missing,Bool}[]
-    for e in v
+    return _sig_vals_typed(v)
+end
+# seit 1.6.5 (CR2-G-1): je Elementtyp übersetzt (Funktionsbarriere) und als Paar (Werte, NA-Maske) statt Vektor aus
+# Union{Missing,Bool} mit push! je Element (bis 1.6.4 rund 55-mal langsamer als R); gleiche Annahme und gleiche Werte
+function _sig_vals_typed(v::AbstractVector)
+    n = length(v)
+    vals = Vector{Bool}(undef, n); na = zeros(Bool, n)
+    @inbounds for (i, e) in enumerate(v)
         if e === missing || e === nothing || (e isa AbstractFloat && isnan(e))
-            push!(out, missing)
+            na[i] = true; vals[i] = false
         elseif e isa Bool
-            push!(out, e)
+            vals[i] = e
         elseif e isa Real && (e == 0 || e == 1)
-            push!(out, e == 1)
+            vals[i] = e == 1
         else
             return nothing
         end
     end
-    return out
+    return (vals, na)
 end
+_sig_vals_typed(v::AbstractVector{Bool}) = (collect(Bool, v), zeros(Bool, length(v)))
 
 
 """
@@ -703,31 +726,52 @@ println(sum(both["buy"]))
 function signal_combine(signals...; op = ("and", "or"))
     op = DP._match_arg(chk_scalar(op), ("and", "or"))
     s = collect(signals)
-    isempty(s) && error("Keine Signale übergeben.")
+    isempty(s) && chk_stop("b2b.m_signal_combine")
     # seit 1.6.4 (B-008, Entscheidung 1): je Signal buy und sell, jeweils true/false oder 0/1 (missing/NaN = NA erlaubt,
     # bleibt NA wie in R; bis 1.6.3 brach Julia mit NA ab)
-    VB = Vector{Vector{Union{Missing,Bool}}}(); VS = Vector{Vector{Union{Missing,Bool}}}()
+    VB = Tuple{Vector{Bool},Vector{Bool}}[]; VS = Tuple{Vector{Bool},Vector{Bool}}[]
     for (i, z) in enumerate(s)
         b = _sig_vals(_getsig(z, "buy")); c = _sig_vals(_getsig(z, "sell"))
         (b === nothing || c === nothing) && chk_stop("e1.signal", "signal_combine", i)
         push!(VB, b); push!(VS, c)
     end
-    len = length.(VB); slen = length.(VS)
+    len = [length(b[1]) for b in VB]; slen = [length(c[1]) for c in VS]
     (any(!=(len[1]), len) || any(slen .!= len)) &&
-        error("signal_combine: Signale haben unterschiedliche Längen ($(join(len, ", "))); alle aus derselben Kursreihe erzeugen.")
+        chk_stop("b2b.m_sig_ok", join(len, ", "))
     n = len[1]
-    if any(v -> any(ismissing, v), VB) || any(v -> any(ismissing, v), VS)   # mit NA: dreiwertig wie R
-        cj(vs, i) = (col = [v[i] for v in vs]; any(e -> e === false, col) ? false : (any(ismissing, col) ? missing : true))
-        dj(vs, i) = (col = [v[i] for v in vs]; any(e -> e === true, col) ? true : (any(ismissing, col) ? missing : false))
-        and_ = op == "and"
-        return RList("buy" => Union{Missing,Bool}[and_ ? cj(VB, i) : dj(VB, i) for i in 1:n],
-                     "sell" => Union{Missing,Bool}[and_ ? dj(VS, i) : cj(VS, i) for i in 1:n])
+    and_ = op == "and"
+    if any(v -> any(v[2]), VB) || any(v -> any(v[2]), VS)   # mit NA: dreiwertig wie R
+        return RList("buy" => _sig_comb3(VB, and_, n), "sell" => _sig_comb3(VS, !and_, n))
     end
-    B = [Bool.(v) for v in VB]; S = [Bool.(v) for v in VS]
-    if op == "and"
-        return RList("buy" => Bool[all(b[i] for b in B) for i in 1:n], "sell" => Bool[any(c[i] for c in S) for i in 1:n])
+    # seit 1.6.5 (CR2-G-1): spaltenweise mit & bzw. | statt je Zeile über einen Generator
+    return RList("buy" => _sig_comb2(VB, and_, n), "sell" => _sig_comb2(VS, !and_, n))
+end
+# ohne NA: all (conj) bzw. any je Zeile
+function _sig_comb2(vs::Vector{Tuple{Vector{Bool},Vector{Bool}}}, conj::Bool, n::Int)
+    r = fill(conj, n)
+    for (v, _) in vs
+        if conj
+            @inbounds for i in 1:n; r[i] &= v[i]; end
+        else
+            @inbounds for i in 1:n; r[i] |= v[i]; end
+        end
     end
-    return RList("buy" => Bool[any(b[i] for b in B) for i in 1:n], "sell" => Bool[all(c[i] for c in S) for i in 1:n])
+    return r
+end
+# mit NA: dreiwertig wie R (ein sicheres false bzw. true entscheidet, sonst NA, wenn ein Wert NA ist)
+function _sig_comb3(vs::Vector{Tuple{Vector{Bool},Vector{Bool}}}, conj::Bool, n::Int)
+    dec = zeros(Bool, n); anyna = zeros(Bool, n)
+    for (v, m) in vs
+        @inbounds for i in 1:n
+            anyna[i] |= m[i]
+            dec[i] |= !m[i] && (conj ? !v[i] : v[i])
+        end
+    end
+    out = Vector{Union{Missing,Bool}}(undef, n)
+    @inbounds for i in 1:n
+        out[i] = dec[i] ? !conj : (anyna[i] ? missing : conj)
+    end
+    return out
 end
 
 end # module

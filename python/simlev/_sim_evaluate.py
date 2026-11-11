@@ -130,26 +130,43 @@ def _f64(x) -> np.ndarray:
     return np.ascontiguousarray(x, dtype=np.float64)
 
 
-def _sim_evaluate(sim: dict, trades: dict, fl: dict, cfg: dict, fr: _Frame, start_date: int, stopp_date: int,
-                  tax_unpaid: float) -> dict:
-    """Auswertung im Kern; Meldungen in der Reihenfolge von R (Warnungen, risk_free, Abbruch)."""
-    nm = fl["flag_assets"]
+def _sim_eval_static(fl: dict, cfg: dict, fr: _Frame, start_date: int, stopp_date: int) -> dict:
+    """Teile der Auswertung ohne den Engine-Lauf (seit 1.6.5 eigene Funktion, Paket E: der Studienkern
+    ``_sim_prepared.py`` merkt sie sich): rf (Reihe bzw. None), rf_err (Fehler von risk_free bzw. None), ev = Eingabe
+    von ``_ext.sim_run_prepared`` (day, filled, sc, rf, rf_ok)."""
     flag_date = fl["flag_date"]
     n = int(flag_date.size)
-    rep = sim["report"]
     try:
         rf = _f64(_sim_risk_free(cfg["risk_free"], fr, n))
         rf_err = None
     except (ValueError, TypeError) as e:
         rf, rf_err = None, e
     filled = fl["flag_filled"]
+    ev = (_f64(flag_date), np.ascontiguousarray(filled, dtype=np.int32) if filled.any() else None,
+          _f64([start_date, stopp_date, cfg["start_value"]]), rf, int(rf_err is None))
+    return {"rf_err": rf_err, "ev": ev}
+
+
+def _sim_evaluate(sim: dict, trades: dict, fl: dict, cfg: dict, fr: _Frame, start_date: int, stopp_date: int,
+                  tax_unpaid: float, st: dict | None = None) -> dict:
+    """Auswertung im Kern; Meldungen in der Reihenfolge von R (Warnungen, risk_free, Abbruch). st: schon gerechnetes
+    Ergebnis von ``_sim_eval_static`` (Studienkern) bzw. None."""
+    nm = fl["flag_assets"]
+    rep = sim["report"]
+    if st is None:
+        st = _sim_eval_static(fl, cfg, fr, start_date, stopp_date)
+    day, filled, sc, rf, rf_ok = st["ev"]
     out = _ext.sim_evaluate(
         [_f64(rep[a]["total"]) for a in nm], [_f64(rep[a]["flows"]) for a in nm], [_f64(rep[a]["worth"]) for a in nm],
-        [_f64(rep[a]["money"]) for a in nm], [_f64(sim["market"][a]["asset_price"]) for a in nm], _f64(flag_date),
-        np.ascontiguousarray(filled, dtype=np.int32) if filled.any() else None,
-        _f64([start_date, stopp_date, cfg["start_value"], tax_unpaid]),
+        [_f64(rep[a]["money"]) for a in nm], [_f64(sim["market"][a]["asset_price"]) for a in nm], day, filled,
+        _f64([sc[0], sc[1], sc[2], tax_unpaid]),
         _f64([sim["status"][a]["money"] for a in nm]), _f64([len(trades[a][0]) for a in nm]),
-        _f64([len(trades[a][1]) for a in nm]), rf, int(rf_err is None))
+        _f64([len(trades[a][1]) for a in nm]), rf, rf_ok)
+    return _sim_eval_finish(out, nm, st["rf_err"])
+
+
+def _sim_eval_finish(out, nm, rf_err) -> dict:
+    """Ergebnis der Auswertung (Rückgabe von ``_ext.sim_evaluate``) mit Meldungen (seit 1.6.5 eigene Funktion)."""
     (tw, twr, inv, dd, scal, has_ext, stats, ints, buys, sells, why, um, msgs, err) = out
     for m in msgs:
         _eval_warn(m[0], m[1:])
@@ -257,7 +274,7 @@ def _sim_result(sim: dict, trades: dict, fl: dict, cfg: dict, r: dict, rs: dict,
     res["tax_report"] = tax_report
     res["undefined_metrics"] = um["undefined_metrics"]
     res["open_lots"] = open_lots
-    if cfg["fees_on"]:
+    if cfg["fees_on"] or cfg.get("fee_cust") is not None:   # seit 1.6.5 auch mit Depotgebühr
         res["fees_paid"] = _FEE.paid
     if _is_true(cfg["harvest_mode"]):
         res["harvest_days"] = flag_date[fl["flag_harvest"]].astype("datetime64[D]")

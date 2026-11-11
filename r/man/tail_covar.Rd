@@ -25,7 +25,10 @@ tail_covar(
 \item{state}{Optionaler Zeichenvektor der Zustandsspalten (in ihrer
 eigenen Einheit). \code{NULL} (Standard) = zeitkonstante Quantile. Seit 1.6.4 keine Spalte aus system oder assets.}
 
-\item{q}{Quantil als Anteil (Standard 0.05 = 5-\%-Quantil).}
+\item{q}{Quantil als Anteil (Standard 0.05 = 5-\%-Quantil).
+Seit 1.6.5 ein Fehler bei weniger Perioden als Koeffizienten + 1 und
+eine Warnung, wenn im Rand erwartet weniger als 5 Beobachtungen liegen
+(Perioden mal min(q, 1 - q) < 5; eigene Schwelle).}
 
 \item{frequency}{Renditefrequenz: \code{"week"} (Standard, ISO-Woche),
 \code{"day"} oder \code{"month"}.}

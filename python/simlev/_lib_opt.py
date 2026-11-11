@@ -81,7 +81,10 @@ def _control(control, m, n):
 
 
 def _bounds(b, n):
-    return np.ascontiguousarray(np.resize(np.asarray(b, dtype=np.float64).ravel(), n))
+    v = np.asarray(b, dtype=np.float64).ravel()
+    if v.size == 0:   # seit 1.6.5 (CR2-L-4) wie R rep_len als NA (der Kern meldet sie; bis 1.6.4 still 0)
+        return np.full(n, math.nan)
+    return np.ascontiguousarray(np.resize(v, n))
 
 
 def _scalar(v):

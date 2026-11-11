@@ -14,7 +14,7 @@
  *               Liu 1988; Zweipunktverteilung nach Mammen 1993; Standardnormal), Reset/Spiegelung
  *               (eigenes Verfahren), EVT mit GPD-Rändern per Inversion
  *               x = sigma ((1 - u)^(-xi) - 1)/xi über expm1(-xi log u) (u und 1 - u gleich
- *               verteilt; |xi| < 1e-10: -sigma log u), Kopplung der übrigen Reihen über das
+ *               verteilt; xi = 0 oder xi log u unterläuft: -sigma log u), Kopplung der übrigen Reihen über das
  *               historische Verhältnis (McNeil, Frey 2000 für die Ränder), GARCH(1,1)/GJR mit
  *               gefilterter historischer Simulation (Barone-Adesi, Giannopoulos, Vosper 1999;
  *               Bollerslev 1986; Glosten, Jagannathan, Runkle 1993), Markov-Switching-(AR-)GJR-
@@ -23,7 +23,10 @@
  *             Ohne Zufall: rollierende Volatilität, Regime über Schwellen, Übergangsmatrix mit
  *               Laplace-Glättung.
  *             Ungültige Indizes in den Eingaben ergeben einen Fehler (früher nicht geprüft).
- * Quellen:    Efron, B. (1979). Bootstrap methods: Another look at the jackknife. The Annals of
+ * Quellen:    Chan, T. F., Golub, G. H., LeVeque, R. J. (1983). Algorithms for computing the sample
+ *               variance: analysis and recommendations. The American Statistician 37(3), 242–247
+ *               (korrigierter Zweipass der rollierenden Volatilität, seit 1.6.5).
+ *             Efron, B. (1979). Bootstrap methods: Another look at the jackknife. The Annals of
  *               Statistics 7(1), 1–26.
  *             Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary
  *               observations. The Annals of Statistics 17(3), 1217–1241.
@@ -129,10 +132,12 @@ int sl_boot_idx_stationary(sl_ctx *cx, sl_rng *r, int n_src, int n_out, double L
     return SL_OK;
 }
 
-/* stationäre Verteilung (Potenziteration wie stationary_dist im eigenen Kern) */
+/* stationäre Verteilung: seit 1.6.5 direkt (sl_markov_stat_exact, slc_msgarch.cpp; CR2-M-1, CR1-Y10-1),
+ * nur bei singulärem System die Potenziteration wie bis 1.6.4 (höchstens 2000 Schritte) */
 static void stationary_dist(int K, const double *P, double *pi, double *nw)
 {
     int it, i, j;
+    if (sl_markov_stat_exact(K, P, pi)) return;
     for (j = 0; j < K; j++) pi[j] = 1.0 / K;
     for (it = 0; it < 2000; it++) {
         double s = 0.0, diff = 0.0;
@@ -202,7 +207,8 @@ int sl_boot_idx_tails(sl_ctx *cx, sl_rng *r, int n_out, double p_l, double p_r, 
     for (t = 0; t < n_out; t++) {
         double u = sl_unif01(r);
         if (u < p_l && nl > 0) idx[t] = left_idx[draw_int(r, nl)];
-        else if (u < p_l + p_r && nr > 0) idx[t] = right_idx[draw_int(r, nr)];
+        /* seit 1.6.5 (CR1-R2-1): ein leerer linker Rand fällt in die Mitte (bis 1.6.4 in den rechten Rand) */
+        else if (u >= p_l && u < p_l + p_r && nr > 0) idx[t] = right_idx[draw_int(r, nr)];
         else idx[t] = bulk_idx[draw_int(r, nb)];
     }
     return SL_OK;
@@ -256,9 +262,11 @@ int sl_boot_reset(sl_ctx *cx, sl_rng *r, int n, int k, const double *ret, double
 /* GPD-Ziehung per Inversion */
 static double rgpd(sl_rng *r, double scale, double shape)
 {
-    const double u = sl_unif01(r);
-    if (fabs(shape) < 1e-10) return -scale * log(u);
-    return scale * expm1(-shape * log(u)) / shape;
+    const double u = sl_unif01(r), lu = log(u), x = -shape * lu;
+    /* seit 1.6.5 (CR1-Y23-1): Grenzfall nur bei shape = 0 oder unterlaufendem shape log u (bis 1.6.4 schon
+     * bei |shape| < 1e-10, relativer Fehler bis 1.8e-9) */
+    if (shape == 0.0 || fabs(x) < DBL_MIN) return -scale * lu;
+    return scale * expm1(x) / shape;
 }
 
 int sl_boot_evt(sl_ctx *cx, sl_rng *r, int n, int k, const double *ret, int base, int n_out,
@@ -323,7 +331,8 @@ static void cross_step(cross_state *cs, double *out, int n_out, int t, double ba
 {
     int c;
     for (c = 0; c < cs->m; c++) {
-        double s2 = cs->om[c] + cs->al[c] * cs->eps[c] * cs->eps[c] + cs->be[c] * cs->s2[c], e, g;
+        /* seit 1.6.5 (CR1-1): erster Tag mit der Startvarianz s2_init (bis 1.6.4 schon fortgeschrieben mit eps = 0) */
+        double s2 = t == 0 ? cs->s2[c] : cs->om[c] + cs->al[c] * cs->eps[c] * cs->eps[c] + cs->be[c] * cs->s2[c], e, g;
         if (s2 < VFLOOR) s2 = VFLOOR;
         cs->s2[c] = s2;
         e = sqrt(s2) * cs->z[tstar + (size_t) cs->n_src * c];
@@ -355,7 +364,9 @@ int sl_boot_garch(sl_ctx *cx, sl_rng *r, int n_out, int base, int k, double mu, 
         const double ind = (eps < 0.0) ? 1.0 : 0.0;
         double rb;
         int ts;
-        s2 = omega + (alpha + gamma * ind) * eps * eps + beta * s2;
+        /* seit 1.6.5 (CR1-1, Entscheidung 185 K1): der erste Tag hat die Langfrist-Varianz s2_init; bis 1.6.4
+         * rechnete schon er omega + beta s2_init mit eps = 0 (Varianz rund alpha zu niedrig) */
+        if (t > 0) s2 = omega + (alpha + gamma * ind) * eps * eps + beta * s2;
         if (s2 < VFLOOR) s2 = VFLOOR;
         ts = valid[draw_int(r, nv)] - 1;
         eps = sqrt(s2) * z_base[ts];
@@ -430,7 +441,8 @@ int sl_boot_ms_garch(sl_ctx *cx, sl_rng *r, int n_out, int base, int k, int K, c
             if (rg != old) s2 = 0.5 * s2 + 0.5 * unc_var[rg];     /* Varianz-Glättung beim Regimewechsel */
         }
         ind = (eps < 0.0) ? 1.0 : 0.0;
-        s2 = omega[rg] + (alpha[rg] + gamma[rg] * ind) * eps * eps + beta[rg] * s2;
+        /* seit 1.6.5 (CR1-1): erster Tag mit der unbedingten Varianz des Start-Regimes (bis 1.6.4 fortgeschrieben) */
+        if (t > 0) s2 = omega[rg] + (alpha[rg] + gamma[rg] * ind) * eps * eps + beta[rg] * s2;
         if (s2 < VFLOOR) s2 = VFLOOR;
         sig = sqrt(s2);
         g = rg;
@@ -452,23 +464,46 @@ int sl_boot_ms_garch(sl_ctx *cx, sl_rng *r, int n_out, int base, int k, int K, c
 
 /* ── ohne Zufall ── */
 
+/* Volatilität der Zeilen s ... i (Nettorenditen x - 1) in zwei Durchgängen: Mittel, dann die Summe der
+ * Abweichungsquadrate mit Korrekturglied (korrigierter Zweipass, Chan, Golub, LeVeque 1983) */
+static double roll_vol_span(const double *x, int s, int i)
+{
+    const int cnt = i - s + 1;
+    double sum = 0.0, m, sd = 0.0, sq = 0.0, q;
+    int j;
+    if (cnt <= 1) return 0.0;
+    for (j = s; j <= i; j++) sum += x[j] - 1.0;
+    m = sum / cnt;
+    for (j = s; j <= i; j++) { const double d = (x[j] - 1.0) - m; sd += d; sq += d * d; }
+    q = (sq - sd * sd / cnt) / (cnt - 1);
+    return sqrt(q > 0.0 ? q : 0.0);
+}
+
+/* seit 1.6.5 (Entscheidung 141, T2-R11): je Fenster zwei Durchgänge statt laufender Summen mit Abziehen
+ * (bis 1.6.4 Auslöschung in sq - cnt m^2: Geldmarkt-artige Reihen bis 7e-11, nach Ausreißern dauerhaft
+ * bis 5e-10 relativ daneben); Aufwand n * window statt n */
 int sl_rolling_vol(sl_ctx *cx, int n, const double *x, int window, double *vol)
 {
-    double sum = 0.0, sq = 0.0;
     int i;
     if (window <= 0) return sl_fail(cx, SL_EARG, "window muss positiv sein");
     if (window > n) window = n;
+    for (i = 0; i < n; i++) vol[i] = roll_vol_span(x, i + 1 < window ? 0 : i - window + 1, i);
+    return SL_OK;
+}
+
+/* seit 1.6.5 (E-T2-6): Fenster in Kalendertagen; Zeile i umfasst die Zeilen j <= i mit
+ * day[j] > day[i] - days (day aufsteigend, z. B. Tage seit 1970-01-01) */
+int sl_rolling_vol_days(sl_ctx *cx, int n, const double *x, const double *day, double days, double *vol)
+{
+    int i, s = 0;
+    if (!(days >= 1.0 && days <= 1e9)) return sl_fail(cx, SL_EARG, "days muss eine Zahl >= 1 sein");
     for (i = 0; i < n; i++) {
-        const double v = x[i] - 1.0;
-        int cnt;
-        sum += v; sq += v * v;
-        if (i >= window) { const double o = x[i - window] - 1.0; sum -= o; sq -= o * o; }
-        cnt = (i + 1) < window ? (i + 1) : window;
-        if (cnt <= 1) vol[i] = 0.0;
-        else {
-            const double m = sum / cnt, q = (sq - cnt * m * m) / (cnt - 1);
-            vol[i] = sqrt(q > 0.0 ? q : 0.0);
-        }
+        if (!isfinite(day[i]) || (i > 0 && !(day[i] > day[i - 1])))
+            return sl_fail(cx, SL_EARG, "interner Fehler: Datum der Zeilen nicht streng aufsteigend");
+    }
+    for (i = 0; i < n; i++) {
+        while (s < i && !(day[s] > day[i] - days)) s++;
+        vol[i] = roll_vol_span(x, s, i);
     }
     return SL_OK;
 }
@@ -497,7 +532,8 @@ int sl_estimate_trans_mat(sl_ctx *cx, int n, const int32_t *regimes, int K, doub
     for (i = 0; i < K; i++) {
         double s = 0.0;
         for (j = 0; j < K; j++) { P[i + K * j] += alpha; s += P[i + K * j]; }
-        for (j = 0; j < K; j++) P[i + K * j] /= s;
+        /* seit 1.6.5 (CR1-Y2-2): Zeile ohne Übergang (nur mit alpha = 0) gleichverteilt statt NaN */
+        for (j = 0; j < K; j++) P[i + K * j] = s > 0.0 ? P[i + K * j] / s : 1.0 / K;
     }
     return SL_OK;
 }

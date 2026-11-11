@@ -29,10 +29,13 @@ function _r_as_int1(v)
     (v === nothing || v === missing) && return nothing
     v isa Bool && return Int(v)
     if v isa AbstractString
-        t = strip(v)
-        t == "NA" && return nothing
-        f = tryparse(Float64, t)
-        (f === nothing || occursin(r"^[+-]?(inf|nan)"i, t)) && (@warn "NAs introduced by coercion"; return nothing)
+        # seit 1.6.5 (CR2-Q-3) wie R's IntegerFromString (wie Python): leerer Text NA ohne Warnung, sonst R_strtod mit
+        # Rest nur aus Leerraum; NaN ohne Warnung, außerhalb des int-Bereichs (auch Inf) die Bereichswarnung
+        isws(c) = c in (' ', '\t', '\n', '\v', '\f', '\r')
+        all(isws, v) && return nothing
+        cs = collect(v)
+        f, e = SimLev.RExpr.r_strtod(cs, 1)
+        (e == 1 || !all(isws, cs[e:end])) && (@warn "NAs introduced by coercion"; return nothing)
         v = f
     end
     v isa Real || return nothing
@@ -690,6 +693,8 @@ const _NOQ = '\0'
 function _strwid(s::AbstractString, q::Char = _NOQ)
     n = 0
     for c in s
+        # seit 1.6.5 (CR2-X4-4): ungültiges UTF-8 wie R als \\xHH je Byte (Breite 4; bis 1.6.4 InvalidCharError)
+        isvalid(c) || (n += 4 * ncodeunits(c); continue)
         k = UInt32(c)
         if 0x20 <= k < 0x7F
             if c == '\\'
@@ -714,6 +719,12 @@ const _ESC = Dict('\a' => "\\a", '\b' => "\\b", '\f' => "\\f", '\n' => "\\n", '\
 function _escape(s::AbstractString, q::Char = _NOQ)
     io = IOBuffer()
     for c in s
+        if !isvalid(c)   # seit 1.6.5 (CR2-X4-4) wie R: \\xHH je Byte
+            for b in codeunits(string(c))
+                print(io, "\\x", string(b, base = 16, pad = 2))
+            end
+            continue
+        end
         k = UInt32(c)
         if 0x20 <= k < 0x7F
             if c == '\\'
@@ -853,7 +864,8 @@ function paste(args...; sep = " ", collapse = nothing)
     allscalar = true
     for a in args
         v = _as_v(a)
-        v.type === :NULL && continue
+        # seit 1.6.5 (CR2-R-6) wie R ein leerer Vektor ("" neben anderen; bis 1.6.4 übergangen)
+        v.type === :NULL && (push!(vecs, String[]); continue)
         v.scalar || (allscalar = false)
         push!(vecs, String[q === nothing ? "NA" : q for q in _as_character_list(v)])
     end

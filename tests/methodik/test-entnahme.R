@@ -96,7 +96,9 @@ test_that("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf ders
   tabelle("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf derselben Stueckzahl",
     wert(tax_w,
          tax_e,
-         quelle = "Handrechnung (Herleitung im Test)", tol = 1e-9))
+         # seit 1.6.5 (Entscheidung 172) legt die Engine den Rest des Erloeses (unter einem Cent) am Ereignistag wieder
+         # an; die Stueckzahl je Verkauf ist netto, die Steuer weicht darum relativ um rund 1e-9 ab
+         quelle = "Handrechnung (Herleitung im Test)", tol = 1e-8))
   # Handrechnung Verkauf 1 (Lot 1 ganz, Rest aus Lot 2): sum s_i (P - price_i) - sum vp_i s_i / units_i, x 0,7 x 26,375 %
   s <- c(L$units[1], units[1] - L$units[1], 0)
   tabelle("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf derselben Stueckzahl",
@@ -648,7 +650,8 @@ test_that("+ k Monate auf das Monatsende begrenzt (series_align_macro, overfit_w
   dd <- data.frame(date = seq.Date(as.Date("2010-01-30"), by = "day", length.out = n)); dd$A <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
   st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
   ps <- param_search(dd, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n)), param_space(n = c(10, 20)))
-  wf <- overfit_walk_forward(ps, train = 1 / 12, test = 1 / 12)
+  # seit 1.6.5 (PR2-5): Punkt n = 20 ist Nov./Dez. 2011 ganz in Kasse (Sharpe ohne Schwankung, Warnung b2.wf_flach gewollt)
+  expect_warning(wf <- overfit_walk_forward(ps, train = 1 / 12, test = 1 / 12), "ohne Schwankung")
   tabelle("+ k Monate auf das Monatsende begrenzt (series_align_macro, overfit_walk_forward, .anniv_ends)",
     wert(wf$windows$test_start[1],
          as.Date("2010-02-28"),
@@ -855,10 +858,17 @@ test_that("Pfadende-VP mit Verlusttopf nach dem Zwangsverkauf (Differenz wie sim
   r <- suppressMessages(simulation(d, s, start_value = 1e6, tax = tax_profile(base_rate = 2.5)))
   we <- withdrawal_simulation(matrix(1.10, 1, 1), withdrawal_rule("constant", rate = 0), start_value = 990000, tax = tax_profile(),
                               base_rate = 2.5, partial_exemption = 30, cost_basis = 100, loss_carryforward = 2000)
+  # seit 1.6.5 (MA1-2, Entscheidung 186 M2) zahlt simulation() die VP-Steuer aus dem freien Geld von B (nach dem
+  # Ausstieg 8000 EUR), ohne Verkauf von A; die Entnahme hat kein zweites Asset und verkauft weiter (2441,18 = VP
+  # 2440,71 + Nachverkauf 0,47)
   tabelle("Pfadende-VP mit Verlusttopf nach dem Zwangsverkauf (Differenz wie simulation())",
     wert(we$paths$taxes,
-         r$tax_report$total_taxes_paid,
-         quelle = "2441,18 = VP 2440,71 + Nachverkauf 0,47", tol = 1e-9))
+         2441.18,
+         quelle = "VP 2440,71 + Nachverkauf 0,47", tol = 1e-6),
+    wert(r$tax_report$total_taxes_paid,
+         (990000 * 0.025 * 0.7 * 0.7 - 2000 - 1000) * t,
+         quelle = "VP (Basisertrag 990000 x 2,5 % x 0,7, TFS 30 %) abzueglich Verlusttopf 2000 und Pauschbetrag 1000, ohne Nachverkauf",
+         tol = 1e-9))
   # Verlustverkauf (Basis ueber dem Wert): Verkauf im ablaufenden Jahr erhoeht den Topf, Erstattung ins Depot
   wl <- withdrawal_simulation(matrix(1.10, 1, 1), withdrawal_rule("constant", rate = 0), start_value = 1e6, tax = tax_profile(),
                               base_rate = 2.5, partial_exemption = 30, cost_basis = 120)

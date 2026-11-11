@@ -17,6 +17,9 @@
 #' @keywords internal
 #' @noRd
 .hmm_viterbi <- function(lB, lA, lp0) {
+  # seit 1.6.5 (CR2-X7-2) ohne NA/NaN ueber den Kern (sl_hmm_viterbi, erstes Maximum wie max.col "first" und
+  # which.max; gleicher Pfad), sonst wie bisher (gleiche Meldung)
+  if (!anyNA(lB) && !anyNA(lA) && !anyNA(lp0)) return(.sl_hmm_viterbi(lB, lA, lp0))
   Tn <- nrow(lB); k <- ncol(lB); jj <- seq_len(k)
   dl <- lp0 + lB[1, ]; bp <- matrix(0L, Tn, k)
   for (t in seq_len(Tn)[-1]) {
@@ -198,7 +201,7 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
   frequency <- match.arg(frequency)
   fn <- "regime_hmm"                                              # seit 1.6.4 vor der Rechnung (K42 E4)
   if (is.factor(k) || !is.numeric(k) || length(k) != 1 || !is.finite(k) || k != round(k) || k < 2)   # seit 1.6.4 ohne Wert
-    stop("regime_hmm: k muss eine ganze Zahl >= 2 sein; ein Zustand w\u00e4re eine einzige Normalverteilung ohne Regime.")
+    stop(chk_msg("c.m_regime_hmm"))
   chk_max(k, SL_MAX_N, fn, "k")                   # B-054 (bis 1.6.3 R: sprintf-Fehler bei k = 1e9)
   .e4_names(columns, fn, "columns")
   .e4_data(data, columns, fn)                                     # B-015
@@ -210,8 +213,7 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
   X <- as.matrix(rd[, columns, drop = FALSE]); Tn <- nrow(X); d <- ncol(X)
   if (Tn < 50 * k) stop(sprintf("regime_hmm: zu wenige Perioden f\u00fcr die Zustandszahl (%d Perioden, mindestens %d).", Tn, 50 * k))
   flat <- columns[apply(X, 2, .sl_sd) == 0]
-  if (length(flat)) stop(sprintf("regime_hmm: Spalte(n) %s ohne Schwankung (alle Periodenrenditen gleich, z. B. konstante Kurse); kein Modell sch\u00e4tzbar.",
-                                 paste0("'", flat, "'", collapse = ", ")))
+  if (length(flat)) stop(chk_msg("c.m_regime_hmm_2", paste0("'", flat, "'", collapse = ", ")))
   ppy <- (Tn - 1) / (as.numeric(rd$date[Tn] - rd$date[1]) / 365.25)
   ridge <- diag(1e-10 + 1e-6 * mean(apply(X, 2, .sl_var)), d)
   rs <- if (isTRUE(n_start >= 2)) .sl_main_stream(seed, "regime_hmm") else NULL   # Hauptstrom, nur bei Zufallsstarts
@@ -220,9 +222,12 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
     else .hmm_init_cl(X, .sl_sample(k, Tn, replace = TRUE, stream = rs), k, ridge)
   })
   fits <- lapply(inits, function(i) tryCatch(.hmm_em(X, k, i, max_iter, tol, ridge), error = function(e) NULL))
+  n_failed <- sum(vapply(fits, is.null, TRUE))                    # seit 1.6.5 (K34, CR2-E-11)
   fits <- Filter(Negate(is.null), fits)
-  if (!length(fits)) stop("regime_hmm: Sch\u00e4tzung fehlgeschlagen.")
+  if (!length(fits)) stop(chk_msg("c.m_regime_hmm_3"))
   f <- fits[[which.max(vapply(fits, `[[`, 0, "ll"))]]
+  converged <- f$iter < max_iter
+  if (!converged) warning(chk_msg("c.hmm_grenze", fn, max_iter), call. = FALSE)
   vol <- vapply(f$S, function(s) sqrt(mean(diag(s))), 0); o <- order(vol)
   A <- f$A[o, o, drop = FALSE]; mu <- f$mu[o, , drop = FALSE]; S <- f$S[o]
   lB <- f$lB[, o, drop = FALSE]
@@ -234,7 +239,8 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
                  correlation = lapply(S, stats::cov2cor),
                  filtered = f$filtered[, o, drop = FALSE], smoothed = f$smoothed[, o, drop = FALSE], viterbi = path,
                  dates = rd$date, columns = columns, k = k, loglik = f$ll, bic = -2 * f$ll + np * log(Tn), initial = stats::setNames(f$p0[o], paste0("Z", seq_len(k))),
-                 duration = 1 / (1 - diag(A)), frequency = frequency, ppy = ppy, share = colMeans(f$smoothed[, o, drop = FALSE])),
+                 duration = 1 / (1 - diag(A)), frequency = frequency, ppy = ppy, share = colMeans(f$smoothed[, o, drop = FALSE]),
+                 iterations = as.integer(f$iter), converged = converged, n_failed = as.integer(n_failed)),   # seit 1.6.5 (K34)
             class = "SimLevHMM")
 }
 
@@ -249,6 +255,9 @@ print.SimLevHMM <- function(x, ...) {
   for (j in seq_len(x$k)) cat(sprintf("  Z%d: Anteil %.0f %%, erwartete Dauer %.1f Perioden, Rendite %s %% p. a., Vola %s %%\n",
                                       j, 100 * x$share[j], x$duration[j], paste(sprintf("%.1f", x$means[j, ]), collapse = "/"),
                                       paste(sprintf("%.1f", x$volatility[j, ]), collapse = "/")))
+  # seit 1.6.5 (K34): Schritte der Schaetzung (aeltere Objekte ohne das Feld: keine Zeile)
+  if (!is.null(x$iterations)) cat(sprintf("  Schritte: %d%s%s\n", x$iterations, if (isTRUE(x$converged)) "" else " (Grenze erreicht)",
+                                          if (isTRUE(x$n_failed > 0)) sprintf(", %d Startwert(e) verworfen", x$n_failed) else ""))
   cat("\n\u00dcbergangsmatrix\n"); print(round(x$transition, 3))
   cat(sprintf("\nAktueller Zustand (gefiltert): Z%d mit %.0f %%\n", which.max(x$filtered[nrow(x$filtered), ]), 100 * max(x$filtered[nrow(x$filtered), ])))
   invisible(x)
@@ -317,10 +326,10 @@ regime_states <- function(x, dates, type = c("filtered", "smoothed", "viterbi"),
     chk_stop("e4.daten", fn)                                      # Entscheidung 7 und 15 (keine Zahl, kein Faktor)
   chk_int1(state_prob, fn, "state_prob", lo = 1, hi = x$k)        # B-007
   chk_int1(lag, fn, "lag", lo = 0)                                # B-012
-  if (type != "filtered") warning("Gegl\u00e4ttete bzw. Viterbi-Zust\u00e4nde nutzen Zukunftsdaten - nur zur Beschreibung verwenden.")
+  if (type != "filtered") warning(chk_msg("c.m_regime_states"))
   d <- .to_date(dv, "regime_states: dates")
   P <- switch(type, filtered = x$filtered, smoothed = x$smoothed, viterbi = NULL)
-  v <- if (output == "probability") { if (is.null(P)) stop("Wahrscheinlichkeit nicht f\u00fcr Viterbi.") ; P[, state_prob] }
+  v <- if (output == "probability") { if (is.null(P)) stop(chk_msg("c.m_regime_states_2")) ; P[, state_prob] }
        else if (is.null(P)) x$viterbi else max.col(P, ties.method = "first")
   k <- findInterval(as.numeric(d), as.numeric(x$dates) + lag)
   ifelse(k > 0, v[pmax(k, 1L)], NA)

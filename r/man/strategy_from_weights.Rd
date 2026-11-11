@@ -18,9 +18,9 @@ sonst Fehler schon hier).}
 in Prozent). Ein unbenannter einzelner Wert gilt fuer alle Assets;
 benannte Vektoren werden je Asset zugeordnet, auch mit einem einzigen
 Element wie \code{partial_exemption = c(aktien = 30)} (fehlende Assets
-behalten den Standardwert, Namen ohne passendes Asset werden
-ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
-ist, gilt fuer alle Assets.
+behalten den Standardwert). Seit 1.6.5 sind Namen, die kein Asset sind,
+und doppelte Namen ein Fehler (bis 1.6.4 still uebergangen; ein einzelner
+benannter Wert mit fremdem Namen galt fuer alle Assets).
 
 \code{wrapper} (Fonds-Wrapper, \code{\link{wrapper_config}}) ist eine
 Ausnahme, weil ein \code{SimLevWrapperConfig} selbst eine benannte Liste

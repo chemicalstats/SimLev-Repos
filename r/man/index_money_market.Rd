@@ -25,6 +25,7 @@ Datenzeile; seit 1.6.4 ist 0 Zeilen ein Fehler), eine Spalte als Zinsangabe nume
 }
 \value{
 Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}).
+Seit 1.6.5 muss \code{date} aufsteigend und ohne NA sein (sonst Fehler); eine Stufentabelle als \code{rate}, die erst nach dem ersten Datentag beginnt, ergibt eine Warnung (davor gilt ihr erster Wert).
 }
 \description{
 Bildet einen Geldmarkt- bzw. Tagesgeld-Index (Niveau) aus einem Zinssatz,

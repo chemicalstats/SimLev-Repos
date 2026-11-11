@@ -65,6 +65,12 @@ hoechstens um die groesste Zeilenluecke der Reihe (hoechstens 7 Tage)
 vor dem 31.12. liegt, bei Handelstagen also z. B. der 30.12.
 Die Daten werden nach Datum sortiert, doppelte Daten wie in
 \code{\link[=result_analysis]{result_analysis()}} behandelt.
+Seit 1.6.5 zaehlt die Haltedauer in Kalenderjahren: fehlt ein Kalenderjahr in den Daten, bleiben die Zellen,
+die es als Start- oder Endjahr brauchen, leer (bis 1.6.4 zaehlten die Zeilen der Jahresend-Tabelle). Bei groben
+Daten (mittlerer Zeilenabstand ueber 7 Tage, z. B. Monatsdaten am Monatsersten) ist das Jahresende der letzte Wert
+im Dezember und das erste, unvollstaendige Jahr entfaellt; bei Jahresdaten (eine Zeile je Jahr) entfaellt das erste
+Jahr. Fallen alle Zeilen auf den 1.1. (Jahresdaten zum Jahresanfang), gilt jeder Wert als Jahresende des Vorjahres:
+die Rendite vom 1.1.2010 zum 1.1.2011 steht in der Zeile 2010 (bis 1.6.4 und bei anderen Daten das Jahr des Datums).
 }
 \examples{
 set.seed(1); n <- 12 * 365

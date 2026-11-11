@@ -35,6 +35,15 @@ Kaufen-und-Halten-Wert des Portfolios (auch bei \code{rebalance =
 nicht darunter; \code{NA} =
 nicht erholt bzw. Daten enden) und je Anlage deren Rendite im Fenster in
 Prozent.
+Seit 1.6.5: \code{days_to_recover} auch, wenn das Fenster an der letzten
+Datenzeile endet (0, wenn der Wert dort nicht unter dem Start liegt); mit
+\code{rebalance = TRUE} zusaetzlich die Spalte
+\code{days_to_recover_rebalanced} (Erholung des taeglich umgeschichteten
+Portfolios, nach dem Fenster mit denselben Umschichtungen fortgeschrieben,
+E-T3-1). Eine Anlage, die wie eine Ergebnisspalte heisst, ist ein Fehler;
+liegt eine Krise nur teilweise in den Daten (Beginn bzw. Ende mehr als 7
+Tage daneben), kommt ein Hinweis; Anlagen mit Gewicht 0 brauchen keinen
+Startkurs.
 }
 \description{
 Rechnet ein heutiges Portfolio durch historische Krisenfenster

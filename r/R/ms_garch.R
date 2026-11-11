@@ -26,10 +26,10 @@
 #' @noRd
 .ms_garch_check <- function(K, model) {
   if (!is.character(model) || length(model) != 1L || is.na(model) || !model %in% c("sGARCH", "gjrGARCH"))
-    stop("MS-GARCH: Varianzmodell je Regime (params ms_garch_model, ms_ar_garch_model bzw. tvtp_garch_model) muss \"sGARCH\" oder \"gjrGARCH\" sein.")   # seit 1.6.4 ohne Wert (Entscheidung 8)
+    stop(chk_msg("b1.m_ms_garch_check"))   # seit 1.6.4 ohne Wert (Entscheidung 8)
   # seit 1.6.4 mit Obergrenze 64 des Kerns (B-097; bis 1.6.3 je Sprache andere Meldung des Kerns)
   if (is.factor(K) || !is.numeric(K) || length(K) != 1L || !is.finite(K) || K != round(K) || K < 2 || K > 64)
-    stop("MS-GARCH: Anzahl Regime (params ms_n_regimes, ms_ar_n_regimes bzw. tvtp_n_regimes) muss eine ganze Zahl >= 2 und <= 64 sein.")
+    stop(chk_msg("b1.m_ms_garch_check_2"))
   invisible(TRUE)
 }
 

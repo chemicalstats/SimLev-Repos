@@ -795,6 +795,7 @@ EIN[["sensitivity/lev_ko"]] <- I
 EIN[["sensitivity/lvs_basic"]] <- I
 EIN[["sensitivity/lvs_opt"]] <- I
 EIN[["sensitivity/lvs_none"]] <- I
+EIN[["sensitivity/lvs_tie"]] <- I
 
 # Vorspann je Szenario bzw. Tabellenzeile (gemeinsame Objekte des Moduls)
 VOR <- list(r = r"(st <- create_strategy(A = asset_config('etf', 'bnh', 0.6, spread = 0.1), B = asset_config('etf', 'bnh', 0.4, spread = 0.1))
@@ -846,7 +847,7 @@ SZ("umschichten", "sensitivity_rebalancing mit Bändern, relativ und mit Sparpla
     r"(x <- planning_lumpsum_vs_dca(d5, st0, amount = 6000, months = 6, horizon = 2, step = 12, sim_args = list(rebalance = rebalance_plan(span = 3))); list(x, attr(x, 'summary')))",
     r"(x = SE.planning_lumpsum_vs_dca(d5, st0, amount=6000, months=6, horizon=2, step=12, sim_args={'rebalance': rebalance_plan(span=3)}); result = [x, x.attrs['summary']])",
     r"(x = SE.planning_lumpsum_vs_dca(d5, st0; amount = 6000, months = 6, horizon = 2, step = 12, sim_args = RList("rebalance" => SL.rebalance_plan(; span = 3))); result = [x, attrs(x)["summary"]])", inp = ein("sensitivity/ls_rebal", c("d5")))))
-SZ("hebel", "series_leverage mit Knock-out, sensitivity_leverage mit Strategie, mit Spread und ohne passende Strategie", vor = VOR, teile = list(
+SZ("hebel", "series_leverage mit Knock-out, sensitivity_leverage mit Strategie, mit Spread und mit Gleichstand ohne Kosten (seit 1.6.5 optimal NA)", vor = VOR, teile = list(
   lev_ko = teil(
     r"(series_leverage(d, 'A', leverage = 80))",
     r"(result = SE.series_leverage(d, 'A', leverage=80))",
@@ -859,10 +860,16 @@ SZ("hebel", "series_leverage mit Knock-out, sensitivity_leverage mit Strategie, 
     r"(x <- sensitivity_leverage(d, 'A', leverages = c(1, 1.5, 2), rate = 2, spread = 0.4); list(attr(x, 'optimal'), attr(x, 'kind')))",
     r"(x = SE.sensitivity_leverage(d, 'A', leverages=[1, 1.5, 2], rate=2, spread=0.4); result = [x.attrs['optimal'], x.attrs['kind']])",
     r"(x = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2], rate = 2, spread = 0.4); result = [attrs(x)["optimal"], attrs(x)["kind"]])", inp = ein("sensitivity/lvs_opt", c("d"))),
-  lvs_none = teil(
-    r"(x <- sensitivity_leverage(d, 'A', leverages = c(1, 2), strategy = create_strategy(X = asset_config('etf', 'bnh', spread = 0.1))); list(x, attr(x, 'optimal')))",
-    r"(x = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], strategy=create_strategy(X=asset_config(asset_class='etf', trading='bnh', spread=0.1))); result = [x, x.attrs['optimal']])",
-    r"(x = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], strategy = create_strategy("X" => asset_config("etf", "bnh", spread = 0.1))); result = [x, attrs(x)["optimal"]])", inp = ein("sensitivity/lvs_none", c("d")))))
+  # seit 1.6.5 (CR2-H-6): eine Strategie ohne LEV ist ein Fehler (Tabelle fehler); hier der Gleichstand ohne
+  # Finanzierungskosten (CR2-X15-1): optimal = NA mit Hinweis, Druckzeile
+  lvs_tie = teil(
+    r"(suppressMessages(sensitivity_leverage(d, 'A', leverages = c(1, 2, 3))))",
+    r"(result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2, 3]))",
+    r"(result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2, 3]))", druck = TRUE, inp = ein("sensitivity/lvs_tie", c("d"))),
+  lvs_tie_opt = teil(
+    r"(x <- suppressMessages(sensitivity_leverage(d, 'A', leverages = c(1, 2, 3))); attr(x, 'optimal'))",
+    r"(x = SE.sensitivity_leverage(d, 'A', leverages=[1, 2, 3]); result = x.attrs['optimal'])",
+    r"(x = SE.sensitivity_leverage(d, "A"; leverages = [1, 2, 3]); result = attrs(x)["optimal"])", inp = ein("sensitivity/lvs_tie", c("d")))))
 ref_done()
 
 ref_init("sensitivity", gruppe = "fehler")
@@ -900,7 +907,15 @@ TB("sensitivity_leverage", "Meldungen und Warnungen von sensitivity_leverage je 
   zeile("lvs_err_cores",   # Standard "auto"; ungültig -> Meldung par.cores (seit 1.6.4, Entscheidung 113)
     r"(sensitivity_leverage(d, 'A', leverages = c(1, 1.5, 2), rate = 2, spread = 0.4, cores = 0))",
     r"(result = SE.sensitivity_leverage(d, 'A', leverages=[1, 1.5, 2], rate=2, spread=0.4, cores=0))",
-    r"(result = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2], rate = 2, spread = 0.4, cores = 0))", inp = ein("sensitivity/lvs_opt", c("d")))))
+    r"(result = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2], rate = 2, spread = 0.4, cores = 0))", inp = ein("sensitivity/lvs_opt", c("d"))),
+  zeile("lvs_none",   # seit 1.6.5 (CR2-H-6): Strategie ohne das Asset LEV ist ein Fehler (bis 1.6.4 leere Tabelle)
+    r"(sensitivity_leverage(d, 'A', leverages = c(1, 2), strategy = create_strategy(X = asset_config('etf', 'bnh', spread = 0.1))))",
+    r"(result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], strategy=create_strategy(X=asset_config(asset_class='etf', trading='bnh', spread=0.1))))",
+    r"(result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], strategy = create_strategy("X" => asset_config("etf", "bnh", spread = 0.1))))", inp = ein("sensitivity/lvs_none", c("d"))),
+  zeile("lvs_allfail",   # seit 1.6.5 (CR2-H-6): alle Läufe fehlgeschlagen = Fehler mit der Meldung der Läufe
+    r"(sensitivity_leverage(d, 'A', leverages = c(1, 2), sim_args = list(start_value = -1)))",
+    r"(result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], sim_args={'start_value': -1}))",
+    r"(result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], sim_args = (start_value = -1,)))", inp = ein("sensitivity/lvs_none", c("d")))))
 TB("planning_lumpsum_vs_dca", "Meldungen und Warnungen von planning_lumpsum_vs_dca je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("ls_tax",
     r"(planning_lumpsum_vs_dca(d5, st1, months = 6, horizon = 3, step = 12, sim_args = list(tax = tax_profile())))",

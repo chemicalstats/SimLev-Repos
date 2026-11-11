@@ -20,7 +20,8 @@ portfolio_optimize(
   frequency = c("week", "day", "month"),
   resample = 0L,
   block = NULL,
-  seed = NULL
+  seed = NULL,
+  cvar_coarse = TRUE
 )
 }
 \arguments{
@@ -42,7 +43,12 @@ Spalten der Matrix.}
 \code{equal} ignorieren \code{lower}/\code{upper} (mit Warnung, wenn
 andere als die Standardgrenzen angegeben sind). \code{risk_parity},
 \code{hrp} und \code{inverse_vol} brechen bei Anlagen ohne Schwankung
-(Volatilitaet 0, z. B. Geldmarkt mit festem Zins) mit Fehler ab.}
+(Volatilitaet 0, z. B. Geldmarkt mit festem Zins) mit Fehler ab; seit
+1.6.5 erhaelt eine einzige Anlage in allen Verfahren das Gewicht 1 (ohne
+Schwankung mit dem Hinweis "Portfolio ohne Schwankung"). Bei
+\code{max_sharpe} und \code{max_diversification} wird der Suchbereich der
+Risikoaversion (0,05 bis 500) seit 1.6.5 verlaengert, wenn das Optimum am
+Rand liegt (sehr ruhige Anlagen, sehr kleine Praemie).}
 
 \item{lower, upper}{Unter- und Obergrenzen der Gewichte als Anteil (0.6 =
 60 \%): Skalar fuer alle Anlagen, benannter Vektor (nicht genannte
@@ -61,7 +67,22 @@ aber eine Warnung (vermutlich Prozent statt Anteil, z. B. 26 statt
 Wolf 2004), \code{"ewma"} (exponentiell gewichtet, Halbwertszeit ein
 Viertel der Stichprobe, 5 bis 52 Perioden), \code{"denoise"}
 (Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
-\code{"gerber"} (Gerber-Statistik, Gerber et al. 2022).}
+\code{"gerber"} (Gerber-Statistik, Gerber et al. 2022).
+\code{"ledoit_wolf"} eignet sich fuer Anlagen aehnlicher Schwankung: das
+Ziel (mittlere Varianz mal Einheitsmatrix) hebt die Varianz ruhiger
+Anlagen an (z. B. Geldmarkt neben Aktien) und verschiebt die Gewichte;
+unterscheiden sich die Stichprobenvarianzen um mehr als das 100-Fache,
+kommt ein Hinweis. \code{"gerber"} zaehlt gemeinsame Bewegungen ueber der
+Schwelle 0,5 Standardabweichungen; die Schwelle haengt an der
+gewoehnlichen Standardabweichung, ein einzelner grosser Ausreisser kann
+die Korrelation einer Anlage deshalb stark verzerren (robust nur gegen
+kleine Bewegungen). \code{"denoise"} setzt alle Eigenwerte unter der
+Marchenko-Pastur-Grenze \eqn{(1 + \sqrt{N/T})^2} gleich; die Grenze gilt
+fuer viele Anlagen, bei wenigen Anlagen (z. B. 2 oder 3) loescht sie auch
+echte Korrelationen (bei N = 2 gilt jede Korrelation mit |r| < 0,275 als
+Rauschen, wenn T = 120). \code{"ewma"}, \code{"denoise"} und
+\code{"gerber"} heben Eigenwerte unter 1e-12 auf 1e-12 an (Renditen in
+sehr kleiner Einheit vorher skalieren).}
 
 \item{mu}{Optional erwartete Renditen in Prozent p. a. (5 = 5 \%), endlich,
 ohne NA: benannter Vektor (unbekannte Namen sind ein Fehler), unbenannter
@@ -81,7 +102,10 @@ Anteil p. a.}
 \item{budget}{Risikobudgets fuer \code{risk_parity}: Skalar (gleiche
 Budgets), benannter Vektor (nicht genannte Anlagen 0) oder unbenannter
 Vektor mit einem Wert je Anlage (Spaltenreihenfolge); Werte >= 0, wird
-auf Summe 1 normiert. \code{NULL} (Standard) = gleiche Risikobeitraege.}
+auf Summe 1 normiert. \code{NULL} (Standard) = gleiche Risikobeitraege.
+Anlagen mit Budget 0 erhalten seit 1.6.5 das Gewicht 0, die Risikoparitaet
+gilt dann fuer die Anlagen mit Budget > 0 (bis 1.6.4 erfuellte das Ergebnis
+die Budgets nicht).}
 
 \item{alpha}{Tail-Wahrscheinlichkeit als Anteil fuer CVaR und CDaR
 (Standard 0.05 = schlechteste 5 \% der Perioden bzw. Drawdowns), im
@@ -106,6 +130,12 @@ mindestens 2 (T = Anzahl Perioden).}
 Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
 Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
 Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
+
+\item{cvar_coarse}{Nur \code{min_cvar}: \code{TRUE} (Standard) glaettet in
+zwei Stufen (0,05 und 0,005 Standardabweichungen der Renditen),
+\code{FALSE} nur in der feinen Stufe - je nach Daten bis rund 40 \% schneller, die Gewichte
+aendern sich etwa in der 5. Nachkommastelle (seit 1.6.5). Erreicht die
+letzte Stufe die Schrittgrenze (2000 Schritte), warnt die Funktion.}
 }
 \value{
 Objekt der Klasse \code{SimLevOptimization}, eine Liste mit
@@ -142,7 +172,12 @@ wie in \code{\link[=dependence_analysis]{dependence_analysis()}} aufbereitet (Fo
 letzte Zeile je ISO-Woche bzw. Kalendermonat, bei \code{"day"} jede Zeile
 ausser Tagen, an denen sich keine Anlage bewegt) und in einfache Renditen
 \eqn{P_t / P_{t-1} - 1} (Anteile) umgerechnet; die Perioden je Jahr
-werden aus den Daten ermittelt. Jede andere Eingabe wird als Matrix
+werden aus den Daten ermittelt. Seit 1.6.5 entfaellt eine angebrochene
+letzte Periode: ist der Abstand der letzten beiden Periodenenden kuerzer
+als die Haelfte des mittleren Abstands (z. B. Daten bis Montag bei
+Wochenrenditen), zaehlt diese Periode weder in den Perioden je Jahr noch
+in Mittelwert und Kovarianz (Daten bis zum Periodenende unveraendert;
+\code{portfolio_rolling()} rechnet seine Fenster wie bisher). Jede andere Eingabe wird als Matrix
 einfacher Periodenrenditen als Anteil (0.01 = 1 \%) behandelt; Zeilen mit
 fehlenden Werten entfallen, unendliche Renditen (\code{Inf}) sind ein
 Fehler (mit Spalte und Zeile), die Perioden je Jahr sind dann fest 252
@@ -155,7 +190,7 @@ Renditen und Kovarianz werden mit diesen Perioden je Jahr annualisiert.
 \code{max_sharpe} \tab maximale Sharpe Ratio (Suche entlang der Effizienzgrenze) \cr
 \code{max_diversification} \tab maximales Diversifikationsverhaeltnis \eqn{w'\sigma / \sqrt{w'\Sigma w}} (Choueifaty & Coignard 2008) \cr
 \code{risk_parity} \tab gleiche (oder vorgegebene, \code{budget}) Risikobeitraege (Spinu 2013) \cr
-\code{hrp} \tab Hierarchical Risk Parity (Lopez de Prado 2016) \cr
+\code{hrp} \tab Hierarchical Risk Parity (Lopez de Prado 2016; Clusterbaum seit 1.6.5 wie dort auf dem euklidischen Abstand der Spalten von \eqn{d = \sqrt{(1 - \rho)/2}}) \cr
 \code{min_cvar} \tab minimaler historischer CVaR (Rockafellar & Uryasev 2000, geglaettet) \cr
 \code{min_cdar} \tab minimaler Conditional Drawdown at Risk (Chekhlov, Uryasev & Zabarankin 2005) \cr
 \code{inverse_vol}, \code{equal} \tab einfache Heuristiken

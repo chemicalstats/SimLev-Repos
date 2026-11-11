@@ -15,7 +15,8 @@ bootstrap_pooled(
   L = NULL,
   country_weights = NULL,
   target = NULL,
-  seed = NULL
+  seed = NULL,
+  periods = NULL
 )
 }
 \arguments{
@@ -48,6 +49,8 @@ Seit 1.6.4 hoechstens 10^8.}
 \item{years}{Laenge jedes Pfads in Jahren (Standard 30); ergibt
 \code{years} x Perioden je Jahr (1, 4 bzw. 12) Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
 \code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze Perioden ergab).}
+
+\item{periods}{Seit 1.6.5: Pfadlaenge in Perioden der gewaehlten \code{frequency} (ganze Zahl von 1 bis 100 x Perioden je Jahr) statt \code{years}; erlaubt Laengen, die keine ganzen Jahre sind (z. B. 30 Monate). \code{years} muss dann beim Standard 30 bleiben, sonst Fehler. \code{NULL} (Standard) = \code{years} gilt.}
 
 \item{L}{Mittlere Blocklaenge in Perioden der gewaehlten \code{frequency}
 (Blocklaenge = 1 + geometrisch verteilte Zahl mit Mittel \code{L} - 1).

@@ -81,6 +81,7 @@ from typing import Any
 
 import numpy as np
 
+from ._pruefen import chk_stop   # seit 1.6.5 (Entscheidung 193)
 from ._r.rformat import r_format1, r_sprintf
 from ._r.rnum import r_pow
 
@@ -132,7 +133,7 @@ class SimLevPlot:
 def _check_svg_file(file: Any, who: str) -> str:
     """Prüft, dass ``file`` auf ``.svg`` endet (Grafiken entstehen nur als SVG); liefert den Pfad."""
     if not isinstance(file, (str, os.PathLike)):
-        raise ValueError("%s: file muss ein Dateiname (Zeichenkette) sein, nicht %s." % (who, type(file).__name__))
+        chk_stop("c.m_check_svg_file", who, type(file).__name__)
     f = os.fspath(file)
     ext = os.path.splitext(f)[1]
     if ext.lower() != ".svg":
@@ -165,8 +166,7 @@ def _as_data(data: Any, who: str) -> dict:
     """``data`` einer Zeichenfunktion vereinheitlichen: ``dict[str, DataFrame]``."""
     import pandas as pd
     if not isinstance(data, dict):
-        raise ValueError("%s: die Grafikmethode lieferte keine Daten als dict (sondern %s)."
-                         % (who, type(data).__name__))
+        chk_stop("c.m_as_data", who, type(data).__name__)
     return {str(k): (v if isinstance(v, pd.DataFrame) else pd.DataFrame(v)) for k, v in data.items()}
 
 
@@ -175,7 +175,7 @@ def _as_plot(res: Any, who: str, x: Any, cls: str) -> SimLevPlot:
         return SimLevPlot(res.svg, res.data, x, cls)
     if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], str):
         return SimLevPlot(res[0], _as_data(res[1], who), x, cls)
-    raise ValueError("%s: die Grafikmethode lieferte kein SVG (sondern %s)." % (who, type(res).__name__))
+    chk_stop("c.m_as_plot", who, type(res).__name__)
 
 
 _PK = inspect.Parameter
@@ -637,6 +637,18 @@ def _date_ticks(z0: float, z1: float) -> list[tuple[float, str]]:
             if m > 12:
                 m = 1
                 y += 1
+    # seit 1.6.5 (CR2-X2-2): weniger als zwei Marken (Zeitraum ohne bzw. mit einem Monatsersten): Tagesmarken im Abstand
+    # 1, 2 oder 7 Tage ("5. Jan")
+    if len(ticks) < 2 and z1 > z0:
+        span = z1 - z0
+        st = 1 if span <= 10 else (2 if span <= 20 else 7)
+        ticks = []
+        z = float(math.ceil(z0))
+        while z <= z1:
+            yy, mm = _ym(int(z))
+            dd = int(z) - _days_from_civil(yy, mm, 1) + 1
+            ticks.append((z, "%d. %s" % (dd, _MONATE_KURZ[mm - 1])))
+            z += st
     return ticks
 
 
@@ -978,11 +990,25 @@ def _grid_axes(out, b, xlo, xhi, ylo, yhi, title="", xlabel="", ylabel="", dates
     if xticks is not None:
         xt = xticks
     elif dates:
-        y0 = _ym(int(math.floor(xlo)))[0]
-        y1 = _ym(int(math.floor(xhi)))[0]
-        st = max(1, -(-(y1 - y0 + 1) // 8))
-        xt = [(float(_days_from_civil(y, 1, 1)), str(y)) for y in range(y0, y1 + 2, st)
-              if xlo <= _days_from_civil(y, 1, 1) <= xhi]
+        if xhi - xlo < 548:                    # seit 1.6.5 (CR2-X9-3): unter rund 18 Monaten Monatsmarken "2020-03"
+            (y, m), (ye, me) = _ym(int(math.floor(xlo))), _ym(int(math.floor(xhi)))
+            cand = []
+            while (y, m) <= (ye, me):
+                z = _days_from_civil(y, m, 1)
+                if xlo <= z <= xhi:
+                    cand.append((float(z), "%04d-%02d" % (y, m)))
+                m += 1
+                if m > 12:
+                    m, y = 1, y + 1
+            xt = cand[::max(1, -(-len(cand) // 8))]
+        else:
+            y0 = _ym(int(math.floor(xlo)))[0]
+            y1 = _ym(int(math.floor(xhi)))[0]
+            st = max(1, -(-(y1 - y0 + 1) // 8))
+            xt = [(float(_days_from_civil(y, 1, 1)), str(y)) for y in range(y0, y1 + 2, st)
+                  if xlo <= _days_from_civil(y, 1, 1) <= xhi]
+        if not xt and xhi > xlo:               # seit 1.6.5 (CR2-X9-3): mindestens Anfang und Ende beschriften
+            xt = [(float(xlo), _fmt_day(math.floor(xlo))), (float(xhi), _fmt_day(math.floor(xhi)))]
     else:
         xt = [(t, _grid_tick_lab(t)) for t in _grid_ticks(xlo, xhi)]
     for t, lab in xt:

@@ -30,13 +30,25 @@
 #' Exponentieller gleitender Durchschnitt (Start mit SMA der ersten n Werte)
 #' @keywords internal
 #' @noRd
+# seit 1.6.5 (CR2-V1-5, Entscheidung 189): fuehrende NA werden uebersprungen (Start mit dem SMA der ersten n
+# vorhandenen Werte; bis 1.6.4 schaltete ein fehlender erster Kurs das Signal fuer die ganze Reihe ab)
 .ema <- function(x, n) {
+  m0 <- length(x); f <- which(!is.na(x))[1]
+  if (!is.na(f) && f > 1L) { out <- rep(NA_real_, m0); out[f:m0] <- .ema(x[f:m0], n); return(out) }
   n <- as.integer(n); m <- length(x); out <- rep(NA_real_, m)
   if (n < 1L || n > m) return(out)
   a <- 2 / (n + 1)
   out[n] <- mean(x[1:n])
   if (n < m) out[(n + 1L):m] <- .sl_filter(a * x[(n + 1L):m], 1 - a, method = "recursive", init = out[n])
   out
+}
+
+# Hinweis bei fehlenden Kursen fuer den exponentiellen Durchschnitt (seit 1.6.5, CR2-V1-5): fuehrende NA werden
+# uebersprungen, ein NA danach beendet den Durchschnitt (Warnung mit der ersten Zeile)
+.sig_ema_na <- function(x, fn) {
+  i <- which(is.na(x))
+  if (length(i)) warning(chk_msg("b2.ema_na", fn, i[1]), call. = FALSE)
+  invisible(NULL)
 }
 
 #' Eingaben der Signal-Bausteine pruefen (seit 1.6.4, B-009 bis B-012, B-016, B-024)
@@ -205,6 +217,7 @@ signal_sma <- function(x, n = 200, band = 0, lag = 0) {
 signal_ema <- function(x, n = 200, band = 0, lag = 0) {
   fn <- "signal_ema"
   .sig_x(x, fn); .sig_win(n, fn, "n"); chk_num1(band, fn, "band", lo = 0); .sig_win(lag, fn, "lag", lo = 0)
+  .sig_ema_na(x, fn)
   s <- .ema(as.numeric(x), n)
   .sig_out(x >= s * (1 + band / 100), x < s * (1 - band / 100), lag)
 }
@@ -215,8 +228,9 @@ signal_crossover <- function(x, fast = 50, slow = 200, type = c("sma", "ema"), b
   fn <- "signal_crossover"
   .sig_x(x, fn); .sig_win(fast, fn, "fast"); .sig_win(slow, fn, "slow")
   type <- match.arg(type)
-  if (fast >= slow) stop("fast muss kleiner als slow sein.")
+  if (fast >= slow) stop(chk_msg("b2b.m_signal_crossover"))
   chk_num1(band, fn, "band", lo = 0); .sig_win(lag, fn, "lag", lo = 0)
+  if (type == "ema") .sig_ema_na(x, fn)
   f <- if (type == "sma") .roll_mean(as.numeric(x), fast) else .ema(as.numeric(x), fast)
   s <- if (type == "sma") .roll_mean(as.numeric(x), slow) else .ema(as.numeric(x), slow)
   .sig_out(f >= s * (1 + band / 100), f < s * (1 - band / 100), lag)
@@ -243,7 +257,7 @@ signal_drawdown <- function(x, sell_dd = 20, buy_dd = 10, window = NULL, lag = 0
   chk_num1(buy_dd, fn, "buy_dd", lo = 0, lo_open = TRUE, hi = 100)
   .sig_win(window, fn, "window", null_ok = TRUE); .sig_win(lag, fn, "lag", lo = 0)
   x <- as.numeric(x)
-  if (buy_dd > sell_dd) stop("buy_dd darf nicht gr\u00f6\u00dfer als sell_dd sein.")
+  if (buy_dd > sell_dd) stop(chk_msg("b2b.m_signal_drawdown"))
   xp <- ifelse(is.na(x), -Inf, x)                              # NA unterbricht das Hoch nicht (nur die eigene Zeile ohne Signal)
   peak <- if (is.null(window)) cummax(xp) else {
     w <- as.integer(window); m <- length(x)
@@ -260,9 +274,11 @@ signal_drawdown <- function(x, sell_dd = 20, buy_dd = 10, window = NULL, lag = 0
 #' @export
 signal_volatility <- function(x, n = 20, threshold = 25, band = 0, ppy = 365.25, lag = 0) {
   fn <- "signal_volatility"
-  .sig_x(x, fn); .sig_win(n, fn, "n"); chk_num1(threshold, fn, "threshold", lo = 0); chk_num1(band, fn, "band", lo = 0)
+  # seit 1.6.5 (CR2-R-4): n >= 2 (Varianz eines Werts ist 0), Kurse > 0 (log)
+  .sig_x(x, fn); .sig_win(n, fn, "n", lo = 2); chk_num1(threshold, fn, "threshold", lo = 0); chk_num1(band, fn, "band", lo = 0)
   chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE); .sig_win(lag, fn, "lag", lo = 0)
   x <- as.numeric(x)
+  if (any(x <= 0, na.rm = TRUE)) chk_stop("b2.kurs_positiv", fn)
   if (!length(x)) return(list(buy = logical(0), sell = logical(0)))   # seit 1.6.4 (B-016): leer statt eines Phantomwerts
   r <- c(NA, diff(log(x)))
   r0 <- r; r0[is.na(r0)] <- 0
@@ -276,7 +292,7 @@ signal_volatility <- function(x, n = 20, threshold = 25, band = 0, ppy = 365.25,
 signal_combine <- function(..., op = c("and", "or")) {
   op <- match.arg(op)
   s <- list(...)
-  if (!length(s)) stop("Keine Signale \u00fcbergeben.")
+  if (!length(s)) stop(chk_msg("b2b.m_signal_combine"))
   # seit 1.6.4 (B-008, Entscheidung 1): je Signal eine Liste mit buy und sell, jeweils TRUE/FALSE oder 0/1 (NA
   # erlaubt, bleibt NA); 0/1 als Wahrheitswerte (bis 1.6.3 wandelte R Zahlen mit Warnung, Python las NaN und Text
   # als TRUE)
@@ -290,8 +306,7 @@ signal_combine <- function(..., op = c("and", "or")) {
   }
   len <- vapply(s, function(z) length(z$buy), 1L)
   if (any(len != len[1]) || any(vapply(s, function(z) length(z$sell), 1L) != len))
-    stop(sprintf("signal_combine: Signale haben unterschiedliche L\u00e4ngen (%s); alle aus derselben Kursreihe erzeugen.",
-                 paste(len, collapse = ", ")))
+    stop(chk_msg("b2b.m_sig_ok", paste(len, collapse = ", ")))
   bs <- lapply(s, `[[`, "buy"); ss <- lapply(s, `[[`, "sell")
   # seit 1.6.3 fuer reine logische Vektoren (wie aus den signal_*-Funktionen) elementweise mit & bzw. |: gleiche Werte
   # wie apply(, 1, all/any), auch mit NA; sonst (Zahlen, Attribute) wie bisher zeilenweise

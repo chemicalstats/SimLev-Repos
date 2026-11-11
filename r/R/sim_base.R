@@ -83,20 +83,20 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
     yc <- match(c("year", "jahr"), nm); yc <- yc[!is.na(yc)][1]
     vc <- match(c("taxable_income", "betrag", "amount", "zve"), nm); vc <- vc[!is.na(vc)][1]
     if (is.na(yc) || is.na(vc)) {
-      if (ncol(x) != 2L) stop(sprintf("%s: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: %s.", who,
-                                      paste(names(x), collapse = ", ")), call. = FALSE)
+      if (ncol(x) != 2L) chk_stop("a.m_check_taxable_income", who, paste(names(x), collapse = ", "))
       yc <- 1L; vc <- 2L
     }
     for (j in c(yc, vc)) if (is.factor(x[[j]])) chk_stop("spalte_faktor", who, names(x)[j])   # Entscheidung 15 (bis 1.6.3 Jahr still als Text)
-    if (!is.numeric(x[[vc]])) stop(sprintf("%s: taxable_income: Spalte '%s' (Betrag) muss numerisch sein.", who, names(x)[vc]), call. = FALSE)
+    if (!is.numeric(x[[vc]])) chk_stop("a.m_check_taxable_income_2", who, names(x)[vc])
+    # seit 1.6.5 (CR2-C-2, CR2-D-15): fehlendes Jahr mit eigener Meldung, in allen drei Sprachen gleich
+    if (anyNA(x[[yc]])) chk_stop("a.zve_jahr_na", who, which(is.na(x[[yc]]))[1], names(x)[yc])
     x <- stats::setNames(as.numeric(x[[vc]]), as.character(x[[yc]]))
   }
   if (!is.numeric(x) || !length(x) || is.matrix(x))
-    stop(sprintf("%s: taxable_income muss %s sein.", who, form), call. = FALSE)   # seit 1.6.4 ohne Eingabewert
+    chk_stop("a.m_check_taxable_income_3", who, form)   # seit 1.6.4 ohne Eingabewert
   if (any(!is.finite(x))) {
     i <- which(!is.finite(x))[1]
-    stop(sprintf("%s: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert%s; erwartet werden endliche Betr\u00e4ge in EUR.", who,
-                 if (!is.null(names(x))) sprintf(" (f\u00fcr %s)", names(x)[i]) else ""), call. = FALSE)   # seit 1.6.4 ohne den Wert
+    chk_stop("a.m_check_taxable_income_4", who, if (!is.null(names(x))) sprintf(" (f\u00fcr %s)", names(x)[i]) else "")   # seit 1.6.4 ohne den Wert
   }
   if (length(x) == 1L && is.null(names(x))) return(list(all = unname(as.numeric(x)), by_year = NULL))
   if (plan_ok && is.null(names(x))) return(list(all = NULL, by_year = NULL))
@@ -106,8 +106,7 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
          call. = FALSE)
   yy <- suppressWarnings(as.integer(trimws(names(x))))
   if (anyNA(yy) || any(as.character(yy) != trimws(names(x))))
-    stop(sprintf("%s: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\").", who,
-                 names(x)[which(is.na(yy) | as.character(yy) != trimws(names(x)))[1]]), call. = FALSE)
+    chk_stop("a.m_check_taxable_income_5", who, names(x)[which(is.na(yy) | as.character(yy) != trimws(names(x)))[1]])
   if (anyDuplicated(yy)) stop(sprintf("%s: taxable_income: Jahr %d kommt mehrfach vor.", who, yy[anyDuplicated(yy)]), call. = FALSE)
   miss <- setdiff(years, yy)
   if (length(miss))
@@ -275,7 +274,9 @@ calculate_skewness <- function(x, na.rm = TRUE){
   mean_x <- mean(x)
   sd_x <- .sl_sd(x)
 
-  if(sd_x == 0){
+  # seit 1.6.5 (CR2-X20-2): nicht endliche Streuung (NA mit na.rm = FALSE, Inf im Vektor) ergibt NA wie in Python und
+  # Julia (bis 1.6.4 Rohfehler "missing value where TRUE/FALSE needed")
+  if(!is.finite(sd_x) || sd_x == 0){
     return(NA)
   }
 
@@ -300,7 +301,9 @@ calculate_kurtosis <- function(x, na.rm = TRUE, excess = TRUE){
   mean_x <- mean(x)
   sd_x <- .sl_sd(x)
 
-  if(sd_x == 0){
+  # seit 1.6.5 (CR2-X20-2): nicht endliche Streuung (NA mit na.rm = FALSE, Inf im Vektor) ergibt NA wie in Python und
+  # Julia (bis 1.6.4 Rohfehler "missing value where TRUE/FALSE needed")
+  if(!is.finite(sd_x) || sd_x == 0){
     return(NA)
   }
 

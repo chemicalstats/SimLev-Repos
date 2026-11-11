@@ -164,6 +164,16 @@ SZ("umschicht_ausloeser", "rebalance_trigger combined aus abs_leverage (Referenz
     r"(rebalance_trigger(tdf, 'combined', triggers = list(list(type = 'abs_leverage', threshold = 10), list(type = 'rel_leverage', threshold = 10), list(type = 'vol_band', threshold = 20)), out_col = 't'))",
     r"(result = simlev.rebalance_trigger(tdf, 'combined', triggers=[{'type': 'abs_leverage', 'threshold': 10}, {'type': 'rel_leverage', 'threshold': 10}, {'type': 'vol_band', 'threshold': 20}], out_col='t'))",
     r"(result = SL.rebalance_trigger(tdf, "combined"; triggers = [Dict("type" => "abs_leverage", "threshold" => 10), Dict("type" => "rel_leverage", "threshold" => 10), Dict("type" => "vol_band", "threshold" => 20)], out_col = "t"))", inp = ein("wrapper/trig_combined", c("tdf")))))
+# seit 1.6.5 (PRG1-3): UND-Verknüpfung der Auslöser
+SZ("umschicht_ausloeser_und", "rebalance_trigger combined mit combine = \"and\" (alle Auslöser zugleich; NA löst nicht aus), auch mit einem einzelnen Auslöser", vor = VOR, teile = list(
+  trig_and = teil(
+    r"(rebalance_trigger(tdf, 'combined', triggers = list(list(type = 'abs_leverage', threshold = 10), list(type = 'vol_band', threshold = 20)), combine = 'and', out_col = 't'))",
+    r"(result = simlev.rebalance_trigger(tdf, 'combined', triggers=[{'type': 'abs_leverage', 'threshold': 10}, {'type': 'vol_band', 'threshold': 20}], combine='and', out_col='t'))",
+    r"(result = SL.rebalance_trigger(tdf, "combined"; triggers = [Dict("type" => "abs_leverage", "threshold" => 10), Dict("type" => "vol_band", "threshold" => 20)], combine = "and", out_col = "t"))", inp = ein("wrapper/trig_and", c("tdf"))),
+  trig_and_eins = teil(
+    r"(rebalance_trigger(tdf, 'combined', triggers = list(list(type = 'rel_leverage', threshold = 10)), combine = 'and'))",
+    r"(result = simlev.rebalance_trigger(tdf, 'combined', triggers=[{'type': 'rel_leverage', 'threshold': 10}], combine='and'))",
+    r"(result = SL.rebalance_trigger(tdf, "combined"; triggers = [Dict("type" => "rel_leverage", "threshold" => 10)], combine = "and"))", inp = ein("wrapper/trig_and_eins", c("tdf")))))
 ref_done()
 
 ref_init("wrapper", gruppe = "fehler")
@@ -312,7 +322,11 @@ TB("rebalance_trigger", "Meldungen und Warnungen von rebalance_trigger je Zeile 
   zeile("trig_err_col",
     r"(rebalance_trigger(tdf, 'vol_band', vol_col = 'vola'))",
     r"(result = simlev.rebalance_trigger(tdf, 'vol_band', vol_col='vola'))",
-    r"(result = SL.rebalance_trigger(tdf, "vol_band"; vol_col = "vola"))", inp = ein("wrapper/trig_err_col", c("tdf")))))
+    r"(result = SL.rebalance_trigger(tdf, "vol_band"; vol_col = "vola"))", inp = ein("wrapper/trig_err_col", c("tdf"))),
+  zeile("trig_err_combine",   # seit 1.6.5 (PRG1-3)
+    r"(rebalance_trigger(tdf, 'combined', triggers = list(list(type = 'abs_leverage')), combine = 'xor'))",
+    r"(result = simlev.rebalance_trigger(tdf, 'combined', triggers=[{'type': 'abs_leverage'}], combine='xor'))",
+    r"(result = SL.rebalance_trigger(tdf, "combined"; triggers = [Dict("type" => "abs_leverage")], combine = "xor"))", inp = ein("wrapper/trig_err_combine", c("tdf")))))
 TB("strategy_remove_asset", "Meldungen und Warnungen von strategy_remove_asset je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("st_remove_empty",
     r"(length(strategy_remove_asset(create_strategy(A = asset_config()), 'A')))",

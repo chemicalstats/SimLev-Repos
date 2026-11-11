@@ -31,13 +31,32 @@
 
 "Text der Tabelle eingabe (nur `%s`-Platzhalter, der Reihe nach ersetzt)."
 function chk_msg(key::AbstractString, args...)
-    parts = split(_MELD_EINGABE[key], "%s")
-    length(parts) == length(args) + 1 || error("chk_msg: Vorlage '$key' erwartet $(length(parts) - 1) Werte")
+    # Platzhalter %s und %% (seit 1.6.5, Paket E: "%%" ergibt "%" wie sprintf in R und % in Python; bis dahin blieb
+    # "%%" stehen, Texte mit Prozentzeichen standen deshalb im Code)
+    tmpl = _MELD_EINGABE[key]
     io = IOBuffer()
-    for (i, p) in enumerate(parts)
-        print(io, p)
-        i <= length(args) && print(io, args[i])
+    k = 0
+    i = firstindex(tmpl)
+    while i <= lastindex(tmpl)
+        c = tmpl[i]
+        j = nextind(tmpl, i)
+        if c == '%' && j <= lastindex(tmpl) && (tmpl[j] == 's' || tmpl[j] == '%')
+            if tmpl[j] == '%'
+                print(io, '%')
+            else
+                k += 1
+                k <= length(args) || error("chk_msg: Vorlage '$key' erwartet mehr als $(length(args)) Werte")
+                a = args[k]
+                # seit 1.6.5 (CR2-W1-4): Vektoren und Tupel mit ", " verbunden, nothing als "" (wie R und Python)
+                a isa Union{AbstractVector,Tuple} ? join(io, a, ", ") : a === nothing ? nothing : print(io, a)
+            end
+            i = nextind(tmpl, j)
+        else
+            print(io, c)
+            i = j
+        end
     end
+    k == length(args) || error("chk_msg: Vorlage '$key' erwartet $k Werte")
     return String(take!(io))
 end
 
@@ -207,7 +226,8 @@ function chk_date1(@nospecialize(x), fn, arg; null_ok::Bool = false)
     x = chk_scalar(x)
     x === nothing && null_ok && return x
     z = x isa Union{AbstractString,Date,DateTime} ? _as_date(x) : nothing
-    z === nothing && chk_stop("datum", fn, arg)
+    # seit 1.6.5 (CR2-X8-3): Tage vor dem 01.01.0001 (-719162) abgelehnt wie in Python (kein Jahr 0)
+    (z === nothing || z < -719162) && chk_stop("datum", fn, arg)
     return from_days(z)
 end
 
@@ -304,7 +324,10 @@ end
 """Zahl aus Text wie R `as.numeric()` (NA bei ungültigem Text), aber nur mit ASCII-Zeichen (Ziffern, Vorzeichen,
 Punkt, Exponent, ASCII-Leerraum); andere Zeichen (z. B. U+00A0, fremde Ziffern) ergeben NA (Entscheidung 27; R
 `chk_as_num`)."""
-chk_as_num(s::AbstractString) = isascii(s) ? r_as_numeric(s) : NA
+# seit 1.6.5 (CR2-X13-1, Entscheidung 189): strenge Zahlengrammatik wie Python und R (Dezimalzahl mit vollständigem
+# Exponenten, ganzzahliges Hex, Inf/inf, NaN, NA); sonst NA (bis 1.6.4 "1400e" = 1400 wie R_strtod)
+const _CHK_NUM_RE = r"^[ \t\n\r\f\x0B]*[-+]?(([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?|0[xX][0-9a-fA-F]+|Inf|inf|NaN|NA)[ \t\n\r\f\x0B]*$"
+chk_as_num(s::AbstractString) = isascii(s) && occursin(_CHK_NUM_RE, s) ? r_as_numeric(s) : NA
 chk_as_num(::Missing) = NA
 
 """Argumente aus Schlüsselwörtern (seit 1.6.4, Entscheidung 21): Namen müssen in `allowed` stehen (sonst

@@ -13,7 +13,8 @@ sharpe_deflated(
   frequency = c("week", "day", "month"),
   dates = NULL,
   risk_free = 0,
-  rho_method = c("cor", "linear")
+  rho_method = c("cor", "linear"),
+  expected_max = c("exact", "bailey")
 )
 
 \method{print}{SimLevDSR}(x, ...)
@@ -53,7 +54,8 @@ annualisiert (betrifft annualisierte Sharpe Ratios und
 
 \item{dates}{Datum je Zeile von \code{x} (Date oder umwandelbar), nur bei
 Matrix-Eingabe; \code{NULL} (Standard) = keine Aggregation. Bei
-\code{SimLevParamSearch} wird \code{x$dates} verwendet.}
+\code{SimLevParamSearch} wird \code{x$dates} verwendet.
+Seit 1.6.4 genau ein Datum je Zeile, aufsteigend, ohne NA und kein Faktor.}
 
 \item{risk_free}{Risikoloser Zins in Prozent p. a. (2 = 2 \%, Standard 0);
 wird als \code{risk_free / 100 / ppy} von jeder Periodenrendite
@@ -71,6 +73,15 @@ gleich; \code{rho}, \code{n_eff}, \code{n_trials}, \code{sr0} und
 \code{dsr} weichen in den letzten Stellen ab (in R, Python und Julia
 gleich). Mit nicht endlichen Renditen rechnet auch \code{"linear"} ueber
 die Korrelationsmatrix. Seit 1.6.4.}
+
+\item{expected_max}{Seit 1.6.5 (CR2-K-2, Entscheidung 189): erwartetes Maximum von
+\eqn{N} wertlosen Versuchen. \code{"exact"} (Standard): exakter Erwartungswert des
+Maximums von \eqn{N} unabhaengigen Standardnormalverteilten fuer reelles
+\eqn{N \ge 1} (\eqn{\int z\,d\Phi(z)^N}, Gauss-Legendre-Quadratur im Kern; fuer
+\eqn{N = 1} genau 0, nie negativ); \code{"bailey"}: Naeherung nach Bailey & Lopez de
+Prado (2014) wie bis 1.6.4 (fuer \eqn{N} zwischen 1 und etwa 1,29 negativ). Die
+effektive Versuchsanzahl \eqn{N_{eff} = \bar\rho + (1 - \bar\rho) N} ist eine
+Heuristik ohne Literaturquelle.}
 
 \item{...}{ungenutzt.}
 }

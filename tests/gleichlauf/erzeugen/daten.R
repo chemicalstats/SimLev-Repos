@@ -524,6 +524,20 @@ result = RList("b" => b.values, "duration" => attrs(b)["duration"]))", inp = ein
     r"(index_currency_hedged(d, 'x', 3, 1))",
     r"(result = BO.index_currency_hedged(d, 'x', 3, 1))",
     r"(result = BO.index_currency_hedged(d, "x", 3, 1))", inp = ein("data_prep/ch_basic", c("d")))))
+# seit 1.6.5 (PRG1-3): Attribut convexity von index_bond() (Entscheidung 151), beide Verfahren
+SZ("anleihe_konvexitaet", "index_bond: Attribute duration und convexity, Verfahren exact und duration", vor = VOR, teile = list(
+  bond_cvx = teil(
+    r"(b <- index_bond(d, 'y', maturity = 10, coupon_frequency = 1); list(b = as.numeric(b), duration = attr(b, 'duration'), convexity = attr(b, 'convexity')))",
+    r"(b = BO.index_bond(d, yield_='y', maturity=10, coupon_frequency=1)
+result = dict(b=np.asarray(b), duration=b.attrs['duration'], convexity=b.attrs['convexity']))",
+    r"(b = BO.index_bond(d, "y"; maturity = 10, coupon_frequency = 1)
+result = RList("b" => b.values, "duration" => attrs(b)["duration"], "convexity" => attrs(b)["convexity"]))", inp = ein("data_prep/bond_small", c("d"))),
+  bond_cvx_dur = teil(
+    r"(b <- index_bond(d, 'y', maturity = 7, coupon_frequency = 2, method = 'duration'); list(b = as.numeric(b), duration = attr(b, 'duration'), convexity = attr(b, 'convexity')))",
+    r"(b = BO.index_bond(d, yield_='y', maturity=7, coupon_frequency=2, method='duration')
+result = dict(b=np.asarray(b), duration=b.attrs['duration'], convexity=b.attrs['convexity']))",
+    r"(b = BO.index_bond(d, "y"; maturity = 7, coupon_frequency = 2, method = "duration")
+result = RList("b" => b.values, "duration" => attrs(b)["duration"], "convexity" => attrs(b)["convexity"]))", inp = ein("data_prep/bond_small", c("d")))))
 SZ("reihen_verketten", "series_splice mit Wochenenden und Vektoren", vor = VOR, teile = list(
   sp_we2 = teil(
     r"(series_splice(etf = e2, idx = idx, other = etf[etf$date > as.Date('2020-03-04'), ]))",

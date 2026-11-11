@@ -210,6 +210,9 @@
 }
 
 .sl_rolling_vol <- function(x, window) .Call(C_sl_rolling_vol, as.double(x), as.integer(window))
+# seit 1.6.5: Fenster in Kalendertagen (E-T2-6) und stationaere Verteilung direkt (CR2-M-1)
+.sl_rolling_vol_days <- function(x, day, days) .Call(C_sl_rolling_vol_days, as.double(x), as.double(day), as.double(days))
+.sl_msgarch_stat <- function(P) .Call(C_sl_msgarch_stat, matrix(as.double(P), nrow(P), ncol(P)))
 
 .sl_assign_regimes <- function(vol, thresh) .Call(C_sl_assign_regimes, as.double(vol), as.double(thresh))
 

@@ -284,9 +284,36 @@ def _ctx_lines(L):
     return out, cl
 
 
+def _ctx_long(L, line, col):
+    """Kontext langer Syntaxfehler (seit 1.6.5, CR2-X10-1; gleiche Regel in R ``.e5_parse_ctx`` und Julia): ist der
+    ganze Text länger als 256 Bytes (seit PR2-3; vorher der Text bis zur Fehlerstelle), nur die Fehlerzeile bis zur Fehlerstelle (Spalte wie der Zerleger:
+    +1 je Zeichen, Tabulator auf Vielfache von 8), gekürzt auf die letzten 80 Zeichen, Tabulator als ein Leerzeichen;
+    sonst ``None`` (Kontext wie R)."""
+    lines = "".join(L.cs).split("\n")
+    if line < 1 or line > len(lines):
+        return None
+    cur = lines[line - 1]
+    c = 0
+    k = 0
+    while c < col and k < len(cur):
+        c += 1
+        if cur[k] == "\t":
+            c = (c + 7) & ~7
+        k += 1
+    pre = cur[:k]
+    if sum(_nbytes(ch) for ch in L.cs) <= 256:
+        return None
+    sh = pre.replace("\t", " ")
+    return sh[-80:] if len(sh) > 80 else sh
+
+
 def _parse_errmsg(L, line, col, msg):
-    lines, cl = _ctx_lines(L)
     head = "<text>:%d:%d: %s" % (line, col, msg)
+    sh = _ctx_long(L, line, col)
+    if sh is not None:
+        hd = "%d: " % line
+        return head + "\n" + hd + sh + "\n" + "^".rjust(len(hd) + len(sh) + 1)
+    lines, cl = _ctx_lines(L)
     if not lines:
         return head
     if len(lines) == 1:
@@ -904,6 +931,7 @@ class Parser:
         self.L = L
         self.la = None
         self.depth = 0   # Schachtelung von _expr (seit 1.6.4, C-006)
+        self.cplx = False   # komplexe Konstante gesehen (seit 1.6.5, PR2-4: Ablehnung erst nach dem Zerlegen)
 
 
 def _peek(P):
@@ -1067,7 +1095,7 @@ def _primary(P, t):
     k = t.kind
     if k == "NUM":
         if isinstance(t.val, str):   # 1i, NA_complex_: seit 1.6.4 in allen drei Sprachen abgelehnt (Entscheidung 64)
-            _error("RExpr: komplexe Zahlen werden nicht unterstützt")
+            P.cplx = True            # seit 1.6.5 (PR2-4, Entscheidung 199): erst nach dem Zerlegen wie R
         return Node("const", t.val, line=t.line, col=t.col)
     if k == "STR" or k == "SYMBOL":
         n = _peek(P)
@@ -1257,6 +1285,11 @@ def _parse_all(s):
         if _has_placeholder(e):
             _error("invalid use of pipe placeholder (<input>:%d:%d)" % (L.line - 1 if t.kind == "NL" else L.line, L.col))
         exprs.append(e)
+    # seit 1.6.5 (PR2-4, Entscheidung 199): komplexe Zahlen erst nach dem Zerlegen des ganzen Textes abgelehnt wie R
+    # (.e5_rexpr_parse: Syntaxfehler, dann Tiefe, dann komplexe Zahlen; bis dahin Ablehnung schon beim Zerlegen)
+    if P.cplx:
+        from .._meldungen import EINGABE
+        _error(EINGABE["b2b.m_e5_rexpr_parse"])
     return exprs, L.warns
 
 
@@ -1340,6 +1373,12 @@ def _from_seq(v):
         return LGL([None for _ in v])
     if all(isinstance(x, (bool, np.bool_)) for x in nonna):
         return LGL([None if _nanlike(x) else bool(x) for x in v])
+    # seit 1.6.5 (CR2-C-11, wie Julia): Wahrheitswerte neben Zahlen werden wie in R c() zu Zahlen (bis 1.6.4 keine Daten)
+    if any(isinstance(x, (bool, np.bool_)) for x in nonna) and \
+            all(isinstance(x, (int, float, np.integer, np.floating)) for x in nonna):
+        v = [int(x) if isinstance(x, (bool, np.bool_)) else x for x in v]
+        nonna = [x for x in v if not _nanlike(x)]
+        isnum = [True] * len(nonna)
     if all(isnum) and all(isinstance(x, (int, np.integer)) for x in nonna):
         if all(_int_ok(int(x)) for x in nonna):
             return INT([None if _nanlike(x) else int(x) for x in v])
@@ -1367,6 +1406,8 @@ def from_python(v):
         return LGL([None])
     if isinstance(v, (bool, np.bool_)):
         return LGL([bool(v)])
+    if isinstance(v, (np.timedelta64, _dt.timedelta)):   # seit 1.6.5 (CR2-F-9): Zeitspannen sind keine Daten (wie
+        return None                                      # pd.Timedelta; np.timedelta64 bis 1.6.4 Rohfehler)
     if isinstance(v, (int, np.integer)):
         return INT([int(v)]) if _int_ok(int(v)) else NUM([float(v)])
     if isinstance(v, (float, np.floating)):
@@ -1382,6 +1423,9 @@ def from_python(v):
         if isinstance(v.dtype, pd.CategoricalDtype):
             return from_python(pd.Categorical(v))
         if v.dtype.kind == "M":
+            # seit 1.6.5 (CR2-F-9): mit Zeitzone der Ortstag wie beim Einzelwert (bis 1.6.4 der UTC-Tag samt Warnung)
+            if getattr(v.dtype, "tz", None) is not None:
+                v = v.dt.tz_localize(None) if isinstance(v, pd.Series) else v.tz_localize(None)
             return from_python(np.asarray(v.to_numpy(), dtype="datetime64[ns]").astype("datetime64[D]"))
         if pd.api.types.is_extension_array_dtype(v.dtype) and v.dtype.kind in "biuf":
             # seit 1.6.4 (C-027): Nullable-Spalten (Int64, Float64, boolean) mit pd.NA als NA wie R und Julia,
@@ -1397,15 +1441,21 @@ def from_python(v):
     if isinstance(v, np.ndarray):
         a = v.ravel(order="F")
         k = a.dtype.kind
+        # seit 1.6.5 (CR2-A-8) als Feld statt je Element (gleiche Werte und Bits)
         if k == "b":
-            return LGL([bool(x) for x in a.tolist()])
+            return LGL(a.tolist())
         if k in "iu":
-            xs = a.tolist()
-            if all(_int_ok(x) for x in xs):
-                return INT(xs)
-            return NUM([float(x) for x in xs])
+            if a.size == 0 or (k == "i" and int(a.min()) >= -_IMAX and int(a.max()) <= _IMAX) or \
+                    (k == "u" and int(a.max()) <= _IMAX):
+                return INT(a.tolist())
+            return NUM([float(x) for x in a.tolist()])
         if k == "f":
-            return NUM([_f2na(x) for x in a.tolist()])
+            f = np.array(a, dtype=np.float64)
+            nan = np.isnan(f)
+            if nan.any():   # _f2na: NaN mit der NA-Nutzlast wird genau NA_REAL, andere NaN bleiben
+                na = nan & ((f.view(np.uint64) & np.uint64(0xFFFFFFFF)) == np.uint64(1954))
+                f[na] = NA_REAL
+            return NUM(f.tolist())
         if k == "M":
             d = a.astype("datetime64[D]")
             f = d.astype(np.int64).astype(np.float64)   # Tage als double (seit 1.6.4, C-003)
@@ -1422,17 +1472,22 @@ def from_python(v):
 def to_python(v):
     """R-Vektor → natürliche Python-Form (numpy-Array)."""
     if isinstance(v, LGL):
-        if any(x is None for x in v):
+        if None in v:   # seit 1.6.5 Suche in C statt Generator (CR2-A-8; gleiche Werte)
             a = np.empty(len(v), dtype=object)
             a[:] = list(v)
             return a
         return np.array(list(v), dtype=bool)
     if isinstance(v, INT):
-        if any(x is None for x in v):
+        if None in v:
             return np.array([NA_REAL if x is None else float(x) for x in v], dtype=np.float64)
         return np.array(list(v), dtype=np.int64)
     if isinstance(v, (NUM, DIF)):
-        return np.array([math.nan if (x != x and not isna_strict(x)) else x for x in v], dtype=np.float64)
+        # seit 1.6.5 (CR2-A-8) als Feld: NaN ohne NA-Nutzlast wird nan, NA bleibt (gleiche Bits wie je Element)
+        f = np.array(v, dtype=np.float64)
+        nan = np.isnan(f)
+        if nan.any():
+            f[nan & ((f.view(np.uint64) & np.uint64(0xFFFFFFFF)) != np.uint64(1954))] = math.nan
+        return f
     if isinstance(v, CHR):
         a = np.empty(len(v), dtype=object)
         a[:] = list(v)
@@ -1569,7 +1624,7 @@ def _date_chr(x):
 def _days_from_civil(y, m, d):
     """Tage seit 1970-01-01 im proleptischen gregorianischen Kalender (auch Jahr 0)."""
     y -= m <= 2
-    era = (y if y >= 0 else y - 399) // 400
+    era = y // 400   # seit 1.6.5 (CR2-O-6): // rundet schon ab (bis 1.6.4 die Korrektur der C-Division dazu)
     yoe = y - era * 400
     doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
     return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
@@ -2601,6 +2656,95 @@ def _difftime_ops(op, a, b):
     _error("'%s' not defined for \"difftime\" objects" % op)
 
 
+# ── Schnellwege über numpy (seit 1.6.5, CR2-A-8, Entscheidung 111) ──────────────────────────────────────────────────
+# Grundrechenarten, Vergleiche, & | und ifelse rechnen ab _FAST_MIN Elementen auf float64-Feldern statt je Element im
+# Interpreter. Bitgleich mit der Schleife: IEEE-Grundrechenarten und Vergleiche sind elementweise dieselben
+# Maschinenbefehle; die NaN-Regel von _nanop (der erste NaN-Operand setzt sich durch, beruhigt) wird über Masken
+# nachgebildet, ungültige Operationen (Inf - Inf, 0 * Inf, 0/0) liefern wie die Schleife den Standard-NaN der Hardware.
+# Die Werte bleiben Listen (LGL, INT, NUM, …); umgewandelt wird nur an den Rändern der Operation.
+_FAST_MIN = 32
+_QBIT = np.uint64(0x0008000000000000)
+_NPOP = {"+": np.add, "-": np.subtract, "*": np.multiply, "/": np.divide}
+_NPCMP = {"<": np.less, ">": np.greater, "<=": np.less_equal, ">=": np.greater_equal, "==": np.equal,
+          "!=": np.not_equal}
+
+
+def _npf(v, n):
+    """NUM (Liste von float) als float64-Feld der Länge n bzw. 1 (Recycling wie _rec)."""
+    a = np.array(v, dtype=np.float64)
+    if a.size != n and a.size != 1:
+        a = np.resize(a, n)
+    return a
+
+
+def _quiet(a):
+    return (a.view(np.uint64) | _QBIT).view(np.float64)
+
+
+def _fast_arith(op, A, B, n, swap):
+    """A op B für NUM-Operanden über numpy; swap: NaN-Vorrang des zweiten Operanden (X38-1)."""
+    x = _npf(A, n)
+    y = _npf(B, n)
+    with np.errstate(all="ignore"):
+        r = _NPOP[op](x, y)
+    p, q = (y, x) if swap else (x, y)
+    mq = np.isnan(q)
+    mp = np.isnan(p)
+    if mq.any():
+        r = np.where(mq, _quiet(q), r)
+    if mp.any():
+        r = np.where(mp, _quiet(p), r)
+    if r.size != n:
+        r = np.broadcast_to(r, (n,))
+    return NUM(r.tolist())
+
+
+def _fast_compare(op, A, B, n):
+    x = _npf(A, n)
+    y = _npf(B, n)
+    with np.errstate(all="ignore"):
+        c = np.broadcast_to(_NPCMP[op](x, y), (n,))
+    na = np.broadcast_to(np.isnan(x) | np.isnan(y), (n,))
+    r = c.tolist()
+    if na.any():
+        for i in np.flatnonzero(na).tolist():
+            r[i] = None
+    return LGL(r)
+
+
+def _lgl_masks(v, n):
+    """LGL (True/False/None) als Masken (wahr, NA) der Länge n bzw. 1."""
+    if None not in v:
+        a = np.array(v, dtype=bool)
+        if a.size != n and a.size != 1:
+            a = np.resize(a, n)
+        return a, np.zeros(a.size, dtype=bool)
+    t = np.empty(len(v), dtype=object)
+    t[:] = v
+    if t.size != n and t.size != 1:
+        t = np.resize(t, n)
+    return np.equal(t, True), np.equal(t, None)
+
+
+def _fast_logic(op, A, B, n):
+    ta, na = _lgl_masks(A, n)
+    tb, nb = _lgl_masks(B, n)
+    if op == "&":
+        fa = ~ta & ~na
+        fb = ~tb & ~nb
+        val = ta & tb
+        nas = ~(fa | fb) & (na | nb)
+    else:
+        val = ta | tb
+        nas = ~val & (na | nb)
+    r = np.broadcast_to(val, (n,)).tolist()
+    nas = np.broadcast_to(nas, (n,))
+    if nas.any():
+        for i in np.flatnonzero(nas).tolist():
+            r[i] = None
+    return LGL(r)
+
+
 def _arith(op, a, b):
     r = _arith0(op, a, b)
     return _setnm(r, _binnames(a, b, len(r)))
@@ -2644,7 +2788,15 @@ def _arith0(op, a, b):
     A = _as_num(a)
     B = _as_num(b)
     n = _len2(A, B)
+    # seit 1.6.5 (CR2-X38-1, Entscheidung 189): bei + und * mit zwei double-Operanden, der erste von Länge 1 und der
+    # zweite länger, setzt sich wie in R (x86-64) der NaN des Vektors durch (R rechnet dort tmp + dy[i], der Übersetzer
+    # vertauscht die Operanden); bis 1.6.4 stets der des ersten Operanden. Sonst unverändert.
+    swap = op in ("+", "*") and isinstance(a, NUM) and isinstance(b, NUM) and len(A) == 1 and len(B) > 1
+    if n >= _FAST_MIN and op in _NPOP:
+        return _fast_arith(op, A, B, n, swap)
     f = {"+": _fadd, "-": _fsub, "*": _fmul, "/": _fdiv, "^": _pow, "%%": r_fmod, "%/%": r_idiv}[op]
+    if swap:
+        return NUM([f(_rec(B, i), A[0]) for i in range(n)])
     return NUM([f(_rec(A, i), _rec(B, i)) for i in range(n)])
 
 
@@ -2717,6 +2869,8 @@ def _compare0(op, a, b):
         return r
     A = _as_num(a)
     B = _as_num(b)
+    if n >= _FAST_MIN:
+        return _fast_compare(op, A, B, n)
     for i in range(n):
         x = _rec(A, i)
         y = _rec(B, i)
@@ -2761,6 +2915,8 @@ def _logic0(op, a, b):
     A = _check_logic(a, op)
     B = _check_logic(b, op)
     n = _len2(A, B)
+    if n >= _FAST_MIN:
+        return _fast_logic(op, A, B, n)
     r = LGL()
     for i in range(n):
         x = _rec(A, i)
@@ -2819,6 +2975,8 @@ def _colon(a, b):
     r = abs(n2 - n1)
     if r >= 4.503599627370496e15:
         _error("result would be too long a vector")
+    if r != r:   # Inf:Inf (seit 1.6.5, CR2-L-3): R wandelt NaN in eine negative Länge
+        _error("negative length vectors are not allowed")
     if math.floor(r + 1 + 1.1920928955078125e-07) > _MAX_LEN:   # seit 1.6.4 (C-006, Entscheidung 79)
         _len_error()
 
@@ -3416,6 +3574,20 @@ def _f_ifelse(args, nms, ex):
     if test is None:
         _missing_arg("test")
     t = _as_lgl(test)
+    n = len(t)
+    # seit 1.6.5 (CR2-A-8): Zahlen auf beiden benutzten Seiten über numpy (gleiche Werte und Bits wie die Schleife)
+    if n >= _FAST_MIN and isinstance(yes, NUM) and isinstance(no, NUM) and len(yes) and len(no):
+        tt = np.empty(n, dtype=object)
+        tt[:] = t
+        ym = np.equal(tt, True)
+        nm_ = np.equal(tt, False)
+        if ym.any() or nm_.any():   # nur NA im Test: logisches Ergebnis wie R (Schleife)
+            out = np.full(n, NA_REAL)
+            if ym.any():
+                out[ym] = _npf(yes, n)[ym] if len(yes) > 1 else yes[0]
+            if nm_.any():
+                out[nm_] = _npf(no, n)[nm_] if len(no) > 1 else no[0]
+            return NUM(out.tolist())
     ans = list(t)
     kind = 1
     ypos = [i for i in range(len(t)) if t[i] is True]
@@ -3820,15 +3992,19 @@ def _f_mean(args, nms, ex):
         _warn("argument is not numeric or logical: returning NA")
         return NUM([NA_REAL])
     narm = _flag_istrue(v[2], False)
+    # seit 1.6.5 (CR2-Q-2) wie mean.default: trim nur als Zahl (is.numeric: double oder integer, kein Wahrheitswert
+    # und kein Datum) der Länge 1; NA mit Werten in x ist der Fehler von if (trim > 0 && n) (bis 1.6.4 genügte Länge 1)
     if v[1] is None:
         trim = 0.0
-    elif len(v[1]) == 1 and not isinstance(v[1], CHR):
+    elif len(v[1]) == 1 and type(v[1]) in (NUM, INT):
         trim = _as_num(v[1])[0]
     else:
         _error("'trim' must be numeric of length one")
     if narm:
         x = _drop_na(x)
     n = len(x)
+    if trim != trim and n > 0:
+        _error("missing value where TRUE/FALSE needed")
     if trim > 0 and n > 0:
         if any(_isna_el(t) for t in x):
             return NUM([NA_REAL])
@@ -4185,6 +4361,166 @@ def _f_cumsum(args, nms, ex):
     return NUM([float(t) for t in _base.r_cumsum(xs)])
 
 
+# ── Reihenfunktionen (seit 1.6.5, E-T4-1): rev, which, seq_len, cumprod, cummax, cummin, diff, head, tail ─────────────
+# Wie R 4.3.3 (rev.default, which, seq_len, cum.c, diff.default/diff.Date/diff.difftime, utils::head.default/tail.default
+# für Vektoren); diff und head/tail aus den Grundoperationen von RExpr zusammengesetzt wie der R-Text dieser Funktionen,
+# damit Typen, Namen, Recycling, Warnungen und Fehler dieselben sind.
+
+def _f_rev(args, nms, ex):
+    v, _, _ = _bind("rev", args, nms, ex, ["x"])
+    x = v[0]
+    if x is None:
+        _missing_arg("x")
+    return _index(x, INT(range(len(x), 0, -1))) if len(x) else x
+
+
+def _f_which(args, nms, ex):
+    v, _, _ = _bind("which", args, nms, ex, ["x", "arr.ind", "useNames"])
+    x = v[0]
+    if x is None:
+        _missing_arg("x")
+    if not isinstance(x, LGL) or x is _NULLV:
+        _error("argument to 'which' is not logical")
+    idx = [i for i, t in enumerate(x) if t is True]
+    r = INT([i + 1 for i in idx])
+    xn = _nm(x)
+    return _setnm(r, [xn[i] for i in idx]) if xn is not None else r   # arr.ind/useNames nur mit dim (isTRUE)
+
+
+def _seq_len_n(v, call="seq_len"):
+    """Länge wie do_seq_len (asReal des ersten Elements, nicht negativ und endlich)."""
+    if len(v) != 1:
+        _warn("first element used of 'length.out' argument")
+    d = _asreal1(v) if len(v) else NA_REAL
+    if not (math.isfinite(d) and d >= 0):
+        _error("argument must be coercible to non-negative integer")
+    if d >= 4.503599627370496e15:
+        _error("result would be too long a vector")
+    if math.trunc(d) > _MAX_LEN:
+        _len_error()
+    return int(d)
+
+
+def _f_seq_len(args, nms, ex):
+    if len(args) != 1:
+        _error("%d arguments passed to 'seq_len' which requires 1" % len(args))
+    nm = nms[0]
+    if nm is not None and not "length.out".startswith(nm):
+        _error("supplied argument name '%s' does not match 'length.out'" % nm)
+    if args[0] is None:
+        _missing_arg("length.out")
+    return INT(range(1, _seq_len_n(args[0]) + 1))
+
+
+def _f_cumx(fname, kind):
+    """cumprod (kind 1), cummax (2), cummin (3) wie do_cum: Ganzzahlen und Wahrheitswerte bleiben bei cummax/cummin
+    ganzzahlig (ab dem ersten NA alles NA), sonst double über den Kern (handleNaN wie R)."""
+    def f(args, nms, ex):
+        x = _prim1(fname, args, nms)
+        if isinstance(x, DAT):
+            _date_math(fname)
+        if isinstance(x, DIF):
+            _dif_math(fname, None)
+        if x is _NULLV:
+            return NUM()
+        if isinstance(x, (LGL, INT)) and kind != 1:
+            out = INT([None] * len(x))
+            m = None
+            for i in range(len(x)):
+                if x[i] is None:
+                    break
+                xi = int(x[i])
+                m = xi if m is None else (max(m, xi) if kind == 2 else min(m, xi))
+                out[i] = m
+            return out
+        xs = np.array(_as_num(x), dtype=np.float64)
+        if xs.size == 0:
+            return NUM()
+        out = np.empty(xs.size)
+        _ext.slc_r_cum(kind, xs, out)
+        return NUM(out.tolist())
+    return f
+
+
+def _oror_cond(x, y_fn):
+    """if (x || y()) mit R's Regeln für zwei logische Einzelwerte (y nur, wenn x nicht TRUE ist)."""
+    xv = _scalar_lgl(x, "||")
+    if xv is True:
+        return True
+    yv = _scalar_lgl(y_fn(), "||", "y")
+    if yv is True:
+        return True
+    if xv is None or yv is None:
+        _error("missing value where TRUE/FALSE needed")
+    return False
+
+
+def _f_diff(args, nms, ex):
+    v, _, _ = _bind("diff", args, nms, ex, ["x", "lag", "differences", "..."])
+    x = v[0]
+    if x is None:
+        _missing_arg("x")
+    lag = INT([1]) if v[1] is None else v[1]
+    dif = INT([1]) if v[2] is None else v[2]
+    isdate = isinstance(x, DAT)
+    one = INT([1])
+    # diff.default: length(differences) != 1L, diff.Date: > 1L
+    if len(lag) != 1 or (len(dif) > 1 if isdate else len(dif) != 1) or \
+            _oror_cond(_compare("<", lag, one), lambda: _compare("<", dif, one)):
+        _error("'lag' and 'differences' must be integers >= 1")
+    if _cond1(_compare(">=", _arith("*", lag, dif), INT([len(x)]))):
+        return DIF() if isdate else _index(x, INT([0]))
+    r = x if isdate else _undate(x)
+    i1 = _unary("-", INT(range(1, _seq_len_n(lag) + 1)))
+    for _ in range(_seq_len_n(dif)):
+        nr = INT([len(r)])
+        hi = _unary("-", _arith("+", _arith("-", nr, lag), one))
+        r = _arith("-", _index(r, i1), _index(r, _colon(_unary("-", nr), hi)))
+    if isinstance(x, DIF):   # diff.difftime: .difftime(NextMethod(), units)
+        return _cp(DIF, r)
+    return r
+
+
+_HT_MSG = ("invalid 'n' - must contain at least one non-missing element, got none.",
+           "invalid 'n' - must be numeric, possibly NA.",
+           "invalid 'n' - must have length one when dim(x) is NULL, got %d")
+
+
+def _ht_n(x, n, ex):
+    """checkHT(n, NULL) und n <- if (n < 0L) max(length(x) + n, 0L) else min(n, length(x))."""
+    ln = len(n)
+    if ln == 0 or all(_isna_el(t) for t in n):
+        _error(_HT_MSG[0])
+    if not isinstance(n, (NUM, INT, LGL)):
+        _error(_HT_MSG[1])
+    if ln > 1:
+        _error(_HT_MSG[2] % ln)
+    lx = INT([len(x)])
+    if _cond1(_compare("<", n, INT([0]))):
+        return _f_minmax([_arith("+", lx, n), INT([0])], [None, None], ex, True)
+    return _f_minmax([n, lx], [None, None], ex, False)
+
+
+def _f_head(args, nms, ex):
+    v, _, _ = _bind("head", args, nms, ex, ["x", "n", "..."])
+    x = v[0]
+    if x is None:
+        _missing_arg("x")
+    n = _ht_n(x, INT([6]) if v[1] is None else v[1], ex)
+    return _index(x, INT(range(1, _seq_len_n(n) + 1)))
+
+
+def _f_tail(args, nms, ex):
+    v, _, _ = _bind("tail", args, nms, ex, ["x", "n", "keepnums", "addrownums", "..."])
+    x = v[0]
+    if x is None:
+        _missing_arg("x")
+    n = _ht_n(x, INT([6]) if v[1] is None else v[1], ex)
+    lout = int(math.ceil(_asreal1(n)))   # seq.int(to = xlen, length.out = n): ceiling(n) Werte bis xlen
+    xlen = len(x)
+    return _index(x, INT(range(xlen - lout + 1, xlen + 1)))
+
+
 def _f_xor(args, nms, ex):
     v, _, _ = _bind("xor", args, nms, ex, ["x", "y"])
     if v[0] is None:
@@ -4450,6 +4786,10 @@ _FUNS = {
     "as.numeric": _f_asnum, "as.double": _f_asnum, "as.integer": _f_asint,
     "as.logical": _f_aslgl, "as.character": _f_aschr, "as.Date": _f_asdate,
     "cumsum": _kn_x("cumsum")(_f_cumsum), "identity": _f_identity,
+    # seit 1.6.5 (E-T4-1)
+    "rev": _f_rev, "which": _f_which, "seq_len": _f_seq_len,
+    "cumprod": _kn_x("cumprod")(_f_cumx("cumprod", 1)), "cummax": _kn_x("cummax")(_f_cumx("cummax", 2)),
+    "cummin": _kn_x("cummin")(_f_cumx("cummin", 3)), "diff": _f_diff, "head": _f_head, "tail": _f_tail,
 }
 
 
@@ -4534,11 +4874,22 @@ def _cond1(v):
 
 _UNSUPPORTED = {"function", "for", "while", "repeat", "next", "break", "~", "?", "::", ":::", "<<-"}
 
+
+def _callx_error(f):
+    """Aufruf eines Ausdrucks als Funktion (seit 1.6.5, CR2-D-12): ist der Funktionsteil (ohne Klammern) ein
+    'function'- bzw. '\\('-Ausdruck oder ein '::'/':::'-Zugriff, dieselbe Meldung wie ohne Aufruf (bis 1.6.4 stets
+    „attempt to apply non-function“)."""
+    while f.head == "call" and f.val == "(" and f.args:
+        f = f.args[0]
+    if f.head == "call" and f.val in ("function", "::", ":::"):
+        _error("RExpr: '%s' wird in Ausdr\u00fccken nicht unterst\u00fctzt" % f.val)
+    _error("attempt to apply non-function")
+
 #: Primitive (ohne Argumentabgleich): leeres Argument ist ein Fehler
 _PRIMS = {"c", "sum", "min", "max", "any", "all", "length", "abs", "sqrt", "exp", "expm1", "log1p",
           "log2", "log10", "sin", "cos", "tan", "tanh", "atan", "floor", "ceiling", "trunc", "sign",
           "is.na", "is.nan", "is.finite", "is.infinite", "as.numeric", "as.double", "as.integer",
-          "as.logical", "as.character", "cumsum", "rep"}
+          "as.logical", "as.character", "cumsum", "rep", "cumprod", "cummax", "cummin", "seq_len"}
 
 
 def _ev(e, c):
@@ -4550,7 +4901,7 @@ def _ev(e, c):
     if h == "empty":
         _error("argument is missing, with no default")
     if h == "callx":
-        _error("attempt to apply non-function")
+        _callx_error(e.val)
     f = e.val
     a = e.args
     if f == "(":

@@ -59,9 +59,15 @@
 #' @export
 param_space <- function(...) {
   d <- list(...)
-  if (!length(d) || is.null(names(d)) || any(names(d) == "")) stop("param_space: alle Dimensionen m\u00fcssen benannt sein.")
+  if (!length(d) || is.null(names(d)) || any(names(d) == "")) stop(chk_msg("b2b.m_param_space"))
+  # seit 1.6.5 (CR2-O-4): doppelte Namen sind ein Fehler (bis 1.6.4 zwei Spalten gleichen Namens im Raster)
+  dup <- names(d)[duplicated(names(d))]
+  if (length(dup)) chk_stop("b2b.dim_doppelt", "param_space", dup[1])
+  # seit 1.6.5 (CR2-W2-4, Entscheidung 189): Datum als Rasterwert in allen Sprachen abgelehnt (bis 1.6.4 nahmen R und
+  # Python ein Datum an, Julia nicht)
+  for (k in names(d)) if (inherits(d[[k]], c("Date", "POSIXt", "difftime"))) chk_stop("b2b.dim_datum", "param_space", k)
   for (k in names(d)) if (!inherits(d[[k]], "SimLevParamRange") && (!is.atomic(d[[k]]) || !length(d[[k]])))
-    stop(sprintf("param_space: Dimension '%s' muss ein Vektor oder param_range() sein.", k))
+    stop(chk_msg("b2b.m_param_space_2", k))
   for (k in names(d)) chk_nofactor(d[[k]], "param_space", k)   # seit 1.6.4 (Entscheidung 15)
   structure(d, class = "SimLevParamSpace")
 }
@@ -79,12 +85,35 @@ param_range <- function(lower, upper, n = 5, step = NULL, integer = FALSE, log =
   chk_bool1(log, "param_range", "log")
   if (log && lower <= 0) stop("param_range: log = TRUE erfordert lower > 0.")
   if (is.null(step) && (!is.numeric(n) || length(n) != 1 || !is.finite(n) || n < 1 || n != round(n)))
-    stop("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein.")
+    stop(chk_msg("b2b.m_param_range"))
   if (is.null(step)) chk_max(n, SL_MAX_GITTER, "param_range", "n")   # seit 1.6.4 (B-004, wie n_grid; Entscheidung 16)
   if (!is.null(step) && (!is.numeric(step) || length(step) != 1 || !is.finite(step) || step <= 0))
-    stop("param_range: step muss eine Zahl > 0 sein.")
+    stop(chk_msg("b2b.m_param_range_2"))
+  if (!is.null(step)) {
+    # seit 1.6.5 (CR2-M-5): Stufenzahl des Rasters mit step hoechstens 1e6 wie n (bis 1.6.4 unbegrenzt); n wird mit
+    # step nicht verwendet und nur als ganze Zahl von 1 bis 1e6 abgelegt, sonst NA (bis 1.6.4 as.integer(n) mit Warnung)
+    ns <- floor((upper - lower) / step + 1e-10) + 1
+    if (ns > SL_MAX_GITTER) chk_stop("b2b.step_punkte", "param_range", sprintf("%.0f", ns), sprintf("%.0f", SL_MAX_GITTER))
+    n <- if (is.numeric(n) && length(n) == 1L && is.finite(n) && n >= 1 && n == round(n) && n <= SL_MAX_GITTER) n
+         else NA_integer_
+  }
   structure(list(lower = lower, upper = upper, n = as.integer(n), step = step, integer = integer, log = log),
             class = "SimLevParamRange")
+}
+
+# Zahl im Druck des Suchraums ohne Exponentenschreibweise (seit 1.6.5, CR2-W2-3; .blk_fmt aus sim_blocks.R)
+.ps_fmt_num <- function(v) if (is.numeric(v) && length(v) && all(is.finite(v))) vapply(v, .blk_fmt, "") else format(v)
+.ps_range_text <- function(d)
+  sprintf("Bereich [%s, %s]%s%s, Raster %s", .blk_fmt(d$lower), .blk_fmt(d$upper),
+          if (d$integer) " ganzzahlig" else "", if (d$log) " log" else "",
+          if (!is.null(d$step)) paste("Schritt", .blk_fmt(d$step)) else paste(d$n, "Punkte"))
+
+#' @rdname param_space
+#' @export
+print.SimLevParamRange <- function(x, ...) {
+  # seit 1.6.5 (CR2-W4-3): eine Zeile wie im Parameterraum (bis 1.6.4 die rohe Liste)
+  cat(sprintf("SimLev-Parameterbereich: %s\n", .ps_range_text(x)))
+  invisible(x)
 }
 
 #' @rdname param_space
@@ -93,11 +122,10 @@ print.SimLevParamSpace <- function(x, ...) {
   cat("SimLev-Parameterraum\n")
   for (k in names(x)) {
     d <- x[[k]]
-    if (inherits(d, "SimLevParamRange"))
-      cat(sprintf("  %-14s Bereich [%g, %g]%s%s, Raster %s\n", k, d$lower, d$upper,
-                  if (d$integer) " ganzzahlig" else "", if (d$log) " log" else "",
-                  if (!is.null(d$step)) paste("Schritt", d$step) else paste(d$n, "Punkte")))
-    else cat(sprintf("  %-14s %s\n", k, paste(utils::head(format(d), 12), collapse = ", ")))
+    # seit 1.6.5 (CR2-W2-3): Grenzen und Zahlen einzeln ohne Exponentenschreibweise (bis 1.6.4 %g bzw. format(d)
+    # gemeinsam, z. B. "1.23457e+06", "1.0e+00, 2.5e+00")
+    if (inherits(d, "SimLevParamRange")) cat(sprintf("  %-14s %s\n", k, .ps_range_text(d)))
+    else cat(sprintf("  %-14s %s\n", k, paste(utils::head(.ps_fmt_num(d), 12), collapse = ", ")))
   }
   invisible(x)
 }
@@ -149,8 +177,10 @@ print.SimLevParamSpace <- function(x, ...) {
       D <- unique(rbind(D, Dn)); tries <- tries + 1L
     }
     D <- utils::head(D, n)
+    # seit 1.6.5 (CR2-A-7, Entscheidung 185 K22): Hinweis, wenn der Plan weniger als n verschiedene zulaessige Punkte hat
+    if (nrow(D) && nrow(D) < n) message(chk_msg("b2b.weniger_punkte", "param_search", nrow(D), as.integer(n)))
   }
-  if (!nrow(D)) stop("param_search: kein zul\u00e4ssiger Punkt im Suchraum (constraint pr\u00fcfen).")
+  if (!nrow(D)) stop(chk_msg("b2b.m_ok_rows"))
   rownames(D) <- NULL
   D
 }
@@ -314,15 +344,14 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   method <- match.arg(method)
   # Text statt Logisch (bis 1.0.0), ohne Alias
   if (is.logical(keep_returns))
-    stop("param_search: keep_returns ist \"day\" oder \"none\" (fr\u00fcher TRUE/FALSE).", call. = FALSE)
+    chk_stop("b2b.m_param_search")
   .e5_choice(keep_returns, c("day", "none"), "param_search", "keep_returns")
   keep_returns <- match.arg(keep_returns)
   keep_ret <- keep_returns == "day"
   # einheitliche Eingabepruefung (seit 1.6.4); data/strategy mit den Meldungen von simulation()
   fn <- "param_search"
   if (!is.data.frame(data))
-    stop(sprintf("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).",
-                 chk_msg("tabelle.formen")))
+    stop(chk_msg("a.m_sim_check_inputs", chk_msg("tabelle.formen")))
   if (!nrow(data)) chk_stop("zeilen_keine", fn, "data")   # seit 1.6.4 vorab (Entscheidung 38)
   if (!is.null(builder) && !is.function(builder)) chk_stop("e2.funktion", fn, "builder")
   if (missing(space)) chk_stop("fehlt", fn, "space")
@@ -333,13 +362,16 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   if (!is.null(constraint) && !is.function(constraint)) chk_stop("e2.funktion", fn, "constraint")
   if (!is.null(sim_args) && !is.list(sim_args)) chk_stop("liste", fn, "sim_args")
   chk_int1(burn_in, fn, "burn_in", lo = 0)
+  # seit 1.6.5 (CR2-A-7): burn_in kleiner als die Zahl der Datenzeilen, vorab (bis 1.6.4 nach der Rechnung "alle Punkte
+  # fehlgeschlagen" mit einer Meldung zu NA im Datum)
+  if (burn_in >= nrow(data)) chk_stop("b2b.burn_in", fn, as.integer(burn_in), nrow(data))
   if (!is.function(metrics)) chk_stop("e2.funktion", fn, "metrics")
   chk_name1(objective, fn, "objective")
   chk_bool1(maximize, fn, "maximize")
   cores <- chk_cores(cores, fn)   # seit 1.6.4 hoechstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
   if (!inherits(space, "SimLevParamSpace")) space <- do.call(param_space, as.list(space))
   if (is.null(builder)) {
-    if (is.null(strategy)) stop("param_search: 'builder' oder 'strategy' angeben.")
+    if (is.null(strategy)) stop(chk_msg("b2b.m_param_search_3"))
     .sim_check_names(names(space), "param_search")   # Dimensionen = Argumente von simulation() bzw. Pfade
     builder <- function(p) list(strategy = strategy, args = p)
   }
@@ -357,7 +389,14 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
     list(m = m, err = NA_character_, date = if (keep_ret) ix$date else NULL,
          ret = if (keep_ret) ix$value[-1] / ix$value[-nrow(ix)] - 1 else NULL)
   }
-  out <- .par_lapply(seq_len(nrow(design)), run, cores)
+  # seit 1.6.5 (CR2-W1-3): der erste Punkt vorab, damit Namen der Kennzahlen und objective vor der ganzen Rechnung
+  # geprueft werden (bis 1.6.4 erst nach allen Punkten); Ergebnis und Reihenfolge der Meldungen unveraendert
+  first <- run(1L)
+  if (!is.null(first$m)) {
+    chk_kennzahlen(names(first$m), length(first$m), c("id", names(design), "error"), fn)
+    if (!objective %in% names(first$m)) chk_stop("rs.objective", fn, objective, paste(names(first$m), collapse = ", "))
+  }
+  out <- c(list(first), if (nrow(design) > 1L) .par_lapply(seq_len(nrow(design))[-1L], run, cores))
   okm <- Filter(function(o) !is.null(o$m), out)
   if (!length(okm)) stop(sprintf("param_search: alle Punkte fehlgeschlagen, z. B.: %s", out[[1]]$err))
   # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
@@ -429,7 +468,8 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   }
   Z <- vapply(P, function(col) { r <- rank(if (is.numeric(col)) col else as.numeric(factor(col)))
                                   if (max(r) > min(r)) (r - min(r)) / (max(r) - min(r)) else r * 0 }, numeric(nrow(P)))
-  if (!is.matrix(Z)) Z <- matrix(Z, ncol = 1)
+  # seit 1.6.5 (CR2-X1-1): eine Zeile je Punkt auch bei genau einem Punkt (bis 1.6.4 matrix(Z, ncol = 1): p Zeilen)
+  if (!is.matrix(Z)) Z <- matrix(Z, nrow = nrow(P))
   D <- as.matrix(.sl_dist(Z))
   lapply(seq_len(nrow(Z)), function(i) order(D[i, ])[seq_len(min(k, nrow(Z)))])
 }
@@ -490,10 +530,13 @@ param_plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
   # unguenstigster Wert: Zielgroesse nach x$maximize, sonst kleiner = besser bei Drawdown-Kennzahlen
   lower_better <- if (metric == x$objective) !isTRUE(x$maximize) else metric %in% .lower_better
   worst <- if (lower_better) max else min
+  # seit 1.6.5 (CR2-R-1, Entscheidung 189): Punkte ohne eigenen Wert haben kein Plateau (NA; bis 1.6.4 Mittel der
+  # Nachbarn, ein fehlgeschlagener Punkt konnte "Bestes Plateau" sein); Spalte valid = Nachbarn mit Wert
+  own <- !is.na(v)
   data.frame(id = tab$id, value = v,
-             plateau_mean = vapply(nb, function(j) mean(v[j], na.rm = TRUE), 0),
-             plateau_min = vapply(nb, function(j) suppressWarnings(worst(v[j], na.rm = TRUE)), 0),
-             neighbours = lengths(nb))
+             plateau_mean = ifelse(own, vapply(nb, function(j) mean(v[j], na.rm = TRUE), 0), NA_real_),
+             plateau_min = ifelse(own, vapply(nb, function(j) suppressWarnings(worst(v[j], na.rm = TRUE)), 0), NA_real_),
+             neighbours = lengths(nb), valid = vapply(nb, function(j) sum(!is.na(v[j])), 0L))
 }
 
 #' @rdname param_search

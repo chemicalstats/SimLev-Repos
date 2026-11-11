@@ -35,7 +35,7 @@ _stop(text::AbstractString) = error(text)
 # ── Vektoren ────────────────────────────────────────────────────────────────
 
 using ..SimLev: _isnum, _cummax   # util.jl (seit 1.6.4 eine Fassung)
-using ..SimLev: chk_fmt, chk_num1, chk_scalar, chk_stop   # pruefen.jl (seit 1.6.4)
+using ..SimLev: chk_fmt, chk_msg, chk_num1, chk_scalar, chk_stop   # pruefen.jl (seit 1.6.4)
 const _isnum_el = _isnum
 "Werte eines Vektors/Skalars als `Vector{Float64}` (missing/nothing → NA)."
 _f64(x::Real) = [Float64(x)]
@@ -293,7 +293,7 @@ function _da_series(x, name::AbstractString)
         nms = names(x)
         if !("date" in nms)
             _stop(_sp("'%s': data.frame braucht eine Spalte 'date' (vorhanden: %s)%s.", name, join(nms, ", "),
-                      length(nms) == 1 ? "; nur eine Spalte: Trennzeichen prüfen, Semikolon-Dateien mit read.csv2() einlesen" : ""))
+                      length(nms) == 1 ? "; nur eine Spalte: Trennzeichen prüfen (Semikolon-Dateien mit Semikolon als Trennzeichen und Dezimalkomma einlesen)" : ""))   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
         end
         vc = if "value" in nms
             "value"
@@ -329,11 +329,25 @@ function _da_series(x, name::AbstractString)
         end
         idx = findall(!isnan, d)
         idx = idx[sortperm(d[idx]; alg = MergeSort)]
+        # seit 1.6.5 (CR2-D-10): Hinweis auf Zeilen ohne Datum
+        length(idx) < length(d) && _message(chk_msg("c.da_ohne_datum", name, length(d) - length(idx)))
         d = d[idx]; v = v[idx]; fl = fl[idx]
         dup = SimLev.DataPrep._duplicated(d; from_last = true)   # duplicated(d, fromLast = TRUE) (seit 1.6.4 eine Fassung)
         if any(dup)
             _message(_sp("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet.", name, count(dup)))
-            d = d[.!dup]; v = v[.!dup]; fl = fl[.!dup]
+            # seit 1.6.5 (CR2-D-10): je Datum der letzte vorhandene Wert (R .da_series)
+            sel = Int[]
+            i = 1
+            while i <= length(d)
+                j = i
+                while j < length(d) && d[j+1] == d[i]
+                    j += 1
+                end
+                okj = [k for k in i:j if !isnan(v[k])]
+                push!(sel, isempty(okj) ? j : okj[end])
+                i = j + 1
+            end
+            d = d[sel]; v = v[sel]; fl = fl[sel]
         end
         has = findall(!isnan, v)
         isempty(has) && _stop(_sp("'%s': Wertspalte '%s' hat keine Werte.", name, vc))
@@ -345,7 +359,7 @@ function _da_series(x, name::AbstractString)
         end
         bad = findall(e -> !isfinite(e) || e <= 0, v)
         if !isempty(bad)
-            _stop(_sp("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexstände, keine Renditen); %d Werte <= 0, z. B. am %s.",
+            _stop(_sp("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexstände, keine Renditen); %d Werte nicht endlich oder <= 0, z. B. am %s.",
                       name, vc, length(bad), _fmt_date1(d[bad[1]])))   # seit 1.6.4 ohne den Wert
         end
         length(v) < 2 && _stop(_sp("'%s': mindestens zwei Daten mit Wert nötig.", name))
@@ -434,10 +448,11 @@ function _da_mwrr(s::DASeries)
     length(fl) != n && (fl = zeros(n))
     fl[isnan.(fl)] .= 0.0
     fi = [i for i in 2:n if fl[i] != 0]
+    start = s.start_gross !== nothing ? s.start_gross : w[1]   # Start brutto wie cagr der Engine
     if isempty(fi)
-        return (w[1] > 0 && horizon > 0 && w[n] >= 0) ? SimLev._cagr_q(w[n] / w[1], horizon) : _NA
+        # seit 1.6.5 (Entscheidung 200): Startbetrag brutto (Kaufkosten am Starttag zählen), bis dahin w[1]
+        return (start > 0 && horizon > 0 && w[n] >= 0) ? SimLev._cagr_q(w[n] / start, horizon) : _NA
     end
-    start = s.start_gross !== nothing ? s.start_gross : w[1]
     Float64(_xirr_rate(vcat(0.0, t[fi]), vcat(start, fl[fi]), w[n], horizon))
 end
 "`.xirr_rate()` der Engine (J-ENG: `SimLev.xirr_rate`, früher `_xirr_rate`)."
@@ -506,7 +521,11 @@ function _da_metrics(s::DASeries, rate, ppy, var_levels, dd_memo = nothing)
     r = Float64[vk[i] / vk[i-1] - 1 for i in 2:length(vk)]
     rfl = _da_rf(s.date, rate, kk, s.defl); rf = rfl["r"]
     yrs = (s.date[end] - s.date[1]) / 365.25
-    cagr = SimLev._cagr_q(val[end] / val[1], yrs)
+    # seit 1.6.5 (Entscheidung 200, M4): bei einem Ergebnis von simulation() Bezug auf den Indexstand vor den
+    # Kaufkosten des Starttags (Basis 100 von result_index(), wie ttwror bzw. cagr der Engine); bis dahin val[1]
+    b0 = s.result !== nothing ? 100.0 : val[1]
+    tot = val[end] / b0 - 1
+    cagr = SimLev._cagr_q(val[end] / b0, yrs)
     vol = SimLev.r_sd(r) * sqrt(ppy)
     ex = r .- rf
     down = ex[ex .< 0]
@@ -528,6 +547,8 @@ function _da_metrics(s::DASeries, rate, ppy, var_levels, dd_memo = nothing)
     rf_ann = rfl["ann"]
     sdex = SimLev.r_sd(ex)
     mex = SimLev.r_mean(ex)
+    # seit 1.6.5 (CR2-I-6): Streuung im Rundungsrauschen gilt als 0 (R .da_metrics, Kern sd_eff)
+    zero_vol = !(sdex > 16 * sqrt(length(ex)) * eps(Float64) * (1 + (isempty(ex) ? 0.0 : maximum(abs.(ex)))))
     nd = SimLev.nrow(ddt)
     neg = r[r .< 0]; pos = r[r .> 0]
     nm = String["start_value", "end_value", "years", "total_return", "cagr", "mwrr", "volatility", "sharpe", "sortino",
@@ -535,14 +556,14 @@ function _da_metrics(s::DASeries, rate, ppy, var_levels, dd_memo = nothing)
                 "required_to_recover", "skewness", "excess_kurtosis", "best_day", "worst_day", "best_month", "worst_month",
                 "best_year", "worst_year", "positive_months", "avg_gain", "avg_loss", "gain_loss_ratio"]
     vals = Float64[
-        val[1], val[end], yrs, val[end] / val[1] - 1, cagr, _da_mwrr(s), vol,
-        (sdex > 0) ? mex * ppy / (sdex * sqrt(ppy)) : _NA,
+        val[1], val[end], yrs, tot, cagr, _da_mwrr(s), vol,
+        !zero_vol ? mex * ppy / (sdex * sqrt(ppy)) : _NA,
         !isempty(down) ? mex * ppy / (sqrt(SimLev.r_mean([(e = min(v, 0.0); e * e) for v in ex])) * sqrt(ppy)) : _NA,
         mdd > 0 ? cagr / mdd : _NA,
         mdd, nd > 0 ? SimLev.r_mean(-ddt["depth"]) : 0.0,
         ulcer, ulcer > 0 ? (cagr - rf_ann) / ulcer : _NA,
         nd > 0 ? _rmax(ddt["days_total"]) : 0.0,
-        mdd > 0 ? (val[end] / val[1] - 1) / mdd : _NA,
+        mdd > 0 ? tot / mdd : _NA,
         dd[end] > 0 ? 1 / (1 - dd[end]) - 1 : 0.0,
         _calc_skew(r), _calc_kurt(r),
         _rmax(r), _rmin(r), _rmax(mr), _rmin(mr), _rmax(yr), _rmin(yr), _mean_lgl(mr .> 0),
@@ -673,8 +694,13 @@ _is_listlike(x) = (x isa AbstractDict && !_is_result(x)) || x isa AbstractVector
                   (x isa AbstractVector && !(x isa SimLev.RVector) &&
                    !(eltype(x) <: Union{Real,Missing,AbstractString,Date}))
 
-"Namen und Elemente einer R-Liste (`names(x)` → nothing, wenn unbenannt)."
-function _list_items(x)
+"""Namen und Elemente einer R-Liste (`names(x)` → nothing, wenn unbenannt). Seit 1.6.5 (K19, CR2-7): ein
+ungeordnetes `Dict` mit mehr als einem Eintrag gibt eine Warnung (Hash-Reihenfolge; später ein Fehler); `fn` nennt
+die aufrufende Funktion."""
+function _list_items(x; fn = nothing)
+    if x isa Base.Dict && length(x) > 1
+        @warn chk_msg("c.dict_reihenfolge", fn === nothing ? "SimLev" : String(fn))
+    end
     if x isa AbstractDict
         return String[String(string(k)) for k in keys(x)], Any[v for v in values(x)]
     elseif x isa AbstractVector{<:Pair}
@@ -779,6 +805,11 @@ längste Drawdown-Dauer, Recovery Factor, nötige Rendite zur Erholung, Schiefe,
 schlechteste Tage, Monate und Jahre, Anteil positiver Monate, Gewinn/Verlust-Verhältnis, historischer VaR und
 CVaR (täglich und monatlich), bei SimLev-Ergebnissen auch Steuern und Transaktionen.
 
+Bei einem `SimLevResult` zählen die Kaufkosten am Starttag (Spread, Ordergebühr) in Gesamtrendite, CAGR, MWRR,
+Calmar, UPI und Recovery Factor mit, wie in `simulation()` (seit 1.6.5): Bezug ist der Startbetrag brutto
+(`invested[1]`) bzw. der Indexstand 100 vor den Kosten, nicht der Depotwert am Starttag (`start_value` der
+Kennzahlen). Ohne Einzahlungen ist `mwrr` dann gleich `simulation()["cagr"]`, die CAGR gleich `ttwror`.
+
 Gegen einen Benchmark: Alpha (annualisiert, CAPM auf Überschussrenditen), Beta, Korrelation gesamt sowie in
 Auf- und Abwärtsphasen, R², Up-/Down-Capture (Monatsbasis), Capture Spread, aktive Rendite, Tracking Error,
 Information Ratio, M² (Modigliani) und Treynor.
@@ -801,15 +832,18 @@ println(da["metrics"])
 function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 3,
                        var_levels = [0.01, 0.05, 0.10], top_drawdowns = 10, inflation = nothing)
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
-    x = SimLev.as_rframe(x)
+    # seit 1.6.5 (CR2-D-11): nur RFrame als Tabelle; Dict, NamedTuple und Paare sind wie in R und Python eine Liste
+    # von Reihen (bis 1.6.4 wurden Dict/NamedTuple mit date und value als Tabelle angenommen)
+    x isa Union{AbstractDict,NamedTuple,AbstractVector{<:Pair}} || (x = SimLev.as_rframe(x))
+    x isa NamedTuple && (x = SimLev.RList((String(k) => v for (k, v) in pairs(x))...))
     benchmark = SimLev.as_rframe(benchmark)
     risk_free = SimLev.as_rframe(risk_free)
     inflation = SimLev.as_rframe(inflation)
-    if _is_result(x) || _is_frame(x)
+    if _is_result(x) || x isa SimLev.RFrame
         x = SimLev.RList("Strategie" => x)
     end
     (_is_listlike(x) && length(x) > 0) || _stop("x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.")
-    keys_, vals = _list_items(x)
+    keys_, vals = _list_items(x; fn = "result_analysis")
     if keys_ === nothing || any(==(""), keys_)
         keys_ = ["S$i" for i in eachindex(vals)]
     end
@@ -877,6 +911,11 @@ function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 
     dd_memo = Any[]
     mets = [_da_metrics(ser[k], rfs[k], ppy_of(ser[k]), vlf, dd_memo) for k in order]
     mnames = mets[1][1]
+    let ish = findfirst(==("sharpe"), mnames), iv = findfirst(==("volatility"), mnames)
+        for (q, k) in enumerate(order)          # seit 1.6.5 (CR2-I-6): Hinweis bei Sharpe ohne Schwankung
+            (isnan(mets[q][2][ish]) && !isnan(mets[q][2][iv])) && _message(chk_msg("c.da_sharpe", k))
+        end
+    end
     met = SimLev.NamedMat(reduce(hcat, [m[2] for m in mets]); rownames = mnames, colnames = order)
     bm = nothing
     if bser !== nothing
@@ -1025,6 +1064,10 @@ function _summary_analysis(object; io::IO = stdout)
     _print_matrix(io, SimLev.NamedMat(map(v -> _rround(100 * v, 2), A.data); rownames = A.rownames, colnames = A.colnames))
     for (nm, d) in object["drawdowns"]
         print(io, _sp("\n  Größte Drawdowns: %s\n", nm))
+        if SimLev.nrow(d) == 0                 # seit 1.6.5 (CR2-X10-2) statt der leeren Tabelle
+            print(io, "  (keine Drawdowns)\n")
+            continue
+        end
         d2 = SimLev.rows(d, 1:min(5, SimLev.nrow(d)))
         d2["depth"] = String[_sp("%.2f %%", 100 * v) for v in d2["depth"]]
         _print_df(io, d2; row_names = false)
@@ -1050,9 +1093,15 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
     type = _match_arg(type, ["overview", "growth", "drawdown", "rolling", "annual", "monthly"])
     nms = collect(keys(x["monthly"]))
     if type == "monthly"
-        bad = (series isa AbstractVector && length(series) != 1) ||
-              (series isa AbstractString && !(series in nms)) ||
-              (_isnum_el(series) && !(series >= 1 && series <= length(nms)))
+        # seit 1.6.5 (CR2-C-4): genau ein Name oder eine ganze Zahl 1..k (R plot.SimLevAnalysis)
+        sv = series isa AbstractVector ? (length(series) == 1 ? series[1] : nothing) : series
+        bad = if sv isa AbstractString
+            !(sv in nms)
+        elseif sv isa Real && !(sv isa Bool)
+            !(isfinite(Float64(sv)) && Float64(sv) == floor(Float64(sv)) && 1 <= sv <= length(nms))
+        else
+            true
+        end
         bad && _stop(_sp("series: Name oder Nummer einer Reihe (%s).", join(nms, ", ")))
     end
     if type in ("overview", "rolling") && !(metric in _ROLL_COLS)
@@ -1129,9 +1178,11 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
                                        (String(c) => An.data[:, j] for (j, c) in enumerate(An.colnames))...)
     end
     function p_monthly(s, x0, y0, w, h)
-        nm = series isa AbstractString ? series : nms[Int(series)]
+        sv = series isa AbstractVector ? series[1] : series
+        nm = sv isa AbstractString ? String(sv) : nms[Int(sv)]
         M = 100 .* x["monthly"][nm].data[:, 1:12]
         fin = filter(isfinite, M); lim = isempty(fin) ? 1.0 : maximum(abs.(fin))
+        lim == 0 && (lim = 1.0)                # seit 1.6.5 (CR2-C-4): ohne Monatsänderung wie ohne Werte
         pal = _ana_ramp(["#B5562B", "#F7F3EE", "#2C6E9B"], 41)
         ny = size(M, 1)
         raw = x["monthly"][nm].data[:, 1:12]; rn = x["monthly"][nm].rownames

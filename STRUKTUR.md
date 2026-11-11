@@ -3,8 +3,8 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tests/schnittstelle/run.py` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tests/schnittstelle/api.json`.
-- **Stand:** 2026-11-09.
-- **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 78 Methoden, Julia 129 Funktionen und 77 Methoden.
+- **Stand:** 2026-11-11.
+- **Umfang:** R 118 Exporte und 79 S3-Methoden, Python 121 Funktionen und 78 Methoden, Julia 131 Funktionen und 78 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tests/schnittstelle/known_differences.tsv`.
 - Dateien relativ zu `r/R/`, `python/simlev/` bzw. `julia/src/`.
@@ -19,7 +19,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | 3 | Analysen | je eine `.R` | je ein Modul | je eine Datei |
 | 4 | Ausgabe | `print`-Methoden, `plot_dashboard.R` | `svg.py`, `dashboard.py` | `svg.jl`, `dashboard.jl` |
 
-## Öffentliche Funktionen (R-Exporte) (116)
+## Öffentliche Funktionen (R-Exporte) (118)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -88,8 +88,10 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `scenario_crisis` | `scenarios.R` | `scenario_crisis` | `scenarios.py` | `scenario_crisis` | `scenarios.jl` |
 | `scenario_entropy_pooling` | `scenarios.R` | `scenario_entropy_pooling` | `scenarios.py` | `scenario_entropy_pooling` | `scenarios.jl` |
 | `scenario_risk` | `scenarios.R` | `scenario_risk` | `scenarios.py` | `scenario_risk` | `scenarios.jl` |
+| `view_cor` | `scenarios.R` | `view_cor` | `scenarios.py` | `view_cor` | `scenarios.jl` |
 | `view_mean` | `scenarios.R` | `view_mean` | `scenarios.py` | `view_mean` | `scenarios.jl` |
 | `view_prob` | `scenarios.R` | `view_prob` | `scenarios.py` | `view_prob` | `scenarios.jl` |
+| `view_rank` | `scenarios.R` | `view_rank` | `scenarios.py` | `view_rank` | `scenarios.jl` |
 | `view_vol` | `scenarios.R` | `view_vol` | `scenarios.py` | `view_vol` | `scenarios.jl` |
 | `planning_lumpsum_vs_dca` | `sensitivity.R` | `planning_lumpsum_vs_dca` | `sensitivity.py` | `planning_lumpsum_vs_dca` | `sensitivity.jl` |
 | `sensitivity_grid` | `sensitivity.R` | `sensitivity_grid` | `sensitivity.py` | `sensitivity_grid` | `sensitivity.jl` |
@@ -183,6 +185,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.SimLevPBO` | `overfitting.R` | `SimLevPBO.print` | `_r/rlist.py` | `show(SimLevPBO)` | `overfitting.jl` |
 | `print.SimLevWalkForward` | `overfitting.R` | `SimLevWalkForward.print` | `_r/rlist.py` | `show(SimLevWalkForward)` | `overfitting.jl` |
 | `plot.SimLevParamSearch` | `param_search.R` | `SimLevParamSearch.plot` | `param_search.py` | `r_plot(SimLevParamSearch)` | `param_search.jl` |
+| `print.SimLevParamRange` | `param_search.R` | `SimLevParamRange.format` | `param_search.py` | `show(SimLevParamRange)` | `param_search.jl` |
 | `print.SimLevParamSearch` | `param_search.R` | `SimLevParamSearch.print` | `param_search.py` | `show(SimLevParamSearch)` | `param_search.jl` |
 | `print.SimLevParamSpace` | `param_search.R` | `SimLevParamSpace.print` | `_r/rlist.py` | `show(SimLevParamSpace)` | `param_search.jl` |
 | `print.summary.SimLevParamSearch` | `param_search.R` | `SummarySimLevParamSearch.print` | `_r/rlist.py` | `show(summary.SimLevParamSearch)` | `param_search.jl` |
@@ -222,7 +225,6 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `[.SimLevWrapperNav` | `wrapper.R` | – | – | – | – |
 | `print.SimLevWrapperConfig` | `wrapper.R` | `SimLevWrapperConfig.print` | `_r/rlist.py` | `show(SimLevWrapperConfig)` | `wrapper.jl` |
 | `print.SimLevWrapperNav` | `wrapper.R` | `SimLevWrapperNav.format` | `wrapper.py` | `show(SimLevWrapperNav)` | `wrapper.jl` |
-| – | – | `SimLevParamRange.format` | `param_search.py` | – | – |
 
 ## Nur in den Ports (13)
 

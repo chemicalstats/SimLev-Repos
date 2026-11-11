@@ -75,6 +75,27 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
     """Vorbereitung, Phasen 4 und 5 über den C++-Kern (Termine, Flags, Startgewichte, Tagesschleife
     und Abschluss des letzten Jahres); Rückgabe (sim, nicht gedeckte Steuerzahlungen in EUR). Setzt
     fl["flag_harvest"] und fl["tax_regimes"]."""
+    ei = _sim_engine_input(sim, fl, cfg, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot, liquidate,
+                           stopp_date, details, harvest_day)
+    reports = _engine_reports(ei)
+    out = _ext.sim_engine_run(*ei["args"], [r[k] for r in reports for k in _REP_KEYS])
+    return _sim_engine_finish(out, sim, fl, ei, reports, cfg.get("tariff_env") if ei["person"] else None)
+
+
+_REP_KEYS = ("worth", "money", "flows", "total", "share")
+
+
+def _engine_reports(ei: dict) -> list:
+    """Report-Vektoren je Asset, die der Kern beschreibt (worth, money, flows, total, share)."""
+    n = ei["n"]
+    return [{k: np.zeros(n) for k in _REP_KEYS} for _ in ei["nm"]]
+
+
+def _sim_engine_input(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                      liquidate, stopp_date: int, details: bool, harvest_day) -> dict:
+    """Eingabe der Tagesengine (seit 1.6.5 eigene Funktion, Paket E: der Studienkern ``_sim_prepared.py`` merkt sie
+    sich je Strategie und tauscht je Pfad nur Kurse und Signale): ``args`` = die ersten 15 Argumente von
+    ``_ext.sim_engine_run`` (ohne reports), dazu nm, n, person, tax_regimes."""
     nm = list(fl["flag_assets"])
     flag_date = np.asarray(fl["flag_date"], dtype=np.int64)
     n = int(flag_date.size)
@@ -102,11 +123,6 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
                1 if a in no_split else 0, sig_logical[k][0], sig_logical[k][1]]
         bonus = sim["assets"][a].get("bonus")
         ad += [float(mk[a]["spread_rate"]), float(cfg["strategy"][a]["share"]), _num(bonus)]
-    reports = []
-    for a in nm:
-        new = {k: np.zeros(n) for k in ("worth", "money", "flows", "total", "share")}
-        sim["report"][a] = new
-        reports += [new["worth"], new["money"], new["flows"], new["total"], new["share"]]
     harvest_on = _is_true(cfg.get("harvest_mode")) and person
     split_on = _is_true(cfg.get("split_mode")) and split_thresh is not None
     lo = float(split_thresh[0]) if split_on else 0.0
@@ -143,13 +159,22 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
           _num(cfg.get("sparer_pauschbetrag")), _num(cfg.get("soli_factor_income"), 1.0), _num(cfg.get("church_k")),
           lo, hi,
           float(env.zve_all) if env is not None and env.zve_all is not None else 0.0]
-    (status, totals, lots, sells, taxes, px, fee_paid, tax_unpaid, rows, ks, events,
-     err, flags) = _ext.sim_engine_run(
-        prep, flag_date.astype(np.float64), prices, sb, ss, ew, br, np.array(ai, dtype=np.int32),
-        np.array(ad, dtype=np.float64), np.array(ci, dtype=np.int32), np.array(cd, dtype=np.float64),
-        np.array(_fee(cfg.get("fee_order")) + _fee(cfg.get("fee_dca")), dtype=np.float64),
-        np.array(tot0, dtype=np.float64), np.asarray(tariff_par, dtype=np.float64), np.array(zve, dtype=np.float64),
-        reports)
+    args = [prep, flag_date.astype(np.float64), prices, sb, ss, ew, br, np.array(ai, dtype=np.int32),
+            np.array(ad, dtype=np.float64), np.array(ci, dtype=np.int32), np.array(cd, dtype=np.float64),
+            np.array(_fee(cfg.get("fee_order")) + _fee(cfg.get("fee_dca")) + _fee(cfg.get("fee_cust")), dtype=np.float64),
+            np.array(tot0, dtype=np.float64), np.asarray(tariff_par, dtype=np.float64), np.array(zve, dtype=np.float64)]
+    return {"args": args, "nm": nm, "n": n, "person": person, "tax_regimes": tax_regimes, "flag_date": flag_date,
+            "sig_logical": sig_logical}
+
+
+def _sim_engine_finish(out, sim: dict, fl: dict, ei: dict, reports: list, env) -> tuple[dict, float]:
+    """Ergebnis der Tagesengine in sim, fl, Tarifjahre (env), Gebühren und Meldungen übernehmen (seit 1.6.5 eigene
+    Funktion, Paket E); env: Tarifzustand dieses Laufs (None ohne Steuer ``person``)."""
+    nm, flag_date, tax_regimes = ei["nm"], ei["flag_date"], ei["tax_regimes"]
+    mk, tt = sim["market"], sim["totals"]
+    (status, totals, lots, sells, taxes, px, fee_paid, tax_unpaid, rows, ks, events, err, flags) = out
+    for a, r in zip(nm, reports):
+        sim["report"][a] = r
     stv = np.frombuffer(status, dtype=np.float64)
     fl["flag_harvest"] = (np.frombuffer(flags, dtype=np.int32) & 128) != 0
     fl["tax_regimes"] = tax_regimes
@@ -215,7 +240,10 @@ _REASONS = tuple(_MR[str(k)] for k in range(len(_MR)))
 
 
 def _label(aux: int, ints) -> str:
-    """Bezeichnung einer Steuerzahlung (.pay_tax label)."""
+    """Bezeichnung einer Steuerzahlung (.pay_tax label); 3 (Depotgebühr) seit 1.6.5."""
+    if aux == 3:
+        from ._pruefen import chk_msg
+        return chk_msg("a.label_depot")
     return _ML[str(aux)] if aux < 2 else _ML["2"] % "/".join(str(y) for y in ints)
 
 
@@ -234,10 +262,18 @@ def _sim_engine_signal(events, err, nm, flag_date) -> None:
             _warn(r_sprintf(_MS["3"], a, d0))
         elif code == 4:
             _warn(_MS["4"])
+        elif code == 5 and aux == 3:   # seit 1.6.5 (Paket E): nicht gedeckte Depotgebühr als offene Gebühr
+            from ._pruefen import chk_msg
+            _warn(chk_msg("e.gebuehr_ungedeckt", _label(aux, ints), r_sprintf("%.2f", d0),
+                          fmt_date(int(flag_date[day - 1])), r_sprintf("%.2f", d1), a))
         elif code == 5:
             _warn(r_sprintf(_MS["5"], _label(aux, ints), d0, fmt_date(int(flag_date[day - 1])), d1, a))
         elif code == 6:
             _warn(r_sprintf(_MS["6"], d0, d1) + _MS["6.rest"])
+        elif code == 7:   # seit 1.6.5 (CR2-G-6, K36): Hinweis zu unbrauchbaren event_weight an Ereignistagen
+            from ._pruefen import chk_msg
+            from ._sim_base import _message
+            _message(chk_msg("a.event_gewicht", str(int(d0)), fmt_date(int(flag_date[day - 1]))))
         else:
             _stop(_MS["unbekannt"] % code)
     if err is not None:
@@ -308,6 +344,12 @@ def _sim_engine_detail(code: int, name, aux: int, v, ints, nm, ds: str) -> None:
         out(sp(m["223"], v[0], name))
     elif code == 224:
         out(sp(m["224"], name, v[0], ds))
+    elif code in (225, 226) and int(aux) == 3:   # seit 1.6.5 (Entscheidung 194): Depotgebühr mit Präfix „Depotgebühr:“
+        from ._pruefen import chk_msg
+        if code == 225:
+            out(chk_msg("a.dt_gebuehr_zahlung", sp("%.2f", v[0]), name, ds))
+        else:
+            out(chk_msg("a.dt_gebuehr_teil", sp("%.2f", v[0]), ds))
     elif code == 225:
         out(sp(m["225"], _label(aux, ints), v[0], name, ds))
     elif code == 226:
@@ -325,6 +367,15 @@ def _sim_engine_detail(code: int, name, aux: int, v, ints, nm, ds: str) -> None:
         out(sp(m["231"], v[0], ds))
     elif code == 232:
         out(sp(m["232"], name, fmt_date(int(v[0])), v[1], v[2], v[3], v[4], ds))
+    elif code in (233, 234):   # seit 1.6.5: Zahlung aus dem Geld eines anderen Assets (MA1-2), Depotgebühr (150)
+        from ._pruefen import chk_msg
+        if code == 233:
+            if int(aux) == 3:
+                out(chk_msg("a.dt_gebuehr_anderes", sp("%.2f", v[0]), nm[int(v[1])], name, ds))
+            else:
+                out(chk_msg("a.dt_zahlung_anderes", _label(aux, ints), sp("%.2f", v[0]), nm[int(v[1])], name, ds))
+        else:
+            out(chk_msg("a.dt_depot", sp("%.2f", v[0]), sp("%.2f", v[1]), sp("%.4f", v[2]), ds))
     elif code == 240:
         out(m["240.1"])
         out(m["240.2"] % (int(v[0]), int(v[1])))

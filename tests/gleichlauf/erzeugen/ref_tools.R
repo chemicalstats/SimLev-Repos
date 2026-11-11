@@ -234,11 +234,20 @@ enc <- function(x) {
   .ref$n <- .ref$n + 1L
 }
 
+# Laufzeit je Fall (seit 1.6.5, FB-14): mit SIMLEV_ZEITEN eine Zeile „R<TAB>Kennung<TAB>Sekunden“ in diese Datei
+# (die abgelegten Fälle bleiben unverändert)
+.ref_zeit <- function(id, dt) {
+  zf <- Sys.getenv("SIMLEV_ZEITEN")
+  if (nzchar(zf)) cat(sprintf("R\t%s/%s\t%.6f\n", .ref$module, id, dt), file = zf, append = TRUE)
+}
+
 # print = NA: Druckausgabe nur für Objekte mit eigener print-Methode in SimLev
 ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL, nur = NULL, calls = FALSE) {
   if (!.ref_in_subset(id)) return(invisible(NULL))
   stopifnot(is.null(nur) || nur %in% c("py", "jl"))
+  t0 <- proc.time()[["elapsed"]]
   ev <- .ref_eval(r, inputs, print, calls)
+  .ref_zeit(id, proc.time()[["elapsed"]] - t0)
   .ref$used <- character(0)
   case <- list(id = id, module = .ref$module, note = note,
                inputs = lapply(inputs, function(x) .ref_input(enc(x))), r = r)

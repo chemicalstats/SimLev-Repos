@@ -150,9 +150,17 @@ def _pext(args, na_rm, greater):
         import warnings
         warnings.warn("an argument will be fractionally recycled", UserWarning, stacklevel=3)
     first, nm = vals[0]
-    out = _np.resize(first, n).copy()
+    # seit 1.6.5 (CR2-O-5): Einzelwerte über Broadcast statt np.resize (bei 1e5 Werten 10-mal schneller), Länge n ohne
+    # Kopie; sonst np.resize wie bisher (Werte und Bits unverändert)
+    if first.size == n:
+        out = first.copy()
+    elif first.size == 1:
+        out = _np.empty(n, dtype=first.dtype)
+        out[:] = first[0]
+    else:
+        out = _np.resize(first, n)
     for v, _ in vals[1:]:
-        t = _np.resize(v, n)
+        t = v if v.size in (1, n) else _np.resize(v, n)
         # wie do_pmin: (narm && ISNAN(r)) || (!ISNAN(b) && b > r) || (!narm && ISNAN(b)); als Feld (seit 1.6.4, C-071;
         # bis dahin je Element, dieselbe Bedingung, Werte unverändert kopiert)
         with _np.errstate(invalid="ignore"):

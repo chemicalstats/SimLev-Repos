@@ -1,6 +1,6 @@
 {
  "language": "Julia",
- "stand": "2026-11-08 – 1.6.4: Standard cores auto (Planer)",
+ "stand": "2026-11-10 – 1.6.5 Paket B2b: sharpe_test nach Ledoit & Wolf, print(param_range)",
  "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -104,7 +104,8 @@
    {"name": "L", "kind": "keyword", "default": "nothing"},
    {"name": "country_weights", "kind": "keyword", "default": "nothing"},
    {"name": "target", "kind": "keyword", "default": "nothing"},
-   {"name": "seed", "kind": "keyword", "default": "nothing"}
+   {"name": "seed", "kind": "keyword", "default": "nothing"},
+   {"name": "periods", "kind": "keyword", "default": "nothing"}
   ],
   "bootstrap_probability": [
    {"name": "study", "kind": "positional", "default": null},
@@ -297,7 +298,9 @@
    {"name": "metric", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "frequency", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "dates", "kind": "keyword", "default": "nothing"},
-   {"name": "risk_free", "kind": "keyword", "default": "0"}
+   {"name": "risk_free", "kind": "keyword", "default": "0"},
+   {"name": "n_splits", "kind": "keyword", "default": "nothing"},
+   {"name": "seed", "kind": "keyword", "default": "nothing"}
   ],
   "overfit_reality_check": [
    {"name": "x", "kind": "positional", "default": null},
@@ -316,7 +319,8 @@
    {"name": "anchored", "kind": "keyword", "default": "false"},
    {"name": "metric", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "select", "kind": "keyword", "default": "nothing", "match_arg": true},
-   {"name": "risk_free", "kind": "keyword", "default": "0"}
+   {"name": "risk_free", "kind": "keyword", "default": "0"},
+   {"name": "correlation", "kind": "keyword", "default": "nothing", "match_arg": true}
   ],
   "param_bootstrap": [
    {"name": "x", "kind": "positional", "default": null},
@@ -431,7 +435,8 @@
    {"name": "frequency", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "resample", "kind": "keyword", "default": "0"},
    {"name": "block", "kind": "keyword", "default": "nothing"},
-   {"name": "seed", "kind": "keyword", "default": "nothing"}
+   {"name": "seed", "kind": "keyword", "default": "nothing"},
+   {"name": "cvar_coarse", "kind": "keyword", "default": "true"}
   ],
   "portfolio_returns": [
    {"name": "data", "kind": "positional", "default": null},
@@ -506,7 +511,8 @@
    {"name": "lev_col", "kind": "keyword", "default": "\"target_leverage\""},
    {"name": "vol_col", "kind": "keyword", "default": "\"sigma_ewma\""},
    {"name": "triggers", "kind": "keyword", "default": "nothing"},
-   {"name": "out_col", "kind": "keyword", "default": "\"rebal_trigger\""}
+   {"name": "out_col", "kind": "keyword", "default": "\"rebal_trigger\""},
+   {"name": "combine", "kind": "keyword", "default": "\"or\""}
   ],
   "regime_hmm": [
    {"name": "data", "kind": "positional", "default": null},
@@ -686,7 +692,8 @@
    {"name": "frequency", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "dates", "kind": "keyword", "default": "nothing"},
    {"name": "risk_free", "kind": "keyword", "default": "0"},
-   {"name": "rho_method", "kind": "keyword", "default": "nothing", "match_arg": true}
+   {"name": "rho_method", "kind": "keyword", "default": "nothing", "match_arg": true},
+   {"name": "expected_max", "kind": "keyword", "default": "nothing", "match_arg": true}
   ],
   "sharpe_haircut": [
    {"name": "x", "kind": "positional", "default": null},
@@ -695,7 +702,8 @@
    {"name": "frequency", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "dates", "kind": "keyword", "default": "nothing"},
    {"name": "risk_free", "kind": "keyword", "default": "0"},
-   {"name": "ppy", "kind": "keyword", "default": "52"}
+   {"name": "ppy", "kind": "keyword", "default": "52"},
+   {"name": "distribution", "kind": "keyword", "default": "nothing", "match_arg": true}
   ],
   "sharpe_min_track_record": [
    {"name": "x", "kind": "positional", "default": null},
@@ -717,7 +725,10 @@
    {"name": "B", "kind": "keyword", "default": "2000"},
    {"name": "block", "kind": "keyword", "default": "nothing"},
    {"name": "ppy", "kind": "keyword", "default": "nothing"},
-   {"name": "seed", "kind": "keyword", "default": "nothing"}
+   {"name": "seed", "kind": "keyword", "default": "nothing"},
+   {"name": "studentize", "kind": "keyword", "default": "true"},
+   {"name": "kernel", "kind": "keyword", "default": "nothing", "match_arg": true},
+   {"name": "prewhiten", "kind": "keyword", "default": "nothing"}
   ],
   "signal_analysis": [
    {"name": "data", "kind": "positional", "default": null},
@@ -794,7 +805,8 @@
    {"name": "order_fee_pos", "kind": "positional", "default": "nothing"},
    {"name": "dca_fee_pos", "kind": "positional", "default": "nothing"},
    {"name": "order_fee", "kind": "keyword", "default": "order_fee_pos"},
-   {"name": "dca_fee", "kind": "keyword", "default": "dca_fee_pos"}
+   {"name": "dca_fee", "kind": "keyword", "default": "dca_fee_pos"},
+   {"name": "custody_fee", "kind": "keyword", "default": "nothing"}
   ],
   "simlev_seed": [
    {"name": "seed", "kind": "positional", "default": "nothing"}
@@ -882,7 +894,8 @@
    {"name": "lookbacks", "kind": "keyword", "default": "[1, 3, 6, 12]"},
    {"name": "type", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "every", "kind": "keyword", "default": "nothing", "match_arg": true},
-   {"name": "weighting", "kind": "keyword", "default": "nothing", "match_arg": true}
+   {"name": "weighting", "kind": "keyword", "default": "nothing", "match_arg": true},
+   {"name": "vol_window", "kind": "keyword", "default": "63"}
   ],
   "tactical_rules": [
    {"name": "data", "kind": "positional", "default": null},
@@ -908,7 +921,18 @@
    {"name": "window", "kind": "keyword", "default": "63"},
    {"name": "max_exposure", "kind": "keyword", "default": "1"},
    {"name": "every", "kind": "keyword", "default": "nothing", "match_arg": true},
-   {"name": "ppy", "kind": "keyword", "default": "nothing"}
+   {"name": "ppy", "kind": "keyword", "default": "nothing"},
+   {"name": "risk", "kind": "keyword", "default": "nothing", "match_arg": true},
+   {"name": "estimator", "kind": "keyword", "default": "nothing", "match_arg": true},
+   {"name": "alpha", "kind": "keyword", "default": "0.05"},
+   {"name": "lpm_order", "kind": "keyword", "default": "1"},
+   {"name": "lambda", "kind": "keyword", "default": "0.94"},
+   {"name": "exponent", "kind": "keyword", "default": "1"},
+   {"name": "min_exposure", "kind": "keyword", "default": "0"},
+   {"name": "risk_floor", "kind": "keyword", "default": "nothing"},
+   {"name": "reference", "kind": "keyword", "default": "nothing", "match_arg": true},
+   {"name": "cushion", "kind": "keyword", "default": "nothing"},
+   {"name": "cushion_window", "kind": "keyword", "default": "252"}
   ],
   "tail_covar": [
    {"name": "data", "kind": "positional", "default": null},
@@ -949,23 +973,33 @@
    {"name": "file_pos", "kind": "positional", "default": "nothing"},
    {"name": "file", "kind": "keyword", "default": "file_pos"}
   ],
+  "view_cor": [
+   {"name": "var1", "kind": "positional", "default": null},
+   {"name": "var2", "kind": "positional", "default": null},
+   {"name": "value", "kind": "positional", "default": null},
+   {"name": "op_pos", "kind": "positional", "default": "_ops", "value": "(\"=\", \"<=\", \">=\")"},
+   {"name": "op", "kind": "keyword", "default": "op_pos"}
+  ],
   "view_mean": [
    {"name": "var", "kind": "positional", "default": null},
    {"name": "value", "kind": "positional", "default": null},
    {"name": "op_pos", "kind": "positional", "default": "_ops", "value": "(\"=\", \"<=\", \">=\")"},
-   {"name": "op", "kind": "keyword", "default": "op_pos", "match_arg": true}
+   {"name": "op", "kind": "keyword", "default": "op_pos"}
   ],
   "view_prob": [
    {"name": "expr", "kind": "positional", "default": null},
    {"name": "value", "kind": "positional", "default": null},
    {"name": "op_pos", "kind": "positional", "default": "_ops", "value": "(\"=\", \"<=\", \">=\")"},
-   {"name": "op", "kind": "keyword", "default": "op_pos", "match_arg": true}
+   {"name": "op", "kind": "keyword", "default": "op_pos"}
+  ],
+  "view_rank": [
+   {"name": "vars", "kind": "positional", "default": null}
   ],
   "view_vol": [
    {"name": "var", "kind": "positional", "default": null},
    {"name": "value", "kind": "positional", "default": null},
    {"name": "op_pos", "kind": "positional", "default": "_ops", "value": "(\"=\", \"<=\", \">=\")"},
-   {"name": "op", "kind": "keyword", "default": "op_pos", "match_arg": true}
+   {"name": "op", "kind": "keyword", "default": "op_pos"}
   ],
   "withdrawal_cohorts": [
    {"name": "data", "kind": "positional", "default": null},
@@ -977,7 +1011,8 @@
    {"name": "wrap", "kind": "keyword", "default": "false"},
    {"name": "cape", "kind": "keyword", "default": "nothing"},
    {"name": "base_rate", "kind": "keyword", "default": "nothing"},
-   {"name": "inflation_type", "kind": "keyword", "default": "_MISSING", "match_arg": true, "default_known": false}
+   {"name": "inflation_type", "kind": "keyword", "default": "_MISSING", "match_arg": true, "default_known": false},
+   {"name": "periods", "kind": "keyword", "default": "nothing"}
   ],
   "withdrawal_horizon": [
    {"name": "type_pos", "kind": "positional", "default": "nothing"},
@@ -1066,7 +1101,8 @@
    {"name": "loss_carryforward", "kind": "keyword", "default": "_MISSING", "default_known": false},
    {"name": "gamma", "kind": "keyword", "default": "2"},
    {"name": "keep_paths", "kind": "keyword", "default": "true"},
-   {"name": "horizon", "kind": "keyword", "default": "nothing"}
+   {"name": "horizon", "kind": "keyword", "default": "nothing"},
+   {"name": "periods", "kind": "keyword", "default": "nothing"}
   ],
   "wrapper_config": [
    {"name": "strategy", "kind": "positional", "default": null},
@@ -1272,6 +1308,9 @@
    {"name": "x", "kind": "positional", "default": null}
   ],
   "print.SimLevPBO": [
+   {"name": "x", "kind": "positional", "default": null}
+  ],
+  "print.SimLevParamRange": [
    {"name": "x", "kind": "positional", "default": null}
   ],
   "print.SimLevParamSearch": [

@@ -214,6 +214,46 @@ int sl_rgeom(sl_ctx *cx, sl_rng *r, int64_t n, double p, double *out)
     return SL_OK;
 }
 
+/* Länderblöcke von bootstrap_pooled (seit 1.6.5, Paket E, K40/CR2-6; bis 1.6.4 je Zug ein Aufruf aus R, Python und
+ * Julia): je Pfad Blöcke, bis nper Perioden gefüllt sind; je Block das Land (Gewichte cw), die Länge 1 + rgeom(1 / L)
+ * und die Startzeile in dessen nr Zeilen, die Zeilen laufen zyklisch weiter. Die Länge des letzten Blocks wird auf die
+ * fehlenden Perioden gekürzt (wie min(len, nper - t + 1) in R; in double, dann ganzzahlig). */
+int sl_pooled_draw(sl_ctx *cx, sl_rng *r, int64_t nc, const int64_t *nr, const double *cw, double L, int64_t nper,
+                   int64_t n, int32_t *ctry, int32_t *row)
+{
+    int64_t i, j, t;
+    int st;
+    if (nc < 1 || nper < 0 || n < 0 || !(L >= 1)) return sl_fail(cx, SL_EARG, "pooled_draw: ungültige Größe");
+    for (i = 0; i < nc; i++)
+        if (nr[i] < 1 || nr[i] > INT32_MAX) return sl_fail(cx, SL_EARG, "pooled_draw: ungültige Zeilenzahl");
+    for (i = 0; i < n; i++) {
+        int32_t *pc = ctry + i * nper, *pr = row + i * nper;
+        t = 0;
+        while (t < nper) {
+            int32_t ci, s0;
+            double g, len, rest;
+            int64_t take, m;
+            st = sl_sample(cx, r, nc, 1, 0, cw, &ci);
+            if (st != SL_OK) return st;
+            st = sl_rgeom(cx, r, 1, 1.0 / L, &g);
+            if (st != SL_OK) return st;
+            len = 1.0 + g;
+            m = nr[ci - 1];
+            st = sl_sample(cx, r, m, 1, 0, NULL, &s0);
+            if (st != SL_OK) return st;
+            rest = (double) (nper - t);
+            take = (int64_t) (len < rest ? len : rest);
+            for (j = 0; j < take; j++) {
+                pc[t + j] = ci;
+                pr[t + j] = (int32_t) (((s0 - 1 + j) % m) + 1);
+            }
+            t += take;
+        }
+        SL_POLL(cx, i);
+    }
+    return SL_OK;
+}
+
 /* Marsaglia-Tsang für alpha >= 1 (Einheitsskala) */
 static double gamma_mt(sl_rng *r, double alpha)
 {

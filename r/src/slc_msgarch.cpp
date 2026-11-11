@@ -12,7 +12,7 @@
  *             Zielfunktion rechnet dieselben Schritte ohne die n x K-Felder.
  *             Umparametrisierung, stationäre Verteilung, Startwerte und Ablauf wie die eigene
  *             R-Funktion .ms_garch_fit (r/R/ms_garch.R, eigener Code):
- *             .ms_garch_unpack/.ms_garch_pack, .ms_garch_stat (Potenziteration), Startfamilie 1 aus
+ *             .ms_garch_unpack/.ms_garch_pack, .ms_garch_stat (seit 1.6.5 direkt gelöst, CR2-M-1), Startfamilie 1 aus
  *             dem Baum-Welch-EM des Gauß-HMM (Baum u. a. 1970; wie .hmm_em mit Start
  *             .hmm_init_rank, r/R/regimes.R), Startfamilie 2 aus der Rangeinteilung der
  *             rollierenden Volatilität (.rolling_vol, Quantile, .assign_regimes,
@@ -243,10 +243,69 @@ void sl_msgarch_pack(int K, int gjr, const double *om, const double *al, const d
     for (i = 0; i < K; i++) for (j = 0; j < K; j++) if (j != i) th[p++] = log(P[i + K * j] / P[i + K * i]);
 }
 
+/* seit 1.6.5 (CR2-M-1, Entscheidung 189): stationäre Verteilung einer Markov-Kette direkt aus
+ * (I - P)' pi = 0 mit sum pi = 1 (letzte Gleichung durch Einsen ersetzt; LU mit Spaltenpivotsuche,
+ * Golub, Van Loan 2013, Alg. 3.4.1; dieselbe Matrix wie für die Ableitung in ms_grad_core).
+ * Rückgabe 1 bei Erfolg. 0 (pi unverändert), wenn das System singulär ist (Pivot <= 1e-13, z. B.
+ * zerfallende Kette wie P = I), ohne Speicher oder wenn das Ergebnis keine Verteilung ist
+ * (nicht endlich, Wert < -1e-12); die Aufrufer behalten dann die Potenziteration bis 1.6.4.
+ * Werte in [-1e-12, 0) werden 0 (danach neu normiert). Bis 1.6.4 nur die Potenziteration ab der
+ * Gleichverteilung mit höchstens 1000 (Bootstrap "regime": 2000) Schritten: bei trägen Regimen
+ * deutlich daneben (P(stay) 0.9999/0.999: 0.773 statt 0.909). */
+int sl_markov_stat_exact(int K, const double *P, double *pi)
+{
+    double buf[16 * 16 + 16], *A, *x;
+    int piv[64], *pv, i, j, k, neg = 0, ok = 1;
+    if (K < 1) return 0;
+    if (K == 1) { pi[0] = 1.0; return 1; }
+    A = K <= 16 ? buf : (double *) malloc(((size_t) K * K + K) * sizeof(double));
+    pv = K <= 64 ? piv : (int *) malloc((size_t) K * sizeof(int));
+    if (A == NULL || pv == NULL) { if (A != buf) free(A); if (pv != piv) free(pv); return 0; }
+    x = A + (size_t) K * K;
+    for (j = 0; j < K; j++) for (i = 0; i < K; i++)          /* A = (I - P)' mit letzter Zeile 1 */
+        A[j + (size_t) K * i] = (j == K - 1) ? 1.0 : ((i == j ? 1.0 : 0.0) - P[i + (size_t) K * j]);
+    for (k = 0; k < K && ok; k++) {
+        int ip = k;
+        double mx = fabs(A[k + (size_t) K * k]);
+        for (i = k + 1; i < K; i++) if (fabs(A[i + (size_t) K * k]) > mx) { mx = fabs(A[i + (size_t) K * k]); ip = i; }
+        pv[k] = ip;
+        if (ip != k) for (j = 0; j < K; j++) { double tt = A[k + (size_t) K * j]; A[k + (size_t) K * j] = A[ip + (size_t) K * j]; A[ip + (size_t) K * j] = tt; }
+        if (!(mx > 1e-13)) { ok = 0; break; }
+        for (i = k + 1; i < K; i++) {
+            const double l = A[i + (size_t) K * k] / A[k + (size_t) K * k];
+            A[i + (size_t) K * k] = l;
+            for (j = k + 1; j < K; j++) A[i + (size_t) K * j] -= l * A[k + (size_t) K * j];
+        }
+    }
+    if (ok) {
+        for (j = 0; j < K; j++) x[j] = (j == K - 1) ? 1.0 : 0.0;
+        for (k = 0; k < K; k++) if (pv[k] != k) { double tt = x[k]; x[k] = x[pv[k]]; x[pv[k]] = tt; }
+        for (i = 1; i < K; i++) for (j = 0; j < i; j++) x[i] -= A[i + (size_t) K * j] * x[j];
+        for (i = K - 1; i >= 0; i--) {
+            for (j = i + 1; j < K; j++) x[i] -= A[i + (size_t) K * j] * x[j];
+            x[i] /= A[i + (size_t) K * i];
+        }
+        for (k = 0; k < K; k++) {
+            if (!isfinite(x[k]) || x[k] < -1e-12) { ok = 0; break; }
+            if (x[k] < 0.0) { x[k] = 0.0; neg = 1; }
+        }
+    }
+    if (ok) {
+        double s = 0.0;
+        if (neg) { for (k = 0; k < K; k++) s += x[k]; ok = s > 0.0; }
+        if (ok) for (k = 0; k < K; k++) pi[k] = neg ? x[k] / s : x[k];
+    }
+    if (A != buf) free(A);
+    if (pv != piv) free(pv);
+    return ok;
+}
+
 void sl_msgarch_stat(int K, const double *P, double *pi)
 {
-    double p2[64], *q = K <= 64 ? p2 : (double *) malloc((size_t) K * sizeof(double));
+    double p2[64], *q;
     int it, i, j, k;
+    if (sl_markov_stat_exact(K, P, pi)) return;   /* seit 1.6.5 direkt (CR2-M-1, CR1-Y2-1) */
+    q = K <= 64 ? p2 : (double *) malloc((size_t) K * sizeof(double));
     /* seit 1.6.4 (B-031): ohne Speicher NaN statt still der Gleichverteilung (nur K > 64) */
     if (q == NULL) { for (k = 0; k < K; k++) pi[k] = NAN; return; }
     for (k = 0; k < K; k++) pi[k] = 1.0 / K;
@@ -295,7 +354,7 @@ static size_t ms_gw_len(int K, int gjr)
  *   (alpha + gamma)/2, beta) = s(t1, t2, t3) mit s = Softmax mit 1 im Nenner, ds_i/dt_j = s_i (d_ij - s_j);
  *   Übergangsmatrix je Zeile i: P_ij = exp(t_ij) / (1 + sum_m exp(t_im)) (P_ii mit 1 im Zähler),
  *   dP_ij/dt_im = P_ij (d_jm - P_im).
- *   Stationäre Verteilung pi (Potenziteration wie sl_msgarch_stat): nach Konvergenz die exakte Ableitung
+ *   Stationäre Verteilung pi (seit 1.6.5 direkt wie sl_msgarch_stat, sonst Potenziteration): exakte Ableitung
  *   aus dpi (I - P) = pi dP, sum dpi = 0; an der Grenze von 1000 Schritten die mitgeführte Ableitung der
  *   Iteration (Einzelheiten unten).
  *   Varianz: dh_t = d omega + d a_t y_{t-1}^2 + d beta h_{t-1} + beta dh_{t-1}, a_t = alpha + gamma 1{y_{t-1} < 0}
@@ -370,19 +429,23 @@ static MS_INLINE int ms_grad_core(const ms_data *d, const double *th, double *g,
      * Startpunkt schon nach 0 Schritten endet (z. B. symmetrisches P).
      * zuerst nur pi (wie sl_msgarch_stat); die mitgeführte Ableitung läuft nur, wenn die Grenze erreicht
      * wird, dann mit derselben Iteration von vorn (gleiche pi, gleiche Ableitung wie bisher). */
-    for (k = 0; k < K; k++) pi[k] = 1.0 / K;
-    for (it = 0; it < 1000; it++) {
-        double mx = 0.0;
-        for (j = 0; j < K; j++) {
-            double s2 = 0.0;
-            for (i = 0; i < K; i++) s2 += pi[i] * P[i + K * j];
-            q[j] = s2;
+    /* seit 1.6.5 (CR2-M-1): pi direkt wie sl_msgarch_stat; nur ohne direkte Lösung die Iteration wie bis 1.6.4 */
+    conv = sl_markov_stat_exact(K, P, pi);
+    if (!conv) {
+        for (k = 0; k < K; k++) pi[k] = 1.0 / K;
+        for (it = 0; it < 1000; it++) {
+            double mx = 0.0;
+            for (j = 0; j < K; j++) {
+                double s2 = 0.0;
+                for (i = 0; i < K; i++) s2 += pi[i] * P[i + K * j];
+                q[j] = s2;
+            }
+            for (j = 0; j < K; j++) { double dd = fabs(q[j] - pi[j]); if (!(dd <= mx)) mx = dd; }
+            if (mx < 1e-12) break;
+            memcpy(pi, q, (size_t) K * sizeof(double));
         }
-        for (j = 0; j < K; j++) { double dd = fabs(q[j] - pi[j]); if (!(dd <= mx)) mx = dd; }
-        if (mx < 1e-12) break;
-        memcpy(pi, q, (size_t) K * sizeof(double));
+        conv = it < 1000;
     }
-    conv = it < 1000;
     for (k = 0; k < K * nP; k++) dpi[k] = 0.0;
     if (!conv) for (k = 0; k < K; k++) pi[k] = 1.0 / K;
     for (it = conv ? 1000 : 0; it < 1000; it++) {

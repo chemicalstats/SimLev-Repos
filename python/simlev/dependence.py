@@ -405,24 +405,16 @@ def _seq_len_out(a, b, n):
     return np.array([a] + mid + [b], dtype=np.float64)
 
 
-def _seq_int_len_out(a, b, n):
-    """``seq.int(a, b, length.out = n)`` (C-Code aus seq.c)."""
-    out = np.empty(n)
-    if n > 0:
-        out[0] = a
-    if n > 1:
-        out[n - 1] = b
-    if n > 2:
-        by = (b - a) / float(n - 1)
-        for i in range(1, n - 1):
-            out[i] = a + float(i) * by if i < n // 2 else b - float(n - 1 - i) * by
-    return out
-
-
 def _bincode(x, breaks, right=True, include_lowest=False):
     """``.bincode`` (Intervallnummern 1..; 0 = NA; seit 1.6.0 C-Kern ``sl_r_bincode``)."""
     code = _st_bincode(np.asarray(x, dtype=np.float64).ravel(), breaks, right, include_lowest)
     return np.where(np.isnan(code), 0, code).astype(np.int64)
+
+
+def _seq_len_core(a, b, n):
+    """``seq.int(a, b, length.out = n)`` wie R (seit 1.6.5 Kern ``sl_r_seq_len`` über ``stats.seq_len_out``; bis
+    1.6.4 eigene Fassung mit ``b - (n - 1 - i) by`` ab der Mitte, 1 ulp anders, CR2-X26-1)."""
+    return np.array(np.atleast_1d(_stats().seq_len_out(float(a), float(b), int(n))), dtype=np.float64)
 
 
 def _cut_n(x, k):
@@ -434,9 +426,9 @@ def _cut_n(x, k):
     dx = rx[1] - rx[0]
     if dx == 0:
         dx = abs(rx[0]) if rx[0] != 0 else 1.0
-        br = _seq_int_len_out(rx[0] - dx / 1000, rx[1] + dx / 1000, nb)
+        br = _seq_len_core(rx[0] - dx / 1000, rx[1] + dx / 1000, nb)
     else:
-        br = _seq_int_len_out(rx[0], rx[1], nb)
+        br = _seq_len_core(rx[0], rx[1], nb)
         br[0] = rx[0] - dx / 1000
         br[nb - 1] = rx[1] + dx / 1000
     return _bincode(x, br, right=True)
@@ -524,7 +516,7 @@ def _dep_sort_dates(data, what="data"):
     na = np.isnat(d)
     if na.any():
         idx = (np.nonzero(na)[0][:5] + 1).tolist()
-        raise ValueError("%s: Spalte 'date' enthält fehlende Daten (Zeile %s)." % (what, ", ".join(str(i) for i in idx)))
+        chk_stop("c.m_dep_sort_dates", what, ", ".join(str(i) for i in idx))
     days = _days(d)
     _, first = np.unique(days, return_index=True)
     if first.size < days.size:
@@ -538,7 +530,7 @@ def _dep_sort_dates(data, what="data"):
             seen.add(v)
         txt = ", ".join(_date_str(np.datetime64("1970-01-01", "D") + np.timedelta64(int(v), "D")) for v in dup[:5])
         more = " und %d weitere" % (len(dup) - 5) if len(dup) > 5 else ""
-        raise ValueError("%s: doppelte Daten in 'date' (%s%s); erwartet ist eine Zeile je Datum." % (what, txt, more))
+        chk_stop("c.m_dep_sort_dates_2", what, txt, more)
     if np.any(days[1:] < days[:-1]):
         message("%s: Zeilen sind nicht nach 'date' sortiert und werden aufsteigend sortiert." % what)
         o = np.argsort(days, kind="stable")
@@ -553,8 +545,7 @@ def _dep_check_prices(v, a, d):
     if bad.size:
         more = " und %d weitere Werte" % (bad.size - 1) if bad.size > 1 else ""
         # seit 1.6.4 ohne den Wert (Entscheidung 8), mit dem Datum als Ort in data
-        raise ValueError("Kursspalte '%s': Kurse müssen positiv und endlich sein, gefunden am %s%s "
-                         "(fehlende Kurse als NA angeben)." % (a, _date_str(_dates_arr(d)[bad[0]]), more))
+        chk_stop("c.m_dep_check_prices", a, _date_str(_dates_arr(d)[bad[0]]), more)
     return v
 
 
@@ -589,7 +580,7 @@ def _period_breaks(d, frequency):
 def _dep_returns(data, assets, conditions=None, frequency="week", drop_flat=True):
     """Periodenrenditen und verzögerte Zustandsvariablen (R: ``.dep_returns``)."""
     if not isinstance(data, pd.DataFrame) or "date" not in data.columns:
-        raise ValueError("data.frame mit Spalte 'date' erwartet.")
+        chk_stop("c.m_dep_returns")
     assets = _as_names(assets)
     conditions = _as_names(conditions)
     miss = [c for c in dict.fromkeys(assets + conditions) if c not in data.columns]
@@ -718,8 +709,10 @@ def _cop_ll(family, par, u, v):
             if abs(th) < 1e-8:
                 return 0.0
             e1 = -_libm.expm1(-th)
-            ll = (lg(th * e1) - th * (u + v)
-                  - 2 * lg(np.abs(e1 - (-_libm.expm1(-th * u)) * (-_libm.expm1(-th * v)))))
+            # seit 1.6.5 (CR2-X7-1): Nenner ohne Auslöschung (R .cop_ll)
+            D = (_libm.exp(-th * u) * (-_libm.expm1(-th * v))
+                 + _libm.exp(-th * v) * (-_libm.expm1(-th * (1 - v))))
+            ll = lg(th * e1) - th * (u + v) - 2 * lg(np.abs(D))
         else:
             raise ValueError("Unbekannte Copula-Familie '%s'." % family)
     s = r_sum(ll)
@@ -865,6 +858,13 @@ def copula_fit(x, y, *, families=None):
         sehr flach ist: für jedes ν eines Rasters (ν = 2 + 2^k, k = -4, …, 12, und ν = ∞, der Grenzfall
         Gauß-Copula) das Maximum in der Korrelation, danach eine eindimensionale Suche um den besten Rasterpunkt.
         Liegt das Maximum bei ν > 500 (auch ν = ∞), steht in ``par2`` 500; ``loglik`` gilt für das gefundene ν.
+        Die Gauß-Copula wird seit 1.6.5 wie die t-Copula über atanh ρ geschätzt (ohne die frühere Schranke |ρ| ≤ 0.995).
+        Die Log-Dichte der Frank-Copula rechnet seit 1.6.5 ohne Auslöschung (bis 1.6.4 blieb die Schätzung bei starker
+        positiver Abhängigkeit bei θ ≈ 37 stehen). Liegt der Parameter von Clayton, Gumbel oder Frank am Rand starker
+        Abhängigkeit des Suchbereichs (θ bis 60 bzw. ±60), gibt die Funktion einen Hinweis; Schätzung, Log-Likelihood und
+        AIC dieser Familie sind dann unzuverlässig. Ebenso seit 1.6.5 für Gauß und t bei nahezu vollständiger
+        Abhängigkeit (1 - |ρ| ≤ 1e-12, z. B. ein Index gegen seinen eigenen Hebelindex): die Log-Likelihood wächst dort
+        unbeschränkt, ihr Wert hängt nur von der Rundung ab und gewinnt den AIC-Vergleich ohne Aussage.
 
     Literatur:
         Genest, C., Ghoudi, K. & Rivest, L.-P. (1995), Biometrika 82(3); Joe, H. (2014), Dependence Modeling with
@@ -888,7 +888,7 @@ def copula_fit(x, y, *, families=None):
     x, y = _finite_pairs(x, y)
     n = x.size
     if n < 20:
-        raise ValueError("copula_fit: mindestens 20 Beobachtungen nötig.")
+        chk_stop("c.m_copula_fit")
     if families is not None:
         import re
         families = _as_names(families)
@@ -906,7 +906,7 @@ def copula_fit(x, y, *, families=None):
     v = _pobs(y)
     tau = _kendall(x, y)
     if not math.isfinite(tau):
-        raise ValueError("copula_fit: x oder y ist konstant (keine Rangstreuung); keine Copula schätzbar.")
+        chk_stop("c.m_copula_fit_3")
     if families is None:
         families = (["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] if tau >= 0
                     else ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"])
@@ -917,21 +917,30 @@ def copula_fit(x, y, *, families=None):
 
         def f(p, fam=fam):
             return -_cop_ll(fam, p, u, v)
-        if base == "gaussian":
-            mn, ob = _optimize(lambda r: f([r]), -0.995, 0.995)
-            par, nll, k = [mn, _NAN], ob, 1
+        edge = False
+        if base == "gaussian":                # seit 1.6.5 (E-T3-5) über atanh rho in [-20, 20]
+            o = _stats().optimize(lambda th: f([math.tanh(th)]), (-20, 20), tol=1e-10)
+            mn, ob = float(o["minimum"]), float(o["objective"])
+            par, nll, k = [math.tanh(mn), _NAN], ob, 1
+            edge = 1 - abs(par[0]) <= 1e-12     # seit 1.6.5 (PRG2-4): |rho| bis auf 1e-12 an 1
         elif base == "t":                     # Profil-Likelihood in nu
             o = _cop_fit_t(u, v)
             par, nll, k = [math.tanh(o[0]), min(o[1], 500)], o[2], 2
+            edge = 1 - abs(par[0]) <= 1e-12     # PRG2-4
         elif base == "clayton":
             mn, ob = _optimize(lambda lt: f([_libm.exp(lt)]), math.log(1e-4), math.log(60))
             par, nll, k = [_libm.exp(mn), _NAN], ob, 1
+            edge = mn > math.log(60) - 1e-3 * (math.log(60) - math.log(1e-4))
         elif base == "gumbel":
             mn, ob = _optimize(lambda lt: f([1 + _libm.exp(lt)]), math.log(1e-5), math.log(60))
             par, nll, k = [1 + _libm.exp(mn), _NAN], ob, 1
+            edge = mn > math.log(60) - 1e-3 * (math.log(60) - math.log(1e-5))
         else:
             mn, ob = _optimize(lambda th: f([th]), -60, 60)
             par, nll, k = [mn, _NAN], ob, 1
+            edge = abs(mn) > 60 - 1e-3 * 120
+        if edge:                              # seit 1.6.5 (CR2-X7-1): Parameter am Suchrand
+            message(chk_msg("c.cop_rand", "copula_fit", fam, _fmt.format(par[0], digits=6)))
         lam = _cop_lambda(fam, par)
         rows.append({"family": fam, "par1": par[0], "par2": par[1], "loglik": -nll,
                      "aic": 2 * k + 2 * nll, "bic": math.log(n) * k + 2 * nll,
@@ -948,8 +957,9 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
     """Empirische Tail-Abhängigkeit und Exceedance-Korrelationen.
 
     Misst für zwei Reihen (z. B. Periodenrenditen), wie oft extreme Werte gemeinsam auftreten, ohne ein
-    Copula-Modell anzunehmen: hatλ_L(q) = frac\\#\\u_i ≤ q, v_i ≤ q\\n q, hatλ_U(q) = frac\\#\\u_i > 1 - q, v_i > 1 -
-    q\\n q auf Pseudo-Beobachtungen u_i, v_i (Rang / (n + 1)). Unter Unabhängigkeit ist hatλ(q) ≈ q, bei
+    Copula-Modell anzunehmen: λ_L(q) = #{R_i ≤ q (n + 1), S_i ≤ q (n + 1)} / (n q) und λ_U(q) = #{n + 1 - R_i ≤
+    q (n + 1), n + 1 - S_i ≤ q (n + 1)} / (n q) mit den Rängen R_i, S_i (Mittel bei Bindungen; seit 1.6.5 beide
+    Ränder spiegelbildlich, bis 1.6.4 oben u_i > 1 - q mit u_i = R_i / (n + 1)). Unter Unabhängigkeit ist λ(q) ≈ q, bei
     Gauß-Abhängigkeit fällt es für q → 0 gegen 0, bei echter Tail-Abhängigkeit bleibt es positiv. Die
     Exceedance-Korrelation (Longin & Solnik 2001) ist die Pearson-Korrelation der Beobachtungen, in denen beide
     Reihen höchstens auf ihrem empirischen q-Quantil (bzw. mindestens auf ihrem (1 - q)-Quantil) liegen.
@@ -962,7 +972,7 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
             bzw. oberen 5 % der Beobachtungen).
 
     Returns:
-        DataFrame mit einer Zeile je Wert von ``q``: ``q``, ``lower``, ``upper`` (hatλ_L(q), hatλ_U(q)),
+        DataFrame mit einer Zeile je Wert von ``q``: ``q``, ``lower``, ``upper`` (λ_L(q), λ_U(q)),
         ``exceed_lower``, ``exceed_upper`` (Exceedance-Korrelationen; ``NA`` bei weniger als 8 gemeinsamen
         Überschreitungen oder Streuung 0), ``n_lower``, ``n_upper`` (Anzahl der Paare, die gemeinsam im unteren
         bzw. oberen Tail liegen).
@@ -986,14 +996,14 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
     qa = np.atleast_1d(np.asarray(q.to_numpy() if isinstance(q, pd.Series) else q))
     if (qa.ndim != 1 or qa.dtype.kind not in "fiu" or not qa.size
             or (~np.isfinite(qa.astype(float)) | (qa <= 0) | (qa >= 1)).any()):   # seit 1.6.4 ohne Wert
-        raise ValueError("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen.")
+        chk_stop("c.m_tail_dependence")
     qa = qa.astype(np.float64)
     x, y = _finite_pairs(x, y)
     n = x.size
     if n < 2:
-        raise ValueError("tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.")
-    u = _pobs(x)
-    v = _pobs(y)
+        chk_stop("c.m_tail_dependence_2")
+    u = _rank_avg(x)                                          # seit 1.6.5 Ränge (CR2-S-1)
+    v = _rank_avg(y)
     rows = []
     for p in qa.tolist():
         r = _tail_dep_core(x, y, u, v, n, p)
@@ -1010,8 +1020,10 @@ def _tail_dep_core(x, y, u, v, n, p):
         if s.sum() >= 8 and r_sd(x[s]) > 0 and r_sd(y[s]) > 0:
             return _cor1(x[s], y[s])
         return _NAN
-    lo = (u <= p) & (v <= p)
-    hi = (u > 1 - p) & (v > 1 - p)
+    # seit 1.6.5 (CR2-S-1): u, v Ränge, beide Ränder spiegelbildlich (R .tail_dep_core)
+    cq = p * (n + 1) + 1e-7
+    lo = (u <= cq) & (v <= cq)
+    hi = ((n + 1 - u) <= cq) & ((n + 1 - v) <= cq)
     qx = np.atleast_1d(np.asarray(_quantile(x, [p, 1 - p]), dtype=np.float64))
     qy = np.atleast_1d(np.asarray(_quantile(y, [p, 1 - p]), dtype=np.float64))
     el = (x <= float(qx[0])) & (y <= float(qy[0]))
@@ -1040,8 +1052,8 @@ def _tail_dep_fun(q):
         x, y = _finite_pairs(x, y)
         n = x.size
         if n < 2:
-            raise ValueError("tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.")
-        r = _tail_dep_core(x, y, _pobs(x), _pobs(y), n, p)
+            chk_stop("c.m_tail_dependence_2")
+        r = _tail_dep_core(x, y, _rank_avg(x), _rank_avg(y), n, p)
         return float(r[0]), float(r[1]), float(r[2])
     return fast
 
@@ -1056,9 +1068,9 @@ def dependence_dcc(R):
     Schätzt zeitvariable Korrelationen zwischen mehreren Renditereihen. Zweistufige Schätzung: univariate
     GARCH(1,1) mit Konstante je Reihe (wie im Bootstrap: Maximum Likelihood unter Normalverteilung mit der
     C-Bibliothek von SimLev, notfalls Momentschätzer), danach die Korrelationsdynamik der standardisierten
-    Residuen z_t Q_t = (1 - a - b)bar Q + a z_t-1 z_t-1' + b Q_t-1 mit Q_1 = bar Q (Stichproben-Korrelation der
+    Residuen z_t: Q_t = (1 - a - b) Q̄ + a z_(t-1) z_(t-1)' + b Q_(t-1) mit Q_1 = Q̄ (Stichproben-Korrelation der
     z_t) und a, b > 0, a + b < 0.999, per Quasi-Maximum-Likelihood (BFGS mit analytischem Gradienten, ganz in der
-    C-Bibliothek von SimLev). Die bedingte Korrelation ist R_t = diag(Q_t)^-1/2 Q_t diag(Q_t)^-1/2. Die Schätzung
+    C-Bibliothek von SimLev). Die bedingte Korrelation ist R_t = diag(Q_t)^(-1/2) Q_t diag(Q_t)^(-1/2). Die Schätzung
     ist deterministisch: Den früheren zufälligen Rückfall der GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit)
     gibt es nicht mehr; die GARCH-Stufe meldet ``method = "ml"`` statt ``"rugarch"``/``"optim"`` (seit 1.0.0).
 
@@ -1067,7 +1079,9 @@ def dependence_dcc(R):
             100 Zeilen, keine fehlenden Werte). Die Einheit ist frei (z. B. Log-Renditen als Anteil); die
             Korrelationen hängen nicht davon ab. Spaltennamen werden übernommen (sonst ``V1``, ``V2``, ...).
             Konstante oder (nahezu) perfekt korrelierte Reihen (singuläre Korrelationsmatrix der standardisierten
-            Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler.
+            Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler. Grenze der Einheit: eine Reihe mit Varianz unter
+            1e-16 (Streuung unter 1e-8, z. B. Renditen mal 1e-8) gilt als konstant; die geschätzten DCC-Parameter
+            hängen in den letzten Stellen (etwa ab der 7.) von der Einheit ab.
             Seit 1.6.4 geprüft: nur Zahlen, alle endlich.
 
     Returns:
@@ -1098,7 +1112,7 @@ def dependence_dcc(R):
     if not np.isfinite(Rm).all():
         chk_stop("e3.werte", "dependence_dcc", "R")
     if Rm.shape[1] < 2 or Rm.shape[0] < 100:
-        raise ValueError("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
+        chk_stop("c.m_dependence_dcc")
     if nm is None:
         nm = ["V%d" % (j + 1) for j in range(Rm.shape[1])]
     fg = _boot()._fit_garch11
@@ -1116,16 +1130,14 @@ def dependence_dcc(R):
         mx = np.max(ab)
         hits = np.argwhere((ab == mx).T)        # spaltenweise wie which(arr.ind = TRUE)
         j0, i0 = int(hits[0][0]), int(hits[0][1])
-        raise ValueError("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '%s' und '%s': "
-                         "Korrelation %s); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen."
-                         % (nm[i0], nm[j0], _sprintf("%.6f", float(Qb[i0, j0]))))
+        chk_stop("c.m_dependence_dcc_4", nm[i0], nm[j0], _sprintf("%.6f", float(Qb[i0, j0])))
 
     # Stufe 2 ganz in C (wie .sl_dcc_fit in R): deterministisch
     o = _sl().dcc_fit(Z, Qb)
     a, b, oval = float(o["a"]), float(o["b"]), float(o["nll"])
     fl = _sl().dcc_filter(Z, a, b, Qb, True)
     if not fl["ok"]:
-        raise ValueError("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
+        chk_stop("c.m_dependence_dcc_3")
     pn = ["%s ~ %s" % (nm[i], nm[j]) for i, j in _combn2(len(nm))]
     C = pd.DataFrame(fl["R"], columns=pn)
     garch = pd.DataFrame({"series": nm, "alpha": [float(gi["alpha"]) for gi in g],
@@ -1137,8 +1149,9 @@ def dependence_dcc(R):
 # Bedingte Analyse
 # ═════════════════════════════════════════════════════════════════════════════
 
-def _signif_str(x):
-    return _fmt1(float(_fmt.signif(float(x), 3)))
+def _signif_str(x, dg=3):
+    v = float(_fmt.signif(float(x), dg))
+    return _fmt1(v) if dg <= 7 else _fmt1(v, digits=dg)
 
 
 def _dep_regimes(cv, breaks=None, n_regimes=3):
@@ -1168,15 +1181,20 @@ def _dep_regimes(cv, breaks=None, n_regimes=3):
         breaks = np.array([-math.inf] + list(br) + [math.inf], dtype=np.float64)
     else:
         breaks = np.asarray(breaks, dtype=np.float64).ravel()
+    # seit 1.6.5 (CR2-X4-2): so viele gültige Stellen (3 bis 15), dass die Grenzen verschieden lauten (R .dep_regimes)
+    fb = [float(v) for v in breaks if math.isfinite(v)]
+    dg = 3
+    while dg < 15 and len(set(_signif_str(v, dg) for v in fb)) < len(fb):
+        dg += 1
     lab = []
     for i in range(breaks.size - 1):
         a, b = breaks[i], breaks[i + 1]
         if not math.isfinite(a):
-            lab.append("< %s" % _signif_str(b))
+            lab.append("< %s" % _signif_str(b, dg))
         elif not math.isfinite(b):
-            lab.append(">= %s" % _signif_str(a))
+            lab.append(">= %s" % _signif_str(a, dg))
         else:
-            lab.append("%s bis %s" % (_signif_str(a), _signif_str(b)))
+            lab.append("%s bis %s" % (_signif_str(a, dg), _signif_str(b, dg)))
     if np.unique(breaks).size < breaks.size:
         raise ValueError("'breaks' are not unique")
     br_s = np.sort(breaks)
@@ -1410,6 +1428,10 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
     diff_names = []
     if conditions:
         if block is None:
+            # seit 1.6.5 (CR2-X51-1): Anlage ohne Schwankung -> klare Meldung (R dependence_analysis)
+            flat = [assets[j] for j in range(len(assets)) if not (r_sd(X[:, j]) > 0)]
+            if flat:
+                chk_stop("c.dep_konstant", fn, ", ".join("'%s'" % a for a in flat))
             bl = []
             for i, j in pidx:
                 x = _scale1(X[:, i])
@@ -1421,7 +1443,7 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
             cv = rd[cn].to_numpy(dtype=np.float64)
             keep = np.nonzero(np.isfinite(cv))[0]
             if keep.size < 30:
-                warnings.warn("Zustand '%s': zu wenige Beobachtungen." % cn)
+                warnings.warn(chk_msg("c.m_dependence_analysis", cn))
                 continue
             bcn = None
             if breaks is not None:
@@ -1649,7 +1671,8 @@ def _plot_dependence(x, type=("overview", "rolling", "tail", "conditional", "sca
     if x["conditional"]:
         condition = _e4_pick(condition, list(x["conditional"].keys()), "plot.SimLevDependence", "condition")
     i = pn.index(pair) if isinstance(pair, str) else int(pair) - 1
-    ab = pn[i].split(" ~ ")
+    # seit 1.6.5 (CR2-L-2): Anlagen aus der Paarliste, nicht aus dem Text
+    ab = [x["assets"][k] for k in _combn2(len(x["assets"]))[i]]
     X = x["returns"]
     data = {}
 
@@ -1803,11 +1826,15 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
     """Lineare Quantilsregression (exakte Lösung mit Optimalitätsnachweis).
 
     Schätzt die Koeffizienten des bedingten τ-Quantils von ``y`` (Koenker & Bassett 1978), d. h. minimiert Σ_i
-    ρ_τ(y_i - x_i'β) mit ρ_τ(r) = r(τ - 1\\r < 0\\). Geliefert wird die exakte Lösung dieses linearen Programms mit
-    Optimalitätsnachweis (Ausnahme: entartete Fälle, siehe unten), berechnet in zwei Schritten (Kern in C++):
+    ρ_τ(y_i - x_i'β) mit ρ_τ(r) = r(τ - 1{r < 0}). Geliefert wird die exakte Lösung dieses linearen Programms mit
+    Optimalitätsnachweis (Ausnahme: entartete Fälle, siehe unten), berechnet in zwei Schritten (Kern in C++).
+    Seit 1.6.5 werden die Regressoren vorher zentriert (mit Konstante) und auf Standardabweichung 1 skaliert, die
+    Koeffizienten danach zurückgerechnet; so hängt das Ergebnis nicht von Einheit oder Niveau der Regressoren ab (bis
+    1.6.4 bei Indexständen oder Jahreszahlen Steigungen bis 85 % daneben, mit der Warnung "Optimalität nicht
+    nachgewiesen").
 
     - MM-Algorithmus von Hunter & Lange (2000), ausgehend von der KQ-Lösung: iterativ gewichtete kleinste Quadrate
-      mit β ← (X'WX)^-1(X'Wy + (τ - 1/2) X'1), W = diag(1 / (2(ε + |r_i|))) in vier Stufen mit ε = sd(y) mal 1e-2,
+      mit β ← (X'WX)^(-1) (X'Wy + (τ - 1/2) X'1), W = diag(1 / (2(ε + |r_i|))) in vier Stufen mit ε = sd(y) mal 1e-2,
       1e-4, 1e-6, 1e-8.
     - Ecken-Politur: Aus den p Beobachtungen mit den kleinsten Residuen der Näherung (linear unabhängig gewählt)
       wird die Ecke des linearen Programms berechnet, die diese Beobachtungen exakt interpoliert, und über die
@@ -1862,13 +1889,13 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
     if (chk_is_factor(tau) or tv.size != 1 or isinstance(tv[0], (bool, np.bool_, str)) or tv[0] is None
             or not isinstance(tv[0], (int, float, np.integer, np.floating))
             or not math.isfinite(float(tv[0])) or float(tv[0]) <= 0 or float(tv[0]) >= 1):   # seit 1.6.4 ohne Wert
-        raise ValueError("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein.")
+        chk_stop("c.m_quantile_regression")
     tau = float(tv[0])
     if chk_is_factor(y):
-        raise ValueError("quantile_regression: y muss numerisch sein.")
+        chk_stop("c.m_quantile_regression_2")
     ya = np.asarray(y.to_numpy() if isinstance(y, pd.Series) else y)
     if ya.dtype.kind not in "fiu" or ya.ndim > 1:              # seit 1.6.4 Vektor
-        raise ValueError("quantile_regression: y muss numerisch sein.")
+        chk_stop("c.m_quantile_regression_2")
     fn = "quantile_regression"
     if chk_is_factor(X):
         chk_stop("faktor", fn, "X")                            # Entscheidung 15
@@ -1891,7 +1918,7 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
         else:
             Xa = np.asarray(X.to_numpy() if isinstance(X, pd.Series) else X)
             if Xa.dtype.kind not in "fiu":
-                raise ValueError("quantile_regression: X muss numerisch sein.")
+                chk_stop("c.m_quantile_regression_4")
             Xm = Xa.astype(np.float64)
             if Xm.ndim == 1:
                 Xm = Xm.reshape(-1, 1)
@@ -1908,7 +1935,7 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
     Xm = Xm[ok, :]
     p = Xm.shape[1]
     if not p:
-        raise ValueError("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
+        chk_stop("c.m_quantile_regression_5")
     if y.size < p:
         raise ValueError("quantile_regression: %d vollständige Beobachtungen für %d Koeffizienten." % (y.size, p))
     qx = _qr_decomp(Xm, y)
@@ -1918,13 +1945,42 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
         bad = [nm[int(k) - 1] for k in piv[rank:]]
         raise ValueError("quantile_regression: Regressoren linear abhängig (%s); doppelte oder konstante Spalten entfernen "
                          "(die Konstante ist bei intercept = TRUE schon enthalten)." % ", ".join("'%s'" % b for b in bad))
-    beta = np.asarray(qx["coefficients"], dtype=np.float64).ravel()
+    # seit 1.6.5 (K5, CR2-E-10): Regressoren zentrieren/skalieren, Koeffizienten zurückrechnen (R .qr_scale)
+    sx = _qr_scale(Xm, intercept)
+    Z = sx[0]
+    beta = np.asarray(_qr_decomp(Z, y)["coefficients"], dtype=np.float64).ravel()
     sc = _rmax(r_sd(y), 1e-12)
-    beta, opt = _core.quantile_reg_core(y, Xm, tau, beta, sc, tol, int(maxit))
+    g, opt = _core.quantile_reg_core(y, Z, tau, beta, sc, tol, int(maxit))
     if not opt:
-        warnings.warn("quantile_regression: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem "
-                      "Zielwert als die MM-Näherung (bzw. die MM-Näherung selbst, falls keine solche Ecke gefunden wurde).")
-    return pd.Series(np.asarray(beta, dtype=np.float64), index=nm)
+        warnings.warn(chk_msg("c.m_quantile_regression_7"))
+    return pd.Series(_qr_unscale(np.asarray(g, dtype=np.float64), sx, intercept), index=nm)
+
+
+def _qr_scale(X, intercept):
+    """``.qr_scale`` (seit 1.6.5, K5): (Z, m, s) mit Z = (X - m) / s je Spalte außer der Konstanten."""
+    X = np.asarray(X, dtype=np.float64)
+    p = X.shape[1]
+    m = np.zeros(p)
+    s = np.ones(p)
+    Z = X.copy()
+    for j in range(p):
+        if intercept and j == 0:
+            continue
+        v = X[:, j]
+        if intercept:
+            m[j] = r_mean(v)
+        sj = r_sd(v)
+        s[j] = sj if (math.isfinite(sj) and sj > 0) else float(np.max(np.abs(v)))
+        Z[:, j] = (v - m[j]) / s[j]
+    return Z, m, s
+
+
+def _qr_unscale(g, sx, intercept):
+    """``.qr_unscale``: Steigung g_j / s_j, Konstante g_0 - sum(g_j m_j / s_j)."""
+    b = np.asarray(g, dtype=np.float64) / sx[2]
+    if intercept and b.size > 1:
+        b[0] = g[0] - r_sum(b[1:] * sx[1][1:])
+    return b
 
 
 class SimLevTailRegression(RList):
@@ -2030,11 +2086,19 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
     X = rd[drivers].to_numpy(dtype=np.float64)
     n = y.size
     if n < 30:
-        raise ValueError("tail_regression: zu wenige Perioden.")
+        chk_stop("c.m_tail_regression")
     p = X.shape[1] + 1
     Xdf = pd.DataFrame(X, columns=drivers)
     est = np.column_stack([quantile_regression(y, X=Xdf, tau=q).to_numpy() for q in quantiles.tolist()])
     X1 = np.column_stack([np.ones(n), X])
+    # seit 1.6.5 (K5): Bootstrap auf denselben zentrierten/skalierten Treibern (R tail_regression)
+    sx = _qr_scale(X1, True)
+    Z1 = sx[0]
+    g0 = est.copy()
+    if est.shape[0] > 1:
+        for k in range(est.shape[1]):
+            g0[1:, k] = est[1:, k] * sx[2][1:]
+            g0[0, k] = est[0, k] + r_sum(est[1:, k] * sx[1][1:])
     terms = ["(Intercept)"] + drivers
     nq = quantiles.size
     se = np.full((p, nq), _NAN)
@@ -2050,12 +2114,12 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         for _b in range(int(B)):
             idx = np.asarray(_boot_idx_stationary(n, n, block, S), dtype=np.int64) - 1
             yb = y[idx]
-            Xb = X1[idx, :]
+            Xb = Z1[idx, :]
             try:
                 cols = []
                 for k in range(nq):
-                    bk, _o = _core.quantile_reg_core(yb, Xb, quantiles[k], est[:, k], _rmax(r_sd(yb), 1e-12), 1e-10, 2000)
-                    cols.append(bk)
+                    bk, _o = _core.quantile_reg_core(yb, Xb, quantiles[k], g0[:, k], _rmax(r_sd(yb), 1e-12), 1e-10, 2000)
+                    cols.append(_qr_unscale(np.asarray(bk, dtype=np.float64), sx, True))
                 bs.append(np.column_stack(cols))
             except _core.QuantileRegError:
                 bs.append(np.full((p, nq), _NAN))
@@ -2141,7 +2205,9 @@ def tail_covar(data, system, assets, *, state=None, q=0.05, frequency=("week", "
         state: Optionaler Zeichenvektor der Zustandsspalten (in ihrer eigenen Einheit). ``None`` (Standard) =
             zeitkonstante Quantile.
             Seit 1.6.4 keine Spalte aus system oder assets.
-        q: Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
+        q: Quantil als Anteil (Standard 0.05 = 5-%-Quantil). Seit 1.6.5 ein Fehler bei weniger Perioden als
+            Koeffizienten + 1 und eine Warnung, wenn im Rand erwartet weniger als 5 Beobachtungen liegen (Perioden
+            mal min(q, 1 - q) < 5; eigene Schwelle).
         frequency: Renditefrequenz: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
 
     Returns:
@@ -2192,6 +2258,12 @@ def tail_covar(data, system, assets, *, state=None, q=0.05, frequency=("week", "
     summ = []
     series = []
     nr = len(rd)
+    # seit 1.6.5 (CR2-R-5): zu wenige Perioden Fehler, wenige Randbeobachtungen Warnung (R tail_covar)
+    kc = 2 + (M.shape[1] if M is not None else 0)
+    if 0 < nr < kc + 1:
+        chk_stop("c.covar_perioden", fn, nr, kc, kc + 1)
+    if nr > 0 and nr * min(q, 1 - q) < 5:
+        warnings.warn(chk_msg("c.covar_rand", fn, nr, chk_fmt(q)), UserWarning, stacklevel=2)
     for a in assets:
         xi = 100 * rd[a].to_numpy(dtype=np.float64)
         bq = quantile_regression(xi, X=Mdf, tau=q).to_numpy()
@@ -2277,7 +2349,7 @@ def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
     """
     rc = getattr(boot, "r_class", ())
     if "bootstrap_result" not in tuple(rc):
-        raise ValueError("boot muss ein bootstrap_result sein.")
+        chk_stop("c.m_dependence_validate")
     fn = "dependence_validate"                                 # seit 1.6.4 (B-033, B-053)
     agg = _e4_count(agg, fn, "agg")
     q = chk_num1(q, fn, "q", lo=0, hi=1, lo_open=True, hi_open=True)
@@ -2289,14 +2361,15 @@ def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
     idx_names = _as_names(cfg["index_names"])
     if len(idx_names) < 2:
         raise ValueError("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
-    ret = _boot()._extract_returns(data, cfg)["ret"]
+    _boot()._boot_numcols(data, cfg, fn)                      # seit 1.6.5 (CR2-X6-1) wie bootstrap()
+    ret = _boot()._extract_returns(data, cfg, who=fn)["ret"]
     hist = _libm.log(np.asarray(ret, dtype=np.float64))
     agg = int(agg)
 
     def aggr(L):
         k = L.shape[0] // agg
         if k < 20:
-            raise ValueError("Zu wenige Perioden nach Aggregation.")
+            chk_stop("c.m_aggr")
         return _rowsum_blocks(L, agg, k)
 
     td_fun = _tail_dep_fun(q)
@@ -2392,8 +2465,10 @@ def regime_subset(data, condition, *, min_run=1, env=None):
     """
     fn = "regime_subset"                                       # seit 1.6.4 (K42 E4, B-008, B-034, B-036)
     chk_df(data, fn, "data")
-    if isinstance(condition, (list, tuple, np.ndarray, pd.Series)) and len(condition) and \
-            all(isinstance(v, str) for v in (condition.tolist() if hasattr(condition, "tolist") else condition)):
+    # seit 1.6.5 (CR2-P-4): Textvektor auch mit fehlenden Werten (alle übrigen Elemente Text) wie in R
+    cl = (condition.tolist() if hasattr(condition, "tolist") else list(condition)) \
+        if isinstance(condition, (list, tuple, np.ndarray, pd.Series)) else []
+    if cl and any(isinstance(v, str) for v in cl) and all(isinstance(v, str) or _e4_isna(v) for v in cl):
         if len(condition) != 1:
             chk_stop("e4.bedingung", fn)
         condition = chk_scalar(condition)
@@ -2408,7 +2483,7 @@ def regime_subset(data, condition, *, min_run=1, env=None):
         cond = getattr(cond, "values")                          # RVector des Auswerters
     c = _e4_cond(cond, fn)
     if c.size != len(data):
-        raise ValueError("condition muss die Länge nrow(data) haben.")
+        chk_stop("c.m_regime_subset")
     # rle (seit 1.6.4 vektorisiert, B-066; bis 1.6.3 Listenschleife je Element, gleiche Läufe)
     if c.size:
         st = np.flatnonzero(np.r_[True, c[1:] != c[:-1]])
@@ -2421,7 +2496,7 @@ def regime_subset(data, condition, *, min_run=1, env=None):
     starts = ends - lens + 1
     keep = np.array(vals, dtype=bool) & (lens >= min_run)
     if not keep.any():
-        raise ValueError("regime_subset: keine Episode erfüllt condition und min_run.")
+        chk_stop("c.m_regime_subset_2")
     rows = np.concatenate([np.arange(s - 1, e) for s, e in zip(starts[keep], ends[keep])])
     out = data.iloc[rows].copy()
     ep = pd.DataFrame({"start": starts[keep], "end": ends[keep], "length": lens[keep]})

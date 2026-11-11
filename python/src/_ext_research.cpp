@@ -104,7 +104,7 @@ PyObject* r_cvar(PyObject*, PyObject* args) {
     if (!ext::get(oR, R, 'd', false, fn, "R") || !mat_dims(R, T, N, fn, "R") ||
         !ext::get(olo, lo, 'd', false, fn, "lo") || !ext::get(ohi, hi, 'd', false, fn, "hi") ||
         !ext::get(ow0, w0, 'd', false, fn, "w0") || !ext::get(osc, sc, 'd', false, fn, "scales") ||
-        !ext::get(oout, out, 'd', true, fn, "out", N)) return nullptr;
+        !ext::get(oout, out, 'd', true, fn, "out", N + 1)) return nullptr;
     if (!need_len(lo, N, fn, "lo") || !need_len(hi, N, fn, "hi") || !need_len(w0, N, fn, "w0")) return nullptr;
     if (!ext::run([&] {
             ext::Vec x = simlev::min_cvar_core(ext::mat(R, T, N), alpha, ext::vec(lo), ext::vec(hi), ext::vec(w0),
@@ -337,6 +337,21 @@ PyObject* r_rmax(PyObject*, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+// Hilfskerne seit 1.6.5 (simlev::research_vec): op, x, par, out (out vom Aufrufer, Laenge = Ergebnislaenge)
+PyObject* r_research_vec(PyObject*, PyObject* args) {
+    PyObject *ox, *op_, *oout;
+    int op;
+    const char* fn = "research_vec";
+    if (!PyArg_ParseTuple(args, "iOOO:research_vec", &op, &ox, &op_, &oout)) return nullptr;
+    ext::Buf x, par, out;
+    if (!ext::get(ox, x, 'd', false, fn, "x") || !ext::get(op_, par, 'd', false, fn, "par") ||
+        !ext::get(oout, out, 'd', true, fn, "out")) return nullptr;
+    bool ok = true;
+    if (!ext::run([&] { ok = simlev::research_vec(op, x.n, x.d(), par.n, par.d(), out.n, out.d()); })) return nullptr;
+    if (!ok) { PyErr_Format(PyExc_ValueError, "research_vec: Abmessungen passen nicht (op %d)", op); return nullptr; }
+    Py_RETURN_NONE;
+}
+
 }  // namespace
 
 PyMethodDef simlev_ext_research_methods[] = {
@@ -357,5 +372,6 @@ PyMethodDef simlev_ext_research_methods[] = {
     {"kendall_tau_core", r_kendall, METH_VARARGS, "kendall_tau_core(x, y) -> float"},
     {"roll_cov_core", r_rcov, METH_VARARGS, "roll_cov_core(x, y, n, out)"},
     {"roll_max_core", r_rmax, METH_VARARGS, "roll_max_core(x, w, zero, out): rollierendes Maximum (NaN als -Inf)"},
+    {"research_vec", r_research_vec, METH_VARARGS, "research_vec(op, x, par, out): Hilfskerne seit 1.6.5"},
     {nullptr, nullptr, 0, nullptr}
 };

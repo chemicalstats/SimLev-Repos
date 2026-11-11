@@ -41,8 +41,9 @@ from ._util import _dates as _as_dates, _match_arg, _which_max, _which_min
 from ._util import _pow_rec, _stats as _st
 from ._util import _fp_quiet
 from ._util import _na as _isna
-from ._pruefen import (chk_cols, chk_col_nofactor, chk_dots, chk_is_factor, chk_num1, chk_scalar,
-                       chk_stop)
+from ._pruefen import (chk_bool1, chk_cols, chk_col_nofactor, chk_dots, chk_is_factor, chk_msg, chk_num1,
+                       chk_scalar, chk_stop)
+from ._util import _message
 
 __all__ = ["portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "portfolio_risk_contributions",
            "portfolio_cpcv", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
@@ -57,7 +58,7 @@ _METHODS = ("min_variance", "max_sharpe", "mean_variance", "max_diversification"
 _COVS = ("sample", "ledoit_wolf", "ewma", "denoise", "gerber")
 _FREQS = ("week", "day", "month")
 _PO_FORMALS = ("x", "assets", "method", "lower", "upper", "cov", "mu", "risk_free", "risk_aversion", "budget",
-               "alpha", "frequency", "resample", "block", "seed")
+               "alpha", "frequency", "resample", "block", "seed", "cvar_coarse")   # cvar_coarse seit 1.6.5 (PRG2-3)
 
 
 class SimLevBoundsPercent(UserWarning):
@@ -176,6 +177,12 @@ def _opt_returns(x, assets=None, frequency="week"):
         assets = [str(a) for a in assets]
         from .dependence import _dep_returns
         rd = _dep_returns(x, assets, None, frequency)
+        # seit 1.6.5 (K13, CR2-F-8, Entscheidung 195 F1 Weg c): letzter Abstand < halber mittlerer Abstand -> letzte
+        # (angebrochene) Periode fällt aus ppy, Mittelwert und Kovarianz (R .opt_returns)
+        if len(rd) >= 3:
+            g = np.diff(_days(np.asarray(rd["date"]))).astype(np.float64)
+            if g[-1] < 0.5 * (float(np.sum(g)) / g.size):
+                rd = rd.iloc[:-1].reset_index(drop=True)
         L = rd[assets].to_numpy(dtype=np.float64) if assets else np.zeros((len(rd), 0))
         R = pd.DataFrame(_libm.expm1(L).reshape(L.shape), columns=assets)
         dd = _days(np.asarray(rd["date"]))
@@ -189,7 +196,7 @@ def _opt_returns(x, assets=None, frequency="week"):
         A = x.to_numpy(dtype=np.float64) if isnum else x.to_numpy(dtype=object)
     else:
         if not isinstance(x, (np.ndarray, pd.Series)):          # seit 1.6.4 wie R: keine Liste (B-057)
-            raise ValueError("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
+            chk_stop("c.m_opt_returns")
         A = np.asarray(x)
         if A.ndim == 1:
             A = A.reshape(-1, 1)
@@ -211,7 +218,7 @@ def _opt_returns(x, assets=None, frequency="week"):
         A = A[:, [cn.index(a) for a in assets]]
         cn = assets
     if not isnum:
-        raise ValueError("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
+        chk_stop("c.m_opt_returns")
     A = np.asarray(A, dtype=np.float64)
     _opt_check_finite(A, cn)
     ok = ~np.isnan(A).any(axis=1)
@@ -267,8 +274,7 @@ def _opt_check_alpha(alpha, fn):
             hint = " - als Anteil angeben (Prozentangaben durch 100 teilen)"
         elif a > 0.5:
             hint = " - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (alpha = 1 - Konfidenzniveau)"
-    raise ValueError("%s: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste "
-                     "5 %%%s." % (fn, hint))
+    chk_stop("e.alpha_anteil", fn, hint)   # seit 1.6.5 aus der Tabelle (193, Paket E)
 
 
 def _opt_bounds(b, nm, default, what="upper"):
@@ -276,7 +282,7 @@ def _opt_bounds(b, nm, default, what="upper"):
     names, vals, isnum = _named_vec(b)
     if (not isnum or not len(vals) or any(_isna(v) for v in vals) or chk_is_factor(b)
             or (isinstance(b, np.ndarray) and b.ndim > 1)):   # seit 1.6.4 ohne Wert, keine Kategorie/Matrix
-        raise ValueError("%s: numerischer Wert bzw. Vektor ohne NA erwartet." % what)
+        chk_stop("c.m_opt_bounds", what)
     v = np.array([float(x) for x in vals], dtype=np.float64)
     if names is None:
         if len(v) == 1:
@@ -307,7 +313,7 @@ def _opt_check_bounds(lower, upper, nm):
               "Prozentangabe? Dann durch 100 teilen." % ", ".join("%s = %s" % (nm[i], s) for i, s in zip(big, fb)),
               SimLevBoundsPercent)
     if (lo < 0).any():
-        raise ValueError("lower: Untergrenzen müssen >= 0 sein (Long-only).")   # seit 1.6.4 ohne Wert
+        chk_stop("c.m_opt_check_bounds")   # seit 1.6.4 ohne Wert
     slo = _sum(lo)
     shi = _sum(hi)
     if slo > 1 + 1e-12 or shi < 1 - 1e-12 or (lo > hi).any():
@@ -319,6 +325,46 @@ def _opt_check_bounds(lower, upper, nm):
 def _opt_flat(S, nm):
     d = np.diag(S)
     return [nm[i] for i in range(len(nm)) if math.sqrt(max(d[i], 0.0)) <= 1e-10]
+
+
+def _opt_check_cov(S, nm):
+    """``.opt_check_cov`` (seit 1.6.5, CR2-X49-1): Kovarianz nicht darstellbar -> Meldung."""
+    S = np.asarray(S, dtype=np.float64)
+    if np.isfinite(S).all():
+        return
+    bad = [nm[j] for j in range(len(nm)) if not np.isfinite(S[:, j]).all()]
+    chk_stop("c.cov_ueberlauf", "x", ", ".join("'%s'" % a for a in bad))
+
+
+def _opt_lw_hint(A, fn):
+    """``.opt_lw_hint`` (seit 1.6.5, CR2-M-2): Hinweis bei Varianzverhältnis über 100."""
+    A = np.asarray(A, dtype=np.float64)
+    if A.ndim != 2 or A.shape[1] < 2 or A.shape[0] < 2:
+        return
+    v = np.diag(np.asarray(_cov(A), dtype=np.float64))
+    if np.isfinite(v).all() and float(np.max(v)) > 100 * float(np.min(v)):
+        _message(chk_msg("c.lw_hinweis", fn))
+
+
+def _front_best(f):
+    """``.front_best`` (seit 1.6.5, CR2-X3-2): Punkt "Max. Sharpe" mit Gleichstandsregel."""
+    sh = np.asarray(f["sharpe"], dtype=np.float64)
+    ok = ~np.isnan(sh)
+    if not ok.any():
+        return 0
+    mx = float(np.max(sh[ok]))
+    cand = [i for i in range(len(sh)) if ok[i] and sh[i] >= mx - 1e-9 * abs(mx)]
+    er = np.asarray(f["expected_return"], dtype=np.float64)
+    return cand[_which_max(er[cand], 0)]
+
+
+def _front_flat(f):
+    sh = np.asarray(f["sharpe"], dtype=np.float64)
+    sh = sh[~np.isnan(sh)]
+    if len(sh) <= 1:
+        return False
+    mx = float(np.max(sh))
+    return bool((sh >= mx - 1e-9 * abs(mx)).all())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -494,9 +540,9 @@ def _risk_parity(S, b):
     return pd.Series(out, index=names) if names is not None else out
 
 
-def _hclust_order(Dm):
+def _hclust_order(Dm, dist=False):
     st = _st()
-    D = st.as_dist(Dm)
+    D = st.dist(Dm) if dist else st.as_dist(Dm)
     h = st.hclust(D, method="single")
     o = h["order"] if isinstance(h, Mapping) else h.order
     return [int(v) for v in np.asarray(o).ravel()]
@@ -511,7 +557,8 @@ def _hrp(S):
     C = np.asarray(_st().cov2cor(S), dtype=np.float64)
     Dm = (1 - C) / 2
     Dm[Dm < 0] = 0.0
-    ordv = _hclust_order(np.sqrt(Dm))
+    # seit 1.6.5 (CR2-X17-1): Baum auf dem euklidischen Abstand der Spalten von d (Lopez de Prado 2016, Stufe 1)
+    ordv = _hclust_order(np.sqrt(Dm), dist=True)
     w = np.ones(N)
     clusters = [ordv]
     while clusters:
@@ -541,14 +588,18 @@ def _hrp(S):
     return w / _sum(w)
 
 
-def _min_cvar(R, alpha, lo, hi):
-    """``.min_cvar``: minimaler CVaR (geglättet, FISTA)."""
+def _min_cvar(R, alpha, lo, hi, coarse=True):
+    """``.min_cvar``: minimaler CVaR (geglättet, FISTA); seit 1.6.5 (K39, CR1-2) ohne grobe Vorstufe mit
+    ``coarse=False`` und Warnung, wenn die letzte Stufe die Schrittgrenze erreicht."""
     R = np.asarray(R, dtype=np.float64)
     N = R.shape[1]
     sc = r_sd(R.ravel(order="F"))
     w = _proj_capped_simplex(np.repeat(1 / N, N), lo, hi)
     zeta = _quantile(-_mat_vec(R, w), 1 - alpha)
-    return _core.min_cvar_core(R, alpha, lo, hi, w, zeta, [sc * 0.05, sc * 0.005], 2000)
+    x = _core.min_cvar_core(R, alpha, lo, hi, w, zeta, [sc * 0.05, sc * 0.005] if coarse else [sc * 0.005], 2000)
+    if x[N] != 0:
+        _warn(chk_msg("c.cvar_grenze", "min_cvar", 2000))
+    return x[:N]
 
 
 def _cdar_hist(r, alpha):
@@ -575,13 +626,15 @@ def _cvar_hist(r, alpha):
 # Kern
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy, scache=None):
+def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy, scache=None,
+              cvar_coarse=True):
     """``.opt_core``: ein Optimierungsschritt auf einer Renditematrix (DataFrame); ``scache`` siehe
     :func:`_opt_cov_once`."""
     nm = [str(c) for c in R.columns]
     A = R.to_numpy(dtype=np.float64)
     N = A.shape[1]
     S = _opt_cov_once(A, cov_type, ppy, scache)
+    _opt_check_cov(S, nm)
     if mu is None:
         m = _colmeans(A) * ppy
     else:
@@ -593,9 +646,7 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
 
     def mu_miss():
         if np.isnan(m).any():
-            raise ValueError("%s: mu für alle Anlagen angeben; es fehlt ein Wert für %s (benannter Vektor mit allen "
-                             "Anlagen oder ein Wert je Spalte in Spaltenreihenfolge)."
-                             % (method, ", ".join("'%s'" % nm[i] for i in range(N) if math.isnan(m[i]))))
+            chk_stop("c.m_mu_miss", method, ", ".join("'%s'" % nm[i] for i in range(N) if math.isnan(m[i])))
 
     env = {"rf": risk_free / 100}
 
@@ -611,8 +662,34 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
         for k in range(len(lg)):
             ws.append(_qp_simplex(_libm.exp(float(lg[k])) * S, -mm, lo, hi, prev, tol=1e-10))
             prev = ws[k]
-        sh = np.array([sharpe_of(w, mm) for w in ws])
-        k = _which_max(sh, 0)
+        sh = [sharpe_of(w, mm) for w in ws]
+        k = _which_max(np.array(sh), 0)
+        # seit 1.6.5 (K8, CR2-G-3 a): Raster am Rand je Faktor 10 verlängern (R best_sharpe)
+        if k == 0 or k == len(lg) - 1:
+            lg = [float(v) for v in lg]
+            md = float(np.max(np.diag(S)))
+            up = k == 0
+            while True:
+                x = lg[0] + math.log(10) if up else lg[-1] - math.log(10)
+                ex = _libm.exp(x)
+                if not math.isfinite(md) or ex * md > 1e12 or ex * md < 1e-12:
+                    _warn(chk_msg("c.sharpe_rand", method))
+                    break
+                w0 = ws[0] if up else ws[-1]
+                wn = _qp_simplex(ex * S, -mm, lo, hi, w0, tol=1e-10)
+                sn = sharpe_of(wn, mm)
+                s0 = sh[0] if up else sh[-1]
+                if up:
+                    lg.insert(0, x)
+                    ws.insert(0, wn)
+                    sh.insert(0, sn)
+                else:
+                    lg.append(x)
+                    ws.append(wn)
+                    sh.append(sn)
+                if not sn > s0:
+                    break
+            k = _which_max(np.array(sh), 0)
         a = lg[min(len(lg), k + 2) - 1]
         b = lg[max(1, k) - 1]
         w0 = ws[k]
@@ -646,18 +723,19 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
     if method in ("inverse_vol", "risk_parity", "hrp") and N > 1:
         fl = _opt_flat(S, nm)
         if fl:
-            raise ValueError("%s: Anlage(n) %s ohne Schwankung (Volatilität 0); das Verfahren ist dafür nicht "
-                             "definiert. Anlage entfernen oder z. B. min_variance verwenden."
-                             % (method, ", ".join("'%s'" % a for a in fl)))
+            chk_stop("c.m_fx", method, ", ".join("'%s'" % a for a in fl))
     if method == "equal":
         if not default_bounds:
-            _warn("equal: Grenzen werden ignoriert.")
+            _warn(chk_msg("c.m_fx_2"))
         w = np.repeat(1 / N, N)
     elif method == "inverse_vol":
         if not default_bounds:
-            _warn("inverse_vol: Grenzen werden ignoriert.")
-        v = 1 / np.sqrt(np.diag(S))
-        w = v / _sum(v)
+            _warn(chk_msg("c.m_fx_3"))
+        if N == 1:                                  # seit 1.6.5 eine Anlage: 1 (K38)
+            w = np.array([1.0])
+        else:
+            v = 1 / np.sqrt(np.diag(S))
+            w = v / _sum(v)
     elif method == "min_variance":
         w = _qp_simplex(S, np.zeros(N), lo, hi)
     elif method == "mean_variance":
@@ -671,21 +749,33 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
         w = best_sharpe(np.sqrt(np.diag(S)))
     elif method == "risk_parity":
         if not default_bounds:
-            _warn("risk_parity: Grenzen werden ignoriert.")
+            _warn(chk_msg("c.m_fx_4"))
         if budget is None:
             b = np.repeat(1 / N, N)
         else:
             v = _opt_bounds(budget, nm, 0, "budget")
             if (v < 0).any() or _sum(v) <= 0:
-                raise ValueError("budget: Risikobudgets müssen >= 0 sein, mit positiver Summe.")
+                chk_stop("c.m_fx_5")
             b = v / _sum(v)
-        w = np.asarray(_risk_parity(S, b), dtype=np.float64)
+        # seit 1.6.5: eine Anlage 1 (K38); Budget 0 = Gewicht 0, Risikoparität über die übrigen (CR2-J-1)
+        if N == 1:
+            w = np.array([1.0])
+        elif (b > 0).all():
+            w = np.asarray(_risk_parity(S, b), dtype=np.float64)
+        else:
+            pos = np.flatnonzero(b > 0)
+            w = np.zeros(N)
+            if len(pos) == 1:
+                w[pos] = 1.0
+            else:
+                bp = b[pos]
+                w[pos] = np.asarray(_risk_parity(S[np.ix_(pos, pos)], bp / _sum(bp)), dtype=np.float64)
     elif method == "hrp":
         if not default_bounds:
-            _warn("hrp: Grenzen werden ignoriert.")
+            _warn(chk_msg("c.m_fx_6"))
         w = _hrp(S)
     elif method == "min_cvar":
-        w = _min_cvar(A, alpha, lo, hi)
+        w = _min_cvar(A, alpha, lo, hi, cvar_coarse)
     elif method == "min_cdar":
         w = _min_cdar(A, alpha, lo, hi)
     else:
@@ -711,7 +801,8 @@ class SimLevOptimization(RList):
 
 
 def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov=_COVS, mu=None, risk_free=0,
-                       risk_aversion=4, budget=None, alpha=0.05, frequency=_FREQS, resample=0, block=None, seed=None):
+                       risk_aversion=4, budget=None, alpha=0.05, frequency=_FREQS, resample=0, block=None, seed=None,
+                       cvar_coarse=True):
     """Portfolio optimieren (Long-only, Summe 1, optionale Grenzen je Anlage).
 
     Bestimmt Gewichte für ein Long-only-Portfolio (Summe 1) mit optionalen Grenzen je Anlage aus historischen
@@ -729,7 +820,10 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
             ``"min_cdar"``, ``"inverse_vol"`` oder ``"equal"``. ``risk_parity``, ``hrp``, ``inverse_vol`` und
             ``equal`` ignorieren ``lower``/``upper`` (mit Warnung, wenn andere als die Standardgrenzen angegeben
             sind). ``risk_parity``, ``hrp`` und ``inverse_vol`` brechen bei Anlagen ohne Schwankung (Volatilität
-            0, z. B. Geldmarkt mit festem Zins) mit Fehler ab.
+            0, z. B. Geldmarkt mit festem Zins) mit Fehler ab; seit 1.6.5 erhält eine einzige Anlage in allen
+            Verfahren das Gewicht 1 (ohne Schwankung mit dem Hinweis "Portfolio ohne Schwankung"). Bei
+            ``max_sharpe`` und ``max_diversification`` wird der Suchbereich der Risikoaversion (0,05 bis 500) seit
+            1.6.5 verlängert, wenn das Optimum am Rand liegt (sehr ruhige Anlagen, sehr kleine Prämie).
         lower, upper: Unter- und Obergrenzen der Gewichte als Anteil (0.6 = 60 %): Skalar für alle Anlagen,
             benannter Vektor (nicht genannte Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
             unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten; andere Längen sind
@@ -740,7 +834,17 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         cov: Kovarianzschätzer: ``"sample"`` (Standard, Stichprobe), ``"ledoit_wolf"`` (Schrumpfung auf skalierte
             Einheitsmatrix, Ledoit & Wolf 2004), ``"ewma"`` (exponentiell gewichtet, Halbwertszeit ein Viertel der
             Stichprobe, 5 bis 52 Perioden), ``"denoise"`` (Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
-            ``"gerber"`` (Gerber-Statistik, Gerber et al. 2022).
+            ``"gerber"`` (Gerber-Statistik, Gerber et al. 2022). ``"ledoit_wolf"`` eignet sich für Anlagen ähnlicher
+            Schwankung: das Ziel (mittlere Varianz mal Einheitsmatrix) hebt die Varianz ruhiger Anlagen an (z. B.
+            Geldmarkt neben Aktien) und verschiebt die Gewichte; unterscheiden sich die Stichprobenvarianzen um
+            mehr als das 100-Fache, kommt ein Hinweis. ``"gerber"`` zählt gemeinsame Bewegungen über der Schwelle
+            0,5 Standardabweichungen; die Schwelle hängt an der gewöhnlichen Standardabweichung, ein einzelner
+            großer Ausreißer kann die Korrelation einer Anlage deshalb stark verzerren (robust nur gegen kleine
+            Bewegungen). ``"denoise"`` setzt alle Eigenwerte unter der Marchenko-Pastur-Grenze (1 + √(N/T))^2
+            gleich; die Grenze gilt für viele Anlagen, bei wenigen Anlagen (z. B. 2 oder 3) löscht sie auch echte
+            Korrelationen (bei N = 2 gilt jede Korrelation mit |r| < 0,275 als Rauschen, wenn T = 120).
+            ``"ewma"``, ``"denoise"`` und ``"gerber"`` heben Eigenwerte unter 1e-12 auf 1e-12 an (Renditen in sehr
+            kleiner Einheit vorher skalieren).
         mu: Optional erwartete Renditen in Prozent p. a. (5 = 5 %), endlich, ohne NA: benannter Vektor (unbekannte
             Namen sind ein Fehler), unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der
             Spalten) oder Skalar (für alle Anlagen gleich); nur für ``max_sharpe`` und ``mean_variance`` verwendet
@@ -752,7 +856,9 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
             Anteil p. a.
         budget: Risikobudgets für ``risk_parity``: Skalar (gleiche Budgets), benannter Vektor (nicht genannte
             Anlagen 0) oder unbenannter Vektor mit einem Wert je Anlage (Spaltenreihenfolge); Werte >= 0, wird auf
-            Summe 1 normiert. ``None`` (Standard) = gleiche Risikobeiträge.
+            Summe 1 normiert. ``None`` (Standard) = gleiche Risikobeiträge. Anlagen mit Budget 0 erhalten seit 1.6.5
+            das Gewicht 0, die Risikoparität gilt dann für die Anlagen mit Budget > 0 (bis 1.6.4 erfüllte das
+            Ergebnis die Budgets nicht).
         alpha: Tail-Wahrscheinlichkeit als Anteil für CVaR und CDaR (Standard 0.05 = schlechteste 5 % der Perioden
             bzw. Drawdowns), im Bereich (0, 0.5]; nicht das Konfidenzniveau (0.95) und nicht in Prozent (5) -
             beides ist ein Fehler. Wirkt auf ``min_cvar``, ``min_cdar`` und die ausgewiesenen Kennzahlen.
@@ -767,6 +873,10 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
             reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal
             ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte Aufrufe
             liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
+        cvar_coarse: Nur ``min_cvar``: ``True`` (Standard) glättet in zwei Stufen (0,05 und 0,005
+            Standardabweichungen der Renditen), ``False`` nur in der feinen Stufe - je nach Daten bis rund 40 % schneller, die
+            Gewichte ändern sich etwa in der 5. Nachkommastelle (seit 1.6.5). Erreicht die letzte Stufe die
+            Schrittgrenze (2000 Schritte), warnt die Funktion.
 
     Returns:
         Objekt der Klasse ``SimLevOptimization``, eine Liste mit
@@ -788,7 +898,11 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         Renditen: Bei einem DataFrame mit Spalte ``date`` werden die Kurse wie in ``dependence_analysis()``
         aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche bzw. Kalendermonat, bei ``"day"``
         jede Zeile außer Tagen, an denen sich keine Anlage bewegt) und in einfache Renditen P_t / P_t-1 - 1
-        (Anteile) umgerechnet; die Perioden je Jahr werden aus den Daten ermittelt. Jede andere Eingabe wird als
+        (Anteile) umgerechnet; die Perioden je Jahr werden aus den Daten ermittelt. Seit 1.6.5 entfällt eine
+        angebrochene letzte Periode: ist der Abstand der letzten beiden Periodenenden kürzer als die Hälfte des
+        mittleren Abstands (z. B. Daten bis Montag bei Wochenrenditen), zählt diese Periode weder in den Perioden je
+        Jahr noch in Mittelwert und Kovarianz (Daten bis zum Periodenende unverändert; ``portfolio_rolling()``
+        rechnet seine Fenster wie bisher). Jede andere Eingabe wird als
         Matrix einfacher Periodenrenditen als Anteil (0.01 = 1 %) behandelt; Zeilen mit fehlenden Werten
         entfallen, unendliche Renditen (``Inf``) sind ein Fehler (mit Spalte und Zeile), die Perioden je Jahr sind
         dann fest 252 (``"day"``), 52 (``"week"``) bzw. 12 (``"month"``). Erwartete Renditen und Kovarianz werden
@@ -800,7 +914,8 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         - ``max_diversification`` | maximales Diversifikationsverhältnis w'σ / √(w'Σ w) (Choueifaty & Coignard
           2008)
         - ``risk_parity`` | gleiche (oder vorgegebene, ``budget``) Risikobeiträge (Spinu 2013)
-        - ``hrp`` | Hierarchical Risk Parity (Lopez de Prado 2016)
+        - ``hrp`` | Hierarchical Risk Parity (Lopez de Prado 2016; Clusterbaum seit 1.6.5 wie dort auf dem
+          euklidischen Abstand der Spalten von d = √((1 - ρ)/2))
         - ``min_cvar`` | minimaler historischer CVaR (Rockafellar & Uryasev 2000, geglättet)
         - ``min_cdar`` | minimaler Conditional Drawdown at Risk (Chekhlov, Uryasev & Zabarankin 2005)
         - ``inverse_vol``, ``equal`` | einfache Heuristiken
@@ -823,18 +938,19 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
     """
     return _portfolio_optimize(x, assets=assets, method=method, lower=lower, upper=upper, cov=cov, mu=mu,
                                risk_free=risk_free, risk_aversion=risk_aversion, budget=budget, alpha=alpha,
-                               frequency=frequency, resample=resample, block=block, seed=seed)
+                               frequency=frequency, resample=resample, block=block, seed=seed, cvar_coarse=cvar_coarse)
 
 
 def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov=_COVS, mu=None, risk_free=0,
                         risk_aversion=4, budget=None, alpha=0.05, frequency=_FREQS, resample=0, block=None, seed=None,
-                        weights_only=False):
+                        cvar_coarse=True, weights_only=False):
     """``portfolio_optimize``; ``weights_only=True`` (portfolio_rolling, seit 1.5.1): nur die Gewichte, von den
     Kennzahlen nur die Prüfung der Volatilität mit ihrer Warnung (gleiche Meldungen wie das volle Ergebnis)."""
     method = _match_arg(method, _METHODS)
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
     fn = "portfolio_optimize"                                  # seit 1.6.4 vor der Rechnung (K42 E4)
+    chk_bool1(cvar_coarse, fn, "cvar_coarse")                  # seit 1.6.5 (K39)
     assets = _opt_check_x(x, assets, fn)
     risk_free = chk_num1(risk_free, fn, "risk_free")           # B-018
     risk_aversion = chk_num1(risk_aversion, fn, "risk_aversion", lo=0)
@@ -853,12 +969,15 @@ def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, co
     if mu is not None:
         mu = pd.Series(_opt_bounds(mu, nm, _NA, "mu"), index=nm)
         if np.isinf(mu.to_numpy()).any():
-            raise ValueError("mu: endliche Werte in Prozent p. a. erwartet.")   # seit 1.6.4 ohne Wert
+            chk_stop("c.m_portfolio_optimize")   # seit 1.6.4 ohne Wert
     ppy = rr["ppy"]
 
     def core(Rx, scache=None):
-        return _opt_core(Rx, method, lo, hi, cov, mu, risk_free, risk_aversion, budget, alpha, ppy, scache)
+        return _opt_core(Rx, method, lo, hi, cov, mu, risk_free, risk_aversion, budget, alpha, ppy, scache,
+                         cvar_coarse)
 
+    if cov == "ledoit_wolf" and not weights_only:
+        _opt_lw_hint(R.to_numpy(dtype=np.float64), fn)
     sc = {}                                                    # Kovarianz von R für _opt_vol (seit 1.6.4, B-072)
     w = core(R, sc)
     wb = None
@@ -901,8 +1020,7 @@ def _opt_vol(wv, A, ppy, cov_type, S=None):
     q = _quad(wv, S)
     vol = math.sqrt(max(q, 0.0)) if not math.isnan(q) else q
     if vol <= 1e-10:
-        _warn("Portfolio ohne Schwankung (Volatilität 0, nur Anlagen mit konstanter Rendite): Sharpe Ratio, "
-              "Diversifikationsverhältnis und Risikoanteile sind nicht definiert (NA).")
+        _warn(chk_msg("c.m_opt_summary"))
         return S, 0.0, _NA
     return S, vol, vol
 
@@ -1094,8 +1212,11 @@ def portfolio_frontier(x, *, assets=None, n=40, lower=0, upper=1, cov=_COVS, ris
     nm = [str(c) for c in R.columns]
     lo, hi = _opt_check_bounds(lower, upper, nm)
     A = R.to_numpy(dtype=np.float64)
+    if cov == "ledoit_wolf":
+        _opt_lw_hint(A, fn)
     S = _opt_cov_m(A, cov) * rr["ppy"]
     m = _colmeans(A) * rr["ppy"]
+    _opt_check_cov(S, nm)
     gs = _libm.exp(_st().seq_len_out(math.log(1e4), math.log(0.02), int(n)))
     gs = np.atleast_1d(gs)
     W = np.array([_qp_simplex(g * S, -m, lo, hi) for g in gs]).reshape(len(gs), len(nm))
@@ -1130,7 +1251,7 @@ def print_SimLevFrontier(x, _return=False):  # noqa: N802 - R-Name
     """``print.SimLevFrontier``: Minimum-Varianz und Max.-Sharpe-Punkt."""
     f = x["frontier"]
     sh = f["sharpe"].to_numpy(dtype=np.float64)
-    ks = [] if np.isnan(sh).all() else [_which_max(sh, 0)]
+    ks = [] if np.isnan(sh).all() else [_front_best(f)]
     j = _which_min(f["volatility"].to_numpy(dtype=np.float64), 0)
     idx = _unique([j] + ks)
     show = f.iloc[idx].copy()
@@ -1138,6 +1259,8 @@ def print_SimLevFrontier(x, _return=False):  # noqa: N802 - R-Name
     for c in show.columns:
         show[c] = np.asarray(_fmt.r_round(show[c].to_numpy(dtype=np.float64), 4), dtype=np.float64)
     txt = "Effizienzgrenze: %d Punkte\n%s" % (len(f), _fmt.print_data_frame(show))
+    if _front_flat(f):
+        txt += "\n" + chk_msg("c.front_flach")
     if _return:
         return txt
     print(txt)
@@ -1199,7 +1322,7 @@ def plot_SimLevFrontier(x, width=700, height=480):  # noqa: N802 - R-Name
         out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"10\">%s</text>"
                    % (_alloc_c(px(av[k])), _alloc_c(py(ar[k]) - 8), _esc(nm)))
     sh = np.asarray(f["sharpe"], dtype=np.float64).ravel()
-    k = None if np.isnan(sh).all() else _which_max(sh, 0)
+    k = None if np.isnan(sh).all() else _front_best(f)
     if k is not None:
         cx, cy = px(fv[k]), py(fr[k])
         out.append("<polygon points=\"%s,%s %s,%s %s,%s\" fill=\"#3E8E5A\"/>"
@@ -1246,9 +1369,11 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     Returns:
         Objekt der Klasse ``SimLevWeights`` (DataFrame mit ``date`` und einer Gewichtsspalte je Anlage, Anteile
         mit Zeilensumme 1, eine Zeile je Zeile von ``data``); vor dem ersten Entscheidungstermin gleich gewichtet.
-        Attribute ``source`` (``"rolling <method>"``), ``decision_rows`` (Zeilennummern der Entscheidungstermine)
-        und ``failed_dates`` (Date-Vektor der Termine mit fehlgeschlagener Optimierung, dort Gleichgewichtung;
-        leer, wenn keine).
+        Attribute ``source`` (``"rolling <method>"``), ``decision_rows`` (Zeilennummern der Entscheidungstermine),
+        ``failed_dates`` (Date-Vektor der Termine mit fehlgeschlagener Optimierung, dort Gleichgewichtung; leer,
+        wenn keine) und seit 1.6.5 ``turnover`` (Umschlag je Entscheidungstermin, Summe der Beträge der Änderungen
+        der Zielgewichte gegenüber dem vorigen Termin, am ersten Termin gegenüber der Gleichgewichtung; der
+        einseitige Umschlag ist die Hälfte).
 
     Details:
         Entscheidungstermine sind die letzten Zeilen jedes Monats, Quartals bzw. Jahres, deren Datum mindestens
@@ -1285,7 +1410,7 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     window = chk_jahre(window, fn, "window")                     # B-098, Entscheidung 70 (ganze Jahre 1 bis 100)
     assets = _e4_names(assets, fn, "assets")
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
-        raise ValueError("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
+        chk_stop("c.m_portfolio_rolling_2")
     miss = _setdiff(assets, [str(c) for c in data.columns])
     if miss:
         raise ValueError("Spalten fehlen: %s" % ", ".join(miss))
@@ -1307,7 +1432,7 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     first_ok = d[0] + wd
     rows = rows[d[rows - 1] >= first_ok]
     if not len(rows):
-        raise ValueError("Historie kürzer als das Fenster.")
+        chk_stop("c.m_portfolio_rolling_3")
     msg = [""] * len(rows)
     M = np.empty((len(rows), N))
     sub_cols = ["date"] + assets
@@ -1346,6 +1471,9 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     out = _as_weights_m(_as_dates(d), H, assets, "rolling %s" % method)
     out.attrs["decision_rows"] = rows
     out.attrs["failed_dates"] = _as_dates(d[rows[failed] - 1]) if failed else _as_dates(np.zeros(0))
+    # seit 1.6.5 (E-T3-4): Umschlag je Termin (Summe |w_neu - w_vorher|, vor dem ersten Termin gleich gewichtet)
+    P = np.vstack([np.repeat(1 / N, N).reshape(1, N), M[:-1, :]])
+    out.attrs["turnover"] = np.asarray(r_rowsums(np.abs(M - P)), dtype=np.float64)
     return out
 
 
@@ -1473,7 +1601,7 @@ def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), 
     # seit 1.6.4 auch ohne Inf, Kategorie und Matrix
     if (not isnum or names is None or any(k == "" for k in names) or any(_isna(v) for v in vals)
             or not all(math.isfinite(float(v)) for v in vals) or chk_is_factor(weights)):
-        raise ValueError("weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).")
+        chk_stop("c.m_portfolio_risk_contribut")
     if len(set(names)) < len(names):
         chk_stop("e2.doppelt", fn, "weights")                  # B-052
     if "date" in names:
@@ -1615,7 +1743,7 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
     purge = int(purge)
     embargo = int(embargo)
     if tg >= ng:
-        raise ValueError("portfolio_cpcv: test_groups muss kleiner als n_groups sein, sonst bleibt keine Trainingsgruppe.")
+        chk_stop("c.m_portfolio_cpcv")
     if isinstance(methods, (str, list, tuple, np.ndarray, pd.Series)) and \
             all(isinstance(m, str) for m in ([methods] if isinstance(methods, str) else list(methods))):
         methods = _e4_names(methods, fn, "methods", no_date=False)   # B-052
@@ -1629,19 +1757,18 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
     elif isinstance(methods, Mapping) and len(methods) and all(str(k) != "" for k in methods.keys()):
         specs = {str(k): v for k, v in methods.items()}
     else:
-        raise ValueError("portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
+        chk_stop("c.m_portfolio_cpcv_2")
     allowed_args = [a for a in _PO_FORMALS if a not in ("x", "assets", "frequency")]
     for nm, sp in specs.items():
         if not isinstance(sp, Mapping) or any(str(k) == "" for k in sp.keys()):
-            raise ValueError("portfolio_cpcv: Eintrag '%s' von methods muss eine benannte Argumentliste sein." % nm)
+            chk_stop("c.m_portfolio_cpcv_3", nm)
         if sp.get("method") is not None and not isinstance(chk_scalar(sp["method"]), str):
             chk_stop("text", fn, "methods$%s$method" % nm)       # seit 1.6.4
         if sp.get("method") is not None and sp["method"] not in _METHODS:
             raise ValueError("portfolio_cpcv: unbekanntes Verfahren '%s'; erlaubt: %s." % (sp["method"], ", ".join(_METHODS)))
         bad = [k for k in sp.keys() if k not in allowed_args]
         if bad:
-            raise ValueError("portfolio_cpcv: unbekannte Argumente für portfolio_optimize() in '%s': %s."
-                             % (nm, ", ".join("'%s'" % b for b in _unique(bad))))
+            chk_stop("c.m_portfolio_cpcv_4", nm, ", ".join("'%s'" % b for b in _unique(bad)))
     grp = np.asarray(_st().cut(np.arange(1, Tn + 1), ng, labels=False), dtype=np.float64)
     combos = list(itertools.combinations(range(1, ng + 1), tg))
     A = R.to_numpy(dtype=np.float64)

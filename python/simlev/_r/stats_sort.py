@@ -377,6 +377,9 @@ def cut(x, breaks, labels=None, include_lowest=False, right=True, dig_lab=3, ord
         b0 = float(br[0])
         if b0 != b0 or b0 < 2:
             raise RError("invalid number of intervals")
+        if not b0 + 1 < 2147483648.0:   # seit 1.6.5 (CR2-D-14) wie R: as.integer(breaks + 1) ist NA, seq.int bricht ab
+            _warn("NAs introduced by coercion to integer range")
+            raise RError("'length.out' must be a finite number")
         nb = int(b0 + 1)
         ok = xv[~np.isnan(xv)]
         if not ok.size:   # range(x, na.rm = TRUE) ohne Werte (Warnungen wie R, seit 1.6.0)
@@ -414,7 +417,11 @@ def cut(x, breaks, labels=None, include_lowest=False, right=True, dig_lab=3, ord
             ok = all(a != b for a, b in zip(ch[1:], ch[:-1]))
             if ok:
                 break
-        if ok:
+        if ok and nb < 2:   # seit 1.6.5 (CR2-D-14): weniger als zwei Grenzen wie R paste0 mit leeren Teilen: eine Stufe
+            labs = ["(,]" if right else "[,)"]
+            if include_lowest and right:
+                labs = ["[,]"]
+        elif ok:
             labs = [("(" if right else "[") + ch[i] + "," + ch[i + 1] + ("]" if right else ")")
                     for i in range(nb - 1)]
             if include_lowest:

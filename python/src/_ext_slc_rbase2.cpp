@@ -339,17 +339,18 @@ static PyObject *slc_r_encode_real(PyObject *self, PyObject *args)
     int w, d, e, drop0, st;
     const char *dec, *nastr;
     char *buf = NULL;
-    int64_t *off = NULL;
+    int64_t *off = NULL, n;
     Py_buffer vx = {}, vn = {};
     (void) self;
     if (!PyArg_ParseTuple(args, "OOiiissp", &x, &na, &w, &d, &e, &dec, &nastr, &drop0)) return NULL;
     if (DBUF(x, &vx, 0, -1, "x") < 0) return NULL;
     if (na_mask(na, &vn, NITEMS(vx)) < 0) { rel(&vx); return NULL; }
-    st = sl_r_encode_real(NITEMS(vx), (const double *) vx.buf, vn.obj ? (const unsigned char *) vn.buf : NULL, w, d, e,
+    n = NITEMS(vx);   /* seit 1.6.5 (CR1-Y17-1, gleiche Art): Länge vor der Freigabe merken */
+    st = sl_r_encode_real(n, (const double *) vx.buf, vn.obj ? (const unsigned char *) vn.buf : NULL, w, d, e,
                           dec, nastr, drop0, &buf, &off);
     rel(&vx); rel(&vn);
     if (st) return PyErr_NoMemory();
-    return str_list(buf, off, NITEMS(vx));
+    return str_list(buf, off, n);
 }
 
 /* as.character für Doubles: (x, scipen, dec) -> list[str] ("NA" für NA) */
@@ -359,15 +360,16 @@ static PyObject *slc_r_as_character_real(PyObject *self, PyObject *args)
     int scipen, st;
     const char *dec;
     char *buf = NULL;
-    int64_t *off = NULL;
+    int64_t *off = NULL, n;
     Py_buffer vx = {};
     (void) self;
     if (!PyArg_ParseTuple(args, "Ois", &x, &scipen, &dec)) return NULL;
     if (DBUF(x, &vx, 0, -1, "x") < 0) return NULL;
-    st = sl_r_as_character_real(NITEMS(vx), (const double *) vx.buf, scipen, dec, &buf, &off);
+    n = NITEMS(vx);   /* seit 1.6.5 (CR1-Y17-1): Länge vor der Freigabe des Puffers merken */
+    st = sl_r_as_character_real(n, (const double *) vx.buf, scipen, dec, &buf, &off);
     rel(&vx);
     if (st) return PyErr_NoMemory();
-    return str_list(buf, off, NITEMS(vx));
+    return str_list(buf, off, n);
 }
 
 /* formatC: (x, isint, width, digits, format, flag, istrlen) -> list[str] */
@@ -377,7 +379,7 @@ static PyObject *slc_r_str_signif(PyObject *self, PyObject *args)
     int isint, width, digits, st;
     const char *format, *flag;
     char *buf = NULL;
-    int64_t *off = NULL;
+    int64_t *off = NULL, n;
     Py_buffer vx = {}, vi = {};
     sl_ctx cx;
     (void) self;
@@ -385,12 +387,13 @@ static PyObject *slc_r_str_signif(PyObject *self, PyObject *args)
     if (DBUF(x, &vx, 0, -1, "x") < 0) return NULL;
     if (LBUF(il, &vi, 0, NITEMS(vx), "istrlen") < 0) { rel(&vx); return NULL; }
     sl_ctx_init(&cx);
-    st = sl_r_str_signif(&cx, NITEMS(vx), (const double *) vx.buf, isint, width, digits, format, flag,
+    n = NITEMS(vx);   /* seit 1.6.5 (CR1-Y17-1, gleiche Art): Länge vor der Freigabe merken */
+    st = sl_r_str_signif(&cx, n, (const double *) vx.buf, isint, width, digits, format, flag,
                          (const int64_t *) vi.buf, &buf, &off);
     rel(&vx); rel(&vi);
     if (st == SL_ENOMEM) return PyErr_NoMemory();
     if (st) { PyErr_SetString(PyExc_ValueError, cx.msg); return NULL; }
-    return str_list(buf, off, NITEMS(vx));
+    return str_list(buf, off, n);
 }
 
 /* sprintf: (fmts, args, scipen, dec) -> (list[str], nunused); fmts: Liste aus str/None; args: Liste aus

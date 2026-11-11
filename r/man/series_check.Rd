@@ -38,7 +38,7 @@ gleicher Werte in Zeilen), \code{nonpositive} (Anzahl Werte <= 0).}
 (bei Spruengen die Veraenderung in Prozent, bei Kalenderluecken die
 Tage, bei stehenden Kursen die Zeilen).}
 \item{settings}{benannter Vektor \code{jump}, \code{stale},
-\code{revert}.}
+\code{revert} und (seit 1.6.5) \code{gap} (verwendete Schwelle der Kalenderluecke in Tagen).}
 }
 \code{print()} zeigt die Zusammenfassung und die ersten
 \code{max_issues} (Standard 25) Funde.
@@ -49,7 +49,8 @@ Erstellt einen Pruefbericht fuer eigene Kursreihen, bevor sie in
 data.frame mit Spalte \code{date} und Kursspalten (Niveaus, keine Renditen),
 z. B. aus \code{\link[=series_align]{series_align()}}. Gemeldet werden: fehlende oder nicht lesbare
 Daten (z. B. Leerzeile am Dateiende), doppelte oder unsortierte
-Daten, Kalenderluecken ueber 5 Tage, fehlende Werte innerhalb der
+Daten, Kalenderluecken (seit 1.6.5 ueber max(5, 1,5 x Median der Datumsabstaende) Tage, also bei
+Tagesdaten ueber 5, bei Wochendaten ueber 10,5, bei Monatsdaten ueber rund 46 Tage), fehlende Werte innerhalb der
 Laufzeit, Spruenge, wahrscheinliche Splits (Sprung nahe einem
 ganzzahligen Verhaeltnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne Ruecklauf),
 Spikes (Sprung mit sofortigem Ruecklauf, typischer Datenfehler), Werte

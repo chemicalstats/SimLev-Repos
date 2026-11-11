@@ -50,7 +50,12 @@ Luecken werden nach \code{index_fill} gefuellt).}
 Skalar, Vektor der Laenge \code{nrow(data)}, Spaltenname,
 data.frame(date, ter) (Stufenfunktion, gueltig ab Datum) oder benannter
 Vektor mit Datumsnamen, z. B.
-\code{c("2010-02-24" = 0.35, "2023-10-10" = 0.50)}.}
+\code{c("2010-02-24" = 0.35, "2023-10-10" = 0.50)}.
+Seit 1.6.5 (fuer \code{ter}, \code{rate}, \code{fx} gleich): eine Spalte
+ohne einen Wert ist ein Fehler, fuehrende fehlende Werte erhalten den
+ersten Wert der Spalte (mit Hinweis), eine Tabelle ohne Zeile ist ein
+Fehler, eine Stufentabelle, die nach dem ersten Datentag beginnt, gibt
+eine Warnung (davor gilt ihr erster Wert).}
 
 \item{leverage}{Hebel L des Produkts relativ zum Index als Zahl ungleich 0
 (Standard 1; z. B. 2, -1, -2). Ist der Index bereits ein Hebelindex
@@ -78,7 +83,12 @@ Proxy-Rueckrechnungen (z. B. MSCI USA aus S&P 500).}
 p. a.), \code{"spread"} (Spread auf den finanzierten Anteil in Prozent
 p. a., nur fuer L != 1, sonst mit Warnung ignoriert) und \code{"beta"}
 (effektiver Hebel-Multiplikator, Faktor; nur Strukturmodell).
-\code{character(0)} schaetzt nichts (reine Kostenrechnung).}
+\code{character(0)} schaetzt nichts (reine Kostenrechnung). \code{drag} und
+\code{spread} wirken beide je Kalendertag und sind gemeinsam nicht
+bestimmbar: stehen beide in \code{fit}, wird seit 1.6.5 mit Warnung nur
+\code{drag} geschaetzt (\code{spread} bleibt beim festen Wert aus
+\code{fixed}). Liegt ein Schaetzwert an der Grenze von \code{bounds} bzw.
+auf dem ersten oder letzten Gitterpunkt, warnt die Funktion seit 1.6.5.}
 
 \item{fixed}{Benannte Liste fester Parameterwerte, z. B.
 \code{list(spread = 0.4)}; nicht genannte Parameter: drag = 0,
@@ -168,6 +178,9 @@ als Anteil).}
 \item{validation}{Out-of-Sample-Ergebnis (Zeitraeume \code{train},
 \code{test}, Parameter \code{par}, Testkennzahlen in Prozent) oder
 \code{NULL}.}
+\item{convergence}{(seit 1.6.5) Konvergenzkennzahl der Suche ueber mehrere
+Parameter (0 = konvergiert; sonst mit Warnung); bei einem Parameter und im
+Gitter 0.}
 \item{regression}{Regressionsfit (nur "linear"/"spline"): \code{coef}
 (Achsenabschnitt, Steigung) bzw. \code{fit} (Splineobjekt der C-Bibliothek
 mit \code{x}, \code{y}, \code{gam}, \code{lambda}, \code{df},

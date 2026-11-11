@@ -43,6 +43,9 @@
 //   roll_max_core      rollierendes Maximum in O(n) (seit 1.6.3; Hoch von signal_drawdown(window))
 //   kendall_tau_core   Kendalls Tau-b (ganzzahlig und double-double statt long double)
 //   roll_cov_core      rollierende Kovarianz
+//   research_vec       Hilfskerne seit 1.6.5 (erwartetes Maximum, harmonische Summe, Risikozustand, Median,
+//                      Drawdown-Polster, Log-Ende t/Normal; seit Paket B2b HAC nach Ledoit & Wolf mit QS-Kern
+//                      und Prewhitening, Stichprobe des studentisierten zirkulaeren Block-Bootstraps)
 //
 // Alle Kerne rechnen dieselben Formeln wie die frueheren R-Fassungen; sie
 // ziehen keine Zufallszahlen.
@@ -163,12 +166,15 @@ static inline double logistic(double z) {
   return e / (1.0 + e);
 }
 
+// Rueckgabe seit 1.6.5 (K39, CR1-2): N Gewichte und als (N + 1)-ter Wert 1, wenn die letzte Glaettungsstufe die
+// Schrittgrenze maxit erreicht hat (ohne Abbruch durch dmax < 1e-9), sonst 0; die Gewichte bitgleich wie bis 1.6.4.
 static auto min_cvar_core(simlev_host::NumMat R, double alpha, simlev_host::NumVec lo, simlev_host::NumVec hi, simlev_host::NumVec w0, double zeta0, simlev_host::NumVec scales, int maxit) {
   const int T = R.nrow(), N = R.ncol();
   const double aT = alpha * T;
   std::vector<double> x(N + 1), yv(N + 1), xn(N + 1), g(N + 1), tmp(N + 1), loss(T);
   for (int i = 0; i < N; ++i) x[i] = w0[i];
   x[N] = zeta0;
+  double limit = 0.0;
   auto port_loss = [&](const std::vector<double>& z) {      // -R w
     for (int s = 0; s < T; ++s) loss[s] = 0.0;
     for (int i = 0; i < N; ++i) { const double wi = z[i]; if (wi == 0.0) continue;
@@ -195,6 +201,7 @@ static auto min_cvar_core(simlev_host::NumMat R, double alpha, simlev_host::NumV
       return z[N] + sc * acc / aT;
     };
     yv = x; double t = 1.0, L = 1.0 / (alpha * sc);
+    limit = 1.0;
     for (int it = 0; it < maxit; ++it) {
       const double fy = grad_f(yv, g); L /= 2.0;
       for (int ls = 0; ls < 60; ++ls) {
@@ -207,14 +214,15 @@ static auto min_cvar_core(simlev_host::NumMat R, double alpha, simlev_host::NumV
       }
       double dmax = 0.0, dir = 0.0;
       for (int i = 0; i <= N; ++i) { dmax = std::max(dmax, std::fabs(xn[i] - x[i])); dir += g[i] * (xn[i] - x[i]); }
-      if (dmax < 1e-9) { x = xn; break; }
+      if (dmax < 1e-9) { x = xn; limit = 0.0; break; }
       if (dir > 0.0) { t = 1.0; yv = xn; x = xn; continue; }
       const double tn = (1.0 + std::sqrt(1.0 + 4.0 * t * t)) / 2.0, mom = (t - 1.0) / tn;
       for (int i = 0; i <= N; ++i) yv[i] = xn[i] + mom * (xn[i] - x[i]);
       x = xn; t = tn;
     }
   }
-  return SIMLEV_COPY(x.begin(), x.begin() + N);
+  x[N] = scales.size() > 0 ? limit : 0.0;
+  return SIMLEV_COPY(x.begin(), x.end());
 }
 
 // ---------------------------------------------------------------------------
@@ -867,19 +875,44 @@ static int64_t goal_dp(int S, int K, const double* R, int ng, const double* grid
 //   In-Sample-Summen = Ind %*% B (sl_matmul), Out-of-Sample = T - In-Sample; Kennzahl wie .of_metric
 //   (m = s1 / n; sharpe m / sqrt(pmax((s2 - c1^2 / n) / (n - 1), 1e-300)), sortino m / sqrt(pmax(sdn / n, 1e-300)),
 //   geometric expm1(sl / n), mean m); best = max.col(IS, "first") (NA bei NaN in der Zeile), ob = OOS[best],
-//   Rang = #(OOS < ob) + (#(OOS == ob) + 1) / 2, w = Rang / (N + 1), lambda = log(w / (1 - w)), Median je Zeile
+//   Rang = #(OOS < ob) + (#(OOS == ob) + 1) / 2 (seit 1.6.5 mit Toleranz near_eq), w = Rang / (N + 1), lambda = log(w / (1 - w)), Median je Zeile
 //   wie median.default (NA bei NA/NaN). NA wie R (NA_real_).
 // Ausgaben lam, isb, oosb, oosm (je C).
+// Seit 1.6.5 (CR2-P-1, Entscheidungen 187, 189): Sharpe bzw. Sortino einer Haelfte ohne Schwankung (Standardabweichung
+// bzw. Abwaertsschwankung <= 1e-10 je Periode, Schwelle von .of_drop_flat) ist NA statt m / sqrt(1e-300) (bis 1.6.4
+// ~1e146, der Punkt wurde in jeder solchen Aufteilung gewaehlt). CR2-P-2: bei "geometric" traegt c1 die Zahl der
+// Totalverluste (Rendite <= -1; sl dann ohne diese Perioden); eine Haelfte mit Totalverlust hat die Kennzahl -1 (bis
+// 1.6.4 -Inf - (-Inf) = NaN in allen Aufteilungen).
 static inline double pbo_metric(double n, double s1, double s2, double sdn, double sl, double c1, int metric) {
-  const double m = s1 / n;
-  auto pmx = [](double x) { const double t = 1e-300; return (!std::isnan(x) && t > x) ? t : x; };
-  auto sq = [](double x) { return std::isnan(x) ? x : std::sqrt(x); };
+  const double m = s1 / n, na = SIMLEV_NA;
   switch (metric) {
-    case 0: return m / sq(pmx((s2 - c1 * c1 / n) / (n - 1)));
-    case 1: return m / sq(pmx(sdn / n));
-    case 2: { const double x = sl / n; return std::isnan(x) ? x : std::expm1(x); }
+    case 0: {
+      const double v = (s2 - c1 * c1 / n) / (n - 1);
+      if (std::isnan(v)) return v;
+      const double sd = v > 0 ? std::sqrt(v) : 0.0;
+      return sd > 1e-10 ? m / sd : na;
+    }
+    case 1: {
+      const double v = sdn / n;
+      if (std::isnan(v)) return v;
+      const double dd = v > 0 ? std::sqrt(v) : 0.0;
+      return dd > 1e-10 ? m / dd : na;
+    }
+    case 2: {
+      if (c1 > 0) return -1.0;
+      const double x = sl / n; return std::isnan(x) ? x : std::expm1(x);
+    }
     default: return m;
   }
+}
+
+// Vergleich mit Toleranz (seit 1.6.5, CR2-W2-1, Entscheidung 189; dieselbe Regel wie .near_eq in R):
+// |a - b| <= 1e-12 * max(1, |a|, |b|); NaN ergibt false
+static inline bool near_eq(double a, double b) {
+  const double d = std::fabs(a - b);
+  double s = std::fabs(a) > std::fabs(b) ? std::fabs(a) : std::fabs(b);
+  if (!(s > 1.0)) s = 1.0;
+  return d <= 1e-12 * s;
 }
 
 static void pbo_cscv(int S, int N, int C, const double* B, const double* T, const int* combos, double half, int metric,
@@ -940,8 +973,12 @@ static void pbo_cscv(int S, int N, int C, const double* B, const double* T, cons
       const std::size_t c = st + r;
       bool rna = false;                                  // max.col(IS, ties.method = "first")
       for (int j = 0; j < N; ++j) if (std::isnan(IS[r + K * j])) { rna = true; break; }
+      // seit 1.6.5 (CR2-W2-1): der erste Punkt, dessen Kennzahl dem Hoechstwert bis auf 1e-12 relativ gleicht
       int best = 0;
-      if (!rna) { double a = IS[r]; for (int j = 1; j < N; ++j) { const double b = IS[r + K * j]; if (a < b) { a = b; best = j; } } }
+      if (!rna) {
+        double a = IS[r]; for (int j = 1; j < N; ++j) { const double b = IS[r + K * j]; if (a < b) a = b; }
+        for (int j = 0; j < N; ++j) if (near_eq(IS[r + K * j], a)) { best = j; break; }
+      }
       const double ob = rna ? na : OOS[r + K * best];
       isb[c] = rna ? na : IS[r + K * best];
       oosb[c] = ob;
@@ -949,8 +986,8 @@ static void pbo_cscv(int S, int N, int C, const double* B, const double* T, cons
       for (int j = 0; j < N; ++j) { row[j] = OOS[r + K * j]; if (std::isnan(row[j])) ona = true; }
       if (rna || ona || std::isnan(ob)) lam[c] = na;
       else {
-        double lt = 0.0, eq = 0.0;
-        for (int j = 0; j < N; ++j) { lt += row[j] < ob; eq += row[j] == ob; }
+        double lt = 0.0, eq = 0.0;                     // seit 1.6.5 (CR2-W2-1): Gleichstand mit Toleranz (near_eq)
+        for (int j = 0; j < N; ++j) { const bool e = near_eq(row[j], ob); lt += (!e && row[j] < ob); eq += e; }
         const double w = (lt + (eq + 1) / 2) / (N + 1);
         lam[c] = sl_r_log1(w / (1 - w));
       }
@@ -1131,6 +1168,503 @@ static auto roll_cov_core(simlev_host::NumVec x, simlev_host::NumVec y, int n) {
     out[i] = (c - cx * cy / n) / n;                 // Korrektur fuer Rundung im Mittelwert
   }
   return SIMLEV_DONE(out);
+}
+
+// ---------------------------------------------------------------------------
+// Seit 1.6.5 (Paket B2): Hilfskerne fuer sharpe_deflated, sharpe_haircut, tactical_target_volatility und
+// tactical_conditional_volatility; ein gemeinsamer Einstieg research_vec(op, x, par, out) fuer alle drei Sprachen
+// ---------------------------------------------------------------------------
+
+// Erwartetes Maximum von N unabhaengigen Standardnormalverteilten fuer reelles N >= 1 (CR2-K-2, Entscheidung 189):
+// E = int_0^inf (1 - Phi(z)^N) dz - int_-inf^0 Phi(z)^N dz (= int z dPhi(z)^N); zusammengesetzte Gauss-Legendre-
+// Quadratur mit 20 Knoten je Teilstueck der Breite 1/4 auf [-38.5, 40] (Teilstueckgrenze bei 0, wo der Integrand
+// springt; ausserhalb Phi^N < 1e-300 bzw. N (1 - Phi) < 1e-300 fuer N bis DBL_MAX). Phi^N = exp(N log Phi), fuer
+// z > 0 ueber log1p(-Q) (Q oberes Ende). N = 1 genau 0, Ergebnis >= 0; N < 1 oder NaN: NA, N = Inf: Inf.
+static double exp_max_normal(double N) {
+  static const double gl[10][2] = {
+    {0x1.3973df98b86b0p-4, 0x1.38d6c490a3380p-3}, {0x1.d281636928bc0p-3, 0x1.31819b52c59a4p-3},
+    {0x1.7eaccf15652c4p-2, 0x1.230348f34a542p-3}, {0x1.05905c13f7ff7p-1, 0x1.0db2c5db26e08p-3},
+    {0x1.45a8d3fa710dbp-1, 0x1.e41ff31573b56p-4}, {0x1.7e1f37346a54ep-1, 0x1.a1817a317a834p-4},
+    {0x1.ada0bd5efd6e7p-1, 0x1.5519fe196e247p-4}, {0x1.d31064173fd92p-1, 0x1.00b467df7e461p-4},
+    {0x1.ed8dba7bd769fp-1, 0x1.4c9b5ea53b638p-5}, {0x1.fc7b5a0c71ce1p-1, 0x1.209680274e74ep-6}};
+  if (!(N >= 1)) return SIMLEV_NA;
+  if (N == 1) return 0.0;
+  if (std::isinf(N)) return INFINITY;
+  const double h = 0.25, a = -38.5;
+  const int np = 314;                                   // (40 - (-38.5)) / 0.25
+  double s = 0.0;
+  for (int k = 0; k < np; ++k) {
+    const double c = a + (k + 0.5) * h, r = 0.5 * h;
+    double sp = 0.0;
+    for (int j = 0; j < 10; ++j)
+      for (int sg = -1; sg <= 1; sg += 2) {
+        const double z = c + sg * r * gl[j][0];
+        double f;
+        if (z > 0) f = -std::expm1(N * std::log1p(-sl_pnorm1(z, 0)));
+        else f = -std::exp(N * std::log(sl_pnorm1(z, 1)));
+        sp += gl[j][1] * f;
+      }
+    s += r * sp;
+  }
+  return s > 0 ? s : 0.0;
+}
+
+// sum(1 / (1:n)) wie R (Kehrwerte in double, Summe im long-double-Akkumulator wie sum()), ohne den Vektor (CR2-I-1:
+// Faktor des Verfahrens von Benjamini-Hochberg-Yekutieli in sharpe_haircut bis n = 10^8)
+static double harmonic_r(double n) {
+  long double s = 0.0L;
+  const long long m = (long long) n;
+  for (long long i = 1; i <= m; ++i) s += 1.0 / (double) i;
+  return (double) s;
+}
+
+// Expandierender Median (lit1 S4, Entscheidung 192): out[t] = Median der endlichen Werte x[0..t] wie
+// stats::median (gerade Anzahl: mean() der beiden mittleren Werte), NA bei weniger als k endlichen Werten
+static void expanding_median(int64_t n, const double* x, double k, double* out) {
+  std::vector<double> lo, hi;                           // lo: Max-Heap (untere Haelfte), hi: Min-Heap
+  auto gt = [](double a, double b) { return a > b; };
+  for (int64_t t = 0; t < n; ++t) {
+    const double v = x[t];
+    if (std::isfinite(v)) {
+      if (lo.empty() || v <= lo.front()) { lo.push_back(v); std::push_heap(lo.begin(), lo.end()); }
+      else { hi.push_back(v); std::push_heap(hi.begin(), hi.end(), gt); }
+      if (lo.size() > hi.size() + 1) {
+        std::pop_heap(lo.begin(), lo.end()); hi.push_back(lo.back()); lo.pop_back(); std::push_heap(hi.begin(), hi.end(), gt);
+      } else if (hi.size() > lo.size()) {
+        std::pop_heap(hi.begin(), hi.end(), gt); lo.push_back(hi.back()); hi.pop_back(); std::push_heap(lo.begin(), lo.end());
+      }
+    }
+    const double cnt = (double) (lo.size() + hi.size());
+    if (cnt < k || cnt == 0) { out[t] = SIMLEV_NA; continue; }
+    if (lo.size() > hi.size()) out[t] = lo.front();
+    else { const double two[2] = {lo.front(), hi.front()}; out[t] = sl_r_mean(2, two); }
+  }
+}
+
+// Wurzel der Ordnung q (1, 2 genau; sonst pow)
+static inline double root_q(double v, double q) {
+  if (!(v > 0)) return std::isnan(v) ? v : 0.0;
+  if (q == 1) return v;
+  if (q == 2) return std::sqrt(v);
+  return std::pow(v, 1.0 / q);
+}
+
+// Beitrag einer Rendite zum Moment: 0 sd (x^2), 1/2 LPM der Ordnung q (max(-x, 0)^q)
+static inline double moment_g(double x, int measure, double q) {
+  if (measure == 0) return x * x;
+  const double d = x < 0 ? -x : 0.0;
+  if (q == 1) return d;
+  if (q == 2) return d * d;
+  return std::pow(d, q);
+}
+
+// Risikozustand je Zeile fuer tactical_target_volatility / tactical_conditional_volatility (seit 1.6.5: CR2-V1-1,
+// CR2-R-2, lit1 S2/S3, Entscheidungen 175, 189, 192). R, W: n x A spaltenweise (Tagesrenditen der Risikoanlagen und
+// je Zeile normierte Gewichte, Summe 1 oder 0), day: n Tageszahlen. In Zeile t gilt die Portfoliorendite mit den
+// Gewichten von t: r_s = sum_a W[t, a] R[s, a] (s <= t, Summe in fester Folge); Bewegungstage: r_s != 0.
+// measure 0 sd (Stichprobe, Teiler w - 1, zwei Durchgaenge), 2 LPM der Ordnung q ((mean(max(-r, 0)^q))^(1/q);
+// Abwaertsschwankung = q 2), 3 VaR (-x_(k), k = max(1, floor(alpha w))), 4 ES (EWMA-gefiltert:
+// z = r_s / sqrt(v_{s-1}), ES = -mean der k kleinsten der letzten w Residuen * sqrt(v_t)).
+// est 0: Fenster der letzten w Bewegungstage; est 1: EWMA v = lam v + (1 - lam) g(r), Start = Mittel von g ueber die
+// ersten 21 Bewegungstage (Mittelwert 0, RiskMetrics); VaR dann ebenfalls gefiltert. ppy > 0: fest, sonst gleitend
+// (Bewegungstage der letzten 365.25 Kalendertage; im ersten Jahr der Daten deren Dichte seit dem ersten Tag).
+// Ergebnis: Mass * sqrt(ppy_t); NA, solange zu wenige Bewegungstage vorliegen oder alle Gewichte 0 sind.
+static void risk_state(int64_t n, int64_t A, const double* R, const double* W, const double* day, int w, int measure,
+                       double q, double alpha, int est, double lam, double ppy_fix, double* out) {
+  const double na = SIMLEV_NA;
+  const int seed = 21;
+  const bool filt = measure == 4 || (measure == 3 && est == 1);
+  std::vector<double> wt((size_t) A), mr, md, z, v, buf;   // Bewegungstage: Rendite, Tag; Residuen; EWMA-Werte
+  bool zero = true;
+  int64_t seg = -1;                                         // Zeile, deren Gewichte gelten (-1 = keine)
+  auto push = [&](int64_t s) {                              // Rendite der Zeile s mit den Gewichten wt
+    double r = 0.0;
+    for (int64_t a = 0; a < A; ++a) r += wt[(size_t) a] * R[s + n * a];
+    if (r == 0.0 || !std::isfinite(r)) return;
+    mr.push_back(r); md.push_back(day[s]);
+    const size_t m = mr.size();
+    if (est == 1 || filt) {
+      const double g = filt ? r * r : moment_g(r, measure, q);
+      if ((int) m < seed) { v.push_back(na); return; }
+      if ((int) m == seed) {
+        double sg = 0.0;
+        for (size_t i = 0; i < m; ++i) sg += filt ? mr[i] * mr[i] : moment_g(mr[i], measure, q);
+        v.push_back(sg / seed);
+        return;
+      }
+      const double vp = v[m - 2];
+      if (filt) z.push_back(r / std::sqrt(vp));
+      v.push_back(lam * vp + (1 - lam) * g);
+    }
+  };
+  for (int64_t t = 0; t < n; ++t) {
+    bool same = seg >= 0;
+    for (int64_t a = 0; a < A && same; ++a) same = W[t + n * a] == W[seg + n * a];
+    if (!same) {                                            // neue Gewichte: Bewegungstage bis t neu bilden
+      seg = t; zero = true;
+      for (int64_t a = 0; a < A; ++a) { wt[(size_t) a] = W[t + n * a]; if (wt[(size_t) a] != 0) zero = false; }
+      mr.clear(); md.clear(); z.clear(); v.clear();
+      if (!zero) for (int64_t s = 0; s < t; ++s) push(s);
+    }
+    if (zero) { out[t] = na; continue; }
+    push(t);
+    const int64_t m = (int64_t) mr.size();
+    double ppy = ppy_fix;
+    if (!(ppy > 0)) {
+      if (!m) { out[t] = na; continue; }
+      const double span = day[t] - day[0];
+      if (span >= 365.25) {
+        const double lim = day[t] - 365.25;
+        ppy = (double) (md.end() - std::upper_bound(md.begin(), md.end(), lim));
+      } else ppy = span > 0 ? (double) m / (span / 365.25) : na;
+      if (!(ppy > 0)) { out[t] = na; continue; }
+    }
+    double rho = na;
+    if (filt) {
+      const int64_t nz = (int64_t) z.size();
+      if (nz >= w) {
+        buf.assign(z.end() - w, z.end());
+        const int k = std::max(1, (int) std::floor(alpha * w));
+        std::nth_element(buf.begin(), buf.begin() + (k - 1), buf.end());
+        double val;
+        if (measure == 3) val = -buf[(size_t) (k - 1)];
+        else {
+          std::sort(buf.begin(), buf.begin() + k);
+          double sz = 0.0;
+          for (int i = 0; i < k; ++i) sz += buf[(size_t) i];
+          val = -(sz / k);
+        }
+        rho = val * std::sqrt(v[(size_t) (m - 1)]);
+      }
+    } else if (est == 1) {
+      if (m >= seed) rho = root_q(v[(size_t) (m - 1)], measure == 0 ? 2.0 : q);
+    } else if (m >= w) {
+      const double* x = mr.data() + (m - w);
+      if (measure == 0) {
+        double sx = 0.0;
+        for (int i = 0; i < w; ++i) sx += x[i];
+        const double mx = sx / w;
+        double c = 0.0, cx = 0.0;
+        for (int i = 0; i < w; ++i) { const double dx = x[i] - mx; c += dx * dx; cx += dx; }
+        const double var = (c - cx * cx / w) / (w - 1);
+        rho = var > 0 ? std::sqrt(var) : 0.0;
+      } else if (measure == 2) {
+        double sg = 0.0;
+        for (int i = 0; i < w; ++i) sg += moment_g(x[i], 2, q);
+        rho = root_q(sg / w, q);
+      } else {
+        buf.assign(x, x + w);
+        const int k = std::max(1, (int) std::floor(alpha * w));
+        std::nth_element(buf.begin(), buf.begin() + (k - 1), buf.end());
+        rho = -buf[(size_t) (k - 1)];
+      }
+    }
+    out[t] = std::isnan(rho) ? na : rho * std::sqrt(ppy);
+  }
+}
+
+// Drawdown-Polster (lit1 S7, Entscheidung 192 L6): Index P aus den Portfoliorenditen pr (P_0 = 1, P_s = P_{s-1} (1 +
+// pr_s)), Hoch ueber die letzten w Bewegungstage (pr != 0; Zeile 0 zaehlt als Start), DDP = 1 - P / Hoch,
+// m = min(1, max(0, (D - DDP) / (D (1 - DDP)))) mit D = Tiefe als Anteil
+static void cushion_mult(int64_t n, const double* pr, int w, double D, double* out) {
+  std::vector<double> pts; pts.reserve((size_t) n);
+  double P = 1.0;
+  pts.push_back(P);
+  for (int64_t t = 0; t < n; ++t) {
+    if (t > 0 && pr[t] != 0 && std::isfinite(pr[t])) { P = P * (1 + pr[t]); pts.push_back(P); }
+    const size_t m = pts.size(), from = m > (size_t) w ? m - (size_t) w : 0;
+    double hi = pts[from];
+    for (size_t i = from + 1; i < m; ++i) if (pts[i] > hi) hi = pts[i];
+    const double dd = hi > 0 ? 1 - P / hi : 1.0;
+    double mt;
+    if (!(dd < D)) mt = 0.0;
+    else { mt = (D - dd) / (D * (1 - dd)); if (mt > 1) mt = 1.0; if (mt < 0) mt = 0.0; }
+    out[t] = mt;
+  }
+}
+
+// Logarithmus des unteren Endes P(T <= -t) der t-Verteilung (nu Freiheitsgrade; nu > 1e20 oder Inf: Normalverteilung)
+// fuer grosse t > 0, wo pt/pnorm unterlaufen (CR2-I-2, Entscheidung 189 Weg a): log P = lnc + L0(t) + log I(t) mit der
+// Dichte exp(lnc + L0(s)), L0(s) = -(nu + 1) / 2 log1p(s^2 / nu) (normal -s^2 / 2), und
+// I(t) = int_0^inf exp(L0(t + u) - L0(t)) du, zusammengesetzte Gauss-Legendre-Quadratur (20 Knoten) mit Teilstuecken der
+// Breite 1 / (2 lambda), lambda = -L0'(t), bis L0(t + u) - L0(t) < -60. Gibt log P und I(t) zurueck.
+static double tail_L0(double s, double nu, bool normal) {
+  return normal ? -0.5 * s * s : -0.5 * (nu + 1) * std::log1p((s / nu) * s);
+}
+static double tail_logp(double t, double nu, double* I_out) {
+  static const double gl[10][2] = {
+    {0x1.3973df98b86b0p-4, 0x1.38d6c490a3380p-3}, {0x1.d281636928bc0p-3, 0x1.31819b52c59a4p-3},
+    {0x1.7eaccf15652c4p-2, 0x1.230348f34a542p-3}, {0x1.05905c13f7ff7p-1, 0x1.0db2c5db26e08p-3},
+    {0x1.45a8d3fa710dbp-1, 0x1.e41ff31573b56p-4}, {0x1.7e1f37346a54ep-1, 0x1.a1817a317a834p-4},
+    {0x1.ada0bd5efd6e7p-1, 0x1.5519fe196e247p-4}, {0x1.d31064173fd92p-1, 0x1.00b467df7e461p-4},
+    {0x1.ed8dba7bd769fp-1, 0x1.4c9b5ea53b638p-5}, {0x1.fc7b5a0c71ce1p-1, 0x1.209680274e74ep-6}};
+  const bool normal = !(nu <= 1e20);
+  const double lnc = normal ? -0.5 * std::log(2 * M_PI)
+                            : std::lgamma(0.5 * (nu + 1)) - std::lgamma(0.5 * nu) - 0.5 * std::log(nu * M_PI);
+  const double L0t = tail_L0(t, nu, normal);
+  const double lam = normal ? t : (nu + 1) * t / (nu + t * t);
+  const double h = 0.5 / lam, r = 0.5 * h;
+  double I = 0.0;
+  for (int k = 0; k < 200000; ++k) {
+    const double c = t + (k + 0.5) * h;
+    double sp = 0.0;
+    for (int j = 0; j < 10; ++j)
+      for (int sg = -1; sg <= 1; sg += 2) sp += gl[j][1] * std::exp(tail_L0(c + sg * r * gl[j][0], nu, normal) - L0t);
+    I += r * sp;
+    if (tail_L0(t + (k + 1) * h, nu, normal) - L0t < -60) break;
+  }
+  if (I_out) *I_out = I;
+  return lnc + L0t + std::log(I);
+}
+// Umkehrung: t > 0 mit log P(T <= -t) = g (Newton t <- t + (logP(t) - g) I(t), Einschluss mit Halbierung)
+static double tail_logp_inv(double g, double nu) {
+  if (std::isnan(g)) return SIMLEV_NA;
+  if (g >= std::log(0.5)) return 0.0;
+  double t = std::sqrt(-2 * (g + 0.5 * std::log(2 * M_PI))), lo = 0.0, hi = INFINITY;
+  if (!(t > 1)) t = 1.0;
+  for (int it = 0; it < 200; ++it) {
+    double I = 0.0;
+    const double f = tail_logp(t, nu, &I) - g;           // fallend in t
+    if (f > 0) lo = t; else hi = t;
+    double tn = t + f * I;
+    if (!(tn > lo && tn < hi)) tn = std::isinf(hi) ? 2 * t : 0.5 * (lo + hi);
+    if (std::fabs(tn - t) <= 1e-15 * t) { t = tn; break; }
+    t = tn;
+  }
+  return t;
+}
+
+// ---------------------------------------------------------------------------
+// Seit 1.6.5 (Paket B2b, Entscheidung 177): sharpe_test nach Ledoit & Wolf (2008)
+// ---------------------------------------------------------------------------
+
+// Inverse einer kleinen k x k-Matrix (zeilenweise) nach Gauss-Jordan mit Spaltenpivot; false bei Pivot 0 bzw. nicht
+// endlichem Ergebnis
+static bool lw_inverse(int k, const double* A, double* Ai) {
+  std::vector<double> M((size_t) k * 2 * k, 0.0);
+  for (int i = 0; i < k; ++i) {
+    for (int j = 0; j < k; ++j) M[(size_t) i * 2 * k + j] = A[(size_t) i * k + j];
+    M[(size_t) i * 2 * k + k + i] = 1.0;
+  }
+  for (int c = 0; c < k; ++c) {
+    int p = c;
+    for (int r = c + 1; r < k; ++r)
+      if (std::fabs(M[(size_t) r * 2 * k + c]) > std::fabs(M[(size_t) p * 2 * k + c])) p = r;
+    const double piv = M[(size_t) p * 2 * k + c];
+    if (!(piv != 0.0) || !std::isfinite(piv)) return false;
+    if (p != c) for (int j = 0; j < 2 * k; ++j) std::swap(M[(size_t) p * 2 * k + j], M[(size_t) c * 2 * k + j]);
+    for (int j = 0; j < 2 * k; ++j) M[(size_t) c * 2 * k + j] /= piv;
+    for (int r = 0; r < k; ++r) {
+      if (r == c) continue;
+      const double f = M[(size_t) r * 2 * k + c];
+      if (f == 0.0) continue;
+      for (int j = 0; j < 2 * k; ++j) M[(size_t) r * 2 * k + j] -= f * M[(size_t) c * 2 * k + j];
+    }
+  }
+  for (int i = 0; i < k; ++i)
+    for (int j = 0; j < k; ++j) {
+      Ai[(size_t) i * k + j] = M[(size_t) i * 2 * k + k + j];
+      if (!std::isfinite(Ai[(size_t) i * k + j])) return false;
+    }
+  return true;
+}
+
+// Quadratic-Spectral-Kern (Andrews 1991, Gl. 2.7): k(x) = 25 / (12 pi^2 x^2) (sin(6 pi x / 5) / (6 pi x / 5) -
+// cos(6 pi x / 5)), k(0) = 1
+static double lw_qs(double x) {
+  if (x == 0.0) return 1.0;
+  const double z = 6.0 * M_PI * x / 5.0;
+  return 25.0 / (12.0 * M_PI * M_PI * x * x) * (std::sin(z) / z - std::cos(z));
+}
+
+// Kern-Schaetzer der Langfristkovarianz nach Ledoit & Wolf (2008, Abschnitt 3.1): Psi = T / (T - k) sum_j
+// w(j) C(j) mit C(j) = 1/m sum_t v_t v_{t-j}' der zentrierten Spalten von Y (T x k, spaltenweise). kern 1: Bartlett mit
+// Lag L = floor(4 (T/100)^(2/9)) (Newey-West wie bisher), w(j) = 1 - j / (L + 1); kern 2: Quadratic Spectral mit
+// automatischer Bandbreite S = 1.3221 (alpha(2) m)^(1/5) nach Andrews (1991, Gl. 6.2 und 6.4) aus univariaten
+// AR(1)-Naeherungen je Spalte (Gewichte 1): rho = sum v_t v_{t-1} / sum v_{t-1}^2, s2 = sum (v_t - rho v_{t-1})^2 /
+// (m - 1), alpha(2) = sum 4 rho^2 s2^2 / (1 - rho)^8 / sum s2^2 / (1 - rho)^4. prew: Prewhitening nach Andrews &
+// Monahan (1992): VAR(1) ohne Konstante per KQ, v = Residuen (m = T - 1), Kern-Schaetzer auf v und Rueckfaerbung
+// (I - A)^-1 Psi_v (I - A)^-1'. out: k x k (spaltenweise), Status (0 gut, 1 VAR(1) singulaer, 2 Bandbreite nicht
+// bestimmbar), Bandbreite bzw. Lag.
+static void lw_hac(int64_t T, int k, const double* Y, int kern, bool prew, double* out) {
+  const int64_t kk = (int64_t) k * k;
+  for (int64_t i = 0; i < kk + 2; ++i) out[i] = SIMLEV_NA;
+  std::vector<double> U((size_t) (T * k));                    // zeilenweise T x k, zentriert
+  for (int a = 0; a < k; ++a) {
+    double s = 0.0;
+    for (int64_t t = 0; t < T; ++t) s += Y[a * T + t];
+    const double mu = s / (double) T;
+    for (int64_t t = 0; t < T; ++t) U[(size_t) (t * k + a)] = Y[a * T + t] - mu;
+  }
+  std::vector<double> Bi((size_t) kk, 0.0);                   // (I - A)^-1 bei Prewhitening
+  const double* V = U.data(); int64_t m = T;
+  std::vector<double> E;
+  if (prew) {
+    std::vector<double> S10((size_t) kk, 0.0), S00((size_t) kk, 0.0), S00i((size_t) kk), A((size_t) kk, 0.0);
+    for (int64_t t = 1; t < T; ++t)
+      for (int i = 0; i < k; ++i)
+        for (int j = 0; j < k; ++j) {
+          S10[(size_t) (i * k + j)] += U[(size_t) (t * k + i)] * U[(size_t) ((t - 1) * k + j)];
+          S00[(size_t) (i * k + j)] += U[(size_t) ((t - 1) * k + i)] * U[(size_t) ((t - 1) * k + j)];
+        }
+    if (!lw_inverse(k, S00.data(), S00i.data())) { out[kk] = 1.0; return; }
+    for (int i = 0; i < k; ++i)
+      for (int j = 0; j < k; ++j) {
+        double s = 0.0;
+        for (int l = 0; l < k; ++l) s += S10[(size_t) (i * k + l)] * S00i[(size_t) (l * k + j)];
+        A[(size_t) (i * k + j)] = s;
+      }
+    std::vector<double> IA((size_t) kk);
+    for (int i = 0; i < k; ++i) for (int j = 0; j < k; ++j) IA[(size_t) (i * k + j)] = (i == j ? 1.0 : 0.0) - A[(size_t) (i * k + j)];
+    if (!lw_inverse(k, IA.data(), Bi.data())) { out[kk] = 1.0; return; }
+    m = T - 1;
+    E.assign((size_t) (m * k), 0.0);
+    for (int64_t t = 1; t < T; ++t)
+      for (int i = 0; i < k; ++i) {
+        double s = U[(size_t) (t * k + i)];
+        for (int j = 0; j < k; ++j) s -= A[(size_t) (i * k + j)] * U[(size_t) ((t - 1) * k + j)];
+        E[(size_t) ((t - 1) * k + i)] = s;
+      }
+    V = E.data();
+  }
+  double bw;
+  if (kern == 1) bw = std::floor(4.0 * std::pow((double) T / 100.0, 2.0 / 9.0));
+  else {
+    double num = 0.0, den = 0.0;
+    for (int a = 0; a < k; ++a) {
+      double sxy = 0.0, sxx = 0.0;
+      for (int64_t t = 1; t < m; ++t) { sxy += V[t * k + a] * V[(t - 1) * k + a]; sxx += V[(t - 1) * k + a] * V[(t - 1) * k + a]; }
+      const double rho = sxy / sxx;
+      double se = 0.0;
+      for (int64_t t = 1; t < m; ++t) { const double e = V[t * k + a] - rho * V[(t - 1) * k + a]; se += e * e; }
+      const double s2 = se / (double) (m - 1), s4 = s2 * s2, om = 1.0 - rho;
+      num += 4.0 * rho * rho * s4 / std::pow(om, 8.0);
+      den += s4 / std::pow(om, 4.0);
+    }
+    bw = 1.3221 * std::pow(num / den * (double) m, 0.2);
+    if (!std::isfinite(bw) || !(bw >= 0.0)) { out[kk] = 2.0; return; }
+  }
+  std::vector<double> P((size_t) kk, 0.0);
+  for (int64_t j = 0; j < m; ++j) {
+    double w;
+    if (kern == 1) { if ((double) j > bw) break; w = 1.0 - (double) j / (bw + 1.0); }
+    else w = bw > 0.0 ? lw_qs((double) j / bw) : (j == 0 ? 1.0 : 0.0);
+    if (w == 0.0 && j > 0) continue;
+    std::vector<double> C((size_t) kk, 0.0);
+    for (int64_t t = j; t < m; ++t)
+      for (int a = 0; a < k; ++a) {
+        const double va = V[t * k + a];
+        for (int b = 0; b < k; ++b) C[(size_t) (a * k + b)] += va * V[(t - j) * k + b];
+      }
+    for (int a = 0; a < k; ++a)
+      for (int b = 0; b < k; ++b) {
+        const double c = C[(size_t) (a * k + b)] / (double) m;
+        if (j == 0) P[(size_t) (a * k + b)] += c;
+        else { P[(size_t) (a * k + b)] += w * c; P[(size_t) (b * k + a)] += w * c; }
+      }
+  }
+  if (prew) {                                                  // Rueckfaerbung Bi P Bi'
+    std::vector<double> Q((size_t) kk, 0.0), R((size_t) kk, 0.0);
+    for (int i = 0; i < k; ++i) for (int j = 0; j < k; ++j) {
+      double s = 0.0; for (int l = 0; l < k; ++l) s += Bi[(size_t) (i * k + l)] * P[(size_t) (l * k + j)]; Q[(size_t) (i * k + j)] = s; }
+    for (int i = 0; i < k; ++i) for (int j = 0; j < k; ++j) {
+      double s = 0.0; for (int l = 0; l < k; ++l) s += Q[(size_t) (i * k + l)] * Bi[(size_t) (j * k + l)]; R[(size_t) (i * k + j)] = s; }
+    P.swap(R);
+  }
+  const double f = (double) T / (double) (T - k);              // Ledoit & Wolf (2008, Abschnitt 3.1): T / (T - 4)
+  for (int a = 0; a < k; ++a) for (int b = 0; b < k; ++b) out[b * k + a] = f * P[(size_t) (a * k + b)];
+  out[kk] = 0.0; out[kk + 1] = bw;
+}
+
+// Eine Stichprobe des studentisierten zirkulaeren Block-Bootstraps (Ledoit & Wolf 2008, Abschnitt 3.2.2): x = (r_a,
+// r_b) der Laenge 2 T, Blocklaenge b. Delta = mu_a / sd_a - mu_b / sd_b (sd mit Teiler T - 1 wie sharpe_test),
+// Gradient der Delta-Methode (Gl. 4, Schwankung ueber die Abweichungen vom Mittel wie Entscheidung 142),
+// y_t = (r_a - mu_a, r_b - mu_b, r_a^2 - g_a, r_b^2 - g_b), Psi* = 1/l sum_j zeta_j zeta_j' mit zeta_j = b^(-1/2)
+// sum_{t=1..b} y_{(j-1)b+t} und l = floor(T / b) (nur die ersten l b Beobachtungen), s = sqrt(grad' Psi* grad / T)
+// (Gl. 8). out = (Delta, s); NA, wenn eine Reihe ohne Schwankung ist.
+static void lw_boot_stat(int64_t T, const double* x, int64_t b, double* out) {
+  const double* r[2] = {x, x + T};
+  double mu[2], g[2], v[2], sd[2];
+  for (int i = 0; i < 2; ++i) {
+    double s = 0.0, q = 0.0;
+    for (int64_t t = 0; t < T; ++t) { s += r[i][t]; q += r[i][t] * r[i][t]; }
+    mu[i] = s / (double) T; g[i] = q / (double) T;
+    double d2 = 0.0;
+    for (int64_t t = 0; t < T; ++t) { const double e = r[i][t] - mu[i]; d2 += e * e; }
+    v[i] = d2 / (double) T; sd[i] = std::sqrt(d2 / (double) (T - 1));
+  }
+  out[0] = out[1] = SIMLEV_NA;
+  if (!(sd[0] > 0.0) || !(sd[1] > 0.0)) return;
+  const double v0 = std::pow(v[0], 1.5), v1 = std::pow(v[1], 1.5);
+  const double grad[4] = {g[0] / v0, -g[1] / v1, -0.5 * mu[0] / v0, 0.5 * mu[1] / v1};
+  const int64_t l = T / b;
+  const double sb = std::sqrt((double) b);
+  double P[16] = {0.0};
+  for (int64_t j = 0; j < l; ++j) {
+    double z[4] = {0.0, 0.0, 0.0, 0.0};
+    for (int64_t t = j * b; t < (j + 1) * b; ++t) {
+      z[0] += r[0][t] - mu[0]; z[1] += r[1][t] - mu[1];
+      z[2] += r[0][t] * r[0][t] - g[0]; z[3] += r[1][t] * r[1][t] - g[1];
+    }
+    for (int a = 0; a < 4; ++a) z[a] /= sb;
+    for (int a = 0; a < 4; ++a) for (int c = 0; c < 4; ++c) P[a * 4 + c] += z[a] * z[c];
+  }
+  double q = 0.0;
+  for (int a = 0; a < 4; ++a) for (int c = 0; c < 4; ++c) q += grad[a] * (P[a * 4 + c] / (double) l) * grad[c];
+  out[0] = mu[0] / sd[0] - mu[1] / sd[1];
+  out[1] = std::sqrt(q / (double) T);
+}
+
+// Gemeinsamer Einstieg (seit 1.6.5) fuer R (.research_vec), Python (_ext.research_vec) und Julia
+// (simlev_c_research_vec): op 1 exp_max_normal je x[i]; op 2 harmonic_r je x[i]; op 3 risk_state mit
+// x = (R, W, day), par = (n, A, w, measure, q, alpha, est, lambda, ppy); op 4 expanding_median mit par = (k);
+// op 5 cushion_mult mit par = (w, D); op 6 tail_logp je x[i] mit par = (nu); op 7 tail_logp_inv je x[i] mit
+// par = (nu); op 8 lw_hac mit x = Y (T x k spaltenweise), par = (T, k, kern, prew), out k*k + 2; op 9 lw_boot_stat mit
+// x = (r_a, r_b), par = (T, b), out 2. Gibt false zurueck, wenn die Abmessungen nicht passen.
+static bool research_vec(int op, int64_t nx, const double* x, int64_t np, const double* par, int64_t nout, double* out) {
+  switch (op) {
+    case 1: case 2:
+      if (nout != nx) return false;
+      for (int64_t i = 0; i < nx; ++i) out[i] = op == 1 ? exp_max_normal(x[i]) : harmonic_r(x[i]);
+      return true;
+    case 3: {
+      if (np != 9) return false;
+      const int64_t n = (int64_t) par[0], A = (int64_t) par[1];
+      if (n < 0 || A < 1 || nx != n * (2 * A + 1) || nout != n || !(par[2] >= 1)) return false;
+      risk_state(n, A, x, x + n * A, x + 2 * n * A, (int) par[2], (int) par[3], par[4], par[5], (int) par[6], par[7],
+                 par[8], out);
+      return true;
+    }
+    case 4:
+      if (np != 1 || nout != nx) return false;
+      expanding_median(nx, x, par[0], out);
+      return true;
+    case 5:
+      if (np != 2 || nout != nx || !(par[0] >= 1)) return false;
+      cushion_mult(nx, x, (int) par[0], par[1], out);
+      return true;
+    case 6: case 7:
+      if (np != 1 || nout != nx || !(par[0] > 0)) return false;
+      for (int64_t i = 0; i < nx; ++i)
+        out[i] = op == 6 ? (x[i] > 0 ? tail_logp(x[i], par[0], nullptr) : SIMLEV_NA) : tail_logp_inv(x[i], par[0]);
+      return true;
+    case 8: {
+      if (np != 4) return false;
+      const int64_t T = (int64_t) par[0], k = (int64_t) par[1];
+      if (T < 3 || k < 1 || k > 16 || T <= k || nx != T * k || nout != k * k + 2 || !(par[2] == 1 || par[2] == 2)) return false;
+      lw_hac(T, (int) k, x, (int) par[2], par[3] != 0.0, out);
+      return true;
+    }
+    case 9: {
+      if (np != 2) return false;
+      const int64_t T = (int64_t) par[0], b = (int64_t) par[1];
+      if (T < 2 || b < 1 || b > T || nx != 2 * T || nout != 2) return false;
+      lw_boot_stat(T, x, b, out);
+      return true;
+    }
+    default:
+      return false;
+  }
 }
 
 }  // namespace simlev

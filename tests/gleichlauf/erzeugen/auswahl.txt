@@ -676,6 +676,7 @@ slc/seed_0
 slc/seed_fehler_bruch
 slc/seed_fehler_gross
 slc/vert_dnorm_log
+slc/vert_dnorm_log_gross
 slc/vert_erfc
 slc/vert_pbeta_beide
 slc/vert_pbeta_klein

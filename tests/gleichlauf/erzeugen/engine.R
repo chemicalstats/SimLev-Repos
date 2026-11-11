@@ -239,7 +239,11 @@ TAB("asset_config", "Prüfungen von asset_config()", list(
 TAB("sim_costs", "Prüfungen von sim_costs()", list(
   ZB("feld_unbekannt", BK("sim_costs", order_fee = list(fix = 1))),
   ZB("text", BK("sim_costs", order_fee = "5")),
-  ZB("negativ", BK("sim_costs", dca_fee = -1))))
+  ZB("negativ", BK("sim_costs", dca_fee = -1)),
+  # seit 1.6.5 (PRG1-3): Depotgebühr
+  ZB("depot_negativ", BK("sim_costs", custody_fee = -1)),
+  ZB("depot_feld_unbekannt", BK("sim_costs", custody_fee = list(prozent = 1))),
+  ZB("depot_max_unter_min", BK("sim_costs", custody_fee = list(percent = 0.5, min = 20, max = 10)))))
 TAB("dca_plan", "Prüfungen von dca_plan()", list(
   ZB("betrag_unendlich", BK("dca_plan", value = Inf, span = 1)),
   ZB("abstand_na", BK("dca_plan", value = 100, span = V("na")), inputs = list(na = na)),
@@ -360,6 +364,14 @@ SZ("liquidieren_gebuehr_ueber_erloes", "liquidate: Position bleibt stehen, weil 
    list(start_value = 100, order_fee = 60, liquidate = TRUE), d = "dK", s = "sC")
 SZ("ereignis_gewicht_unvollstaendig", "event_weight nennt nicht alle Assets (Warnung), event_mode replace",
    list(event_col = "ev", event_weight = c(A = "wA"), event_mode = "replace"), d = "dE", s = "sC2")
+# seit 1.6.5 (PRG1-3): Depotgebühr (Entscheidungen 150, 194; PR1-2, PR1-3, PRG1-4)
+SZ("depotgebuehr_anteilig_min_max", "Depotgebühr fixed + percent mit min und max, erstes und letztes Jahr anteilig, Verkauf für die Gebühr mit Abgeltungsteuer, details",
+   list(start_value = 1e5, details = TRUE, costs = BK("sim_costs", custody_fee = list(fixed = 5, percent = 0.25, min = 10, max = 40)),
+        tax = BK("tax_profile")), d = "d1", s = "s1")
+SZ("depotgebuehr_fest_aus_geld", "feste Depotgebühr aus dem Geldbestand (ganze Stücke) und durch Verkauf, zwei Assets, details",
+   list(start_value = 5000, fractions = FALSE, details = TRUE, costs = BK("sim_costs", order_fee = 1, custody_fee = 45)))
+SZ("depotgebuehr_ungedeckt", "Depotgebühr größer als das Depot: offene Gebühr als negativer Geldbestand, negativer Endwert (Warnungen), details",
+   list(start_value = 1000, details = TRUE, costs = BK("sim_costs", custody_fee = 20000)), d = "dT", s = "s1")
 set.seed(7); cal <- days("2019-10-01", "2020-03-31"); wd <- cal[!format(cal, "%u") %in% c("6", "7")]
 us <- data.frame(date = wd, A = round(100 * exp(cumsum(rnorm(length(wd), 4e-4, 0.011))), 4))
 ref_case("filled_nach_zeilenauswahl", note = "prüft: Attribut filled nach Zeilenauswahl einer series_align()-Tabelle (Warnung), Ergebnis und Druck",

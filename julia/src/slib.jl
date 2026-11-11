@@ -7,7 +7,7 @@
 # Fehlertexte kommen aus dem Kern und sind in allen drei Sprachen gleich (Warnung: @warn ohne
 # Quellangabe; Fehler: error(msg)). Der Kontext sl_ctx ist für Julia undurchsichtig
 # (sl_ctx_alloc/sl_ctx_free und Zugriffsfunktionen); ein Benutzerabbruch ist nur zwischen zwei
-# Aufrufen möglich (interrupted = NULL).
+# Aufrufen möglich (interrupted = NULL), seit 1.6.5 in der t-Copula auch während des Kerns (_ctx_intr).
 #
 # Zufallszustand: globaler Zustand G prozessweit mit ReentrantLock (nicht je
 # Task), gesetzt beim Laden (__init__) und mit simlev_seed(nothing) aus Uhrzeit, Prozessnummer
@@ -46,7 +46,35 @@ function _entropy!(st::Stream)
     st
 end
 
-__init__() = (lock(() -> _entropy!(_G), _LOCK); nothing)
+# Abbruchhaken (seit 1.6.5, Entscheidungen 171, 188; bisher nur zwischen zwei Aufrufen): der Kern ruft ihn nur aus dem
+# aufrufenden Thread. Eine anstehende Unterbrechung (Strg-C) wirft Julia an der nächsten Sicherungsstelle; sie wird hier
+# im Rückruf selbst gefangen (kein Sprung durch C-Rahmen), der Kern bricht mit SL_EINTR ab und die Hülle wirft danach
+# InterruptException. Nur für Hüllen, die SL_EINTR so behandeln (_ctx_intr).
+function _intr_cb(::Ptr{Cvoid})::Cint
+    Threads.threadid() == 1 || return Cint(0)   # Signale behandelt Julia im ersten Thread
+    try
+        GC.safepoint()
+    catch e
+        e isa InterruptException && return Cint(1)
+    end
+    return Cint(0)
+end
+const _INTR_CB = Ref{Ptr{Cvoid}}(C_NULL)
+
+"Kontext mit Abbruchhaken; die Hülle muss Rückgabecode 6 (SL_EINTR) mit `_throw_intr` behandeln."
+function _ctx_intr()
+    cx = _ctx()
+    ccall((:sl_ctx_set_interrupt, LIBSLC), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), cx, _INTR_CB[], C_NULL)
+    cx
+end
+const _SL_EINTR = Cint(6)
+_throw_intr(s::Cint) = s == _SL_EINTR && throw(InterruptException())
+
+function __init__()
+    _INTR_CB[] = @cfunction(_intr_cb, Cint, (Ptr{Cvoid},))
+    lock(() -> _entropy!(_G), _LOCK)
+    nothing
+end
 
 # ── Kontext ────────────────────────────────────────────────────────────────
 
@@ -262,6 +290,21 @@ rgamma(n, shape, scale = 1.0; stream = nothing) = _draw(_rgamma, stream, _count(
 rexp(n, rate = 1.0; stream = nothing) = _draw(_rexp, stream, _count(n), Float64(rate))
 rgeom(n, prob; stream = nothing) = _draw(_rgeom, stream, _count(n), Float64(prob))
 rchisq(n, df; stream = nothing) = _draw(_rchisq, stream, _count(n), Float64(df))
+
+"""Länderblöcke von `bootstrap_pooled` im Kern (seit 1.6.5, Paket E, K40/CR2-6; `sl_pooled_draw`): Land und Zeile je
+Periode und Pfad als `Matrix{Int}` (nper x n), dieselben Züge wie die Schleife bis 1.6.4."""
+function pooled_draw(nr, cw, L, nper, n; stream = nothing)
+    rows = Int64[Int64(x) for x in nr]; w = Vector{Float64}(cw); np = Int(nper); nn = Int(n)
+    _draw(stream) do st
+        c = Matrix{Int32}(undef, np, nn); r = Matrix{Int32}(undef, np, nn)
+        cx = _ctx()
+        s = ccall((:sl_pooled_draw, LIBSLC), Cint,
+                  (Ptr{Cvoid}, Ref{Stream}, Int64, Ptr{Int64}, Ptr{Float64}, Float64, Int64, Int64, Ptr{Int32}, Ptr{Int32}),
+                  cx, st, length(rows), rows, w, Float64(L), np, nn, c, r)
+        _finish(cx, s)
+        (Matrix{Int}(c), Matrix{Int}(r))
+    end
+end
 
 "Stichprobe aus 1 … n (wie R's `sample.int`); Ergebnis `Vector{Int32}`."
 function sample(n, size = n; replace = false, prob = nothing, stream = nothing)

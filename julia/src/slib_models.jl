@@ -479,6 +479,25 @@ function rolling_vol(x, window)
     out
 end
 
+# seit 1.6.5 (E-T2-6): Fenster in Kalendertagen (day streng aufsteigend)
+function rolling_vol_days(x, day, days)
+    v = _fv(x); d = _fv(day); out = similar(v)
+    length(d) == length(v) || error("interner Fehler: day hat die falsche Länge")
+    cx = _ctx()
+    st = ccall((:sl_rolling_vol_days, LIBSLC), Cint, (Ptr{Cvoid}, Cint, Ptr{Float64}, Ptr{Float64}, Float64, Ptr{Float64}),
+               cx, Cint(length(v)), v, d, Float64(days), out)
+    _finish(cx, st)
+    out
+end
+
+# seit 1.6.5 (CR2-M-1): stationäre Verteilung wie im Kern (direkt gelöst)
+function msgarch_stat(P)
+    M = Matrix{Float64}(P); K = size(M, 1)
+    out = Vector{Float64}(undef, K)
+    ccall((:sl_msgarch_stat, LIBSLC), Cvoid, (Cint, Ptr{Float64}, Ptr{Float64}), Cint(K), M, out)
+    out
+end
+
 function assign_regimes(vol, thresh)
     v = _fv(vol); t = _fv(thresh); out = Vector{Int32}(undef, length(v))
     cx = _ctx()

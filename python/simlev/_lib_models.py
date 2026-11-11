@@ -25,7 +25,7 @@ __all__ = ["garch11_filter", "garch11_nll", "garch11_grad", "garch11_fit", "fit_
            "dcc_filter", "dcc_fit", "backcast_obj", "backcast_fit", "ms_garch_filter", "ms_garch_nll", "ms_garch_grad", "ms_garch_starts", "ms_garch_fitstarts",
            "ms_garch_fit", "hmm_em_univ", "hmm_viterbi", "boot_idx_iid", "boot_idx_block", "boot_idx_stationary",
            "boot_idx_regime", "boot_idx_tails", "boot_wild", "boot_reset", "boot_evt", "boot_garch",
-           "boot_ms_garch", "rolling_vol", "assign_regimes", "estimate_trans_mat"]
+           "boot_ms_garch", "rolling_vol", "rolling_vol_days", "msgarch_stat", "assign_regimes", "estimate_trans_mat"]
 
 _GARCH_METHODS = ("konstant", "ml", "momente")
 
@@ -372,6 +372,23 @@ def rolling_vol(x, window):
     v = _vec(x)
     out = np.empty(v.size)
     _ext.slc_rolling_vol(v, int(window), out)
+    return out
+
+
+def rolling_vol_days(x, day, days):
+    """seit 1.6.5 (E-T2-6): Fenster in Kalendertagen (day streng aufsteigend)."""
+    v = _vec(x)
+    out = np.empty(v.size)
+    _ext.slc_rolling_vol_days(v, _vec(day), float(days), out)
+    return out
+
+
+def msgarch_stat(P):
+    """seit 1.6.5 (CR2-M-1): stationäre Verteilung wie im Kern (direkt gelöst)."""
+    P = np.asarray(P, dtype=np.float64)
+    K = int(P.shape[0])
+    out = np.empty(K)
+    _ext.slc_msgarch_stat(np.ascontiguousarray(P.T).ravel(), K, out)
     return out
 
 

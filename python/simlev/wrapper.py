@@ -30,6 +30,7 @@ und danach (auch bei Fehlern) wiederhergestellt. Meldungen der inneren Rechnung 
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
 import math
 import sys
@@ -168,12 +169,10 @@ def wrapper_config(strategy: Any, *, rebalance: Any = None, costs: Any = _FUNDS_
     if isinstance(costs, _FundsCostsDefault):
         costs = funds_costs()
     if strategy is None:
-        raise ValueError("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die "
-                         "create_strategy() annimmt).")
+        chk_stop("a.m_wrapper_config")
     if not isinstance(strategy, Strategy):
         if not isinstance(strategy, (Mapping, list, tuple)):   # seit 1.6.4 ohne Klasse (Entscheidung 8)
-            raise ValueError("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von "
-                             "Asset-Konfigurationen sein.")
+            chk_stop("a.m_wrapper_config_2")
         strategy = create_strategy(assets=strategy)
     strategy_validate(strategy)
     nested = _strategy_wrappers(strategy)
@@ -182,10 +181,10 @@ def wrapper_config(strategy: Any, *, rebalance: Any = None, costs: Any = _FUNDS_
                          "Wrapper sind nicht möglich." % nested[0])
     total = r_sum(np.array([float(a["share"]) for a in strategy.values()], dtype=np.float64))
     if abs(total - 1) > 1e-6:
-        raise ValueError(r_sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.4f, "
+        raise ValueError(r_sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.8g, "
                                    "müssen aber 1 ergeben.", total))
     if rebalance is not None and not isinstance(rebalance, SimLevRebalancePlan):
-        raise ValueError("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.")
+        chk_stop("a.m_wrapper_config_4")
     if not isinstance(costs, SimLevFundsCosts):
         raise ValueError("wrapper_config: costs muss ein Objekt aus funds_costs() sein.")
     from ._sim_blocks import _fee_norm
@@ -193,12 +192,9 @@ def wrapper_config(strategy: Any, *, rebalance: Any = None, costs: Any = _FUNDS_
     fs = _fee_spec(order_fee, "wrapper_config", "order_fee")
     volume = chk_scalar(volume)   # Länge 1 wie Einzelwert (Entscheidung 4)
     if volume is not None and (not _one_num(volume) or volume <= 0):
-        raise ValueError("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in "
-                         "EUR).")
+        chk_stop("a.m_wrapper_config_6")
     if fs is not None and volume is None and (fs["fixed"] > 0 or fs["min"] > 0 or math.isfinite(fs["max"])):
-        raise ValueError("wrapper_config: order_fee enthält feste Beträge in EUR (fixed, min oder max); dafür ist das "
-                         "Fondsvolumen 'volume' in EUR nötig (die innere Rechnung startet dann mit diesem Volumen). Ohne "
-                         "volume gehen nur Prozentgebühren (order_fee = list(percent = ...)).")
+        chk_stop("a.m_wrapper_config_7")
     spr = [(nm, 0.0 if a.get("spread") is None else float(a["spread"])) for nm, a in strategy.items()]
     if any(v > 0 for _, v in spr):
         _message("Hinweis: wrapper_config: innere Assets mit Spread > 0: %s; der Spread gilt in der inneren "
@@ -238,6 +234,21 @@ class SimLevWrapperNav(pd.DataFrame):
     def _constructor(self):
         return pd.DataFrame
 
+    def copy(self, deep=True):
+        """Kopie mit Klasse und ``attrs`` (seit 1.6.5, CR2-W2-2; R: ``y <- x`` behält Klasse und Attribute; bis 1.6.4
+        lieferte ``copy()`` einen gewöhnlichen ``DataFrame``). Auswahlen bleiben gewöhnliche ``DataFrame`` (wie R)."""
+        out = SimLevWrapperNav(pd.DataFrame(self).copy(deep=deep))
+        out.attrs = dict(self.attrs)
+        return out
+
+    def __copy__(self):
+        return self.copy(deep=False)
+
+    def __deepcopy__(self, memo=None):
+        out = self.copy(deep=True)
+        out.attrs = copy.deepcopy(dict(self.attrs), memo)
+        return out
+
     @property
     def attrs(self) -> dict:
         """``attrs`` als :class:`_NavAttrs` (auch nach ``pickle``, das ``attrs`` als ``dict`` zurückgibt)."""
@@ -254,11 +265,9 @@ class SimLevWrapperNav(pd.DataFrame):
     def format(self) -> str:
         w = self.attrs.get("wrapper")
         if not _is_wrapper(w) or not len(self) or not all(c in self.columns for c in ("date", "nav", "gross")):
+            # seit 1.6.5 (CR2-W2-2): print_data_frame gibt den Text zurück (bis 1.6.4 umgeleitet, die Ausgabe blieb leer)
             from ._r.fmt import print_data_frame
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                print_data_frame(pd.DataFrame(self))
-            return buf.getvalue().rstrip("\n")
+            return print_data_frame(pd.DataFrame(self)).rstrip("\n")
         n = len(self)
         dates = np.asarray(self["date"]).astype("datetime64[D]")
         nav = np.asarray(self["nav"], dtype=np.float64)
@@ -367,8 +376,36 @@ def _nav_key(d: _Frame, wrapper, splits, tag: str, who: str):
     if any(d.kinds[nm] not in ("numeric", "date", "logical", "character", "factor") for nm in d.names):
         return None
     objs = (wrapper, wrapper["strategy"], wrapper["rebalance"], wrapper["order_fee"], wrapper["volume"])
-    return (tag, who, tuple(id(o) for o in objs), sk, tuple(d.names), tuple(d.kinds[nm] for nm in d.names),
+    # seit 1.6.5 (CR2-X8-1): Abzug des Inhalts statt der Identität (id) der Bausteine; ein an Ort und Stelle geänderter
+    # Wrapper lieferte sonst in einer Studie den alten Anteilswert
+    try:
+        snap = tuple(_nav_snap(o) for o in objs[1:]) + (_nav_snap({k: v for k, v in wrapper.items() if k != "strategy"}),)
+    except _NoSnap:
+        return None
+    return (tag, who, snap, sk, tuple(d.names), tuple(d.kinds[nm] for nm in d.names),
             tuple(np.copy(d.cols[nm]) for nm in d.names), fk), objs
+
+
+class _NoSnap(Exception):
+    """Ein Baustein lässt sich nicht sicher abbilden (dann kein Cache)."""
+
+
+def _nav_snap(o):
+    """Abzug eines Bausteins für den Schlüssel des Anteilswert-Caches (seit 1.6.5, CR2-X8-1): Zahlen, Texte, Daten
+    und None unverändert, Felder als Kopie, Listen und Abbildungen (auch Strategie und Bausteine) als Tupel mit Typ und
+    Schlüsseln; sonst :class:`_NoSnap`."""
+    import datetime as _dt
+    if o is None or isinstance(o, (bool, int, float, str, np.generic, _dt.date, np.datetime64)):
+        return (type(o).__name__, o)
+    if isinstance(o, np.ndarray):
+        if o.dtype.kind not in "fiubM":
+            raise _NoSnap
+        return ("ndarray", np.array(o, copy=True))
+    if isinstance(o, Mapping):
+        return (type(o).__name__, tuple((str(k), _nav_snap(v)) for k, v in o.items()))
+    if isinstance(o, (list, tuple)):
+        return (type(o).__name__, tuple(_nav_snap(v) for v in o))
+    raise _NoSnap
 
 
 def _frame_rows(fr: _Frame, i0: int) -> _Frame:
@@ -470,7 +507,7 @@ def _wrapper_nav_calc(data: _Frame, wrapper: SimLevWrapperConfig, splits: Any, t
         idx = np.array([pos[int(z)] for z in d.get("date")], dtype=np.int64)
     idx = idx[~rfilled[idx]]
     if idx.size == 0:
-        raise ValueError("%s: keine Handelstage in der inneren Rechnung (alle Tage aufgefüllt)." % who)
+        chk_stop("a.m_wrapper_nav_calc", who)
     day = rdays[idx]
     G = np.asarray(res["worth"], dtype=np.float64)[idx]
     yr = _days_to_civil(day)[0]                      # seit 1.5.1 vektorisiert statt year_of je Tag
@@ -481,8 +518,7 @@ def _wrapper_nav_calc(data: _Frame, wrapper: SimLevWrapperConfig, splits: Any, t
                                                                          float(rdays[0]))
     if bad >= 0:
         G_prev = S if bad == 0 else float(G[bad - 1])
-        raise ValueError("%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert."
-                         % (who, fmt_date(int(day[bad])), r_format1(float(G[bad])), r_format1(G_prev)))
+        chk_stop("a.m_wrapper_nav_calc_2", who, fmt_date(int(day[bad])), r_format1(float(G[bad])), r_format1(G_prev))
     out = SimLevWrapperNav({"date": day.astype("datetime64[D]"), "nav": nav, "gross": gross, "fee": fee_t,
                             "perf_fee": acc_t, "perf_paid": paid_t, "hwm": hwm})
     object.__setattr__(out, "_attrs", _NavAttrs(inner=res, wrapper=wrapper))   # Auswahl ohne attrs (_NavAttrs)
@@ -588,9 +624,9 @@ def wrapper_nav(data: Any, wrapper: Any, *, splits: Any = None) -> SimLevWrapper
     # seit 1.6.4 Meldungen ohne Klasse (Entscheidung 8); data nur als Tabelle, die Meldung nennt die Umwandlung
     # (Entscheidung 6, wie simulation())
     if not _is_wrapper(wrapper):
-        raise ValueError("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.")
+        chk_stop("a.m_wrapper_nav")
     if splits is not None and not isinstance(splits, SimLevSplitRule):
-        raise ValueError("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.")
+        chk_stop("a.m_wrapper_nav_2")
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
         chk_stop("e1.tabelle_spalten", "wrapper_nav", chk_msg("tabelle.formen"))
     fa = data.attrs.get("filled")

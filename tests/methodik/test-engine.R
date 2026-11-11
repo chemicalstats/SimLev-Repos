@@ -661,8 +661,12 @@ test_that("B no_negative_returns, no_drawdown, no_recovery (stetig steigender Ku
     wert(.um(r, "avg_recovery_time")$detail,
          "kein Drawdown im Zeitraum",
          quelle = "Handrechnung (Herleitung im Test)"),
-    pruef(expect_false(any(c("cagr", "ttwror", "sharpe") %in% r$undefined_metrics$metric)),
-          quelle = "Handrechnung (Herleitung im Test)"))
+    pruef(expect_false(any(c("cagr", "ttwror") %in% r$undefined_metrics$metric)),
+          quelle = "Handrechnung (Herleitung im Test)"),
+    # seit 1.6.5 (MA2-4, Entscheidung 186 M7): konstante Tagesrendite, die Streuung ist nur Rundungsrauschen
+    wert(.um(r, "sharpe")$reason,
+         "zero_volatility",
+         quelle = "Handrechnung (Herleitung im Test)"))
 })
 
 test_that("B alles definiert: leeres data.frame mit gleichen Spalten, Ausgabe ohne Hinweise", {
@@ -1280,14 +1284,14 @@ test_that("Tagesrendite an Zuflusstagen mit Bewertung zum Zahlungszeitpunkt, son
          1 + (w[nf + 1] - w[nf]) / w[nf],
          quelle = "ohne Zufluss bitgleich"),
     wert(r$ttwror,
-         prod(g)^(365.25 / (n - 1)) - 1,
+         (r$twr_index[1] * prod(g))^(365.25 / (n - 1)) - 1,   # seit 1.6.5 (M4) mit der ersten Stufe W_1 / (S + F_1)
          quelle = "Handrechnung (Herleitung im Test)", tol = 1e-12))
-  # Ohne Zufluesse: TTWROR = (W_n / W_1)^(1/T) - 1 wie bisher
+  # Ohne Zufluesse: TTWROR = (W_n / S)^(1/T) - 1 (seit 1.6.5, M4: Bezug Startwert, Startkosten zaehlen; bis 1.6.4 W_1)
   r0 <- .er_sim(d, st, start_value = 1e4)
   tabelle("Tagesrendite an Zuflusstagen mit Bewertung zum Zahlungszeitpunkt, sonst unverändert",
     wert(r0$ttwror,
-         prod(1 + diff(r0$worth) / head(r0$worth, -1))^(365.25 / (n - 1)) - 1,
-         quelle = "Handrechnung (Herleitung im Test)"))
+         (r0$worth[1] / 1e4 * prod(1 + diff(r0$worth) / head(r0$worth, -1)))^(365.25 / (n - 1)) - 1,
+         quelle = "Handrechnung (Herleitung im Test)", tol = 1e-12))
 })
 
 # ---------------------------------------------------------------------------
@@ -1314,11 +1318,11 @@ test_that("invested = Startwert + Einzahlungen (brutto), XIRR mit Brutto-Start",
     wert(r$cagr,
          x,
          quelle = "vorher 0,03112 statt 0,02971", tol = 1e-10))
-  # Ohne Einzahlungen: cagr unveraendert aus dem Depotwert am Starttag
+  # Ohne Einzahlungen: cagr seit 1.6.5 (M4) aus dem Startwert (Startkosten zaehlen; bis 1.6.4 Depotwert am Starttag)
   r0 <- .er_sim(d, st, start_value = 10000)
   tabelle("invested = Startwert + Einzahlungen (brutto), XIRR mit Brutto-Start",
     wert(r0$cagr,
-         (tail(r0$worth, 1) / r0$worth[1])^(365.25 / (n - 1)) - 1,
+         (tail(r0$worth, 1) / 10000)^(365.25 / (n - 1)) - 1,
          quelle = "Handrechnung (Herleitung im Test)"),
     wert(unique(r0$invested),
          10000,
@@ -1759,9 +1763,15 @@ test_that("Drawdowns zeitgewichtet, Calmar/Martin mit TTWROR", {
     wert(s$martin_ratio,
          r$ttwror / s$ulcer_index,
          quelle = "Handrechnung (Herleitung im Test)", tol = 1e-12),
+    # seit 1.6.5 (Entscheidung 194): Serenity = (TTWROR - rf) / (Ulcer * CDaR_95 / Volatilitaet p. a.), rf = 0
     wert(s$serenity,
-         r$ttwror / (s$ulcer_index * s$max_drawdown),
-         quelle = "Handrechnung (Herleitung im Test)", tol = 1e-12),
+         local({
+           dd <- r$drawdowns; cdar <- mean(dd[dd >= quantile(dd, 0.95, names = FALSE)])
+           rr <- diff(r$twr_index) / head(r$twr_index, -1)
+           vol <- sd(rr) * sqrt(length(rr) / (as.numeric(diff(range(r$dates))) / 365.25))
+           r$ttwror * vol / (s$ulcer_index * cdar)
+         }),
+         quelle = "Handrechnung (Herleitung im Test)", tol = 1e-10),
     wert(s$ulcer_index,
          sqrt(mean(r$drawdowns^2)),
          quelle = "Handrechnung (Herleitung im Test)", tol = 1e-12))
@@ -1803,13 +1813,14 @@ test_that("ohne Zufluesse unver\u00e4ndert (alte Formeln bitgleich)", {
   tabelle("ohne Zufluesse unverändert (alte Formeln bitgleich)",
     pruef(expect_false(r$external_flows),
           quelle = "Handrechnung (Herleitung im Test)"),
+    # seit 1.6.5 (M4): Bezug Startwert 10000 statt w[1] (Startkosten zaehlen)
     ident(r$cagr,
-          expm1(log(w[n] / w[1]) / yrs),                   # seit 1.6.2 genauer als (w[n] / w[1])^(1 / yrs) - 1
+          expm1(log(w[n] / 10000) / yrs),                  # seit 1.6.2 genauer als (w[n] / S)^(1 / yrs) - 1
           quelle = "Handrechnung (Herleitung im Test)"),
     wert(r$cagr,
-         (w[n] / w[1])^(1 / yrs) - 1,
+         (w[n] / 10000)^(1 / yrs) - 1,
          quelle = "Formel bis 1.6.1", tol = 1e-14))
-  rm <- cummax(w)
+  rm <- pmax(cummax(w), 10000)   # seit 1.6.5 (M4): Hoechststand ab dem Startwert
   tabelle("ohne Zufluesse unverändert (alte Formeln bitgleich)",
     ident(r$drawdowns,
           ifelse(rm > 0, (rm - w) / rm, 0),
@@ -1821,7 +1832,7 @@ test_that("ohne Zufluesse unver\u00e4ndert (alte Formeln bitgleich)", {
           rep(10000, n),
           quelle = "start_value brutto (vorher w[1] nach Kaufkosten)"),
     wert(r$twr_index,
-         w / w[1],
+         w / w[1] * (w[1] / 10000),   # seit 1.6.5 (M4): erste Stufe w[1] / S
          quelle = "Handrechnung (Herleitung im Test)", tol = 1e-12))
   out <- capture.output(print(r))
   tabelle("ohne Zufluesse unverändert (alte Formeln bitgleich)",

@@ -30,8 +30,10 @@ Nachbarschaft, fehlende Werte ignoriert), \code{plateau_min}
 \code{x$maximize} das Minimum bzw. Maximum; bei anderen Kennzahlen das
 Maximum fuer \code{max_drawdown}, \code{avg_drawdown}, \code{dd_q50},
 \code{dd_q90}, \code{ulcer_index} und \code{longest_drawdown}
-(kleiner = besser), sonst das Minimum) und \code{neighbours} (Anzahl Punkte der Nachbarschaft). Die
-Einheit entspricht der Kennzahl.
+(kleiner = besser), sonst das Minimum), \code{neighbours} (Anzahl Punkte der Nachbarschaft) und
+\code{valid} (seit 1.6.5: Anzahl Punkte der Nachbarschaft mit Wert). Die
+Einheit entspricht der Kennzahl. Seit 1.6.5 haben Punkte ohne eigenen Wert (fehlgeschlagen oder \code{NA})
+kein Plateau: \code{plateau_mean} und \code{plateau_min} sind dort \code{NA}.
 }
 \description{
 Eine einzelne Spitze im Parameterraum ist oft Zufall. Robuster ist ein

@@ -223,7 +223,7 @@ SEXP C_sl_tcop_fit(SEXP u, SEXP v, SEXP nthreads)
     ctx_init(&cx);
     st = sl_tcop_fit(&cx, XLENGTH(u), REAL(u), REAL(v), int1(nthreads, "nthreads"), REAL(out), &flag);
     UNPROTECT(1);
-    if (st == SL_EINTR) R_CheckUserInterrupt();
+    if (st == SL_EINTR) Rf_onintr();   /* seit 1.6.5 (C-033): echte Unterbrechung statt Rueckfallweg */
     return (st != SL_OK || flag) ? R_NilValue : out;
 }
 
@@ -240,7 +240,7 @@ SEXP C_sl_tcop_nu(SEXP U, SEXP Ri, SEXP ldR, SEXP lower, SEXP upper, SEXP tol, S
     ctx_init(&cx);
     st = sl_tcop_nu(&cx, INTEGER(dim)[0], k, REAL(U), REAL(Ri), num1_bad(ldR, "ldR"), num1_bad(lower, "lower"),
                     num1_bad(upper, "upper"), num1_bad(tol, "tol"), int1(nthreads, "nthreads"), &nu, &flag);
-    if (st == SL_EINTR) R_CheckUserInterrupt();
+    if (st == SL_EINTR) Rf_onintr();   /* seit 1.6.5 (C-033): echte Unterbrechung statt Rueckfallweg */
     return (st != SL_OK || flag) ? R_NilValue : Rf_ScalarReal(nu);
 }
 

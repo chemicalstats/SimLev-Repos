@@ -18,7 +18,8 @@ sensitivity_leverage(
 )
 }
 \arguments{
-\item{data}{data.frame mit Spalte \code{date} und der Indexspalte.}
+\item{data}{data.frame mit Spalte \code{date} und der Indexspalte.
+Seit 1.6.5 geprueft wie in \code{\link{series_leverage}}; eine Spalte \code{LEV} ist ein Fehler.}
 
 \item{index}{Spaltenname des Index (Niveau, nicht Rendite; Luecken werden
 mit dem letzten Wert gefuellt).}
@@ -38,7 +39,8 @@ Spaltenname, Vektor der Laenge \code{nrow(data)},
 
 \item{strategy}{Optional Strategie mit dem Asset \code{"LEV"}; \code{NULL}
 (Standard) = Buy-and-Hold-ETF mit 30 Prozent Teilfreistellung
-(\code{asset_config("etf", "bnh", partial_exemption = 30)}).}
+(\code{asset_config("etf", "bnh", partial_exemption = 30)}).
+Seit 1.6.5 muss eine eigene Strategie das Asset \code{"LEV"} enthalten (sonst Fehler).}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
 (Standard \code{list()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
@@ -61,11 +63,10 @@ viele, wie der freie Speicher traegt, und
 nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
-Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
-rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl: SimLev misst und plant wie mit
+\code{"auto"}, nimmt aber hoechstens so viele Prozesse (bis 1.6.4 immer so viele Prozesse ohne Messung);
+unter Windows rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster; hoechstens Zahl der Prozessoren:
 mehr wird mit einem Hinweis begrenzt.
-Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
 In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
 \code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
 der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
@@ -74,9 +75,12 @@ Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Pr
 }
 \value{
 data.frame der Klasse \code{SimLevSensitivity} mit \code{leverage}
-und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen);
+und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen; seit 1.6.5 mit Warnung und
+Attribut \code{failed}, data.frame mit \code{leverage} und \code{error}; schlagen alle fehl, ein Fehler);
 Attribut \code{optimal} (benannter Vektor \code{cagr}, \code{sharpe}:
-Hebel mit maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert) und \code{kind = "leverage"}.
+Hebel mit maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert; seit 1.6.5
+NA mit Hinweis, wenn mehrere Hebel mit dem besten Wert gleichauf liegen, Abstand hoechstens relativ 1e-12, z. B. die
+Sharpe Ratio ohne Finanzierungskosten und ohne risikolosen Zins) und \code{kind = "leverage"}.
 Mit Sparplan (\code{sim_args}) ist \code{cagr} geldgewichtet (XIRR).
 Ausgabe und Grafik ueber \code{print()} und \code{plot()}.
 }
@@ -85,7 +89,8 @@ Erzeugt fuer jeden Hebel eine Reihe mit \code{\link[=series_leverage]{series_lev
 sie als Buy-and-Hold (oder mit einer eigenen Strategie fuer das Asset
 \code{"LEV"}) und bestimmt den Hebel mit der hoechsten CAGR bzw. Sharpe
 Ratio, wie die LETF-Analyse von testfol.io. An \code{\link[=simulation]{simulation()}} wird ein
-data.frame mit den Spalten \code{date} und \code{LEV} uebergeben.
+data.frame mit den Spalten \code{date} und \code{LEV} uebergeben, seit 1.6.5 dazu alle uebrigen Spalten von
+\code{data} (Signal- und Ereignisspalten einer eigenen Strategie).
 }
 \examples{
 set.seed(1)

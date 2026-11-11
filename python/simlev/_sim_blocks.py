@@ -33,6 +33,7 @@ from ._sim_base import (_Default, _as_date, _check_taxable_income, _fee_spec, _i
 from .config import _match_arg, _fmt15 as _fmt   # format(x, digits = 15), R: .blk_fmt (seit 1.6.4 eine Fassung)
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
 from ._util import _MISSING, _Missing
+from ._pruefen import chk_msg   # seit 1.6.5 (Entscheidung 193)
 from ._pruefen import _to_float, chk_int1, chk_scalar, chk_stop
 
 __all__ = ["sim_costs", "dca_plan", "rebalance_plan", "split_rule", "tax_profile", "income_rate", "income_tariff",
@@ -65,8 +66,7 @@ def _blk_lgl(who: str, x: Any, arg: str) -> None:
 
 def _blk_frac_warn(who: str, x: Any, arg: str, hi: float = 1.0) -> None:
     if _one_num(x) and 0 < x < hi:
-        _warn("%s: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-              % (who, arg, r_format1(x), r_format1(x), r_format1(x * 100)))
+        _warn(chk_msg("e.prozent_anteil", who, arg, r_format1(x), r_format1(x), r_format1(x * 100)))
 
 
 def _blk_days(who: str, x: Any) -> Any:
@@ -84,8 +84,7 @@ def _blk_days(who: str, x: Any) -> Any:
         if d not in u:
             u.append(d)
     if len(u) < len(v):
-        _warn("%s: days enthält doppelte Tage (%s); jeder Tag ergibt nur einen Termin, verwendet wird days = %s."
-              % (who, ", ".join(r_format(v)), r_deparse(u)))
+        _warn(chk_msg("a.m_blk_days_2", who, ", ".join(_fmt(e) for e in v), r_deparse(u)))   # seit 1.6.5 (CR2-F-2) je Tag
         return u
     return x
 
@@ -95,9 +94,10 @@ def _blk_start(who: str, x: Any) -> None:
     Länge 1 (A-075), Meldung ohne Eingabewert)."""
     if x is None:
         return
-    from .config import _is_date_like
+    from .config import _is_date_like, _start_days
     try:
-        d = _as_date(x) if _is_date_like(x) else None
+        # seit 1.6.5 (Entscheidung 185 K27) Text nach der Regel von .to_date() (bis 1.6.4 wie as.Date)
+        d = _start_days(x, "%s: start" % who) if _is_date_like(x) else None
     except Exception:  # noqa: BLE001 - as.Date-Fehler: kein Datum
         d = None
     if d is None:
@@ -130,21 +130,28 @@ def _blk_print(title: str, rows: list) -> str:
     return "\n".join([title] + ["  %s %s" % ((k + ":").ljust(w), v) for k, v in rows])
 
 
+def _custody_text(x: Any) -> str:
+    """Depotgebühr (seit 1.6.5; R ``.blk_custody_text``)."""
+    s = ("%s EUR" % _fmt(x)) if _is_num(x) else _fee_text(x).replace(" %", " % des Depotwerts", 1)
+    return "%s je Jahr (am 31.12., im ersten und im letzten Jahr anteilig)" % s
+
+
 def _fee_text(x: Any) -> str:
     if x is None:
         return "keine"
     if _is_num(x):
         return "%s EUR je Order" % _fmt(x)
+    # seit 1.6.5 (CR2-G-5): Nullbeträge und max = Inf erscheinen nicht
     p = []
-    if x.get("fixed") is not None:
+    if x.get("fixed") is not None and float(x["fixed"]) != 0:
         p.append("%s EUR" % _fmt(x["fixed"]))
-    if x.get("percent") is not None:
+    if x.get("percent") is not None and float(x["percent"]) != 0:
         p.append("%s %%" % _fmt(x["percent"]))
     s = " + ".join(p) if p else "0 EUR"
     g = []
-    if x.get("min") is not None:
+    if x.get("min") is not None and float(x["min"]) != 0:
         g.append("mindestens %s EUR" % _fmt(x["min"]))
-    if x.get("max") is not None:
+    if x.get("max") is not None and float(x["max"]) != math.inf:
         g.append("höchstens %s EUR" % _fmt(x["max"]))
     if g:
         s = "%s (%s)" % (s, ", ".join(g))
@@ -186,10 +193,11 @@ class SimLevSimCosts(RList):
     r_class = ("SimLevSimCosts",)
 
     def format(self) -> str:
-        return _blk_print("Kosten (sim_costs)",
-                          [("Ordergebühr", _fee_text(self["order_fee"])),
-                           ("Sparplan-Gebühr", "wie Ordergebühr" if self["dca_fee"] is None
-                            else _fee_text(self["dca_fee"]))])
+        rows = [("Ordergebühr", _fee_text(self["order_fee"])),
+                ("Sparplan-Gebühr", "wie Ordergebühr" if self["dca_fee"] is None else _fee_text(self["dca_fee"]))]
+        if self.get("custody_fee") is not None:   # seit 1.6.5
+            rows.append(("Depotgebühr", _custody_text(self["custody_fee"])))
+        return _blk_print("Kosten (sim_costs)", rows)
 
 
 class SimLevDcaPlan(RList):
@@ -328,7 +336,7 @@ def _mk(cls: type, items: list) -> RList:
 # Gemeinsamer Text der neun Baustein-Docstrings (seit 1.6.4 eine Fassung, A-109; bis 1.6.3 neunfach kopiert wie die
 # gemeinsame Rd-Seite ?sim_costs): _blk_doc setzt ihn um die Argumente und das Beispiel des Bausteins.
 _BLK_DOC_KOPF = 'Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.\n\nDie Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =\ndca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit\n``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus\n(kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim\nAnlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft\nnur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob\n``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.\n\n``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);\n``simulation()`` nimmt ihn nicht an.'
-_BLK_DOC_SCHLUSS = 'Returns:\n    Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und\n    ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der\n    Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,\n    ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.\n    ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.\n\nÜbersetzung in die Engine:\n    ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``\n    schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am\n    Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,\n    ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =\n    tax_profile()`` steht für die persönliche Besteuerung.\n\nFondskosten:\n    ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:\n    ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,\n    Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift\n    „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;\n    ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.'
+_BLK_DOC_SCHLUSS = 'Returns:\n    Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und\n    ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der\n    Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,\n    ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.\n    ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.\n\nÜbersetzung in die Engine:\n    ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``\n    schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am\n    Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,\n    ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =\n    tax_profile()`` steht für die persönliche Besteuerung.\n\nRechtsstand:\n    Die Steuerrechnung (``tax_profile()``, ``income_rate()``, ``income_tariff()``, Vorabpauschale) wendet auf alle\n    simulierten Jahre das heutige Recht an, auch in Rückrechnungen über frühere Jahre: Investmentsteuergesetz in der\n    Fassung ab 2018 (Teilfreistellung, Vorabpauschale), Sparer-Pauschbetrag und Freigrenze nach § 23 EStG mit den\n    angegebenen Beträgen (Standard je 1000 EUR, für alle Jahre gleich) und der Einkommensteuertarif der Tarifdatei\n    (mitgeliefert: ab VZ 2026). Früheres Recht wird nicht nachgebildet (z. B. Sparer-Pauschbetrag 801 EUR bis 2022,\n    Freigrenze 600 EUR bis 2023, Investmentsteuer vor 2018). Weitere Vereinfachungen: nur thesaurierende Fonds\n    (keine Ausschüttungen), Erstattungen erst zum Jahreswechsel, keine Cent-Rundung der Abgeltungsteuer.\n\nFondskosten:\n    ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:\n    ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,\n    Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift\n    „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;\n    ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.'
 
 
 def _blk_doc(f):
@@ -344,7 +352,7 @@ def _blk_doc(f):
 # ── Konstruktoren ────────────────────────────────────────────────────────────
 
 @_blk_doc
-def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
+def sim_costs(*, order_fee: Any = None, dca_fee: Any = None, custody_fee: Any = None) -> SimLevSimCosts:
     """Baustein für simulation (gemeinsamer Text in ``_BLK_DOC_KOPF`` und ``_BLK_DOC_SCHLUSS``).
     Args:
         order_fee: ``sim_costs``: Ordergebühr: ``None`` (keine, Standard), eine Zahl (feste Gebühr in EUR je
@@ -364,16 +372,27 @@ def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
             ``dca_fee`` angelegt (zwei Orders); fällt ein Sparplantermin auf einen Rebalancing-Tag, wird die Rate
             im Rebalancing mit angelegt. Standard (``None``): wie ``order_fee``. Viele Broker führen Sparpläne
             kostenlos aus (``dca_fee = 0``).
+        custody_fee: ``sim_costs``: seit 1.6.5 jährliche Depotgebühr: ``None`` (keine, Standard), eine Zahl (fester
+            Betrag in EUR je Jahr) oder ``{"fixed": ..., "percent": ..., "min": ..., "max": ...}`` mit ``percent`` in
+            Prozent p. a. des Depotwerts (Geld und Bestände zum Kurs) am 31.12. Abgerechnet wird an jedem 31.12. im
+            Zeitraum, im ersten (angebrochenen) Jahr anteilig nach Kalendertagen; ein angebrochenes letztes Jahr (Ende vor
+            dem 31.12.) wird am letzten Tag anteilig nach Kalendertagen abgerechnet. Gezahlt wird zuerst aus den Geldbeständen der Assets (absteigend nach Wert),
+            dann durch Verkauf wie eine Steuerzahlung (mit Ordergebühr und Steuer auf den Veräußerungsgewinn; die
+            Depotgebühr selbst mindert keine Steuer, § 20 Abs. 9 EStG). Sie zählt in ``fees_paid`` und mindert
+            Depotwert und Rendite; ``details = True`` zeigt je Jahr die Zeilen mit dem Präfix „Depotgebühr:“.
 
     Beispiel::
 
         import simlev
         print(simlev.sim_costs(order_fee={"fixed": 1, "percent": 0.25, "min": 2, "max": 20}, dca_fee=0))
     """
-    order_fee, dca_fee = _fee_norm(order_fee), _fee_norm(dca_fee)
+    order_fee, dca_fee, custody_fee = _fee_norm(order_fee), _fee_norm(dca_fee), _fee_norm(custody_fee)
     _fee_spec(order_fee, "sim_costs", "order_fee")
     _fee_spec(dca_fee, "sim_costs", "dca_fee")
-    return _mk(SimLevSimCosts, [("order_fee", order_fee), ("dca_fee", dca_fee)])
+    _fee_spec(custody_fee, "sim_costs", "custody_fee")   # seit 1.6.5 (Entscheidung 150)
+    # Feld custody_fee nur, wenn gesetzt (ohne Depotgebühr derselbe Baustein wie bis 1.6.4)
+    return _mk(SimLevSimCosts, [("order_fee", order_fee), ("dca_fee", dca_fee)]
+               + ([("custody_fee", custody_fee)] if custody_fee is not None else []))
 
 
 @_blk_doc
@@ -537,12 +556,12 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
     _blk_frac_warn(who, thresh, "thresh", hi=0.2)
     thresh_type = _match_arg(thresh_type, ("absolute", "relative"), "thresh_type")
     if event_col is None and not isinstance(event_mode, _Default):
-        _warn("rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert.")
+        _warn(chk_msg("a.m_rebalance_plan"))
     event_mode = _match_arg(_unwrap(event_mode), ("additional", "replace"), "event_mode")
     if event_col is not None and not (isinstance(event_col, str) and event_col != ""):
         _stop("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.")
     if event_col is None and event_weight is not None:
-        _warn("rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert.")
+        _warn(chk_msg("a.m_rebalance_plan_3"))
     # seit 1.6.4 (A-049): event_weight benannt, je Asset ein Spaltenname (die Spalten prüft simulation())
     if event_weight is not None:
         if isinstance(event_weight, Mapping):
@@ -585,13 +604,13 @@ def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
         print(simlev.split_rule([20, 500]))
     """
     thresh = None if isinstance(thresh, _Missing) else thresh
+    if isinstance(thresh, dict):   # seit 1.6.5 (CR2-W3-3): benannte Schwellen wie R c(lo = 50, hi = 200), Reihenfolge zählt
+        thresh = list(thresh.values())
     st = _num_vec(thresh) if thresh is not None else None
     if st is None or len(st) != 2 or any(v is None or math.isnan(v) for v in st):
         _stop("split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein.")   # seit 1.6.4 ohne Eingabewert
     if not (st[0] < 100 < st[1]):
-        _warn("split_rule: thresh = c(%s, %s) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). "
-              "Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein "
-              "weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)." % (r_format1(st[0]), r_format1(st[1])))
+        _warn(chk_msg("a.m_split_rule_2", r_format1(st[0]), r_format1(st[1])))
     return _mk(SimLevSplitRule, [("thresh", [float(v) for v in st])])
 
 
@@ -618,9 +637,9 @@ def income_rate(marginal_rate: Any = _MISSING, *, soli_rate: Any = 0) -> SimLevI
     _blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
     _blk_frac_warn(who, marginal_rate, "marginal_rate")
     if marginal_rate > 50:
-        _stop("income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für "
-              "42 %).")
+        chk_stop("e.grenzsteuersatz")
     _blk_num(who, soli_rate, "soli_rate", "eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5.5; 0 = ohne Soli)")
+    _blk_frac_warn(who, soli_rate, "soli_rate")   # seit 1.6.5 (CR2-V2-3)
     return _mk(SimLevIncomeRate, [("marginal_rate", marginal_rate), ("soli_rate", soli_rate)])
 
 
@@ -743,19 +762,17 @@ def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pausch
                                 guenstigerpruefung))
     rate_given = not isinstance(rate, _Dflt)
     if not _is_num(rate) or math.isnan(_to_float(rate)) or rate < 0 or rate > 100:
-        _stop("tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für "
-              "26,375 %).")
+        chk_stop("e.steuersatz")
     rate = float(rate)
     _blk_frac_warn(who, rate, "rate")
     if church_tax is not None:
         if not _is_num(church_tax) or math.isnan(_to_float(church_tax)) or church_tax < 0 or church_tax > 100:
             _stop("tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).")
         if 0 < church_tax < 1:
-            _warn("tax_profile: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-                  % (r_format1(church_tax), r_format1(church_tax), r_format1(church_tax * 100)))
+            _warn(chk_msg("e.kirchensteuer_anteil", r_format1(church_tax), r_format1(church_tax),
+                          r_format1(church_tax * 100)))
         elif church_tax > 9:
-            _warn("tax_profile: church_tax = %s %% ist ungewöhnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %%)."
-                  % r_format1(church_tax))
+            _warn(chk_msg("e.kirchensteuer_hoch", r_format1(church_tax)))
         if church_tax > 0 and rate_given:
             _stop("tax_profile: rate und church_tax schließen sich aus; rate gilt nur ohne Kirchensteuer (mit "
                   "church_tax gilt der Satz nach § 32d Abs. 1 EStG).")
@@ -806,6 +823,7 @@ def funds_costs(*, fee: Any = 0.95, performance_fee: Any = 5) -> SimLevFundsCost
         if not _is_num(x) or math.isnan(_to_float(x)) or x < 0 or x > 100:
             _stop("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s)."
                   % (a, "0.95 für 0,95 % p. a." if a == "fee" else "5 für 5 %"))
+    _blk_frac_warn("funds_costs", performance_fee, "performance_fee")   # seit 1.6.5 (CR2-V2-3); fee nicht (0.95 üblich)
     return _mk(SimLevFundsCosts, [("fee", fee), ("performance_fee", performance_fee)])
 
 
@@ -825,6 +843,8 @@ def _sim_from_blocks(costs, dca, rebalance, splits, tax) -> dict:
     _blk_check(tax, SimLevTaxProfile, "tax", "tax_profile")
     a: dict = {"order_fee": None if costs is None else costs["order_fee"],
                "dca_fee": None if costs is None else costs["dca_fee"]}
+    if costs is not None and costs.get("custody_fee") is not None:   # seit 1.6.5 (Entscheidung 150)
+        a["custody_fee"] = costs["custody_fee"]
     if dca is not None:
         a.update(dca_mode=True, dca_value=dca["value"], dca_span=dca["span"], dca_days=dca["days"],
                  dca_unit=dca["unit"], dca_anchor=dca["anchor"], dca_start=dca["start"], dca_skip=dca["skip"],
@@ -867,7 +887,7 @@ _SIM_TOP = ("start_value", "costs", "dca", "rebalance", "splits", "tax", "risk_f
 _SIM_BLOCKS = {"costs": "sim_costs", "dca": "dca_plan", "rebalance": "rebalance_plan", "splits": "split_rule",
                "tax": "tax_profile"}
 _SIM_BLOCK_PARAMS = {
-    "sim_costs": ("order_fee", "dca_fee"),
+    "sim_costs": ("order_fee", "dca_fee", "custody_fee"),
     "dca_plan": ("value", "span", "days", "unit", "anchor", "start", "skip", "fill_deficits"),
     "rebalance_plan": ("span", "days", "unit", "anchor", "start", "skip", "thresh", "thresh_type", "event_col",
                        "event_mode", "event_weight"),
@@ -1023,6 +1043,11 @@ def _sim_args_set(args: dict, over, who: str) -> dict:
             blocks.append(parts[p][0])
     for b in blocks:
         ctor = _SIM_BLOCKS[b]
+        # seit 1.6.5 (CR2-F-1): ein Wert, der kein Baustein ist, ist ein Fehler (bis 1.6.4 Rohfehler)
+        cls = {"costs": SimLevSimCosts, "dca": SimLevDcaPlan, "rebalance": SimLevRebalancePlan,
+               "splits": SimLevSplitRule, "tax": SimLevTaxProfile}[b]
+        if args.get(b) is not None and not isinstance(args.get(b), cls):
+            _stop("%s: %s muss NULL oder ein Objekt aus %s() sein." % (who, b, ctor))
         f = _sim_fields(args.get(b))
         set_ = []
         mine = [p for p in paths if parts[p][0] == b]
@@ -1058,7 +1083,12 @@ def _sim_args_set(args: dict, over, who: str) -> dict:
 
 
 def _sim_call(data, strategy, args: dict):
-    """``simulation()`` mit sim_args aufrufen (R: ``.sim_call``)."""
+    """``simulation()`` mit sim_args aufrufen (R: ``.sim_call``); seit 1.6.5 (Paket E, Entscheidung 176) in einer Studie
+    über den Studienkern (``_sim_prepared.py``), bitgleich."""
+    from ._sim_base import _StudyCache
+    if _StudyCache.on:
+        from ._sim_prepared import _sim_call_study
+        return _sim_call_study(data, strategy, args)
     from .engine import simulation
     return simulation(data, strategy, **args)
 

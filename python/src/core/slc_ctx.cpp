@@ -31,6 +31,13 @@ sl_ctx *sl_ctx_alloc(void)
 
 void sl_ctx_free(sl_ctx *cx) { free(cx); }
 
+void sl_ctx_set_interrupt(sl_ctx *cx, int (*f)(void *host), void *host)
+{
+    if (cx == NULL) return;
+    cx->interrupted = f;
+    cx->host = host;
+}
+
 const char *sl_ctx_msg(const sl_ctx *cx) { return cx->msg; }
 int sl_ctx_nwarn(const sl_ctx *cx) { return cx->n_warn; }
 

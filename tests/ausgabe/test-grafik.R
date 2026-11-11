@@ -374,7 +374,8 @@ test_that("expected-return shift, pooled bootstrap, random horizon and goal plan
   d$r <- c(1, d$A[-1] / d$A[-nrow(d)])
   d2 <- series_shift_return(d, "r", 4)
   yrs <- as.numeric(max(d$date) - min(d$date)) / 365.25
-  expect_equal(prod(d2$r)^(1 / yrs) - 1, 0.04, tolerance = 1e-10)
+  # seit 1.6.5 (CR2-E-7): ppy = (n - 1) / Spanne; n Renditen decken n Perioden zu je 1 / ppy Jahren
+  expect_equal(prod(d2$r)^((nrow(d) - 1) / (nrow(d) * yrs)) - 1, 0.04, tolerance = 1e-10)
   expect_equal(sd(log(d2$r)), sd(log(d$r)))
   mk <- function(mu, seed) { set.seed(seed); n <- 60
     data.frame(date = seq.Date(as.Date("1960-12-31"), by = "year", length.out = n),

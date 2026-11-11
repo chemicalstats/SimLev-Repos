@@ -196,8 +196,7 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
     if (!is.character(aux_type) || is.null(names(aux_type)) || any(names(aux_type) == "") || anyNA(aux_type))
       chk_stop("ut2.aux_type", "bootstrap_config")
     bad <- setdiff(names(aux_type), aux_names)
-    if (length(bad)) stop(sprintf("aux_type: '%s' ist keine Zusatzreihe aus aux (verf\u00fcgbar: %s).", paste(bad, collapse = "', '"),
-                                  if (length(aux_names)) paste(aux_names, collapse = ", ") else "keine"))
+    if (length(bad)) stop(chk_msg("b1.m_bootstrap_config", paste(bad, collapse = "', '"), if (length(aux_names)) paste(aux_names, collapse = ", ") else "keine"))
     if (anyDuplicated(names(aux_type))) stop(sprintf("aux_type: Name '%s' doppelt angegeben.", names(aux_type)[duplicated(names(aux_type))][1]))
     bad <- which(!aux_type %in% c("level", "rate"))
     if (length(bad)) chk_stop("rs.aux_type_wert", "bootstrap_config", names(aux_type)[bad[1]])   # seit 1.6.4 ohne Eingabewert
@@ -214,28 +213,36 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
   chk_num <- function(i, v, nm) if (!num1(v)) chk_stop("zahl", "bootstrap_config", sprintf("letfs[[%d]]$%s", i, nm))
   chk_col <- function(i, v, nm) if (!num1(v) && !txt1(v))
     chk_stop("ut2.zahl_oder_aux", "bootstrap_config", sprintf("letfs[[%d]]$%s", i, nm))
+  letf_felder <- c("base", "leverage", "finance", "expense", "spread", "days", "rate_basis", "ter_basis", "name")
   letf_list <- lapply(seq_along(letfs), function(i) {
     l <- letfs[[i]]
-    if (is.null(l$base)) chk_stop("fehlt", "bootstrap_config", sprintf("letfs[[%d]]$base", i))
-    if (!txt1(l$base)) chk_stop("text", "bootstrap_config", sprintf("letfs[[%d]]$base", i))
-    if (!l$base %in% index_names)
-      chk_stop("rs.letf_base", "bootstrap_config", sprintf("letfs[[%d]]$base", i), l$base, paste(index_names, collapse = ", "))
-    lev <- l$leverage %||% 2
+    # seit 1.6.5 (CR2-A-2, Entscheidung 185 K21): nur die neun Felder, Namen genau (bis 1.6.4 still uebergangen, R nahm
+    # ueber $ auch Teilnamen wie leverage_x)
+    if (length(l) && (is.null(names(l)) || anyNA(names(l)) || any(names(l) == "")))
+      chk_stop("e2.benannt", "bootstrap_config", sprintf("letfs[[%d]]", i))
+    bad <- setdiff(names(l), letf_felder)
+    if (length(bad)) chk_stop("b1.letf_feld", "bootstrap_config", bad[1], i)
+    l <- l[intersect(names(l), letf_felder)]
+    if (is.null(l[["base"]])) chk_stop("fehlt", "bootstrap_config", sprintf("letfs[[%d]]$base", i))
+    if (!txt1(l[["base"]])) chk_stop("text", "bootstrap_config", sprintf("letfs[[%d]]$base", i))
+    if (!l[["base"]] %in% index_names)
+      chk_stop("rs.letf_base", "bootstrap_config", sprintf("letfs[[%d]]$base", i), l[["base"]], paste(index_names, collapse = ", "))
+    lev <- l[["leverage"]] %||% 2
     chk_num(i, lev, "leverage")
     if (lev == 0) chk_stop("rs.letf_null", "bootstrap_config", sprintf("letfs[[%d]]$leverage", i))
-    fin <- l$finance %||% 3.5
+    fin <- l[["finance"]] %||% 3.5
     chk_col(i, fin, "finance")
     if (is.character(fin) && !fin %in% aux_names) chk_stop("rs.letf_aux", "bootstrap_config", sprintf("letfs[[%d]]$finance", i), fin)
     if (is_level(fin)) chk_stop("ut2.finance_level", "bootstrap_config", sprintf("letfs[[%d]]$finance", i), fin)
     if (is.numeric(fin) && fin < 0) warning(sprintf("LETF %d: negativer Finanzierungszins.", i))
-    exp_ <- l$expense %||% 0.5
+    exp_ <- l[["expense"]] %||% 0.5
     chk_num(i, exp_, "expense")
     if (exp_ < 0) chk_stop("ut2.expense", "bootstrap_config", sprintf("letfs[[%d]]$expense", i))
-    days <- l$days %||% 1
+    days <- l[["days"]] %||% 1
     chk_col(i, days, "days")
     if (is.character(days) && !days %in% aux_names) chk_stop("rs.letf_aux", "bootstrap_config", sprintf("letfs[[%d]]$days", i), days)
     if (is_level(days)) chk_stop("rs.letf_days_level", "bootstrap_config", sprintf("letfs[[%d]]$days", i), days)
-    spread <- l$spread %||% 0; rate_basis <- l$rate_basis %||% 360; ter_basis <- l$ter_basis %||% 365
+    spread <- l[["spread"]] %||% 0; rate_basis <- l[["rate_basis"]] %||% 360; ter_basis <- l[["ter_basis"]] %||% 365
     chk_num(i, spread, "spread"); chk_num(i, rate_basis, "rate_basis"); chk_num(i, ter_basis, "ter_basis")
     # seit 1.6.4 Tagesbasis > 0, Tage je Zeile > 0, Spread >= 0 (bis 1.6.3: Basis 0 brach mit falscher Ursache ab,
     # negative Werte kehrten die Kosten still in Ertraege um)
@@ -243,9 +250,9 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
     chk_num1(rate_basis, lw, "rate_basis", lo = 0, lo_open = TRUE); chk_num1(ter_basis, lw, "ter_basis", lo = 0, lo_open = TRUE)
     if (is.numeric(days)) chk_num1(days, lw, "days", lo = 0, lo_open = TRUE)
     chk_num1(spread, lw, "spread", lo = 0)
-    if (!is.null(l$name) && !txt1(l$name)) chk_stop("text", "bootstrap_config", sprintf("letfs[[%d]]$name", i))
-    name <- l$name %||% (if (lev > 0) paste0(l$base, "_l", lev) else paste0(l$base, "_inv", abs(lev)))
-    list(name = name, base = l$base, leverage = lev, finance = fin, expense = exp_,
+    if (!is.null(l[["name"]]) && !txt1(l[["name"]])) chk_stop("text", "bootstrap_config", sprintf("letfs[[%d]]$name", i))
+    name <- l[["name"]] %||% (if (lev > 0) paste0(l[["base"]], "_l", lev) else paste0(l[["base"]], "_inv", abs(lev)))
+    list(name = name, base = l[["base"]], leverage = lev, finance = fin, expense = exp_,
          spread = spread, days = days, rate_basis = rate_basis, ter_basis = ter_basis)
   })
   letf_names <- vapply(letf_list, function(x) x$name, "")
@@ -359,21 +366,49 @@ print.bootstrap_config <- function(x, ...) {
   }
   if (any(ret <= 0)) chk_stop("rs.rendite_null", who)
   if (stats::median(abs(ret - 1)) > 0.5)
-    warning("Renditen sehen nicht wie Brutto-Tagesrenditen aus (Median |R - 1| > 0.5). input = 'prices' vergessen?")
-  list(ret = ret, aux = aux, aux_ratio = aux_ratio, aux_start = aux_start)
+    warning(chk_msg("b1.m_get_col"))
+  # seit 1.6.5: Zeile von data je Renditezeile (fuer das Regime-Fenster in Kalendertagen, E-T2-6)
+  src_rows <- if (config$input == "prices") which(ok) + 1L else which(ok)
+  list(ret = ret, aux = aux, aux_ratio = aux_ratio, aux_start = aux_start, src_rows = src_rows)
 }
 
 #' Standardparameter je Verfahren
 #' @keywords internal
 #' @noRd
-.get_base_params <- function(params) {
-  defaults <- list(
-    L = 20, block_length = 20, wild_type = 0, n_regimes = 2, vol_window = 20,
+# seit 1.6.5: L und block_length Standard "auto" (Entscheidung 178; bis 1.6.4 fest 20), vol_unit neu (E-T2-6)
+.boot_param_defaults <- list(
+    L = "auto", block_length = "auto", wild_type = 0, n_regimes = 2, vol_window = 20, vol_unit = "rows",
     tail_prob = 0.05, both_tails = TRUE, p_break = 0.02, garch_order = c(1, 1),
     ms_n_regimes = 2, ms_garch_model = "gjrGARCH", ms_ar_n_regimes = 2,
     ms_ar_garch_model = "gjrGARCH", tvtp_n_regimes = 2, tvtp_garch_model = "gjrGARCH")
+.get_base_params <- function(params) {
+  defaults <- .boot_param_defaults
   for (nm in names(defaults)) if (is.null(params[[nm]])) params[[nm]] <- defaults[[nm]]
   params
+}
+
+# Parameter, die ein Verfahren verwendet (seit 1.6.5 fuer die Pruefung von ess_grid, CR2-O-1)
+.boot_method_params <- function(method) switch(method,
+  block = , circular = "block_length", stationary = "L", wild = "wild_type",
+  regime = c("n_regimes", "vol_window", "vol_unit"), evt = c("tail_prob", "both_tails"), tails = "tail_prob",
+  reset = "p_break", ms_garch = c("ms_n_regimes", "ms_garch_model"),
+  ms_ar_garch_m = c("ms_ar_n_regimes", "ms_ar_garch_model"), tvtp_ms_garch = c("tvtp_n_regimes", "tvtp_garch_model"),
+  character(0))
+
+# seit 1.6.5 (CR2-O-1, Entscheidung 189): unbekannte Namen in params und ess_grid sind ein Fehler (bis 1.6.4 still
+# uebergangen, z. B. params = list(l = 200) ohne Wirkung); in ess_grid auch Namen, die das Verfahren nicht nutzt
+# (bis 1.6.4 Kombinationen mit gleicher ESS). params darf Namen anderer Verfahren enthalten (eine Liste fuer mehrere).
+.check_param_names <- function(params, ess_grid, method, who) {
+  ok <- names(.boot_param_defaults)
+  if (length(params) && (is.null(names(params)) || anyNA(names(params)) || any(names(params) == "")))
+    chk_stop("e2.benannt", who, "params")
+  for (nm in names(params)) if (!nm %in% ok) chk_stop("b1.param_unbekannt", who, nm, "params", paste(ok, collapse = ", "))
+  use <- .boot_method_params(method)
+  for (nm in names(ess_grid)) {
+    if (!nm %in% ok) chk_stop("b1.param_unbekannt", who, nm, "ess_grid", paste(ok, collapse = ", "))
+    if (!nm %in% use) chk_stop("b1.gitter_verfahren", who, nm, method, if (length(use)) paste(use, collapse = ", ") else "keine")
+  }
+  invisible(TRUE)
 }
 
 #' Standard-ESS-Gitter je Verfahren
@@ -494,7 +529,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   xc <- x - mean(x)
   acov <- function(k) sum(xc[1:(n - k)] * xc[(1 + k):n]) / n
   r0 <- acov(0)
-  if (r0 <= 0) return(c(stationary = 1, circular = 1))
+  # seit 1.6.5 (CR2-X51-1, Uebergabe aus Paket C): nicht endliche Varianz (NaN-Eingabe) wie Varianz 0 (bis 1.6.4 Rohfehler)
+  if (!is.finite(r0) || r0 <= 0) return(c(stationary = 1, circular = 1))
   lags <- seq_len(floor(mmax))
   A <- vapply(lags, acov, 0)   # seit 1.6.4 (A-089) einmal fuer rho und Rk (M <= floor(mmax))
   rho <- A / r0
@@ -521,8 +557,14 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' "auto"-Parameter aufloesen (L, block_length)
 #' @keywords internal
 #' @noRd
-.resolve_auto <- function(params, returns) {
-  for (nm in c("L", "block_length")) if (identical(params[[nm]], "auto")) {
+# seit 1.6.5 (Entscheidung 178): ohne Angabe gilt "auto" fuer den Blockparameter des Verfahrens (method; NULL = wie
+# bis 1.6.4 nur ausdruecklich angegebene "auto"); skip: Namen, die das ESS-Gitter setzt (dort keine Schaetzung)
+.resolve_auto <- function(params, returns, method = NULL, skip = character(0)) {
+  if (!is.null(method)) {
+    nm <- switch(method, stationary = "L", block = , circular = "block_length", NULL)
+    if (!is.null(nm) && is.null(params[[nm]]) && !nm %in% skip) params[[nm]] <- "auto"
+  }
+  for (nm in setdiff(c("L", "block_length"), skip)) if (identical(params[[nm]], "auto")) {
     lr <- log(returns)
     b <- rbind(bootstrap_block_length(lr), bootstrap_block_length(lr, "abs"))
     col <- if (nm == "L") "stationary" else "circular"
@@ -590,8 +632,10 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   }, error = function(e) NULL)
   if (is.null(scale) && ne >= 20) {
     m <- mean(exc); v <- .sl_var(exc)
+    # seit 1.6.5 (CR2-S-2, Entscheidung 189): scale aus dem begrenzten shape (GPD-Mittel scale / (1 - shape) = m);
+    # bis 1.6.4 0.5 m (1 + ratio) mit dem unbegrenzten Wert (Randmittel bei shape = -0.5 zu gross)
     if (v > 0 && m > 0) { ratio <- m^2 / v; shape <- max(-0.5, min(1, 0.5 * (1 - ratio)))
-      scale <- max(1e-3, 0.5 * m * (1 + ratio)); method <- "Momente" }
+      scale <- max(1e-3, m * (1 - shape)); method <- "Momente" }
   }
   if (is.null(scale) && ne >= 5) { scale <- max(1e-3, .sl_sd(exc)); shape <- 0.1; method <- "empirisch" }
   if (is.null(scale)) { scale <- max(0.005, 2 * .sl_sd(base_ret - 1)); shape <- 0.1; method <- "Default"
@@ -603,8 +647,10 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Regime aus rollierender Volatilitaet
 #' @keywords internal
 #' @noRd
-.prepare_regime_info <- function(base_ret, vol_window, n_regimes) {
-  vol <- .sl_rolling_vol(base_ret, as.integer(vol_window))
+.prepare_regime_info <- function(base_ret, vol_window, n_regimes, vol_unit = "rows", day = NULL) {
+  # seit 1.6.5 (E-T2-6): Fenster wahlweise in Kalendertagen (vol_unit = "days", Datum der Renditezeilen in day)
+  vol <- if (identical(vol_unit, "days")) .sl_rolling_vol_days(base_ret, day, vol_window)
+         else .sl_rolling_vol(base_ret, as.integer(vol_window))
   th <- stats::quantile(vol, probs = seq(0, 1, length.out = n_regimes + 1))
   th[length(th)] <- th[length(th)] + 1e-10
   reg <- .sl_assign_regimes(vol, th)
@@ -633,6 +679,10 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     if (is.finite(b)) phi[r] <- max(-0.5, min(0.5, b))
     l <- tryCatch(.sl_lsfit(cbind(sig[i]), ex[i] - mu[r] - phi[r] * lag_ex[i])$coefficients[1], error = function(e) NA)
     if (is.finite(l)) lam[r] <- max(-5, min(5, l))
+    # seit 1.6.5 (CR2-C-12, Entscheidung 185 K2): Achsenabschnitt nach phi und lambda (samt Grenzen) neu, damit
+    # das Mittel des bedingten Mittelwerts im Regime das Datenmittel trifft (Engle, Lilien, Robins 1987: Achsenabschnitt
+    # und Risikopraemie gemeinsam); bis 1.6.4 blieb mu das Regimemittel (Drift je Regime bis rund 2.7 % p. a. daneben)
+    mu[r] <- mean(ex[i] - phi[r] * lag_ex[i] - lam[r] * sig[i])
   }
   unc <- vapply(seq_len(K), function(r) {
     p <- al[r] + be[r] + ga[r] / 2
@@ -650,8 +700,14 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   cm <- mu[reg] + phi[reg] * lag_ex + lam[reg] * sig
   z <- (ex - cm) / sig; z[!is.finite(z)] <- 0
   pools <- lapply(seq_len(K), function(r) { i <- which(reg == r); if (length(i) < 10) seq_len(n) else i })
-  for (r in seq_len(K)) { i <- pools[[r]]; s <- .sl_sd(z[i]); if (is.finite(s) && s > 0) z[i] <- (z[i] - mean(z[i])) / s }
-  pi_ <- rep(1 / K, K); for (it in 1:1000) { p2 <- as.numeric(pi_ %m% P); if (max(abs(p2 - pi_)) < 1e-12) break; pi_ <- p2 }
+  # seit 1.6.5 (Entscheidung 195, Nebenpunkt von CR2-C-12): nur Regime ab 10 Tagen normieren; ein kleineres Regime zieht
+  # aus allen Tagen, ohne alle Residuen erneut zu normieren (bis 1.6.4 hob das die Normierung der anderen Regime auf)
+  for (r in seq_len(K)) if (sum(reg == r) >= 10) {
+    i <- pools[[r]]; s <- .sl_sd(z[i]); if (is.finite(s) && s > 0) z[i] <- (z[i] - mean(z[i])) / s
+  }
+  # seit 1.6.5 (CR2-M-1, Entscheidung 189): stationaere Verteilung direkt im Kern (bis 1.6.4 hoechstens 1000 Schritte der
+  # Potenziteration ab der Gleichverteilung; bei traegen Regimen deutlich daneben)
+  pi_ <- .sl_msgarch_stat(P)
   message(sprintf("MS-GARCH(%d, %s%s%s): P(stay) = %s", K, garch_model, if (ar_gm) ", AR-M" else "",
                   if (tvtp) ", TVTP" else "", paste(sprintf("%.3f", diag(P)), collapse = "/")))
   list(K = K, mu = mu, omega = om, alpha = al, beta = be, gamma = ga, phi = phi, lambda = lam,
@@ -662,12 +718,12 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Verfahrensspezifische Vorberechnung
 #' @keywords internal
 #' @noRd
-.prepare_method_info <- function(returns, config, method, params, cores = 1L) {
+.prepare_method_info <- function(returns, config, method, params, cores = 1L, day = NULL) {
   p <- .get_base_params(params)
   base <- which(config$index_names == config$regime_index)
   br <- returns[, base]
   info <- list(base = base)
-  if (method == "regime") info <- c(info, .prepare_regime_info(br, p$vol_window, p$n_regimes))
+  if (method == "regime") info <- c(info, .prepare_regime_info(br, p$vol_window, p$n_regimes, p$vol_unit, day))
   if (method == "evt") {
     info$left <- .fit_tail(br, p$tail_prob, "left")
     info$right <- if (isTRUE(p$both_tails)) .fit_tail(br, p$tail_prob, "right") else NULL
@@ -742,18 +798,30 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Angaben fuer den Kern sl_boot_path (seit 1.6.0) oder NULL (seit 1.6.3 ein interner Fehler in .build_path)
 #' @keywords internal
 #' @noRd
-.boot_path_spec <- function(ret, idx, aux, config, start, aux_ratio, aux_start) {
+.boot_path_spec <- function(ret, idx, aux, config, start, aux_ratio, aux_start, fixed = NULL) {
   dbl1 <- function(v) is.double(v) && length(v) == 1L
-  num1 <- function(v) is.numeric(v) && length(v) == 1L
   n_out <- nrow(ret)
   if (!is.double(ret) || n_out < 1L || ncol(ret) < 1L || !is.null(rownames(ret)) || !dbl1(start) ||
       !is.numeric(idx) || length(idx) != n_out || anyNA(idx)) return(NULL)
-  cn <- colnames(ret)
-  if (length(config$index_names) != ncol(ret)) return(NULL)
+  # seit 1.6.5 (CR2-E-13): die je Lauf festen Angaben einmal (.boot_path_fixed in .boot_setup, wie Python/Julia);
+  # je Pfad nur Typ und Laenge von ret und der Wertebereich von idx (bis 1.6.4 alles je Pfad, rund 20 % der Laufzeit)
+  if (is.null(fixed)) fixed <- .boot_path_fixed(colnames(ret), aux, config, aux_ratio, aux_start)
+  if (is.null(fixed) || !identical(colnames(ret), fixed$cn)) return(NULL)
+  if (!is.null(aux)) {
+    if (!is.integer(idx) && any(idx != trunc(idx))) return(NULL)
+    r <- range(idx)
+    if (r[1L] < 1 || r[2L] > nrow(aux)) return(NULL)
+  }
+  list(idx = as.integer(idx), level = fixed$level, letf = fixed$letf, names = fixed$names)
+}
+
+# feste Teile der Angaben fuer sl_boot_path (Namen, Doppelte, Hebelprodukte, Niveau-Merker, Form von aux); NULL = ungueltig
+.boot_path_fixed <- function(cn, aux, config, aux_ratio, aux_start) {
+  num1 <- function(v) is.numeric(v) && length(v) == 1L
+  if (length(config$index_names) != length(cn)) return(NULL)
   anames <- character(0); level <- logical(0)
   if (!is.null(aux)) {
-    if (!is.matrix(aux) || !is.double(aux) || !is.null(rownames(aux)) || is.null(colnames(aux)) ||
-        any(idx < 1 | idx > nrow(aux) | idx != trunc(idx))) return(NULL)
+    if (!is.matrix(aux) || !is.double(aux) || !is.null(rownames(aux)) || is.null(colnames(aux))) return(NULL)
     if (!is.null(aux_ratio) && (!is.matrix(aux_ratio) || !is.double(aux_ratio) || !identical(dim(aux_ratio), dim(aux)) ||
                                 !is.null(rownames(aux_ratio)) || !identical(colnames(aux_ratio), colnames(aux)) ||
                                 (!is.null(aux_start) && (!is.double(aux_start) || length(aux_start) != ncol(aux)))))
@@ -777,7 +845,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
         !all(vapply(list(l$leverage, l$rate_basis, l$ter_basis, l$expense, l$spread), num1, NA))) return(NULL)
     letf[i, ] <- c(b - 1, l$leverage, fi, dd, l$rate_basis, l$ter_basis, l$expense, l$spread)
   }
-  list(idx = as.integer(idx), level = level, letf = letf, names = nms)
+  list(cn = cn, level = level, letf = letf, names = nms)
 }
 
 #' Preis-Pfad aus Renditen bauen (Index-Knockout = ungueltig, LETF-Knockout = Totalverlust)
@@ -791,13 +859,13 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' "level"-Reihen ist sie identisch mit der Pfadspalte.
 #' @keywords internal
 #' @noRd
-.build_path <- function(g, aux, config, start = 100, aux_ratio = NULL, aux_start = NULL) {
+.build_path <- function(g, aux, config, start = 100, aux_ratio = NULL, aux_start = NULL, fixed = NULL) {
   ret <- g$ret; idx <- g$idx
   # seit 1.6.4 (A-058) ohne die Vorpruefung any(!is.finite(ret)) || any(ret <= 0): der Kern (sl_boot_path) prueft
   # dieselbe Bedingung und liefert dann NULL (gleiches Ergebnis, ein Durchlauf statt drei)
   if (!is.matrix(ret)) return(NULL)
   # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf)
-  sp <- .boot_path_spec(ret, idx, aux, config, start, aux_ratio, aux_start)
+  sp <- .boot_path_spec(ret, idx, aux, config, start, aux_ratio, aux_start, fixed)
   # bis 1.6.2 rechnete hier ein Rueckfall in R; seit 1.6.3 unerreichbar (bootstrap_config prueft die LETF-Felder,
   # .generate_returns liefert double-Matrizen ohne Zeilennamen und ganzzahlige Zeilen)
   if (is.null(sp)) stop("bootstrap: interner Fehler: Angaben f\u00fcr den Pfadkern unvollst\u00e4ndig (.boot_path_spec)")
@@ -812,18 +880,46 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   P
 }
 
+# Datum der Renditezeilen als Tage (seit 1.6.5, vol_unit = "days"): Spalte date von data, streng aufsteigend
+.boot_days <- function(data, ex, who) {
+  if (!is.data.frame(data) || !"date" %in% names(data)) chk_stop("b1.vol_days", who)
+  d <- as.numeric(.to_date(data$date, paste0(who, ": data$date")))[ex$src_rows]
+  if (anyNA(d) || (length(d) > 1L && any(diff(d) <= 0))) chk_stop("b1.vol_days", who)
+  d
+}
+.span_days <- function(day) if (is.null(day) || !length(day)) NULL else day[length(day)] - day[1L] + 1
+
+# seit 1.6.5 (FB-5, Entscheidung 184): Speicher aller Pfade (n x (path_length + 1) x Spalten x 8 Byte, mit der
+# Niveau-Variante der Zusatzreihen) vor dem Ziehen gegen den freien Speicher laut System (unbekannt: keine Pruefung)
+.boot_mem_check <- function(setup, config, who) {
+  cols <- config$n_indices + config$n_letfs + 2 * config$n_aux
+  need <- as.numeric(setup$n_paths) * (setup$n_out + 1) * cols * 8
+  avail <- .sl_mem_avail()
+  if (avail >= 0 && need > avail) chk_stop("b1.speicher", who, sprintf("%.1f", need / 1e9))
+  invisible(need)
+}
+
 #' ESS-Design: Simulationsbudget auf Hyperparameter-Kombinationen verteilen
 #' @keywords internal
 #' @noRd
-.ess_design <- function(method, grid, budget, n_obs) {
+.ess_design <- function(method, grid, budget, n_obs, params = NULL, base_ret = NULL, who = "bootstrap", day = NULL) {
   if (is.null(grid)) grid <- .get_ess_grid(method, n_obs)
   if (is.null(grid) || !length(grid)) return(NULL)
   ess_params <- c("L", "block_length", "n_regimes", "tail_prob", "ms_n_regimes", "ms_ar_n_regimes", "tvtp_n_regimes")
   non_ess <- c("vol_window", "wild_type", "both_tails", "p_break", "garch_order")   # seit 1.6.4 ohne Textparameter (Entscheidung 31)
   nm <- names(grid)
   design <- expand.grid(grid, stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
-  design$ess_per_boot <- apply(design[, nm, drop = FALSE], 1, function(row)
-    .calculate_ess(n_obs, method, as.list(row)))
+  rows <- lapply(seq_len(nrow(design)), function(i) as.list(design[i, nm, drop = FALSE]))
+  # seit 1.6.5 (CR2-O-2): jede Kombination vor der ESS-Rechnung pruefen (bis 1.6.4 rohe Fehler bei 0, NA, NaN)
+  if (!is.null(base_ret)) for (r in rows)
+    .check_boot_params(method, .get_base_params(utils::modifyList(params %||% list(), r)), n_obs, who, .span_days(day))
+  # seit 1.6.5 (P04-R13): "regime" rechnet die ESS mit der Verweildauer der geschaetzten Uebergangsmatrix (bis 1.6.4
+  # immer mit Verweildauer 1, der Parameter info war im Paket nie gesetzt)
+  infos <- lapply(rows, function(r) if (method == "regime" && !is.null(base_ret)) {
+    p <- .get_base_params(utils::modifyList(params %||% list(), r))
+    .prepare_regime_info(base_ret, p$vol_window, p$n_regimes, p$vol_unit, day)
+  })
+  design$ess_per_boot <- vapply(seq_along(rows), function(i) .calculate_ess(n_obs, method, rows[[i]], infos[[i]]), 0)
   if (any(nm %in% non_ess)) {
     ec <- nm[nm %in% ess_params]
     design$ess_group <- if (length(ec)) apply(design[, ec, drop = FALSE], 1, paste, collapse = "_") else "all"
@@ -832,8 +928,22 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   } else {
     design$n_variants <- 1; design$weight_alloc <- 1 / design$ess_per_boot
   }
-  design$n_sims <- pmax(1, round(budget * design$weight_alloc / sum(design$weight_alloc)))
+  q <- budget * design$weight_alloc / sum(design$weight_alloc)
+  design$n_sims <- pmax(1, round(q))
   while (sum(design$n_sims) > budget) { i <- which.max(design$n_sims); design$n_sims[i] <- design$n_sims[i] - 1 }
+  # seit 1.6.5 (CR2-J-2, Entscheidung 189): immer genau budget Pfade; fehlende nach groesstem Bruchteil q - n_sims
+  # (bei Gleichstand die erste Kombination); bis 1.6.4 ohne Hinweis weniger Pfade (z. B. 199 statt 200)
+  miss <- budget - sum(design$n_sims)
+  if (miss > 0) {
+    o <- order(-(q - design$n_sims), seq_along(q))[seq_len(miss)]
+    design$n_sims[o] <- design$n_sims[o] + 1
+  }
+  # Kombinationen ohne Pfad (budget kleiner als ihre Zahl) entfallen vor der Vorberechnung (seit 1.6.5 mit Hinweis)
+  if (any(design$n_sims == 0)) {
+    message(chk_msg("b1.ess_ohne_pfad", who, sum(design$n_sims == 0), nrow(design), budget))
+    design <- design[design$n_sims > 0, , drop = FALSE]
+    rownames(design) <- NULL
+  }
   design$total_ESS <- design$ess_per_boot * design$n_sims
   target <- stats::median(design$total_ESS[design$total_ESS > 0])
   design$weight <- ifelse(design$total_ESS > 0, target / design$total_ESS, 0)
@@ -848,7 +958,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' (der Kern rechnet hoechstens 64; Python/Julia legten vorher K x K-Felder an).
 #' @keywords internal
 #' @noRd
-.check_boot_params <- function(method, p, n_obs, who = "bootstrap") {
+.check_boot_params <- function(method, p, n_obs, who = "bootstrap", n_days = NULL) {
   num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
   if (method == "stationary" && (!num1(p$L) || p$L < 1))
     chk_stop("ut2.param_L", who)
@@ -865,6 +975,13 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   if (method == "regime") {
     chk_int1(p$n_regimes, who, "params$n_regimes", lo = 1)
     chk_int1(p$vol_window, who, "params$vol_window", lo = 2)
+    chk_choice(p$vol_unit, who, "params$vol_unit", c("rows", "days"))
+    # seit 1.6.5 (CR2-M-9, Entscheidung 189): Fenster hoechstens so lang wie die Historie (Zeilen bzw. Kalendertage;
+    # bis 1.6.4 still gekuerzt) und hoechstens eine Regime je 10 Beobachtungen
+    span <- if (identical(p$vol_unit, "days")) n_days else n_obs
+    if (!is.null(span) && p$vol_window > span)
+      chk_stop("b1.vol_window", who, chk_fmt(span), if (identical(p$vol_unit, "days")) "Kalendertage" else "Zeilen")
+    if (p$n_regimes > max(1, n_obs %/% 10)) chk_stop("b1.n_regimes", who, as.integer(max(1, n_obs %/% 10)), as.integer(n_obs))
   }
   if (method %in% c("evt", "tails"))
     chk_num1(p$tail_prob, who, "params$tail_prob", lo = 0, hi = 0.5, lo_open = TRUE, hi_open = TRUE)
@@ -888,6 +1005,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   # seit 1.6.4 nur Zahlen (Entscheidung 31; bis 1.6.3 scheiterten Textparameter wie ms_garch_model technisch);
   # Wahrheitswerte (z. B. both_tails) bleiben erlaubt (Entscheidung 45)
   if (!all(vapply(g, function(v) is.numeric(v) || is.logical(v), NA))) chk_stop("gitter_zahlen", who)
+  if (any(vapply(g, anyNA, NA))) chk_stop("b1.gitter_na", who)   # seit 1.6.5 (CR2-O-2; bis 1.6.4 Rohfehler)
   invisible(NULL)
 }
 
@@ -913,6 +1031,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   if (!is.null(params) && !is.list(params)) chk_stop("liste", who, "params")
   chk_bool1(ess, who, "ess")
   .check_ess_grid(ess_grid, who)
+  .check_param_names(params, if (isTRUE(ess)) ess_grid, method, who)   # seit 1.6.5 (CR2-O-1)
   chk_int1(max_tries, who, "max_tries")
   cores <- chk_cores(cores, who)   # seit 1.6.4 hoechstens Zahl der Prozessoren, mit Hinweis (Entscheidung 41b)
   chk_bool1(progress, who, "progress")
@@ -924,10 +1043,19 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   if (isTRUE(ess) && is.null(ess_grid) && method %in% c("stationary", "block", "circular") && n_obs < 4L)
     chk_stop("ess_kurz", who, 4L)
   n_out <- as.integer(path_length %||% n_obs)
+  # seit 1.6.5 (FB-6): Hinweise bei langen Pfaden und GARCH-Schaetzung auf wenigen Beobachtungen
+  if (n_out > 5 * n_obs) message(chk_msg("b1.pfad_lang", who, n_out, n_obs))
+  if (method %in% c("garch", "gjr_garch", "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch") && n_obs < 500L)
+    message(chk_msg("b1.garch_kurz", who, method, n_obs))
   if (method %in% c("wild", "reset") && n_out != n_obs)
     chk_stop("ut2.chronologie", who, method, as.integer(n_obs))
-  params <- .resolve_auto(params, ex$ret)
-  design <- if (ess) .ess_design(method, ess_grid, as.integer(n), n_obs) else NULL
+  # seit 1.6.5 (E-T2-6): Datum der Renditezeilen nur fuer vol_unit = "days"
+  day <- NULL
+  if (method == "regime" && (identical(params$vol_unit, "days"))) day <- .boot_days(data, ex, who)
+  grid0 <- if (isTRUE(ess)) ess_grid %||% .get_ess_grid(method, n_obs)
+  params <- .resolve_auto(params, ex$ret, method, skip = names(grid0))   # seit 1.6.5 Standard "auto" (Entscheidung 178)
+  design <- if (ess) .ess_design(method, ess_grid, as.integer(n), n_obs, params, ex$ret[, which(config$index_names == config$regime_index)],
+                                 who, day) else NULL
   if (ess && is.null(design)) message("Keine Hyperparameter f\u00fcr ESS - nutze Standard-Bootstrap")
   combos <- if (is.null(design)) list(params) else lapply(seq_len(nrow(design)), function(i) {
     gp <- as.list(design[i, attr(design, "param_names"), drop = FALSE])
@@ -936,13 +1064,14 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   combo_of_path <- if (is.null(design)) rep(1L, n) else rep(seq_len(nrow(design)), design$n_sims)
   n_paths <- length(combo_of_path)
   base_p <- lapply(combos, .get_base_params)
-  for (bp in base_p) .check_boot_params(method, bp, n_obs, who)   # seit 1.6.4 vor der Vorberechnung
-  infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores),
+  for (bp in base_p) .check_boot_params(method, bp, n_obs, who, .span_days(day))   # seit 1.6.4 vor der Vorberechnung
+  infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores, day),
                                                error = function(e) stop(sprintf("Vorberechnung fehlgeschlagen: %s", e$message))))
   weights <- if (is.null(design)) rep(1, n_paths) else design$weight[combo_of_path]
   weights <- weights / sum(weights) * length(weights)
   list(ex = ex, n_obs = n_obs, n_out = n_out, design = design, combos = combos, base_p = base_p,
-       infos = infos, combo_of_path = combo_of_path, n_paths = n_paths, weights = weights, cores = cores)
+       infos = infos, combo_of_path = combo_of_path, n_paths = n_paths, weights = weights, cores = cores,
+       path_fixed = .boot_path_fixed(config$index_names, ex$aux, config, ex$aux_ratio, ex$aux_start))
 }
 
 #' Einen gueltigen Pfad mit eigenem Zufallsstrom erzeugen (mit Wiederholungen)
@@ -958,7 +1087,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     g <- tryCatch(.generate_returns(setup$ex$ret, method, setup$base_p[[c_id]], setup$infos[[c_id]], setup$n_out, stream),
                   error = function(e) { err <<- conditionMessage(e); NULL })
     if (!is.null(g)) {
-      P <- .build_path(g, setup$ex$aux, config, aux_ratio = setup$ex$aux_ratio, aux_start = setup$ex$aux_start)
+      P <- .build_path(g, setup$ex$aux, config, aux_ratio = setup$ex$aux_ratio, aux_start = setup$ex$aux_start,
+                       fixed = setup$path_fixed)
       if (!is.null(P)) return(list(path = P, tries = try))
     }
   }
@@ -974,9 +1104,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' wird weder gelesen noch gesetzt.
 #' \itemize{
 #'   \item \code{cores = "auto"}: [.par_lapply_auto()].
-#'   \item Feste Zahl >= 2 auf Unix (seit 1.6.4, Entscheidung 133): derselbe Weg wie \code{"auto"}, nur ohne
-#'     Messung: [.par_auto_fork()] ueber alle Einheiten mit min(cores, Einheiten) Forks, Kern-Threads je Kind
-#'     Prozessoren / Forks. Ergebnis, Ausgaben, Meldungen, Warnungen und Fehler wie \code{cores = 1}; endet ein Kind
+#'   \item Feste Zahl >= 2 auf Unix: seit 1.6.5 (Entscheidungen 140, 179) der Hoechstwert der automatischen Wahl
+#'     ([.par_lapply_auto()] mit hoechstens \code{cores} Laeufen; misst und plant wie \code{"auto"}). 1.6.4
+#'     (Entscheidung 133): [.par_auto_fork()] ueber alle Einheiten mit min(cores, Einheiten) Forks ohne Messung. Ergebnis, Ausgaben, Meldungen, Warnungen und Fehler wie \code{cores = 1}; endet ein Kind
 #'     ohne Ergebnis: Fehler. Bis dahin \code{mclapply} ueber hoechstens 4 cores Pakete
 #'     (\code{.par_lapply_fork}): Ausgaben und Warnungen der Einheiten gingen verloren, Fehler kamen als
 #'     \code{try-error}-Elemente mit Warnung "k function calls resulted in an error" zurueck (Folgefehler oder still
@@ -988,7 +1118,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 .par_lapply <- function(X, FUN, cores) {
   if (identical(cores, "auto")) return(.par_lapply_auto(X, FUN))   # seit 1.6.4: Planer
   if (cores <= 1 || length(X) <= 1) return(.sl_in_unit(lapply(X, FUN)))
-  if (.Platform$OS.type == "unix") return(.par_lapply_fixed(X, FUN, cores))
+  # seit 1.6.5 (Entscheidungen 140, 179): eine feste Zahl ist der Hoechstwert der automatischen Wahl (Planer mit
+  # hoechstens cores Laeufen); bis 1.6.4 immer min(cores, Einheiten) Forks ohne Messung (.par_lapply_fixed)
+  if (.Platform$OS.type == "unix") return(.par_lapply_auto(X, FUN, max_runs = as.integer(cores)))
   .sl_nthreads()                                               # Hinweis zu SIMLEV_THREADS hoechstens einmal, hier
   cl <- parallel::makePSOCKcluster(cores)
   on.exit(parallel::stopCluster(cl))
@@ -999,20 +1131,6 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
                         .sl_unit_threads(min(as.integer(cores), length(X))))
   parallel::parLapplyLB(cl, X, FUN)
 }
-
-# Feste Zahl cores >= 2 auf Unix (seit 1.6.4, Entscheidung 133): alle Einheiten ueber .par_auto_fork mit
-# c = min(cores, Einheiten) Forks (ganzzahlig abgeschnitten wie mclapply; unter 2 nacheinander wie lapply)
-.par_lapply_fixed <- function(X, FUN, cores) {
-  if (!is.vector(X) || is.object(X)) X <- as.list(X)              # wie lapply
-  FUN <- match.fun(FUN)
-  n <- length(X)
-  c <- min(as.integer(cores), n)
-  if (c < 2L) return(.sl_in_unit(lapply(X, FUN)))
-  res <- .par_auto_fork(X, seq_len(n), FUN, c, .sl_unit_threads(c))
-  names(res) <- names(X)
-  res
-}
-
 
 #' Parallele Ausfuehrung mit cores = "auto" (seit 1.6.4, Entscheidungen 41b/41c)
 #'
@@ -1031,11 +1149,11 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'     Einheiten davor fertig sind, und loest den ersten Fehler in Einheitenreihenfolge erneut aus (laufende
 #'     Kinder werden beendet). Endet ein Kind ohne Ergebnis: Fehler.
 #'   \item Windows (PSOCK, Startkosten hier nicht gemessen) und ein Prozessor: nacheinander.
-#'   \item Den Verteilweg (\code{.par_auto_fork}) nutzt seit 1.6.4 auch eine feste Zahl (\code{.par_lapply_fixed}).
+#'   \item Seit 1.6.5 rechnet auch eine feste Zahl \code{cores} hier, mit hoechstens \code{cores} Laeufen (\code{max_runs}).
 #' }
 #' @keywords internal
 #' @noRd
-.par_lapply_auto <- function(X, FUN) {
+.par_lapply_auto <- function(X, FUN, max_runs = NULL) {
   if (!is.vector(X) || is.object(X)) X <- as.list(X)              # wie lapply
   FUN <- match.fun(FUN)
   n <- length(X)
@@ -1055,7 +1173,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   })
   if (k < n) {
     u <- if (k >= 2L) t_rest / (k - 1L) else t_first
-    pl <- .sl_par_plan(n - k, u, as.numeric(utils::object.size(res[seq_len(k)])) / k, 0L)
+    np <- .sl_nprocs()
+    pl <- .sl_par_plan(n - k, u, as.numeric(utils::object.size(res[seq_len(k)])) / k, 0L, nprocs = np,
+                       max_runs = if (is.null(max_runs)) np else min(np, max_runs))
     .sl_state$par_last <- c(probed = k, runs = pl[1L], threads = pl[2L])
     idx <- (k + 1L):n
     res[idx] <- if (pl[1L] >= 2L) .par_auto_fork(X, idx, FUN, pl[1L], pl[2L])
@@ -1212,19 +1332,25 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   Standardwerte). Je Verfahren werden nur die oben genannten Eintraege
 #'   verwendet:
 #'   \describe{
-#'     \item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1,
-#'       Standard 20) oder \code{"auto"} ([bootstrap_block_length()], Spalte
-#'       \code{stationary}).}
+#'     \item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1)
+#'       oder \code{"auto"} (Standard seit 1.6.5, bis 1.6.4 fest 20; [bootstrap_block_length()], Spalte
+#'       \code{stationary}); der gewaehlte Wert wird als Meldung ausgegeben.}
 #'     \item{block_length}{Feste Blocklaenge in Zeilen fuer "block" und
-#'       "circular" (ganze Zahl, Standard 20; bei "block" hoechstens Zeilen der
+#'       "circular" (ganze Zahl; bei "block" hoechstens Zeilen der
 #'       Historie minus 1, bei "circular" hoechstens Zeilen der Historie) oder
-#'       \code{"auto"} ([bootstrap_block_length()], Spalte \code{circular}).}
+#'       \code{"auto"} (Standard seit 1.6.5, bis 1.6.4 fest 20; [bootstrap_block_length()], Spalte \code{circular}).}
 #'     \item{wild_type}{Gewichte beim Wild Bootstrap: 0 = Rademacher
 #'       (Standard), 1 = Mammen, 2 = Standardnormal; andere Werte sind ein
 #'       Fehler.}
 #'     \item{n_regimes}{Anzahl Volatilitaetsregime fuer "regime" (Standard 2).}
-#'     \item{vol_window}{Fensterlaenge der rollierenden Volatilitaet in Zeilen
-#'       fuer "regime" (Standard 20).}
+#'     \item{vol_window}{Fensterlaenge der rollierenden Volatilitaet fuer "regime"
+#'       (Standard 20) in der Einheit von \code{vol_unit}; seit 1.6.5 hoechstens so lang wie die
+#'       Historie (bis 1.6.4 still gekuerzt). \code{n_regimes} ist seit 1.6.5 hoechstens
+#'       ein Regime je 10 Renditen.}
+#'     \item{vol_unit}{Seit 1.6.5, nur "regime": \code{"rows"} (Standard, Fenster in Zeilen wie bis 1.6.4)
+#'       oder \code{"days"} (Fenster in Kalendertagen ueber die Spalte \code{date} von \code{data}; Luecken
+#'       wie Wochenenden oder Feiertage zaehlen mit, das Fenster enthaelt die Renditen der letzten
+#'       \code{vol_window} Kalendertage).}
 #'     \item{tail_prob}{Tail-Wahrscheinlichkeit je Seite als Anteil fuer "evt"
 #'       und "tails" (Standard 0.05 = 5 Prozent).}
 #'     \item{both_tails}{Logisch, nur "evt": auch den rechten Tail mit einer
@@ -1252,6 +1378,11 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   Pfade erhalten Gewichte (Mittel 1), mit denen [bootstrap_probability()]
 #'   und \code{summary()} rechnen. Fuer "raw", "garch" und "gjr_garch" gibt es
 #'   kein Standardgitter (dann normaler Bootstrap).
+#'   Seit 1.6.5 ist die Summe der Pfade genau \code{n} (Rest nach groesstem Bruchteil verteilt;
+#'   bis 1.6.4 durch Runden etwas mehr oder weniger); Kombinationen ohne Pfad entfallen mit
+#'   einem Hinweis. Beim Verfahren "regime" rechnet die ESS mit den tatsaechlich verwendeten
+#'   Regimen und dem Fenster der Kombination. Unbekannte Namen in \code{params} und
+#'   \code{ess_grid} sind seit 1.6.5 ein Fehler (bis 1.6.4 still ignoriert).
 #'   Seit 1.6.4 braucht ess = TRUE mit dem Standardgitter bei stationary, block und circular mindestens 4 Renditen
 #'   (sonst Fehler).
 #' @param ess_grid Benannte Liste von Wertevektoren je Hyperparameter (z. B.
@@ -1286,7 +1417,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 #'   einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 #'   erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-#'   Eine feste Zahl rechnet wie bis 1.6.3; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
+#'   Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
 #'   begrenzt.
 #'   Das Ergebnis haengt nicht von cores ab.
 #'   Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
@@ -1382,6 +1513,7 @@ bootstrap <- function(data, config, method = "raw", n = 1000, params = list(), e
   t0 <- Sys.time()
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores, max_tries, progress, "bootstrap")
   cores <- setup$cores   # begrenzt (Entscheidung 41)
+  .boot_mem_check(setup, config, "bootstrap")   # seit 1.6.5 (FB-5)
   if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed, "bootstrap")   # NULL -> einmal k aus G
   streams <- .sl_streams(seed, setup$n_paths)                 # U_i = J^i(S_0) je Pfad
   res <- .par_lapply(seq_len(setup$n_paths), function(i)
@@ -1449,12 +1581,13 @@ bootstrap_validate <- function(result, min_rows = NULL, verbose = TRUE) {
   ok <- vapply(P, function(p) !is.null(p) && (is.matrix(p) || is.data.frame(p)) && nrow(p) > 0 &&
                  !anyNA(p) && all(is.finite(as.matrix(p))), TRUE)
   if (any(ok)) {
-    len <- vapply(P, function(p) if (is.null(p)) NA_integer_ else nrow(p), 0L)
+    # seit 1.6.5 (CR2-H-3): Laenge nur fuer Matrizen/Tabellen (bis 1.6.4 Rohfehler bei einem Vektor als Pfad)
+    len <- vapply(P, function(p) if (is.matrix(p) || is.data.frame(p)) nrow(p) else NA_integer_, 0L)
     mode_len <- as.numeric(names(sort(table(len[ok]), decreasing = TRUE))[1])
     ok <- ok & len == mode_len
     if (!is.null(min_rows)) ok <- ok & len >= min_rows
   }
-  if (!any(ok)) stop("Keine g\u00fcltigen Pfade nach Validierung \u00fcbrig")
+  if (!any(ok)) stop(chk_msg("b1.m_bootstrap_validate"))
   if (verbose && any(!ok)) cat(sprintf("%d von %d Pfaden entfernt\n", sum(!ok), length(ok)))
   result$paths <- P[ok]
   if (!is.null(result$weights)) { w <- result$weights[ok]; result$weights <- w / sum(w) * length(w) }
@@ -1518,6 +1651,8 @@ bootstrap_data <- function(result, i = 1L, dates = NULL, start = "2000-01-01") {
     chk_stop("pfad", "bootstrap_data")
   chk_date1(start, "bootstrap_data", "start")
   P <- if (is_res) result$paths[[i]] else result
+  # seit 1.6.5 (CR2-N-4): eine Pfadspalte 'date' ist ein Fehler (bis 1.6.4 R/Julia zwei Spalten date, Python ueberschrieb)
+  if ("date" %in% colnames(P)) chk_stop("b1.pfad_date", "bootstrap_data")
   chk_nofactor(dates, "bootstrap_data", "dates")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = nrow(P))
   if (length(dates) != nrow(P)) chk_stop("rs.dates_pfad", "bootstrap_data", length(dates), nrow(P))
@@ -1707,7 +1842,7 @@ bootstrap_study_metrics <- function(res) {
 #'   nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 #'   einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 #'   erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-#'   Eine feste Zahl rechnet wie bis 1.6.3; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
+#'   Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl; hoechstens Zahl der Prozessoren: mehr wird mit einem Hinweis
 #'   begrenzt.
 #'   Das Ergebnis haengt nicht von cores ab.
 #'   Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Prozesse Threads (mindestens 1).
@@ -1850,6 +1985,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     dir.create(chunk_dir, showWarnings = FALSE, recursive = TRUE)
     chunk_file <- function(ci) file.path(chunk_dir, paste0(.chunk_stem(ci, seed, keep_returns, keep_paths), "_r.rds"))
     .chunk_pruefen(chunk_dir, length(chunks), seed, keep_returns, keep_paths, "_r.rds")
+    .chunk_tmp_weg(chunk_dir, "_r.rds", fn)   # seit 1.6.5 (E-T2-5)
     # seit 1.6.4 (Entscheidung 29): vorhandene Zwischendateien vor dem Rechnen lesen; eine unvollstaendige oder
     # beschaedigte Datei bricht bei jedem cores mit derselben Meldung ab (bis 1.6.3 bei cores > 1 nur Warnung und
     # fehlende Pfade)
@@ -1878,7 +2014,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   eval_path <- function(i) {
     dp <- .draw_path(setup, i, streams[[i]], config, method, max_tries)
     if (is.null(dp$path)) return(NULL)
-    df0 <- data.frame(date = dates, as.data.frame(dp$path), check.names = FALSE)
+    df0 <- .path_frame(dates, dp$path)
     df_cut <- NULL   # Ausschnitt nach burn_in fuer Strategien ohne signal und map: seit 1.6.3 einmal je Pfad
     rows <- lapply(names(specs), function(nm) {
       sp <- specs[[nm]]; df <- df0; wr <- character()
@@ -1934,13 +2070,24 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   res <- unlist(res, recursive = FALSE)
   # seit 1.6.4 (Entscheidung 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte (bis 1.6.3 je
   # Sprache verschiedene falsche Tabellen); geprueft nach dem Rechnen, bei jedem cores gleich
-  for (r in res) for (nm in names(specs)) {
-    rw <- r$rows[[nm]]$row
+  # seit 1.6.5 (CR2-A-1, Entscheidung 185 K9): je Strategie dieselben Kennzahlen in jedem Pfad; andere Reihenfolge
+  # wird nach Namen eingeordnet (wie Julia), andere Menge ist ein Fehler (bis 1.6.4 R/Python still nach Position)
+  ref <- list()
+  for (ri in seq_along(res)) for (nm in names(specs)) {
+    rw <- res[[ri]]$rows[[nm]]$row
     if (is.null(rw)) next
     mn <- names(rw)[-(1:4)]
     if (anyNA(mn) || any(mn == "") || anyDuplicated(mn) ||
         any(mn %in% c("path", "weight", "combo", "tries", "strategy")))
       chk_stop("kennzahl_namen", fn)
+    if (is.null(ref[[nm]])) { ref[[nm]] <- mn; next }
+    if (identical(mn, ref[[nm]])) next
+    fehlt <- setdiff(ref[[nm]], mn); extra <- setdiff(mn, ref[[nm]])
+    if (length(fehlt) || length(extra))
+      chk_stop("b1.kennzahl_pfad", fn, as.integer(res[[ri]]$id), nm,
+               paste(c(if (length(fehlt)) paste0("fehlt ", paste(fehlt, collapse = ", ")),
+                       if (length(extra)) paste0("zus\u00e4tzlich ", paste(extra, collapse = ", "))), collapse = "; "))
+    res[[ri]]$rows[[nm]]$row <- rw[c(names(rw)[1:4], ref[[nm]])]
   }
   tab <- do.call(rbind, lapply(names(specs), function(nm) {
     m <- do.call(rbind, lapply(res, function(r) r$rows[[nm]]$row))
@@ -2012,6 +2159,20 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   ), class = "SimLevBootstrapStudy")
 }
 
+#' Pfad als Tabelle fuer simulation(): wie data.frame(date = dates, as.data.frame(P), check.names = FALSE), seit 1.6.5
+#' (Paket E, Studienkern) ohne die Umwege von data.frame() direkt gebaut (gleiches Objekt, identical()), wenn der Pfad
+#' keine Zeilennamen und eindeutige, nicht leere Spaltennamen ausser "date" hat; sonst ueber data.frame()
+#' @keywords internal
+#' @noRd
+.path_frame <- function(dates, P) {
+  cn <- colnames(P)
+  if (!is.null(rownames(P)) || is.null(cn) || anyNA(cn) || any(cn == "") || anyDuplicated(cn) || any(cn == "date") ||
+      !is.double(P) || length(dates) != nrow(P))
+    return(data.frame(date = dates, as.data.frame(P), check.names = FALSE))
+  structure(c(list(date = dates), lapply(seq_len(ncol(P)), function(j) P[, j])), names = c("date", cn),
+            row.names = c(NA_integer_, -nrow(P)), class = "data.frame")
+}
+
 #' Chunk-Dateien von bootstrap_study(chunk_dir) (seit 1.6.3 je Sprache)
 #'
 #' Name: <Stamm><Kennung>, Stamm chunk_<Nr>_seed<Seed>[_<keep_returns>][_keep<k>], Kennung je Sprache: R "_r.rds"
@@ -2034,6 +2195,17 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
       if (file.exists(file.path(dir, paste0(st, k)))) stop(.chunk_meldung(paste0(st, k)))
   }
   invisible(NULL)
+}
+
+# seit 1.6.5 (E-T2-5): verwaiste Zwischendateien <Chunk-Datei>.tmp<Prozessnummer> der eigenen Sprache (Abbruch
+# waehrend des Schreibens) vor dem Rechnen entfernen, mit Hinweis; bis 1.6.4 blieben sie liegen (nie gelesen)
+.chunk_tmp_weg <- function(dir, eigen, fn) {
+  pat <- paste0("^chunk_.*", gsub(".", "\\.", eigen, fixed = TRUE), "\\.tmp[0-9]+$")
+  f <- list.files(dir, pattern = pat)
+  if (!length(f)) return(invisible(0L))
+  ok <- file.remove(file.path(dir, f))
+  if (any(ok)) message(chk_msg("b1.chunk_tmp", fn, sum(ok)))
+  invisible(sum(ok))
 }
 
 #' Anzahl behaltener Pfade aus keep_paths
@@ -2148,8 +2320,10 @@ bootstrap_probability <- function(study, ..., thresholds = NULL) {
   env <- parent.frame()                                   # freie Variablen im Aufrufer suchen
   conds <- as.list(substitute(list(...)))[-1]
   if (!length(conds) && is.null(thresholds)) chk_stop("e2.bedingung", "bootstrap_probability")   # seit 1.6.4 (vorher NULL)
-  if (is.null(names(conds))) names(conds) <- vapply(conds, function(e) paste(deparse(e), collapse = ""), "")
-  names(conds)[names(conds) == ""] <- vapply(conds[names(conds) == ""], function(e) paste(deparse(e), collapse = ""), "")
+  # seit 1.6.5 (CR2-H-3): Name wie eingegeben ohne Umbruch von deparse (bis 1.6.4 mit eingeschobenen Leerzeichen)
+  dp <- function(e) paste(deparse(e, width.cutoff = 500L), collapse = " ")
+  if (is.null(names(conds))) names(conds) <- vapply(conds, dp, "")
+  names(conds)[names(conds) == ""] <- vapply(conds[names(conds) == ""], dp, "")
   tab <- study$results
   out <- do.call(rbind, lapply(unique(tab$strategy), function(s) {
     d <- tab[tab$strategy == s, , drop = FALSE]
@@ -2219,6 +2393,7 @@ NULL
 #' @export
 summary.SimLevBootstrapStudy <- function(object, metrics = c("cagr", "ttwror", "max_drawdown", "sharpe", "ulcer_index", "final_value"),
                                          probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...) {
+  probs <- .check_probs(probs, "summary")   # seit 1.6.5 (CR2-X5-3): Pruefung vorab, doppelte Werte einmal
   tab <- object$results
   metrics <- intersect(metrics, names(tab))
   dist <- do.call(rbind, lapply(object$strategies, function(s) {
@@ -2226,7 +2401,7 @@ summary.SimLevBootstrapStudy <- function(object, metrics = c("cagr", "ttwror", "
     do.call(rbind, lapply(metrics, function(m) {
       q <- .wquantile(d[[m]], d$weight, probs)
       data.frame(strategy = s, metric = m, mean = stats::weighted.mean(d[[m]], d$weight, na.rm = TRUE),
-                 t(setNames(q, sprintf("q%02d", round(100 * probs)))), check.names = FALSE)
+                 t(setNames(q, .q_names(probs))), check.names = FALSE)
     }))
   }))
   paired <- NULL
@@ -2251,6 +2426,21 @@ summary.SimLevBootstrapStudy <- function(object, metrics = c("cagr", "ttwror", "
               benchmark = object$benchmark, path_length = object$path_length)
   class(out) <- "summary.SimLevBootstrapStudy"
   out
+}
+
+# Spaltennamen der Quantile (seit 1.6.5, CR2-S-3/X5-3, Entscheidung 189): ganze Prozente wie bisher "q05", sonst mit so
+# vielen Nachkommastellen wie noetig ("q02.5", "q97.5", "q00.5"); bis 1.6.4 gerundet (2.5 % -> "q02", doppelte Namen)
+.q_names <- function(probs) vapply(100 * probs, function(p) {
+  if (abs(p - round(p)) < 1e-8) return(sprintf("q%02d", as.integer(round(p))))
+  d <- 1L
+  while (d < 8L && abs(p - round(p, d)) >= 1e-8) d <- d + 1L
+  sprintf(paste0("q%0", d + 3L, ".", d, "f"), p)
+}, "")
+# probs der Zusammenfassungen: Zahlen von 0 bis 1 ohne NA (seit 1.6.5 vorab; bis 1.6.4 Rohfehler), doppelte einmal
+.check_probs <- function(probs, fn) {
+  if (!is.numeric(probs) || is.factor(probs) || !length(probs) || anyNA(probs) || any(probs < 0 | probs > 1))
+    chk_stop("b1.probs", fn)
+  unique(as.numeric(probs))
 }
 
 #' @rdname SimLevBootstrap-methods
@@ -2299,13 +2489,21 @@ print.SimLevBootstrapStudy <- function(x, ...) {
 #' @export
 plot.SimLevBootstrapStudy <- function(x, metric = "cagr", ...) {
   tab <- x$results
+  # seit 1.6.5 (CR2-X4-3): metric aus den Zahlenspalten von results; Strategien mit weniger als 2 endlichen Werten
+  # fehlen mit Hinweis (Legende "(nicht definiert)"), sind es alle: Fehler (bis 1.6.4 innere Meldung von bw.nrd0)
+  num <- setdiff(names(tab)[vapply(tab, is.numeric, NA)], c("path", "weight", "combo", "tries"))
+  chk_choice(metric, "plot", "metric", num)
   dl <- lapply(x$strategies, function(s) tab[[metric]][tab$strategy == s])
-  rng <- range(unlist(dl), finite = TRUE)
+  ok <- vapply(dl, function(v) sum(is.finite(v)) >= 2L, NA)
+  if (!any(ok)) chk_stop("b1.plot_keine", "plot", metric)
+  if (!all(ok)) message(chk_msg("b1.plot_undef", "plot", metric, paste(x$strategies[!ok], collapse = ", ")))
+  rng <- range(unlist(dl[ok]), finite = TRUE)
   cols <- grDevices::hcl.colors(length(dl), "Dark 3")
-  dens <- lapply(dl, function(v) .sl_kde(v[is.finite(v)]))   # Gauss-Kerndichte (slc; nur Grafik)
+  dens <- lapply(dl[ok], function(v) .sl_kde(v[is.finite(v)]))   # Gauss-Kerndichte (slc; nur Grafik)
   plot(NULL, xlim = rng, ylim = c(0, max(vapply(dens, function(d) max(d$y), 0))),
        xlab = metric, ylab = "Dichte", main = sprintf("Verteilung %s (%s, %d Pfade)", metric, x$method, x$n_paths), ...)
-  for (i in seq_along(dens)) graphics::lines(dens[[i]], col = cols[i], lwd = 1.5)
-  graphics::legend("topright", legend = x$strategies, col = cols, lwd = 1.5, bty = "n")
+  for (i in seq_along(dens)) graphics::lines(dens[[i]], col = cols[ok][i], lwd = 1.5)
+  graphics::legend("topright", legend = ifelse(ok, x$strategies, paste(x$strategies, "(nicht definiert)")), col = cols,
+                   lwd = 1.5, lty = ifelse(ok, 1, 0), bty = "n")
   invisible(x)
 }

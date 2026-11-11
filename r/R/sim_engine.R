@@ -27,6 +27,15 @@
 #' @noRd
 .sim_engine_run <- function(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
                             liquidate, stopp_date, details, harvest_day) {
+  ei <- .sim_engine_input(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                          liquidate, stopp_date, details, harvest_day)
+  .sim_engine_finish(.Call(C_sim_engine_run, ei$inp), sim_mem, ei, ei$env, fl)
+}
+
+# Eingabe der Tagesengine (seit 1.6.5 eigene Funktion, Paket E: der Studienkern R/sim_prepared.R merkt sie sich je
+# Strategie und tauscht je Pfad nur Kurse und Signale); Rueckgabe list(inp, nm, person, env, tax_regimes)
+.sim_engine_input <- function(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                              liquidate, stopp_date, details, harvest_day) {
   nm <- fl$flag_assets
   n <- length(fl$flag_date)
   mk <- sim_mem[["market"]]
@@ -90,7 +99,7 @@
     }),
     base_rates = if (person) lapply(nm, function(a) as.numeric(mk[[a]][["base_rates"]])),
     ai = ai, ad = ad, ci = as.integer(ci), cd = as.numeric(cd),
-    fees = c(fee(cfg$fee_order), fee(cfg$fee_dca)), tot0 = as.numeric(tot0),
+    fees = c(fee(cfg$fee_order), fee(cfg$fee_dca), fee(cfg$fee_cust)), tot0 = as.numeric(tot0),   # seit 1.6.5 15 Werte
     tariff_par = as.numeric(tariff_par), zve = as.numeric(zve),
     pi = as.integer(pint), pd = as.numeric(pdbl),
     start = vapply(nm, function(a) as.numeric(as_[[a]][["start"]]), numeric(1), USE.NAMES = FALSE),
@@ -100,7 +109,13 @@
     # seit 1.6.3 kompakte Ausgabe: je Asset nur die Zahl der Kaeufe/Verkaeufe und (tax_mode = "person") die offenen
     # Lots als Spalten date, units, price, vp; Einzelobjekte je Lot, Verkauf und Steuerbuchung las niemand (R-r-1)
     compact = if (person) 2L else 1L)
-  out <- .Call(C_sim_engine_run, inp)
+  list(inp = inp, nm = nm, person = person, env = env, tax_regimes = tax_regimes)
+}
+
+# Ergebnis der Tagesengine in sim_mem, Tarifjahre (env), Gebuehren und Meldungen uebernehmen (seit 1.6.5 eigene
+# Funktion, Paket E); env: Tarifzustand dieses Laufs (cfg$tariff_env bzw. im Studienkern eine frische Kopie)
+.sim_engine_finish <- function(out, sim_mem, ei, env, fl) {
+  nm <- ei$nm; person <- ei$person; tax_regimes <- ei$tax_regimes
   for (k in seq_along(nm)) {
     a <- nm[k]
     # Zustand je Asset: count, price, worth, money, total, target, actual, differ; gelesen wird nur money
@@ -138,6 +153,10 @@
   for (i in seq_along(ev$code)) {
     code <- ev$code[i]
     a <- if (ev$asset[i] > 0L) nm[ev$asset[i]] else NA_character_
+    if (code == 7L) {   # seit 1.6.5 (CR2-G-6, K36): Hinweis zu unbrauchbaren event_weight an Ereignistagen
+      message(chk_msg("a.event_gewicht", format(ev$d0[i]), dstr(ev$day[i])))
+      next
+    }
     if (code >= 200L) {
       .sim_engine_detail(code, a, ev$aux[i], ev_vals[ev$v_off[i] + seq_len(ev$nv[i])],
                          ev_ints[ev$y_off[i] + seq_len(ev$ny[i])], nm, ev$day[i], flag_date)
@@ -149,8 +168,13 @@
       "3" = simpleWarning(sprintf(m[["3"]], a, ev$d0[i])),
       "4" = simpleWarning(m[["4"]], cl),
       "5" = {
-        simpleWarning(sprintf(m[["5"]], .sim_engine_label(ev$aux[i], ev_ints[ev$y_off[i] + seq_len(ev$ny[i])]), ev$d0[i],
-                              dstr(ev$day[i]), ev$d1[i], a))
+        # seit 1.6.5 (Paket E): nicht gedeckte Depotgebuehr (Bezeichnung 3) als offene Gebuehr statt Steuerschuld
+        if (ev$aux[i] == 3L)
+          simpleWarning(chk_msg("e.gebuehr_ungedeckt", .sim_engine_label(3L, integer(0)), sprintf("%.2f", ev$d0[i]),
+                                dstr(ev$day[i]), sprintf("%.2f", ev$d1[i]), a))
+        else
+          simpleWarning(sprintf(m[["5"]], .sim_engine_label(ev$aux[i], ev_ints[ev$y_off[i] + seq_len(ev$ny[i])]), ev$d0[i],
+                                dstr(ev$day[i]), ev$d1[i], a))
       },
       "6" = simpleWarning(paste0(sprintf(m[["6"]], ev$d0[i], ev$d1[i]), m[["6.rest"]])),
       stop(sprintf(m[["unbekannt"]], code)))
@@ -169,7 +193,8 @@
 # Bezeichnung einer Steuerzahlung (.pay_tax label): 0 Vorabpauschale, 1 Paragraf-23-Steuer, 2 Veranlagung der Jahre
 .sim_engine_label <- function(aux, years) {
   m <- .MELD_ENGINE_LABEL
-  switch(as.character(aux), "0" = m[["0"]], "1" = m[["1"]], sprintf(m[["2"]], paste(years, collapse = "/")))
+  switch(as.character(aux), "0" = m[["0"]], "1" = m[["1"]], "3" = chk_msg("a.label_depot"),   # 3 seit 1.6.5
+         sprintf(m[["2"]], paste(years, collapse = "/")))
 }
 
 #' details-Ausgabe eines Ereignisses (DT_* in engine_core_impl.h) wortgleich zu den bisherigen cat()-Aufrufen
@@ -214,8 +239,11 @@
     "222" = cat(sprintf(m[["222"]], v[1])),
     "223" = cat(sprintf(m[["223"]], v[1], name)),
     "224" = cat(sprintf(m[["224"]], name, v[1], date)),
-    "225" = cat(sprintf(m[["225"]], .sim_engine_label(aux, ints), v[1], name, date)),
-    "226" = cat(sprintf(m[["226"]], .sim_engine_label(aux, ints), v[1], date)),
+    # seit 1.6.5 (Entscheidung 194): Zahlungen der Depotgebuehr (Bezeichnung 3) mit dem Praefix "Depotgebuehr:"
+    "225" = cat(if (aux == 3) chk_msg("a.dt_gebuehr_zahlung", sprintf("%.2f", v[1]), name, date)
+                else sprintf(m[["225"]], .sim_engine_label(aux, ints), v[1], name, date)),
+    "226" = cat(if (aux == 3) chk_msg("a.dt_gebuehr_teil", sprintf("%.2f", v[1]), date)
+                else sprintf(m[["226"]], .sim_engine_label(aux, ints), v[1], date)),
     "227" = cat(sprintf(m[["227"]], v[1], .sim_engine_label(aux, ints))),
     "228" = cat(sprintf(m[["228"]], as.integer(v[1]), v[2], v[3], v[4], if (bitwAnd(aux, 1L)) sprintf(m[["228.guenstiger"]], v[5]) else "",
                         date, if (bitwAnd(aux, 2L)) m[["228.asset"]] else m[["228.gleich"]])),
@@ -223,6 +251,10 @@
     "230" = cat(sprintf(m[["230"]], v[1], name, date)),
     "231" = cat(sprintf(m[["231"]], v[1], date)),
     "232" = cat(sprintf(m[["232"]], name, format(structure(v[1], class = "Date")), v[2], v[3], v[4], v[5], date)),
+    # seit 1.6.5: Zahlung aus dem Geld eines anderen Assets (MA1-2) und Depotgebuehr (Entscheidung 150)
+    "233" = cat(if (aux == 3) chk_msg("a.dt_gebuehr_anderes", sprintf("%.2f", v[1]), nm[v[2] + 1], name, ds)
+                else chk_msg("a.dt_zahlung_anderes", .sim_engine_label(aux, ints), sprintf("%.2f", v[1]), nm[v[2] + 1], name, ds)),
+    "234" = cat(chk_msg("a.dt_depot", sprintf("%.2f", v[1]), sprintf("%.2f", v[2]), sprintf("%.4f", v[3]), ds)),
     "240" = {
       cat(sprintf(m[["240.1"]]))
       cat(sprintf(m[["240.2"]], as.integer(v[1]), as.integer(v[2])))

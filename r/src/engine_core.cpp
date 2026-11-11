@@ -102,24 +102,44 @@ extern "C" SEXP C_sim_dates_flags(SEXP inp) {
   });
 }
 
-extern "C" SEXP C_sim_engine_run(SEXP inp) {
-  return sl::call([&]() {
+namespace {
+
+// Eingabe der Tagesengine aus der Liste inp (Aufbau in .sim_engine_input, R/sim_engine.R) mit den Puffern, auf die
+// Input und PrepFlat zeigen; report: die R-Vektoren, die der Kern beschreibt (seit 1.6.5 eigene Hilfe, gemeinsam fuer
+// C_sim_engine_run und C_sim_run_prepared)
+struct EngineIn {
+  simlev_engine::Input I;
+  simlev_prepare::PrepFlat F;
+  std::vector<const double*> p_price, p_sb, p_ss, p_ew, p_br;
+  std::vector<std::vector<double>> store;
+  std::vector<int> ai;
+  std::vector<double*> reps;
+  SEXP report = R_NilValue;
+  int n = 0, na = 0;
+};
+
+void engine_in(SEXP inp, EngineIn& X) {
     using namespace simlev_engine;
     const int n = sl::as_int(el(inp, "n"));
+    X.n = n;
     SEXP prices = el(inp, "price"), sb = el(inp, "sig_buy"), ss = el(inp, "sig_sell"), ew = el(inp, "event_w"),
          br = el(inp, "base_rates");
     const int na = (int) Rf_xlength(prices);
+    X.na = na;
     if (n < 1 || na < 1 || Rf_xlength(sb) != na || Rf_xlength(ss) != na || (!Rf_isNull(ew) && Rf_xlength(ew) != na) ||
         (!Rf_isNull(br) && Rf_xlength(br) != na))
       sl::stop("sim_engine_run: Asset-Listen passen nicht");
-    Input I;
+    Input& I = X.I;
     I.n = n;
     I.na = na;
     I.day = real_of(inp, "day", n);
-    std::vector<const double*> p_price((std::size_t) na), p_sb((std::size_t) na), p_ss((std::size_t) na),
-        p_ew((std::size_t) na, nullptr), p_br((std::size_t) na, nullptr);
-    std::vector<std::vector<double>> store((std::size_t) (2 * na));
-    std::vector<int> ai(AI_N * (std::size_t) na);
+    std::vector<const double*>&p_price = X.p_price, &p_sb = X.p_sb, &p_ss = X.p_ss, &p_ew = X.p_ew, &p_br = X.p_br;
+    p_price.assign((std::size_t) na, nullptr); p_sb.assign((std::size_t) na, nullptr);
+    p_ss.assign((std::size_t) na, nullptr); p_ew.assign((std::size_t) na, nullptr); p_br.assign((std::size_t) na, nullptr);
+    std::vector<std::vector<double>>& store = X.store;
+    store.assign((std::size_t) (2 * na), std::vector<double>());
+    std::vector<int>& ai = X.ai;
+    ai.assign(AI_N * (std::size_t) na, 0);
     const int* ai_in = int_of(inp, "ai", AI_N * (R_xlen_t) na);
     for (std::size_t k = 0; k < ai.size(); k++) ai[k] = ai_in[k];
     for (int a = 0; a < na; a++) {
@@ -152,7 +172,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     I.ad = real_of(inp, "ad", AD_N * (R_xlen_t) na);
     I.ci = int_of(inp, "ci", CI_N);
     I.cd = real_of(inp, "cd", CD_N);
-    I.fees = real_of(inp, "fees", 10);
+    I.fees = real_of(inp, "fees", 15);   // seit 1.6.5 mit Depotgebuehr (Entscheidung 150)
     I.tot0 = real_of(inp, "tot0", TT_N);
     SEXP tp = el(inp, "tariff_par"), zv = el(inp, "zve");
     if (TYPEOF(tp) != REALSXP || TYPEOF(zv) != REALSXP || Rf_xlength(zv) % 2 != 0)
@@ -163,8 +183,9 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     I.n_zve = Rf_xlength(zv) / 2;
     // Report-Vektoren: R-Vektoren, die der Kern direkt beschreibt (Tag 1 setzt die Vorbereitung)
     SEXP rep_names = names_of({"worth", "money", "flows", "total", "share"});
-    SEXP report = sl::alloc(VECSXP, na);
-    std::vector<double*> reps(5 * (std::size_t) na);
+    SEXP report = X.report = sl::alloc(VECSXP, na);
+    std::vector<double*>& reps = X.reps;
+    reps.assign(5 * (std::size_t) na, nullptr);
     for (int a = 0; a < na; a++) {
       SEXP r = sl::alloc(VECSXP, 5);
       for (int k = 0; k < 5; k++) {
@@ -179,7 +200,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     }
     I.reports = reps.data();
     // Vorbereitung (prepare_core_impl.h): Termine, Tagesflags, Startgewichte
-    simlev_prepare::PrepFlat F;
+    simlev_prepare::PrepFlat& F = X.F;
     F.pi = int_of(inp, "pi", simlev_prepare::PI_N);
     F.pd = real_of(inp, "pd", simlev_prepare::PD_N);
     F.start = real_of(inp, "start", na);
@@ -188,10 +209,12 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     if (!Rf_isNull(evc)) F.event = int_of(inp, "event", n);
     sched_days(inp, "d_days", "d_dcode", F.d_nd, F.d_days, F.d_dcode);
     sched_days(inp, "b_days", "b_dcode", F.b_nd, F.b_days, F.b_dcode);
-    Engine E;
-    const int bad = E.setup_prepared(I, F);
-    if (bad) sl::stop("sim_engine_run: Eingabe passt nicht (%d)", bad);
-    const int rc = E.run();
+}
+
+// Ergebnisliste der Tagesengine nach dem Lauf (rc: Rueckgabe von Engine::run)
+SEXP engine_out(simlev_engine::Engine& E, int rc, SEXP inp, EngineIn& X) {
+    using namespace simlev_engine;
+    const int na = X.na;
     // Ergebnis
     std::vector<double> buf(8 * (std::size_t) na);
     E.status_out(buf.data());
@@ -270,7 +293,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     }
     SEXP res = sl::alloc(VECSXP, 16);
     SET_VECTOR_ELT(res, 0, status);
-    SET_VECTOR_ELT(res, 1, report);
+    SET_VECTOR_ELT(res, 1, X.report);
     SET_VECTOR_ELT(res, 2, px_out);
     SET_VECTOR_ELT(res, 3, totals);
     SET_VECTOR_ELT(res, 4, num_scalar(E.fee_paid));
@@ -289,6 +312,19 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
                                               "ks", "events", "ev_ints", "ev_vals", "error", "flags", "n_buys",
                                               "n_sells", "open_lots"}));
     return res;
+}
+
+}  // namespace
+
+extern "C" SEXP C_sim_engine_run(SEXP inp) {
+  return sl::call([&]() {
+    EngineIn X;
+    engine_in(inp, X);
+    simlev_engine::Engine E;
+    const int bad = E.setup_prepared(X.I, X.F);
+    if (bad) sl::stop("sim_engine_run: Eingabe passt nicht (%d)", bad);
+    const int rc = E.run();
+    return engine_out(E, rc, inp, X);
   });
 }
 
@@ -314,40 +350,9 @@ SEXP msgs_out(const std::vector<simlev_eval::Msg>& m, SEXP& vals) {
   }
   return codes;
 }
-}  // namespace
-
-// Auswertung von simulation(): inp = list(n, total, flows, worth, money, price (je Asset Reihen),
-// day, filled (0/1 oder NULL), sc = c(start_date, stopp_date, start_value, tax_unpaid), status_money, n_buys,
-// n_sells (je Asset), rf (Zahlen oder NULL), rf_ok)
-extern "C" SEXP C_sim_evaluate(SEXP inp) {
-  return sl::call([&]() {
+// Ergebnisliste der Auswertung (seit 1.6.5 eigene Hilfe, gemeinsam fuer C_sim_evaluate und C_sim_run_prepared)
+SEXP eval_out(const simlev_eval::Result& R) {
     using namespace simlev_eval;
-    const R_xlen_t n = sl::as_int(el(inp, "n"));
-    const R_xlen_t na = Rf_xlength(el(inp, "total"));
-    if (n < 1 || na < 1) sl::stop("sim_evaluate: Eingabe passt nicht");
-    const std::vector<const double*> total = series(inp, "total", n, na), flows = series(inp, "flows", n, na),
-                                     worth = series(inp, "worth", n, na), money = series(inp, "money", n, na),
-                                     price = series(inp, "price", n, na);
-    In I;
-    I.n = n; I.na = na;
-    I.total = total.data(); I.flows = flows.data(); I.worth = worth.data(); I.money = money.data();
-    I.price = price.data();
-    I.day = real_of(inp, "day", n);
-    if (!Rf_isNull(el(inp, "filled"))) I.filled = int_of(inp, "filled", n);
-    const double* sc = real_of(inp, "sc", 4);
-    I.start_date = sc[0]; I.stopp_date = sc[1]; I.start_value = sc[2]; I.tax_unpaid = sc[3];
-    I.status_money = real_of(inp, "status_money", na);
-    I.n_buys = real_of(inp, "n_buys", na);
-    I.n_sells = real_of(inp, "n_sells", na);
-    SEXP rf = el(inp, "rf");
-    if (!Rf_isNull(rf)) {
-      if (TYPEOF(rf) != REALSXP) sl::stop("sim_evaluate: rf passt nicht");
-      I.rf = REAL(rf);
-      I.n_rf = Rf_xlength(rf);
-    }
-    I.rf_ok = sl::as_int(el(inp, "rf_ok"));
-    Result R;
-    if (evaluate(I, R) == 2) sl::stop("sim_evaluate: Eingabe passt nicht");
     SEXP res = sl::alloc(VECSXP, 17);
     SET_VECTOR_ELT(res, 0, num_vec(R.total_worth));
     SET_VECTOR_ELT(res, 1, num_vec(R.twr_index));
@@ -384,6 +389,42 @@ extern "C" SEXP C_sim_evaluate(SEXP inp) {
                                               "stats", "ints", "buys", "sells", "why_i", "why_v", "um_i", "um_v",
                                               "msg_code", "msg_v", "err"}));
     return res;
+}
+}  // namespace
+
+// Auswertung von simulation(): inp = list(n, total, flows, worth, money, price (je Asset Reihen),
+// day, filled (0/1 oder NULL), sc = c(start_date, stopp_date, start_value, tax_unpaid), status_money, n_buys,
+// n_sells (je Asset), rf (Zahlen oder NULL), rf_ok)
+extern "C" SEXP C_sim_evaluate(SEXP inp) {
+  return sl::call([&]() {
+    using namespace simlev_eval;
+    const R_xlen_t n = sl::as_int(el(inp, "n"));
+    const R_xlen_t na = Rf_xlength(el(inp, "total"));
+    if (n < 1 || na < 1) sl::stop("sim_evaluate: Eingabe passt nicht");
+    const std::vector<const double*> total = series(inp, "total", n, na), flows = series(inp, "flows", n, na),
+                                     worth = series(inp, "worth", n, na), money = series(inp, "money", n, na),
+                                     price = series(inp, "price", n, na);
+    In I;
+    I.n = n; I.na = na;
+    I.total = total.data(); I.flows = flows.data(); I.worth = worth.data(); I.money = money.data();
+    I.price = price.data();
+    I.day = real_of(inp, "day", n);
+    if (!Rf_isNull(el(inp, "filled"))) I.filled = int_of(inp, "filled", n);
+    const double* sc = real_of(inp, "sc", 4);
+    I.start_date = sc[0]; I.stopp_date = sc[1]; I.start_value = sc[2]; I.tax_unpaid = sc[3];
+    I.status_money = real_of(inp, "status_money", na);
+    I.n_buys = real_of(inp, "n_buys", na);
+    I.n_sells = real_of(inp, "n_sells", na);
+    SEXP rf = el(inp, "rf");
+    if (!Rf_isNull(rf)) {
+      if (TYPEOF(rf) != REALSXP) sl::stop("sim_evaluate: rf passt nicht");
+      I.rf = REAL(rf);
+      I.n_rf = Rf_xlength(rf);
+    }
+    I.rf_ok = sl::as_int(el(inp, "rf_ok"));
+    Result R;
+    if (evaluate(I, R) == 2) sl::stop("sim_evaluate: Eingabe passt nicht");
+    return eval_out(R);
   });
 }
 
@@ -400,6 +441,43 @@ extern "C" SEXP C_sim_xirr(SEXP t, SEXP amount, SEXP end_value, SEXP horizon) {
     SET_VECTOR_ELT(res, 0, num_scalar(v));
     SEXP mv;
     SET_VECTOR_ELT(res, 1, msgs_out(m, mv));
+    return res;
+  });
+}
+
+// Vorbereiteter Kernlauf (seit 1.6.5, Paket E, Entscheidung 176): Tagesengine und Auswertung in einem Aufruf
+// (core/evaluate_core_impl.h, simlev_run::run_prepared; R-Seite .sim_prep_run in R/sim_prepared.R).
+// inp wie C_sim_engine_run; ev = list(day, filled (0/1 oder NULL), sc = c(start_date, stopp_date, start_value),
+// rf (Zahlen oder NULL), rf_ok). Rueckgabe list(engine = wie C_sim_engine_run, eval = wie C_sim_evaluate bzw. NULL
+// nach einem Abbruch der Engine).
+extern "C" SEXP C_sim_run_prepared(SEXP inp, SEXP ev) {
+  return sl::call([&]() {
+    EngineIn X;
+    engine_in(inp, X);
+    simlev_run::EvalStatic S;
+    S.day = real_of(ev, "day", X.n);
+    if (!Rf_isNull(el(ev, "filled"))) S.filled = int_of(ev, "filled", X.n);
+    const double* sc = real_of(ev, "sc", 3);
+    S.start_date = sc[0]; S.stopp_date = sc[1]; S.start_value = sc[2];
+    SEXP rf = el(ev, "rf");
+    if (!Rf_isNull(rf)) {
+      if (TYPEOF(rf) != REALSXP) sl::stop("sim_run_prepared: rf passt nicht");
+      S.rf = REAL(rf);
+      S.n_rf = Rf_xlength(rf);
+    }
+    S.rf_ok = sl::as_int(el(ev, "rf_ok"));
+    simlev_engine::Engine E;
+    simlev_eval::Result R;
+    int bad = 0;
+    const int rc = simlev_run::run_prepared(E, X.I, X.F, S, R, &bad);
+    if (rc == 1) sl::stop("sim_engine_run: Eingabe passt nicht (%d)", bad);
+    if (rc == 3) sl::stop("sim_evaluate: Eingabe passt nicht");
+    SEXP eo = engine_out(E, rc == 2 ? 1 : 0, inp, X);
+    SEXP vo = rc == 0 ? eval_out(R) : R_NilValue;
+    SEXP res = sl::alloc(VECSXP, 2);
+    SET_VECTOR_ELT(res, 0, eo);
+    SET_VECTOR_ELT(res, 1, vo);
+    sl::set_attr_sym(res, R_NamesSymbol, names_of({"engine", "eval"}));
     return res;
   });
 }

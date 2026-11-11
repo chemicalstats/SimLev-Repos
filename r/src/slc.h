@@ -67,6 +67,9 @@ enum { SL_OK = 0, SL_EARG = 1, SL_ENONFINITE = 2, SL_ENOTPD = 3, SL_ESINGULAR = 
 void        sl_ctx_init(sl_ctx *cx) SL_NOTHROW;                 /* alles leer, interrupted = NULL */
 sl_ctx     *sl_ctx_alloc(void) SL_NOTHROW;                      /* für Hosts ohne Kenntnis des Layouts */
 void        sl_ctx_free(sl_ctx *cx) SL_NOTHROW;
+/* Abbruchhaken für Hosts ohne Kenntnis des Layouts (seit 1.6.5, Julia): f(host) != 0 bei Benutzerabbruch; der Kern
+ * ruft f nur aus dem aufrufenden Thread */
+void        sl_ctx_set_interrupt(sl_ctx *cx, int (*f)(void *host), void *host) SL_NOTHROW;
 const char *sl_ctx_msg(const sl_ctx *cx) SL_NOTHROW;
 int         sl_ctx_nwarn(const sl_ctx *cx) SL_NOTHROW;
 const char *sl_ctx_warn(const sl_ctx *cx, int i) SL_NOTHROW;    /* i = 0 ... nwarn-1 */
@@ -86,7 +89,7 @@ uint64_t sl_rng_next(sl_rng *r) SL_NOTHROW;
 void     sl_rng_jump(sl_rng *r) SL_NOTHROW;                     /* 2^128 Schritte weiter */
 int      sl_rng_streams(sl_ctx *cx, const sl_rng *base, int64_t n, sl_rng *out) SL_NOTHROW; /* out[i] = J^(i+1)(base) */
 int32_t  sl_rng_seed31(sl_rng *global) SL_NOTHROW;              /* nächster Startwert 0 ... 2^31-1: next() >> 33 */
-double   sl_unif01(sl_rng *r) SL_NOTHROW;                       /* (floor(x / 2^11) + 1/2) 2^-53 in (0, 1) */
+double   sl_unif01(sl_rng *r) SL_NOTHROW;                       /* (floor(x / 2^11) + 1/2) 2^-53, höchstens 1 - 2^-53: in (0, 1) */
 int      sl_runif(sl_ctx *cx, sl_rng *r, int64_t n, double a, double b, double *out) SL_NOTHROW;
 
 /* ── Ziehungen (slc_sample.cpp) ─────────────────────────────────────────── */
@@ -99,6 +102,11 @@ int sl_rexp(sl_ctx *cx, sl_rng *r, int64_t n, double rate, double *out) SL_NOTHR
 int sl_rgeom(sl_ctx *cx, sl_rng *r, int64_t n, double p, double *out) SL_NOTHROW;
 int sl_rgamma(sl_ctx *cx, sl_rng *r, int64_t n, double shape, double scale, double *out) SL_NOTHROW;
 int sl_rchisq(sl_ctx *cx, sl_rng *r, int64_t n, double df, double *out) SL_NOTHROW;
+/* Länderblöcke von bootstrap_pooled (seit 1.6.5, Paket E, K40/CR2-6): n Pfade zu nper Perioden; je Block Land
+ * sample(nc, 1, prob = cw), Länge 1 + rgeom(1, 1 / L), Startzeile sample(nr[Land], 1) (dieselben Züge in derselben
+ * Reihenfolge wie die Schleife der Sprachen bis 1.6.4); ctry, row je nper x n (spaltenweise, 1-basiert) */
+int sl_pooled_draw(sl_ctx *cx, sl_rng *r, int64_t nc, const int64_t *nr, const double *cw, double L, int64_t nper,
+                   int64_t n, int32_t *ctry, int32_t *row) SL_NOTHROW;
 
 /* ── Normalverteilung (slc_normal.cpp) ─────────────────────────────────── */
 

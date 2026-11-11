@@ -34,7 +34,7 @@ from .svg import (_AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana
 from ._util import _num_col
 from .data_prep import _e5_choice  # seit 1.6.4 (K43 T2-N4)
 from ._util import _cagr_q, _pow1m
-from ._pruefen import chk_col_nofactor, chk_col_type, chk_int1, chk_max, chk_num1, chk_scalar, chk_stop  # seit 1.6.4
+from ._pruefen import chk_col_nofactor, chk_col_type, chk_int1, chk_max, chk_msg, chk_num1, chk_scalar, chk_stop  # seit 1.6.4
 from ._pruefen import SL_MAX_JAHRE, SL_MAX_N  # seit 1.6.4 (Entscheidung 46)
 
 __all__ = ["signal_analysis", "sharpe_test", "overfit_reality_check", "sharpe_min_track_record", "result_heatmap",
@@ -81,7 +81,7 @@ def _ret_from(x, frequency, inflation=None):
         e = _last_of_key(key)
         d = s["date"][e]
         v = s["value"][e]
-    return {"r": v[1:] / v[:-1] - 1, "date": _dates(d[1:])}
+    return {"r": v[1:] / v[:-1] - 1, "date": _dates(d[1:]), "lvl": v, "ldate": _dates(d)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -141,6 +141,16 @@ def _st(z):
     sd = r_sd(z)
     return {"n": float(n), "mean": m, "median": r_median(z), "win_rate": _mean_lgl(z > 0), "sd": sd,
             "t": m / (sd / math.sqrt(n))}
+
+
+def _sa_lrv(a, b, L):
+    """Langfristige Kovarianz mit Bartlett-Gewichten (R ``.sa_lrv``, seit 1.6.5, CR2-5)."""
+    n = len(a)
+    s = r_sum(a * b)
+    for l in range(1, L + 1):
+        if l < n:
+            s = s + (1 - l / (L + 1)) * (r_sum(a[l:] * b[:n - l]) + r_sum(b[l:] * a[:n - l]))
+    return s
 
 
 def _welch(x, y):
@@ -265,7 +275,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
         print(sa["bins"][["bin", "n", "mean"]])
     """
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
-        raise ValueError("signal_analysis: data muss ein data.frame mit Spalte 'date' sein.")
+        chk_stop("b2b.m_signal_analysis")
     chk_col_nofactor(data, "date", "signal_analysis")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     n = len(data)
     d = _to_date_days(data["date"], "signal_analysis: data$date")
@@ -275,8 +285,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
         if isinstance(v, str) or (isinstance(v, (list, tuple, np.ndarray)) and len(v) and isinstance(np.ravel(v)[0], str)):
             vl = [v] if isinstance(v, str) else [str(e) for e in np.ravel(v)]
             if len(vl) != 1 or vl[0] not in names:
-                raise ValueError("signal_analysis: %s: Spalte '%s' fehlt in data (vorhanden: %s)." % (
-                    what, vl[0], ", ".join(names)))
+                chk_stop("b2b.m_getcol", what, vl[0], ", ".join(names))
             chk_col_nofactor(data, vl[0], "signal_analysis")   # Entscheidung 15
             chk_col_type(data, vl[0], "signal_analysis", type)   # seit 1.6.4 (vorher Kategorie-Codes bzw. Text)
             col = data[vl[0]]
@@ -295,7 +304,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     sig = getcol(signal, "signal")
     target = chk_scalar(target)
     if not isinstance(target, str):
-        raise ValueError("signal_analysis: target muss ein Spaltenname sein.")
+        chk_stop("b2b.m_getcol_2")
     px = getcol(target, "target", "numerisch")
     s2all = getcol(signal2, "signal2") if signal2 is not None else None
     o = np.argsort(np.where(np.isnan(d), np.inf, d), kind="stable")
@@ -323,9 +332,9 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     if not int1(horizon):
         chk_stop("ganz", "signal_analysis", "horizon", "1")
     if step is not None and not (int1(step) and step >= 1):
-        raise ValueError("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
+        chk_stop("b2b.m_int1")
     if not (int1(bins) and bins >= 2):
-        raise ValueError("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+        chk_stop("b2b.m_int1_2")
     bins2 = chk_int1(bins2, "signal_analysis", "bins2", lo=2)
     splits = chk_int1(splits, "signal_analysis", "splits")
     degree = chk_int1(degree, "signal_analysis", "degree", lo=0)
@@ -334,7 +343,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     if len(hz) != 1 or hz[0] is None or hz[0] < 1 or hz[0] >= n:
         raise ValueError("signal_analysis: horizon muss zwischen 1 und %d (Zeilen - 1) liegen." % (n - 1))
     if len(stp) != 1 or stp[0] is None or stp[0] < 1:
-        raise ValueError("signal_analysis: step muss eine ganze Zahl >= 1 sein.")
+        chk_stop("b2b.m_int1")
     horizon, step = hz[0], stp[0]
     if breaks is not None:
         ba = np.atleast_1d(np.asarray(breaks, dtype=object)).ravel()
@@ -343,13 +352,12 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
             bf = ba.astype(np.float64)
             okb = not np.isnan(bf).any() and bool(np.all(np.diff(bf) > 0))
         if not okb:
-            raise ValueError("signal_analysis: breaks braucht mindestens 3 streng aufsteigende Grenzen (erste und letzte "
-                             "werden zu -Inf und Inf), z. B. c(-Inf, 0, Inf).")
+            chk_stop("b2b.m_int1_3")
         breaks = bf
     if breaks is None:
         bl = np.atleast_1d(np.asarray(bins, dtype=np.float64)).ravel()
         if len(bl) != 1 or math.isnan(bl[0]) or bl[0] < 2:
-            raise ValueError("signal_analysis: bins muss eine ganze Zahl >= 2 sein.")
+            chk_stop("b2b.m_int1_2")
     t0 = np.arange(0, n - horizon, step, dtype=np.int64)
     fwd = px[t0 + horizon] / px[t0] - 1
     s2 = s2all[t0] if s2all is not None else None
@@ -362,7 +370,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
         raise ValueError("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorwärtsrendite." % len(df))
     sv = df["signal"].to_numpy(dtype=np.float64)
     if len(np.unique(sv)) < 2:
-        raise ValueError("signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche möglich.")
+        chk_stop("b2b.m_int1_4")
     ppy = (n - 1) / (float(d[-1] - d[0]) / 365.25)
 
     def ann(m):
@@ -387,6 +395,36 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     else:
         tstat = pval = _NAN
     spread = pd.Series({"difference": r_mean(hi) - r_mean(lo), "t": tstat, "p": pval}, dtype=np.float64)
+    overall = pd.Series(_st(fw), dtype=np.float64)
+    # seit 1.6.5 (CR2-5, K3): bei step < horizon Newey-West-Standardfehler (Bartlett, Lag ceiling(horizon / step) - 1)
+    if step < horizon:
+        L = int(math.ceil(horizon / step)) - 1
+
+        def zb(j):
+            z = np.zeros(len(fw))
+            sel = codes == j
+            z[sel] = fw[sel] - r_mean(fw[sel])
+            return z
+        tv = tab["t"].to_numpy(dtype=np.float64).copy()
+        r = 0
+        for j in range(len(lv)):
+            if not (codes == j).any():
+                continue
+            z = zb(j)
+            nb = float(tab["n"].iloc[r])
+            tv[r] = float(tab["mean"].iloc[r]) / math.sqrt(_sa_lrv(z, z, L) / nb ** 2)
+            r += 1
+        tab["t"] = tv
+        z0 = fw - overall["mean"]
+        overall["t"] = overall["mean"] / math.sqrt(_sa_lrv(z0, z0, L) / float(len(fw)) ** 2)
+        if len(lo) > 2 and len(hi) > 2:
+            zh = zb(len(lv) - 1)
+            zl = zb(0)
+            v = (_sa_lrv(zh, zh, L) / float(len(hi)) ** 2 + _sa_lrv(zl, zl, L) / float(len(lo)) ** 2 -
+                 2 * _sa_lrv(zh, zl, L) / (float(len(hi)) * len(lo)))
+            tt = spread["difference"] / math.sqrt(v)
+            spread["t"] = tt
+            spread["p"] = 2 * float(np.asarray(_lib.pnorm(-abs(tt))).ravel()[0])
     fit = None
     if degree > 0 and len(np.unique(sv)) > degree + 1:
         model, r2 = _poly_lm(df, int(degree))
@@ -425,7 +463,6 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     out["bin"] = pd.Categorical.from_codes(codes, categories=lv)
     if bin2 is not None:
         out["bin2"] = bin2
-    overall = pd.Series(_st(fw), dtype=np.float64)
     return SimLevSignalAnalysis([
         ("bins", tab), ("overall", overall), ("spread", spread), ("splits", spl), ("table2d", t2), ("fit", fit),
         ("data", out), ("horizon", horizon), ("step", step), ("target", target),
@@ -554,13 +591,30 @@ def _sr(r):
     return r_mean(r) / r_sd(r)
 
 
+def _st_hac(Y, kernel, prewhiten):
+    """Langfristkovarianz für sharpe_test (R ``.st_hac``, seit 1.6.5, Entscheidung 177): Bartlett ohne Prewhitening
+    wie bisher (Newey-West), sonst Schätzer nach Ledoit & Wolf (2008, Abschnitt 3.1) im Kern (research_vec op 8)."""
+    if kernel == "bartlett" and not prewhiten:
+        return _hac_cov(Y)
+    Y = np.asarray(Y, dtype=np.float64)
+    T, k = Y.shape
+    from ._signals_core import research_vec
+    o = research_vec(8, Y.ravel(order="F"), [float(T), float(k), 2.0 if kernel == "qs" else 1.0, 1.0 if prewhiten else 0.0],
+                     k * k + 2)
+    if o[k * k] == 1:
+        chk_stop("b2b.st_prewhiten", "sharpe_test")
+    if o[k * k] == 2:
+        chk_stop("b2b.st_bandbreite", "sharpe_test")
+    return np.asarray(o[:k * k], dtype=np.float64).reshape((k, k), order="F")
+
+
 def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "bootstrap"), B=2000, block=None,
-                ppy=None, seed=None):
+                ppy=None, seed=None, studentize=True, kernel=None, prewhiten=None):
     """Test auf gleiche Sharpe Ratios (Ledoit & Wolf 2008).
 
     Prüft, ob sich die Sharpe Ratios zweier Strategien unterscheiden, robust gegen Autokorrelation,
     Heteroskedastie und dicke Ränder (Ledoit & Wolf 2008): mit der Delta-Methode und Newey-West-Kovarianz
-    (``"hac"``) oder einem stationären Block-Bootstrap der Renditepaare (``"bootstrap"``). Der klassische
+    (``"hac"``) oder einem Block-Bootstrap der Renditepaare (``"bootstrap"``, seit 1.6.5 studentisiert und zirkulär). Der klassische
     Jobson-Korkie-Test unterstellt Normalverteilung und unabhängige Renditen und ist für Finanzdaten zu
     optimistisch.
 
@@ -576,16 +630,22 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
               nur gemeinsame Perioden-Enddaten verwendet.
         frequency: Periodenlänge: ``"week"`` (Standard, ISO-Wochen), ``"day"`` oder ``"month"``. Bei
             Vektor-Eingabe bestimmt sie nur den Standardwert von ``ppy``.
-        method: ``"hac"`` (Standard): Delta-Methode mit Newey-West-Kovarianz (Bartlett-Kern, Lag ⌊ 4 (T/100)^2/9
-            ⌋); ``"bootstrap"``: stationärer Block-Bootstrap der Renditepaare (Standardfehler = Standardabweichung
-            der Bootstrap-Differenzen, p-Wert = Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5-
-            und 97.5-%-Quantil der Bootstrap-Differenzen).
+        method: "hac" (Standard): Delta-Methode mit HAC-Kovarianz (Standard Newey-West, Bartlett-Kern, Lag ⌊4
+            (T/100)^(2/9)⌋; siehe kernel, prewhiten); "bootstrap": seit 1.6.5 studentisierter zirkulärer
+            Block-Bootstrap der Renditepaare nach Ledoit & Wolf (2008, Abschnitt 3.2.2, siehe studentize und Details);
+            mit studentize = ``False`` stationärer Block-Bootstrap wie bis 1.6.4 (Standardfehler = Standardabweichung
+            der Bootstrap-Differenzen, p-Wert = Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5- und
+            97.5-%-Quantil der Bootstrap-Differenzen).
         B: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur bei ``method = "bootstrap"``.
             Seit 1.6.4 höchstens 10^8.
-        block: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
-            Blöcke laufen zyklisch über das Ende); ``None`` (Standard) = ``max(2, round(T^(1/3)))`` mit T = Anzahl
-            Renditepaare. Nur bei ``method = "bootstrap"``.
-            Seit 1.6.4 eine Zahl ≥ 1.
+        block: Blocklänge in Perioden: mit studentize = ``True`` die feste Länge b der Blöcke des zirkulären
+            Block-Bootstraps (ganze Zahl), sonst die mittlere Blocklänge des stationären Bootstraps (geometrisch
+            verteilte Blocklängen, Blöcke laufen zyklisch über das Ende); ``None`` (Standard) = max(2, round(T^(1/3)))
+            mit T = Anzahl Renditepaare. Nur bei method = "bootstrap".
+            Seit 1.6.4 eine Zahl ≥ 1. Mit studentize = ``True`` seit 1.6.5 höchstens T/4: die Block-Kovarianz Ψ*
+            braucht mindestens 4 Blöcke (l = floor(T/b) ≥ 4, sonst Fehler; bei weniger Blöcken ist sie singulär und
+            p-Wert und Intervall sind unbrauchbar). Die Güte des Tests sinkt schon vorher mit wachsender Blocklänge;
+            T/4 ist nur die Mindestbedingung.
         ppy: Perioden je Jahr für die Annualisierung. ``None`` (Standard) = bei Vektoren 252 (``"day"``), 52
             (``"week"``) bzw. 12 (``"month"``); bei Ergebnissen und DataFrames aus den gemeinsamen Daten
             geschätzt: (Anzahl Perioden - 1) / (Zeitspanne in Tagen / 365.25).
@@ -594,6 +654,17 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
             Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau
             einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte
             Aufrufe liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
+        studentize: Logisch (seit 1.6.5, Standard ``True``): bei method = "bootstrap" der studentisierte zirkuläre
+            Block-Bootstrap nach Ledoit & Wolf (2008); ``False`` = der nicht studentisierte stationäre Block-Bootstrap
+            bis 1.6.4 (bitgleich).
+        kernel: Kern der HAC-Kovarianz (seit 1.6.5): "bartlett" (Lag ⌊4 (T/100)^(2/9)⌋) oder "qs" (Quadratic Spectral
+            mit automatischer Bandbreite S_T = 1.3221 (α(2) T)^(1/5) nach Andrews 1991 aus AR(1)-Näherungen je
+            Moment). ``None`` (Standard) = "bartlett" bei method = "hac" (bitgleich zu 1.6.4 außer 142), "qs" beim
+            studentisierten Bootstrap (Standardfehler der Ausgangsstichprobe wie bei Ledoit & Wolf 2008).
+        prewhiten: Logisch (seit 1.6.5): Prewhitening mit einem VAR(1) nach Andrews & Monahan (1992). ``None``
+            (Standard) = ``False`` bei method = "hac", ``True`` beim studentisierten Bootstrap. Außer bei Bartlett
+            ohne Prewhitening (Newey-West wie bisher) rechnet SimLev den Schätzer von Ledoit & Wolf (2008, Abschnitt
+            3.1) mit dem Faktor T/(T - 4).
 
     Returns:
         Benannter numerischer Vektor: ``sharpe_x``, ``sharpe_y`` (Sharpe Ratios p. a.), ``difference`` (``sharpe_x
@@ -609,9 +680,21 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
         Mindestens 10 gemeinsame Renditepaare sind nötig, und keine der beiden Reihen darf die Varianz 0 haben
         (sonst Fehler). Identische Reihen ergeben ``difference = 0``, ``se = 0``, ``z = 0`` und ``p_value = 1``.
 
+        Studentisierter Bootstrap (Standard bei method = "bootstrap" seit 1.6.5, Ledoit & Wolf 2008, Abschnitt 3.2.2
+        und Bemerkung 3.2): Δ = μ_x/σ_x - μ_y/σ_y; Standardfehler s(Δ) = √(∇f' Ψ ∇f / T) (Gl. 5) mit der HAC-Kovarianz
+        der Momente (r_x, r_y, r_x^2, r_y^2); Teststatistik d = |Δ| / s(Δ). Je Wiederholung m werden Blöcke der festen
+        Länge b mit gleichverteiltem Start zyklisch gezogen; der Standardfehler der Stichprobe ist s(Δ^*_m) aus Ψ^* =
+        l^-1 Σ_j ζ_j ζ_j', ζ_j = b^(-1/2) Σ_{t=1..b} y^*_{(j-1)b+t}, l = ⌊T/b⌋ (Gl. 8), d^*_m = |Δ^*_m - Δ| /
+        s(Δ^*_m). p-Wert (#{d^*_m ≥ d} + 1)/(B + 1) (Gl. 9), Intervall Δ ± z^*_0.95 s(Δ) mit dem 95-%-Quantil der
+        d^*_m (Gl. 7); se ist s(Δ), z = difference / se. Die Blocklänge wählt SimLev nicht datenabhängig (die
+        Kalibrierung von Ledoit & Wolf, Algorithmus 3.1, ist nicht umgesetzt).
+
     Literatur:
         Ledoit, O. & Wolf, M. (2008), Robust performance hypothesis testing with the Sharpe ratio, Journal of
         Empirical Finance 15(5), 850-859.
+        Andrews, D. W. K. (1991), Heteroskedasticity and autocorrelation consistent covariance matrix estimation,
+        Econometrica 59(3), 817-858. Andrews, D. W. K. & Monahan, J. C. (1992), An improved heteroskedasticity and
+        autocorrelation consistent covariance matrix estimator, Econometrica 60(4), 953-966.
 
     Beispiel::
 
@@ -635,23 +718,44 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
     seed = chk_scalar(seed)
     if seed is not None:
         _lib.check_seed(seed, "sharpe_test")
+    # seit 1.6.5 (Entscheidung 177): studentisierter zirkulärer Block-Bootstrap (Standard), Kern und Prewhitening
+    from ._pruefen import chk_bool1
+    studentize = chk_bool1(studentize, "sharpe_test", "studentize")
+    kernel = chk_scalar(kernel)
+    if kernel is not None:
+        _e5_choice(kernel, ("bartlett", "qs"), "sharpe_test", "kernel")
+    prewhiten = chk_scalar(prewhiten)
+    if prewhiten is not None:
+        prewhiten = chk_bool1(prewhiten, "sharpe_test", "prewhiten")
+    stud = method == "bootstrap" and studentize
+    kernel = kernel if kernel is not None else ("qs" if stud else "bartlett")
+    prewhiten = prewhiten if prewhiten is not None else stud
+    if stud and block is not None and block != math.trunc(block):
+        chk_stop("b2b.st_block_ganz", "sharpe_test")
     a = _ret_from(x, frequency)
     b = _ret_from(y, frequency)
     if (a["date"] is None) != (b["date"] is None):
-        raise ValueError("sharpe_test: x und y müssen dieselbe Art sein: beide Renditevektoren oder beide "
-                         "Kursreihen/Ergebnisse (data.frame bzw. SimLevResult).")
+        chk_stop("b2b.m_sharpe_test")
     if a["date"] is not None:
-        da, db = _days(a["date"]), _days(b["date"])
-        sb = set(db.tolist())
-        common = list(dict.fromkeys([v for v in da.tolist() if v in sb]))
+        # seit 1.6.5 (CR2-H-2): erst die gemeinsamen Perioden-Enddaten, dann die Renditen zwischen ihnen
+        la, lb = _days(a["ldate"]).tolist(), _days(b["ldate"]).tolist()
+        sb = set(lb)
+        cl = list(dict.fromkeys([v for v in la if v in sb]))
+        sc = set(cl)
+        nskip = len(set(la) - sc) + len(set(lb) - sc)
+        if nskip > 0:
+            _message(chk_msg("b2.st_luecke", "sharpe_test", nskip))
         pa = {}
-        for i, v in enumerate(da.tolist()):
+        for i, v in enumerate(la):
             pa.setdefault(v, i)
         pb = {}
-        for i, v in enumerate(db.tolist()):
+        for i, v in enumerate(lb):
             pb.setdefault(v, i)
-        ra = a["r"][[pa[c] for c in common]]
-        rb = b["r"][[pb[c] for c in common]]
+        va = np.asarray(a["lvl"], dtype=np.float64)[[pa[c] for c in cl]]
+        vb = np.asarray(b["lvl"], dtype=np.float64)[[pb[c] for c in cl]]
+        ra = va[1:] / va[:-1] - 1 if len(cl) > 1 else np.zeros(0)
+        rb = vb[1:] / vb[:-1] - 1 if len(cl) > 1 else np.zeros(0)
+        common = cl[1:]
         if ppy is None:
             ppy = (len(common) - 1) / ((max(common) - min(common)) / 365.25)
     else:
@@ -668,35 +772,75 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
         raise ValueError("sharpe_test: zu wenige gemeinsame Renditepaare (%d, mindestens 10)." % Tn)
     for k, v in (("x", ra), ("y", rb)):
         if r_sd(v) == 0:
-            raise ValueError("sharpe_test: Renditen von %s haben die Varianz 0; die Sharpe Ratio ist nicht definiert." % k)
+            chk_stop("b2b.m_sharpe_test_2", k)
     ppy = float(ppy)
     d0 = _sr(ra) - _sr(rb)
     names = ["sharpe_x", "sharpe_y", "difference", "se", "z", "p_value", "ci_low", "ci_high", "n"]
     if np.array_equal(ra, rb):
         return pd.Series([_sr(ra) * math.sqrt(ppy), _sr(rb) * math.sqrt(ppy), 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, float(Tn)],
                          index=names, dtype=np.float64)
-    if method == "hac":
+    if method == "hac" or stud:
+        # seit 1.6.5 (Entscheidung 142): Schwankung über die Abweichungen vom Mittel
         mu = [r_mean(ra), r_mean(rb)]
         g = [r_mean(ra * ra), r_mean(rb * rb)]
-        v1 = r_pow(g[0] - mu[0] * mu[0], 1.5)
-        v2 = r_pow(g[1] - mu[1] * mu[1], 1.5)
+        v1 = r_pow(r_mean((ra - mu[0]) ** 2), 1.5)
+        v2 = r_pow(r_mean((rb - mu[1]) ** 2), 1.5)
         grad = np.array([g[0] / v1, -g[1] / v2, -0.5 * mu[0] / v1, 0.5 * mu[1] / v2], dtype=np.float64)
-        Psi = _hac_cov(np.column_stack([ra, rb, ra * ra, rb * rb]))
+        Psi = _st_hac(np.column_stack([ra, rb, ra * ra, rb * rb]), kernel, prewhiten)
         q = _matprod(_matprod(grad.reshape(1, 4), Psi), grad.reshape(4, 1))
         se = math.sqrt(float(q.ravel()[0]) / Tn)
         z = d0 / se
         p = 2 * float(_lib.pnorm(-abs(z)))
         qq = float(_lib.qnorm(0.975))
         ci = [d0 + (-1 * qq) * se, d0 + (1 * qq) * se]
-    else:
+    if stud:
+        # seit 1.6.5 (Entscheidung 177): studentisierter zirkulärer Block-Bootstrap nach Ledoit & Wolf (2008,
+        # Abschnitt 3.2.2, Bemerkung 3.2; Gl. 7-9), R: gleicher Weg
+        if block is None:
+            block = max(2.0, float(_fmt.r_round(r_pow(Tn, 1 / 3))))
+        if block > Tn:
+            chk_stop("b2.st_block", "sharpe_test", Tn)
+        # seit 1.6.5 (PR2-1): mindestens 4 Blöcke (l = floor(T / b) >= 4), sonst ist die 4x4-Block-Kovarianz singulär
+        if 4 * block > Tn:
+            chk_stop("pf2.st_bloecke", "sharpe_test", Tn // 4, Tn)
+        S = _main_stream(seed, "sharpe_test")
+        from ._signals_core import research_vec
+        from ._lib_models import boot_idx_block
+        par = [float(Tn), float(block)]
+        dk = float(research_vec(9, np.concatenate([ra, rb]), par, 2)[0])
+        ds = np.empty(int(B))
+        nz = 0
+        for i in range(int(B)):
+            kk = boot_idx_block(Tn, Tn, int(block), True, stream=S).astype(np.int64) - 1
+            o = research_vec(9, np.concatenate([ra[kk], rb[kk]]), par, 2)
+            if np.isnan(o[0]) or not (o[1] > 0):
+                nz += 1
+                ds[i] = _NAN
+                continue
+            ds[i] = abs(float(o[0]) - dk) / float(o[1])
+        if nz:
+            chk_stop("b2.st_var0", "sharpe_test", nz, int(B))
+        p = (int(np.sum(ds >= abs(dk) / se)) + 1) / (int(B) + 1)
+        q95 = float(_quantile(ds, [0.95])[0])
+        ci = [d0 + (-1 * q95) * se, d0 + (1 * q95) * se]
+    elif method == "bootstrap":
         if block is None:
             block = max(2.0, float(_fmt.r_round(r_pow(Tn, 1 / 3))))
 
+        if block > Tn:                                   # seit 1.6.5 (CR2-H-1)
+            chk_stop("b2.st_block", "sharpe_test", Tn)
         S = _main_stream(seed, "sharpe_test")
         db = np.empty(int(B))
+        nz = 0
         for i in range(int(B)):
             k = _boot_idx(Tn, Tn, block, S)
+            if r_sd(ra[k]) == 0 or r_sd(rb[k]) == 0:
+                nz += 1
+                db[i] = _NAN
+                continue
             db[i] = _sr(ra[k]) - _sr(rb[k])
+        if nz:
+            chk_stop("b2.st_var0", "sharpe_test", nz, int(B))
         se = r_sd(db)
         z = d0 / se
         p = _mean_lgl(np.abs(db - d0) >= abs(d0))
@@ -809,16 +953,21 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
         barr = np.atleast_1d(np.asarray(bl, dtype=object)).ravel()
         if barr.size == 1:
             e = barr[0]
+            # seit 1.6.5 (CR2-D-5, K7): Nummer = Spalte der Eingabe (bei einer Suche die id); leere Spalte: Fehler
             if isinstance(e, str):
                 j = cn.index(e) + 1 if e in cn else None
             else:
                 try:
                     f = float(e)
-                    j = int(f) if math.isfinite(f) and f == math.trunc(f) else None
+                    j0 = int(f) if math.isfinite(f) and f == math.trunc(f) else None
                 except (TypeError, ValueError):
-                    j = None
-            if j is None or j < 1 or j > R.shape[1]:
-                raise ValueError("benchmark: unbekannte Spalte.")
+                    j0 = None
+                cols = [int(c) for c in np.asarray(rr["cols"]).ravel()]
+                j = cols.index(j0) + 1 if j0 in cols else None
+                if j is None and j0 is not None and 1 <= j0 <= max(cols):
+                    chk_stop("b2.bench_leer", "overfit_reality_check")
+            if j is None:
+                chk_stop("b2.bench_spalte", "overfit_reality_check")
             b = R[:, j - 1].copy()
             R = np.delete(R, j - 1, axis=1)
             cn = cn[:j - 1] + cn[j:]
@@ -826,6 +975,15 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
             b = barr.astype(np.float64)
     if len(b) != R.shape[0]:
         chk_stop("rs.benchmark_laenge", "overfit_reality_check")
+    # seit 1.6.5 (CR2-X9-1): Inf in der Vergleichsreihe Fehler, Perioden mit NA/NaN entfallen für alle
+    if np.isinf(b).any():
+        chk_stop("b2.bench_inf", "overfit_reality_check")
+    if np.isnan(b).any():
+        ok = ~np.isnan(b)
+        R = R[ok]
+        b = b[ok]
+    if R.shape[0] < 3:                     # seit 1.6.5 (CR2-D-6)
+        chk_stop("b2.rc_perioden", "overfit_reality_check")
     D = R - b[:, None]
     Tn, K = D.shape
     fbar = _col_means(D)
@@ -869,7 +1027,8 @@ class SimLevRealityCheck(RList):
     r_class = ("SimLevRealityCheck",)
 
     def format(self):
-        out = [_sp("Reality Check und SPA: %d Strategien, %d Perioden, B = %d\n", int(self["k"]), int(self["n"]), int(self["B"])),
+        out = [_sp("Reality Check und SPA: %d %s, %d Perioden, B = %d\n", int(self["k"]),
+                   "Strategie" if int(self["k"]) == 1 else "Strategien", int(self["n"]), int(self["B"])),
                _sp("  Beste Strategie: %s (mittlere Überrendite %.4f je Periode)\n", str(self["best"]),
                    float(np.max(np.asarray(self["mean_excess"], dtype=np.float64)))),
                _sp("  p-Wert Reality Check (White):   %.3f\n  p-Wert SPA (Hansen, konsistent): %.3f  [untere %.3f, obere %.3f]\n",
@@ -886,7 +1045,7 @@ def sharpe_min_track_record(x, *, target=0, prob=0.95, frequency=("week", "day",
     """Mindestlänge einer Historie (Minimum Track Record Length, Bailey & López de Prado 2012).
 
     Wie viele Perioden braucht es, um mit Wahrscheinlichkeit ``prob`` sagen zu können, dass die wahre Sharpe Ratio
-    über ``target`` liegt? MinTRL = 1 + (1 - γ_3 SR + (γ_4 - 1)/(4)SR^2) (fracz_probSR - SR^*)^2 Dabei sind SR und
+    über ``target`` liegt? MinTRL = 1 + (1 - γ_3 SR + (γ_4 - 1)/(4)SR^2) ((z_prob)/(SR - SR^*))^2 Dabei sind SR und
     SR^* Sharpe Ratios je Periode (Mittelwert / Standardabweichung, ohne Abzug eines risikolosen Zinses), γ_3 die
     Schiefe und γ_4 die Wölbung (nicht Exzess) der Renditen. Eingabe ist ein Renditevektor oder eine fertige
     Simulation bzw. Kursreihe.
@@ -1001,6 +1160,13 @@ def result_heatmap(x, *, inflation=None, max_years=30):
         höchstens um die größte Zeilenlücke der Reihe (höchstens 7 Tage) vor dem 31.12. liegt, bei Handelstagen
         also z. B. der 30.12. Die Daten werden nach Datum sortiert, doppelte Daten wie in ``result_analysis()``
         behandelt.
+        Seit 1.6.5 zählt die Haltedauer in Kalenderjahren: fehlt ein Kalenderjahr in den Daten, bleiben die Zellen,
+        die es als Start- oder Endjahr brauchen, leer (bis 1.6.4 zählten die Zeilen der Jahresend-Tabelle). Bei groben
+        Daten (mittlerer Zeilenabstand über 7 Tage, z. B. Monatsdaten am Monatsersten) ist das Jahresende der letzte Wert
+        im Dezember und das erste, unvollständige Jahr entfällt; bei Jahresdaten (eine Zeile je Jahr) entfällt das erste
+        Jahr. Fallen alle Zeilen auf den 1.1. (Jahresdaten zum Jahresanfang), gilt jeder Wert als Jahresende des
+        Vorjahres: die Rendite vom 1.1.2010 zum 1.1.2011 steht in der Zeile 2010 (bis 1.6.4 und bei anderen Daten das
+        Jahr des Datums).
 
     Beispiel::
 
@@ -1018,28 +1184,44 @@ def result_heatmap(x, *, inflation=None, max_years=30):
     if inflation is not None:
         s = _da_deflate(s, inflation)
     d = s["date"]
-    yr = np.array([int(k) for k in _key_year(d)], dtype=np.int64)
+    # seit 1.6.5 (CR2-N-1, Entscheidung 195 F2 Weg b): alle Zeilen am 1.1. -> Wert gilt als Jahresende des Vorjahres
+    jan1 = len(d) > 1 and all(t == "01-01" for t in _fmt.format_date(_dates(np.asarray(d)), "%m-%d"))
+    dt = np.asarray(d, dtype=np.float64) - 1.0 if jan1 else d
+    yr = np.array([int(k) for k in _key_year(dt)], dtype=np.int64)
     m = len(yr)
     e = list(_last_of_key(list(yr)))
     keep = np.concatenate([[True], ~s["filled"][1:]])
-    tol = min(7.0, float(np.max(np.diff(d[keep]))))
+    gaps = np.diff(d[keep])
+    tol = min(7.0, float(np.max(gaps)))
     dec31 = float(_days(np.array(["%04d-12-31" % yr[-1]], dtype="datetime64[D]"))[0])
-    if dec31 - d[m - 1] >= tol:
-        e = e[:-1]
+    # seit 1.6.5 (CR2-N-1): Haltedauer nach Kalenderjahren, grobe Daten mit Dezemberwert (R result_heatmap)
+    coarse = gaps.size > 0 and float(r_median(gaps)) > 7
+    annual = len(set(int(y) for y in yr)) == m
+    last_ok = dec31 - dt[m - 1] < tol
     v = s["value"]
-    base = [float(v[0])] + [float(v[i]) for i in e]
-    years = [int(yr[0]) - 1] + [int(yr[i]) for i in e]
-    if _fmt.format_date(_dates(d[:1]), "%m-%d")[0] != "01-01":
-        base = [float(v[i]) for i in e]
-        years = [int(yr[i]) for i in e]
-    ny = len(base) - 1
+    if coarse and not annual:
+        mons = _fmt.format_date(_dates(np.asarray([d[i] for i in e])), "%m")
+        ok = [int(mm) == 12 for mm in mons]
+    else:
+        ok = [True] * (len(e) - 1) + [bool(last_ok)]
+    ye = [int(yr[i]) for i, o in zip(e, ok) if o]
+    ve = [float(v[i]) for i, o in zip(e, ok) if o]
+    if not coarse and _fmt.format_date(_dates(d[:1]), "%m-%d")[0] == "01-01":
+        ye = [int(yr[0]) - 1] + ye
+        ve = [float(v[0])] + ve
+    ny = (max(ye) - min(ye)) if ye else 0
     if ny < 1:
-        raise ValueError("result_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.")
+        chk_stop("b2b.m_result_heatmap")
+    years = list(range(min(ye), min(ye) + ny + 1))
+    base = [_NAN] * (ny + 1)
+    for yv, vv in zip(ye, ve):
+        base[yv - years[0]] = vv
     H = int(min(max_years, ny))
     M = np.full((ny, H), _NAN)
     for i in range(ny):
         for h in range(1, min(H, ny - i) + 1):
-            M[i, h - 1] = _cagr_q(base[i + h] / base[i], h)
+            if not (math.isnan(base[i]) or math.isnan(base[i + h])):
+                M[i, h - 1] = _cagr_q(base[i + h] / base[i], h)
     Mdf = pd.DataFrame(M, index=[str(y) for y in years[1:]], columns=[str(h) for h in range(1, H + 1)])
     mins, meds, maxs, neg, cnt = [], [], [], [], []
     for j in range(H):
@@ -1167,7 +1349,8 @@ def _plot_heatmap(x):
             if not math.isfinite(v):
                 continue
             v = -lim if v < -lim else (lim if v > lim else v)
-            c = pal[min(max(int(round((v + lim) / (2 * lim) * 50)) + 1, 1), 51) - 1]
+            # seit 1.6.5 (CR2-N-2): ohne Wertänderung (lim = 0) die mittlere Farbstufe
+            c = pal[25] if lim == 0 else pal[min(max(int(round((v + lim) / (2 * lim) * 50)) + 1, 1), 51) - 1]
             _ana_rect(s, p, yrs[i] - 0.5, h - 0.5, yrs[i] + 0.5, h + 0.5, fill=c)
             sy.append(yrs[i])
             hy.append(h)

@@ -32,23 +32,36 @@ def pruefe_datei(out, f, k, verbose):
     strom = faelle.bereich_strom(f)
     store = next(strom)["inputs"]
     stat = {}
+    zeit = {}
+    zf = os.environ.get("SIMLEV_ZEITEN")   # seit 1.6.5 (FB-14): Laufzeit je Fall, Zeilen „py<TAB>Kennung<TAB>Sekunden“
+    zh = open(zf, "a", encoding="utf-8") if zf else None
     for c in strom:
         key = faelle.kennung(c)
         if k and k not in key:
             continue
         m = key.split("/")[0]
+        t0 = time.perf_counter()
         try:
             errs = faelle.pruefe(c, store, verbose=verbose)
         except Exception as e:  # noqa: BLE001
             errs = ["Werkzeugfehler: %r" % e]
+        dt = time.perf_counter() - t0
+        zeit.setdefault(m, []).append(dt)
+        if zh:
+            zh.write("py\t%s\t%.6f\n" % (key, dt))
         ok, n = stat.get(m, (0, 0))
         stat[m] = (ok + (not errs), n + 1)
         if errs:
             print("FAIL %s" % key, file=out)
             for e in (errs if verbose else errs[:4]):
                 print("    " + e.replace("\n", "\n    ")[: (20000 if verbose else 600)], file=out)
+    if zh:
+        zh.close()
     for m, (ok, n) in stat.items():
         print("%-16s %d/%d bitgleich" % (m, ok, n), file=out)
+    for m, ts in zeit.items():   # seit 1.6.5 (FB-14): Laufzeit je Modul
+        ts = sorted(ts)
+        print("zeit %-16s n=%d median=%.3f ms summe=%.3f s" % (m, len(ts), 1000 * ts[len(ts) // 2], sum(ts)), file=out)
     return sum(s[0] for s in stat.values()), sum(s[1] for s in stat.values())
 
 

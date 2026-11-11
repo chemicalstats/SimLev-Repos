@@ -35,6 +35,7 @@ haben (seit 1.6.4; vorher wiederholte R einen kuerzeren Vektor).}
 }
 \value{
 Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}).
+Seit 1.6.5 muss \code{date} aufsteigend und ohne NA sein und \code{local} (nach dem Fuellen) endliche Werte > 0 haben (sonst Fehler); eine Stufentabelle als Zins, die erst nach dem ersten Datentag beginnt, ergibt eine Warnung (davor gilt ihr erster Wert).
 }
 \description{
 Naeherung einer rollierend per Devisentermingeschaeft gesicherten Anlage:

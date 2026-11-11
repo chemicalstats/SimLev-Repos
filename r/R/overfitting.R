@@ -38,6 +38,9 @@
   }
   keep <- colSums(is.finite(R)) > 0
   R <- R[, keep, drop = FALSE]
+  # seit 1.6.5 (CR2-G-7): Renditen unter -1 (Verlust ueber 100 %) vor der Aggregation ablehnen (bis 1.6.4 fiel die
+  # Periode bei Wochen-/Monatsdaten still weg, bei Tagesdaten blieb der Wert)
+  if (any(R < -1, na.rm = TRUE)) chk_stop("b2.rendite_unter", fn)
   if (!is.null(dates)) {
     dates <- .to_date(dates, "dates")
     if (anyNA(dates) || is.unsorted(dates)) chk_stop("e5.datum_vektor", fn, "dates")
@@ -52,6 +55,8 @@
   R <- R[ok, , drop = FALSE]; if (!is.null(dates)) dates <- dates[ok]
   if (any(is.infinite(R))) chk_stop("e5.renditen_inf", fn)  # seit 1.6.4 (B-012; bis 1.6.3 still Sharpe NaN bzw. sr0 = 0)
   if (nrow(R) < 2L) chk_stop("e5.perioden", fn)            # seit 1.6.4 Mindestlaenge (B-016)
+  # seit 1.6.5 (CR2-G-7): mindestens zwei verschiedene Tage (bis 1.6.4 ppy = Inf)
+  if (!is.null(dates) && dates[length(dates)] == dates[1]) chk_stop("b2.datum_spanne", fn)
   ppy <- if (!is.null(dates) && length(dates) > 1) (length(dates) - 1) / (as.numeric(dates[length(dates)] - dates[1]) / 365.25)
          else switch(frequency, day = 252, week = 52, month = 12)
   R <- R - risk_free / 100 / ppy
@@ -83,14 +88,17 @@
 #' Verschiebung entfaellt die Ausloeschung in s2 - c1^2 / n.
 #' @keywords internal
 #' @noRd
+# Seit 1.6.5 (CR2-D-4, Entscheidungen 185 K6, 187): Sharpe bzw. Sortino ohne Schwankung (Standardabweichung bzw.
+# Abwaertsschwankung <= 1e-10 je Periode, Schwelle von .of_drop_flat) ist NA (bis 1.6.4 m / sqrt(1e-300), ~1e146)
 .of_metric <- function(n, s1, s2, sdn, sl, metric, c1 = s1) {
   m <- s1 / n
+  flat_na <- function(v) { s <- sqrt(pmax(v, 0)); ifelse(is.nan(v), v, ifelse(s > 1e-10, m / s, NA_real_)) }
   switch(metric,
-    sharpe = m / sqrt(pmax((s2 - c1^2 / n) / (n - 1), 1e-300)),
-    sortino = m / sqrt(pmax(sdn / n, 1e-300)),
+    sharpe = flat_na((s2 - c1^2 / n) / (n - 1)),
+    sortino = flat_na(sdn / n),
     geometric = expm1(sl / n),
     mean = m,
-    stop("metric: 'sharpe', 'sortino', 'geometric' oder 'mean'."))
+    stop(chk_msg("b2b.m_flat_na")))
 }
 
 #' Kennzahl je Spalte einer Renditematrix
@@ -108,7 +116,7 @@
   sdv <- apply(rr$R, 2, .sl_sd)
   flat <- which(!(sdv > 1e-10))
   if (!length(flat)) return(rr)
-  if (length(flat) == ncol(rr$R)) stop(sprintf("%s: alle Spalten ohne Schwankung (Standardabweichung <= 1e-10); Sharpe Ratio nicht definiert.", what))
+  if (length(flat) == ncol(rr$R)) stop(chk_msg("b2b.m_of_drop_flat", what))
   warning(sprintf("%s: %d Spalte(n) ohne Schwankung (Standardabweichung <= 1e-10 je Periode, z. B. Geldmarkt mit festem Zins; Punkt(e) %s) ausgeschlossen - Sharpe Ratio dort nicht definiert.",
                   what, length(flat), paste(rr$cols[flat], collapse = ", ")))
   rr$R <- rr$R[, -flat, drop = FALSE]; rr$cols <- rr$cols[-flat]
@@ -210,7 +218,7 @@
 #' plot(pb)
 #' @export
 overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric", "mean"),
-                frequency = c("week", "day", "month"), dates = NULL, risk_free = 0) {
+                frequency = c("week", "day", "month"), dates = NULL, risk_free = 0, n_splits = NULL, seed = NULL) {
   fn <- "overfit_pbo"
   .e5_choice(metric, c("sharpe", "sortino", "geometric", "mean"), fn, "metric")   # Pruefung (Meldung auswahl)
   metric <- match.arg(metric)
@@ -221,6 +229,8 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
   S <- as.integer(S)
   if (S < 2L || S %% 2L) chk_stop("ut2.pbo_S", fn)
   .of_check_common(fn, risk_free)
+  chk_int1(n_splits, fn, "n_splits", lo = 1, null_ok = TRUE)   # seit 1.6.5 (E-T2-2, Entscheidung 196)
+  if (!is.null(seed)) .sl_check_seed(seed, fn)
   rr <- .of_returns(x, frequency, dates, risk_free, fn)
   if (metric == "sharpe") rr <- .of_drop_flat(rr, "overfit_pbo")
   R <- rr$R; N <- ncol(R); Tn <- nrow(R)
@@ -230,10 +240,23 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
   R <- R[(Tn - bl * S + 1L):Tn, , drop = FALSE]
   blk <- rep(seq_len(S), each = bl)
   Rc <- sweep(R, 2, colMeans(R))                                 # zentriert fuer die Varianz (keine Ausloeschung)
-  B1 <- rowsum(R, blk); B2 <- rowsum(Rc^2, blk); Bd <- rowsum(pmin(R, 0)^2, blk); Bl <- rowsum(log1p(R), blk)
-  Bc <- rowsum(Rc, blk)
+  # seit 1.6.5 (CR2-P-2, Entscheidung 189): Totalverluste (Rendite <= -1, auch nach Abzug von risk_free) je Block
+  # gezaehlt; log1p ohne diese Perioden, bei "geometric" traegt der fuenfte Block die Zaehler (Kern: Haelfte mit
+  # Totalverlust = -1; bis 1.6.4 -Inf - (-Inf) = NaN in allen Aufteilungen)
+  tl <- R <= -1
+  Lg <- if (any(tl)) log1p(ifelse(tl, 0, R)) else log1p(R)
+  B1 <- rowsum(R, blk); B2 <- rowsum(Rc^2, blk); Bd <- rowsum(pmin(R, 0)^2, blk); Bl <- rowsum(Lg, blk)
+  Bc <- if (metric == "geometric") rowsum(tl + 0, blk) else rowsum(Rc, blk)
   T1 <- colSums(B1); T2 <- colSums(B2); Td <- colSums(Bd); Tl <- colSums(Bl); Tc <- colSums(Bc)
   combos <- utils::combn(S, S / 2L)
+  C_all <- ncol(combos)
+  # seit 1.6.5 (E-T2-2, Entscheidung 196): n_splits < C(S, S/2) zieht so viele Aufteilungen ohne Zuruecklegen aus dem
+  # SimLev-Zufallsstrom (aufsteigend sortiert); Naeherung ohne Literaturquelle, Standardfehler etwa
+  # sqrt(p (1 - p) / n_splits). Ohne n_splits (Standard) alle Aufteilungen wie bisher.
+  if (!is.null(n_splits) && n_splits < C_all) {
+    S_r <- .sl_main_stream(seed, fn)
+    combos <- combos[, sort(.sl_sample(C_all, n_splits, stream = S_r)), drop = FALSE]
+  }
   C <- ncol(combos); half <- bl * S / 2
   # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in R): In-Sample-Summen Ind %*% B,
   # Out-of-Sample = Gesamt - In-Sample, Kennzahl wie .of_metric, bester IS-Punkt (max.col, erster), dessen
@@ -241,11 +264,19 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
   cs <- .pbo_cscv(c(B1, B2, Bd, Bl, Bc), c(T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
   lam <- cs$lambda; isb <- cs$is_best; oosb <- cs$oos_best; oosm <- cs$oos_median
   ok <- !is.na(isb) & !is.na(oosb)                              # wie lm(): Paare mit NA entfallen
-  cf <- .sl_lsfit(cbind(1, isb[ok]), oosb[ok])$coefficients     # OOS ~ IS, kleinste Quadrate
-  structure(list(pbo = mean(lam <= 0), lambda = lam, is_best = isb, oos_best = oosb, oos_median = oosm,
+  # seit 1.6.5 (CR2-P-3): ohne zwei gueltige Paare keine Regression (bis 1.6.4 Rohmeldung von lm)
+  cf <- if (sum(ok) >= 2L) .sl_lsfit(cbind(1, isb[ok]), oosb[ok])$coefficients else c(NA_real_, NA_real_)
+  # seit 1.6.5 (CR2-P-1, Entscheidung 189): PBO und Verlustanteil ueber die Aufteilungen mit Kennzahl, Warnung mit
+  # deren Zahl (bis 1.6.4 NA bzw. still verfaelscht)
+  nbad <- sum(is.na(lam))
+  if (nbad > 0L) warning(chk_msg("b2.pbo_ohne", fn, nbad, C), call. = FALSE)
+  mna <- function(v) if (all(is.na(v))) NA_real_ else mean(v, na.rm = TRUE)
+  out <- structure(list(pbo = mna(lam <= 0), lambda = lam, is_best = isb, oos_best = oosb, oos_median = oosm,
                  slope = unname(cf[2]), intercept = unname(cf[1]),
-                 prob_loss = mean(oosb < 0), S = S, n_combos = C, n_points = N, n_obs = bl * S,
+                 prob_loss = mna(oosb[!is.na(lam)] < 0), S = S, n_combos = C, n_points = N, n_obs = bl * S,
                  metric = metric, frequency = frequency, ppy = rr$ppy), class = "SimLevPBO")
+  if (C < C_all) out$n_combos_all <- C_all
+  out
 }
 
 #' @rdname overfit_pbo
@@ -255,11 +286,14 @@ print.SimLevPBO <- function(x, ...) {
   cat("Probability of Backtest Overfitting (PBO, CSCV)\n")
   cat(sprintf("  %d Punkte, %d Beobachtungen (%s), S = %d Bl\u00f6cke, %d Aufteilungen, Kennzahl %s\n",
               x$n_points, x$n_obs, x$frequency, x$S, x$n_combos, x$metric))
+  if (!is.null(x$n_combos_all))
+    cat(sprintf("  Zufallsauswahl: %d von %d Aufteilungen (Standardfehler der PBO etwa %.3f)\n", x$n_combos,
+                x$n_combos_all, sqrt(x$pbo * (1 - x$pbo) / x$n_combos)))
   cat(sprintf("  PBO:                              %.1f %%\n", 100 * x$pbo))
-  cat(sprintf("  Median-Logit lambda:              %.2f\n", stats::median(x$lambda)))
+  cat(sprintf("  Median-Logit lambda:              %.2f\n", stats::median(x$lambda, na.rm = TRUE)))
   cat(sprintf("  Leistungsabfall (Steigung OOS~IS): %.2f\n", x$slope))
   cat(sprintf("  OOS-Verlustwahrscheinlichkeit:    %.1f %%\n", 100 * x$prob_loss))
-  cat(sprintf("  Gew\u00e4hlter Punkt OOS vor Median:   %.1f %%\n", 100 * mean(x$oos_best > x$oos_median)))
+  cat(sprintf("  Gew\u00e4hlter Punkt OOS vor Median:   %.1f %%\n", 100 * mean(x$oos_best > x$oos_median, na.rm = TRUE)))
   cat(sprintf("  Lesart: PBO nahe 0 = Auswahl tr\u00e4gt, um %.0f %% = Zufall%s, dar\u00fcber = Auswahl schadet.\n",
               100 * (x$n_points + x$n_points %% 2) / (2 * x$n_points), if (x$n_points %% 2) " (ungerade Punktezahl: (N + 1) / (2N))" else ""))
   invisible(x)
@@ -315,6 +349,7 @@ sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
   fn <- "sharpe_probabilistic"
   chk_nofactor(r, fn, "r")
   .e5_numvec(r, fn, "r")
+  if (!is.null(dim(r))) chk_stop("zahlen", fn, "r")      # seit 1.6.5 (CR2-V2-4): Matrix wie in Julia abgelehnt
   chk_num1(benchmark, fn, "benchmark")
   chk_num1(ppy, fn, "ppy", lo = 0, lo_open = TRUE)
   rf <- r[is.finite(r)]
@@ -380,6 +415,14 @@ sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
 #'   gleich). Mit nicht endlichen Renditen rechnet auch \code{"linear"} ueber
 #'   die Korrelationsmatrix. Seit 1.6.4.
 #' @inheritParams overfit_pbo
+#' @param expected_max Seit 1.6.5 (CR2-K-2, Entscheidung 189): erwartetes Maximum von
+#'   \eqn{N} wertlosen Versuchen. \code{"exact"} (Standard): exakter Erwartungswert des
+#'   Maximums von \eqn{N} unabhaengigen Standardnormalverteilten fuer reelles
+#'   \eqn{N \ge 1} (\eqn{\int z\,d\Phi(z)^N}, Gauss-Legendre-Quadratur im Kern; fuer
+#'   \eqn{N = 1} genau 0, nie negativ); \code{"bailey"}: Naeherung nach Bailey & Lopez de
+#'   Prado (2014) wie bis 1.6.4 (fuer \eqn{N} zwischen 1 und etwa 1,29 negativ). Die
+#'   effektive Versuchsanzahl \eqn{N_{eff} = \bar\rho + (1 - \bar\rho) N} ist eine
+#'   Heuristik ohne Literaturquelle.
 #' @return Objekt der Klasse \code{SimLevDSR}, eine Liste mit \code{id}
 #'   (gepruefter Punkt), \code{sharpe} (seine Sharpe Ratio p. a.),
 #'   \code{sr0} (erwartetes Maximum ohne Koennen, p. a.), \code{psr}
@@ -413,8 +456,10 @@ sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
 #' @export
 sharpe_deflated <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
                             frequency = c("week", "day", "month"), dates = NULL, risk_free = 0,
-                            rho_method = c("cor", "linear")) {
+                            rho_method = c("cor", "linear"), expected_max = c("exact", "bailey")) {
   fn <- "sharpe_deflated"
+  .e5_choice(expected_max, c("exact", "bailey"), fn, "expected_max")   # seit 1.6.5 (CR2-K-2, Entscheidung 189)
+  expected_max <- match.arg(expected_max)
   .e5_choice(frequency, c("week", "day", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
   .e5_choice(rho_method, c("cor", "linear"), fn, "rho_method")   # seit 1.6.4 (B-075, Entscheidung 92)
@@ -438,12 +483,17 @@ sharpe_deflated <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
   Nt <- n_trials %||% (if (effective) n_eff else N)
   v <- if (N > 1) .sl_var(sr) else 0
   g <- 0.5772156649
-  sr0 <- if (Nt > 1 && v > 0) sqrt(v) * ((1 - g) * .sl_qnorm(1 - 1 / Nt) + g * .sl_qnorm(1 - 1 / (Nt * exp(1)))) else 0
+  # seit 1.6.5 (CR2-K-2, Entscheidung 189): Standard ist das exakte erwartete Maximum von Nt Standardnormalen
+  # (Gauss-Quadratur im Kern; fuer Nt = 1 genau 0, nie negativ); die Naeherung von Bailey & Lopez de Prado (2014)
+  # mit expected_max = "bailey" (bis 1.6.4 der einzige Weg; fuer Nt zwischen 1 und etwa 1,29 negativ)
+  e_max <- function() if (expected_max == "exact") .research_vec(1L, Nt, numeric(0), 1L)
+                      else (1 - g) * .sl_qnorm(1 - 1 / Nt) + g * .sl_qnorm(1 - 1 / (Nt * exp(1)))
+  sr0 <- if (Nt > 1 && v > 0) sqrt(v) * e_max() else 0
   r <- R[, j]
   structure(list(id = rr$cols[j], sharpe = sr[j] * sqrt(rr$ppy), sr0 = sr0 * sqrt(rr$ppy),
                  psr = .of_psr(r, 0, rr$ppy), dsr = .of_psr(r, sr0 * sqrt(rr$ppy), rr$ppy),
                  n_trials = Nt, n_points = N, n_eff = n_eff, rho = rho, var_sr = v * rr$ppy, n_obs = nrow(R),
-                 frequency = frequency), class = "SimLevDSR")
+                 frequency = frequency, expected_max = expected_max), class = "SimLevDSR")
 }
 
 # Mittlere paarweise Pearson-Korrelation der Spalten von R (endlich, N >= 2) in O(T N) (seit 1.6.4, B-075,
@@ -522,6 +572,11 @@ print.SimLevDSR <- function(x, ...) {
 #'   \code{ppy} = (Anzahl Tage - 1) / (Zeitspanne in Tagen / 365.25). Wirkt
 #'   auch auf \code{series} und die CAGR in \code{summary} (dann
 #'   Ueberrenditen).
+#' @param correlation Seit 1.6.5 (lit1 W1, Entscheidung 192): Art der
+#'   Walk-Forward-Korrelation je Fenster zwischen der In-Sample- und der
+#'   Out-of-Sample-Kennzahl aller Punkte (Tinsley 2026): \code{"spearman"}
+#'   (Standard), \code{"kendall"} oder \code{"pearson"}. NA bei weniger als drei
+#'   Punkten mit Kennzahl oder ohne Streuung.
 #' @return Objekt der Klasse \code{SimLevWalkForward}, eine Liste mit
 #'   \describe{
 #'     \item{\code{windows}}{data.frame je Testfenster: \code{train_start},
@@ -547,6 +602,14 @@ print.SimLevDSR <- function(x, ...) {
 #'       Testfenstern die Spanne vom ersten bis zum letzten Testtag), \code{mean_oos_rank}, \code{efficiency}
 #'       (mittlere OOS- durch mittlere IS-Kennzahl) und \code{switches}
 #'       (Anzahl Wechsel des gewaehlten Punkts).}
+#'     \item{\code{windows} (seit 1.6.5)}{zusaetzlich \code{wfc} (Walk-Forward-Korrelation
+#'       der Kennzahlen aller Punkte), \code{oos_positive} (Anteil der Punkte mit
+#'       OOS-Kennzahl > 0) und \code{is_pos_oos_neg} (Anteil mit IS > 0 und OOS < 0);
+#'       \code{summary} zusaetzlich \code{mean_wfc} und \code{median_wfc}. Kennzahlen
+#'       ohne Schwankung (Standardabweichung bzw. Abwaertsschwankung <= 1e-10 je Tag)
+#'       sind NA (mit Warnung) und werden weder gewaehlt noch gerankt; Gleichstaende
+#'       bis auf 1e-12 relativ zaehlen bei Auswahl (erster Punkt) und Rang (mittlerer
+#'       Rang) als Gleichstand.}
 #'     \item{\code{hindsight_id}, \code{metric}, \code{select},
 #'       \code{train}, \code{test}, \code{anchored}, \code{params}}{Rueckschau-Punkt
 #'       und Einstellungen.}
@@ -567,12 +630,15 @@ print.SimLevDSR <- function(x, ...) {
 #' @export
 overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored = FALSE,
                          metric = c("sharpe", "sortino", "geometric", "mean"),
-                         select = c("best", "plateau"), risk_free = 0) {
+                         select = c("best", "plateau"), risk_free = 0,
+                         correlation = c("spearman", "kendall", "pearson")) {
   fn <- "overfit_walk_forward"
   .e5_choice(metric, c("sharpe", "sortino", "geometric", "mean"), fn, "metric")   # Pruefung (Meldung auswahl)
   metric <- match.arg(metric)
   .e5_choice(select, c("best", "plateau"), fn, "select")   # Pruefung (Meldung auswahl)
   select <- match.arg(select)
+  .e5_choice(correlation, c("spearman", "kendall", "pearson"), fn, "correlation")   # seit 1.6.5 (lit1 W1)
+  correlation <- match.arg(correlation)
   if (!inherits(x, "SimLevParamSearch") || is.null(x$returns)) chk_stop("ut2.ps_renditen", "overfit_walk_forward")
   # seit 1.6.4: Jahre, die gerundet mindestens einen Monat ergeben, hoechstens 100 Jahre (B-006: step = 0 lief endlos)
   for (a in c("train", "test", "step")) {
@@ -588,6 +654,17 @@ overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored =
   add_m <- function(date, months) .add_months(date, round(months))      # auf das Monatsende begrenzt
   t0 <- d[1]; last <- d[length(d)]
   win <- list(); k <- 0L
+  n_flat <- 0L; n_val <- 0L; tl_pts <- integer(0)
+  # seit 1.6.5 (CR2-D-7, Entscheidung 185 K16): Ueberrendite unter -1 (Totalverlust abzueglich risk_free) bei
+  # "geometric" mit eigener Warnung statt der Rohwarnung "NaNs produced" (Ergebnis wie bisher: Kennzahl NaN)
+  cm <- function(rows) {
+    Rw <- R[rows, , drop = FALSE]
+    if (metric == "geometric" && any(Rw < -1)) {
+      tl_pts <<- union(tl_pts, rr$cols[colSums(Rw < -1) > 0])
+      return(suppressWarnings(.of_col_metric(Rw, metric)))
+    }
+    .of_col_metric(Rw, metric)
+  }
   repeat {
     ts <- add_m(t0, 12 * (train + k * step))
     if (ts >= last) break
@@ -595,22 +672,33 @@ overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored =
     te <- add_m(t0, 12 * (train + k * step + test))       # alle Grenzen von t0 aus (sonst Luecken nach Monatsende-Kuerzung)
     is_rows <- which(d >= tr & d < ts); oos_rows <- which(d >= ts & d < te)
     if (length(is_rows) < 20 || length(oos_rows) < 5) break
-    m_is <- .of_col_metric(R[is_rows, , drop = FALSE], metric)
+    m_is <- cm(is_rows)
     score <- m_is
     if (select == "plateau") {
       full <- rep(NA_real_, nrow(x$results)); full[rr$cols] <- m_is
       score <- vapply(rr$cols, function(cid) mean(full[nb[[cid]]], na.rm = TRUE), 0)
     }
-    j <- which.max(score)
-    m_oos <- .of_col_metric(R[oos_rows, , drop = FALSE], metric)
+    # seit 1.6.5 (CR2-W2-1, Entscheidung 189): Auswahl mit Toleranz (der erste Punkt, dessen Wert dem Hoechstwert bis
+    # auf 1e-12 relativ gleicht), Rang als mittlerer Rang des Gleichstands mit Toleranz
+    j <- .of_which_max_tol(score)
+    if (!length(j)) chk_stop("b2.wf_keine_kennzahl", fn, format(d[is_rows[1]]))
+    m_oos <- cm(oos_rows)
+    if (metric %in% c("sharpe", "sortino")) {
+      n_flat <- n_flat + sum(is.na(m_is)) + sum(is.na(m_oos)); n_val <- n_val + 2L * length(m_is)
+    }
     win[[length(win) + 1L]] <- data.frame(train_start = d[is_rows[1]], test_start = d[oos_rows[1]], test_end = d[oos_rows[length(oos_rows)]],
                                           id = rr$cols[j], is_metric = m_is[j], oos_metric = m_oos[j],
-                                          oos_rank = (rank(m_oos)[j] - 0.5) / length(m_oos),
+                                          oos_rank = .of_rank_tol(m_oos, j),
                                           oos_return = .geo_ret(R[oos_rows, j]),
-                                          oos_average = mean(apply(R[oos_rows, , drop = FALSE], 2, .geo_ret)))
+                                          oos_average = mean(apply(R[oos_rows, , drop = FALSE], 2, .geo_ret)),
+                                          wfc = .of_wfc(m_is, m_oos, correlation),
+                                          oos_positive = mean(m_oos[!is.na(m_oos)] > 0),
+                                          is_pos_oos_neg = mean((m_is > 0 & m_oos < 0)[!is.na(m_is) & !is.na(m_oos)]))
     k <- k + 1L
   }
   if (!length(win)) chk_stop("rs.wf_kurz", fn)
+  if (n_flat > 0L) warning(chk_msg("b2.wf_flach", fn, n_flat, n_val), call. = FALSE)
+  if (length(tl_pts)) warning(chk_msg("b2.wf_totalverlust", fn, sort(tl_pts)), call. = FALSE)
   W <- do.call(rbind, win)
   W <- cbind(W[, 1:4], x$results[W$id, x$params, drop = FALSE], W[, -(1:4)])
   # Testtage ohne Ueberlappung: jeder Tag gehoert zum juengsten Fenster, dessen Test begonnen hat
@@ -630,11 +718,40 @@ overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored =
   series <- data.frame(date = d[rows], walk_forward = cumprod(1 + wf), hindsight = cumprod(1 + span[, hind]),
                        average = cumprod(1 + rowMeans(span)))
   smry <- c(cagr_walk_forward = ann(wf), cagr_hindsight = ann(span[, hind]), cagr_average = ann(rowMeans(span)),
-            mean_oos_rank = mean(W$oos_rank), efficiency = mean(W$oos_metric) / mean(W$is_metric),
-            switches = sum(W$id[-1] != W$id[-nrow(W)]))
+            mean_oos_rank = mean(W$oos_rank, na.rm = TRUE),
+            efficiency = mean(W$oos_metric, na.rm = TRUE) / mean(W$is_metric, na.rm = TRUE),
+            switches = sum(W$id[-1] != W$id[-nrow(W)]),
+            mean_wfc = mean(W$wfc, na.rm = TRUE), median_wfc = if (all(is.na(W$wfc))) NA_real_ else stats::median(W$wfc, na.rm = TRUE))
+  if (is.nan(smry[["mean_wfc"]])) smry[["mean_wfc"]] <- NA_real_
   structure(list(windows = W, series = series, summary = smry, hindsight_id = rr$cols[hind], metric = metric,
-                 select = select, train = train, test = test, anchored = anchored, params = x$params),
+                 select = select, train = train, test = test, anchored = anchored, params = x$params,
+                 correlation = correlation),
             class = "SimLevWalkForward")
+}
+
+# Hilfen seit 1.6.5 (CR2-W2-1, lit1 W1): Vergleich mit Toleranz (Regel wie .near_eq in sensitivity.R, Paket B1:
+# |a - b| <= 1e-12 * max(1, |a|, |b|)), Auswahl des ersten Punkts am Hoechstwert, Rang mit Toleranz,
+# Walk-Forward-Korrelation
+.of_which_max_tol <- function(v) {
+  ok <- which(!is.na(v))
+  if (!length(ok)) return(integer(0))
+  mx <- max(v[ok])
+  ok[which(.near_eq(v[ok], mx))[1]]
+}
+# Rang des Punkts j unter den Werten v (ohne NA) als Anteil (Rang - 0.5) / Anzahl; Gleichstand = |Differenz| nach
+# .near_eq, mittlerer Rang. NA, wenn v[j] NA ist.
+.of_rank_tol <- function(v, j) {
+  if (is.na(v[j])) return(NA_real_)
+  u <- v[!is.na(v)]; e <- .near_eq(u, v[j])
+  (sum(!e & u < v[j]) + (sum(e) + 1) / 2 - 0.5) / length(u)
+}
+# Korrelation der IS- und OOS-Kennzahlen aller Punkte eines Fensters (Tinsley 2026, Gl. 5); NA bei weniger als drei
+# gueltigen Paaren oder ohne Streuung in einer der beiden Listen
+.of_wfc <- function(a, b, method) {
+  ok <- !is.na(a) & !is.na(b)
+  a <- a[ok]; b <- b[ok]
+  if (length(a) < 3L || length(unique(a)) < 2L || length(unique(b)) < 2L) return(NA_real_)
+  .sl_cor(a, b, method = method)
 }
 
 #' @rdname overfit_walk_forward
@@ -655,6 +772,10 @@ print.SimLevWalkForward <- function(x, ...) {
               100 * s["cagr_walk_forward"], x$hindsight_id, 100 * s["cagr_hindsight"], 100 * s["cagr_average"]))
   cat(sprintf("Mittlerer OOS-Rang %.0f %% (50 %% = Zufall), Effizienz OOS/IS %.2f, %d Wechsel\n",
               100 * s["mean_oos_rank"], s["efficiency"], s["switches"]))
+  # seit 1.6.5 (lit1 W1, Entscheidung 192): Walk-Forward-Korrelation je Fenster, Mittel und Median
+  if (!is.null(x$correlation))
+    cat(sprintf("Walk-Forward-Korrelation IS/OOS (%s) Mittel %.2f, Median %.2f\n", x$correlation,
+                s["mean_wfc"], s["median_wfc"]))
   invisible(x)
 }
 
@@ -764,12 +885,20 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
     v <- if (by == "plateau") param_plateau(x)$plateau_mean else x$results[[x$objective]]
     ids <- x$results$id[utils::head(order(v, decreasing = isTRUE(x$maximize), na.last = NA), top)]
   }
+  # seit 1.6.5 (CR2-F-4, Entscheidung 185 K35): Namen p<id> ohne Exponentenschreibweise; ein Name aus include, der
+  # fuer einen Suchpunkt vergeben ist, ist ein Fehler (bis 1.6.4: R Meldung zu doppelten Namen, Python/Julia ersetzten
+  # den Suchpunkt still)
+  nm_specs <- sprintf("p%d", as.integer(ids))
+  dup <- intersect(nm_specs, names(include))
+  if (length(dup)) chk_stop("b2.pb_include", fn, dup[1])
   specs <- lapply(ids, function(i) {
     sp <- .as_spec(x$builder(as.list(x$results[i, x$params, drop = FALSE])))
-    if (!is.null(map)) sp$map <- c(sp$map, map)
+    # seit 1.6.5 (CR2-F-3, Entscheidung 185 K18): map ersetzt gleiche Aliase der Suche (bis 1.6.4 gewann in R still
+    # die Zuordnung der Suche, in Python und Julia die angegebene)
+    if (!is.null(map)) { m <- sp$map; m[names(map)] <- map; sp$map <- m }
     sp
   })
-  names(specs) <- paste0("p", ids)
+  names(specs) <- nm_specs
   # sim_args aus ... ergaenzen die der Suche (oberste Ebene; Bausteine werden ersetzt, nicht gemischt)
   dots <- list(...); sa <- x$sim_args %||% list()
   if ("sim_args" %in% names(dots)) { sa <- .sim_args_set(sa, dots$sim_args, "param_bootstrap"); dots$sim_args <- NULL }
@@ -821,6 +950,14 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #' @param ppy Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 =
 #'   Wochen). Bei Suche oder Matrix wird es wie bei [overfit_pbo()] bestimmt (aus
 #'   dem Datum geschaetzt, sonst 252/52/12 je \code{frequency}).
+#' @param distribution Seit 1.6.5 (Entscheidung 190): Verteilung des t-Werts in beiden
+#'   Richtungen (p-Wert und Rueckrechnung der abgeschlagenen Sharpe Ratio):
+#'   \code{"t"} (Standard) = t-Verteilung mit \eqn{T - 1} Freiheitsgraden nach Harvey
+#'   & Liu (2015, Gl. 3; braucht \code{n_obs >= 2}); \code{"normal"} =
+#'   Normalverteilung wie bis 1.6.4. Wo der p-Wert unterlaeuft (unter 1e-290),
+#'   rechnet SimLev im Log-Massstab (CR2-I-2; bis 1.6.4 Abschlag \code{-Inf}); die
+#'   Spalten \code{p} und \code{p_*} zeigen dort 0. Die Korrektur nach Holm und BY
+#'   rechnet ohne Auffuellen der weiteren Tests (CR2-I-1, gleiche Werte).
 #' @return data.frame je Punkt, absteigend nach \code{sharpe} sortiert, mit
 #'   \code{id} (Punkt bzw. Spaltennummer; bei Vektoren die Position),
 #'   \code{sharpe} (p. a.), \code{t}, \code{p} und fuer jedes Verfahren
@@ -843,10 +980,12 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #'   Portfolio Management 42(1), 13-28.
 #' @export
 sharpe_haircut <- function(x, n_obs = NULL, n_tests = NULL, frequency = c("week", "day", "month"), dates = NULL,
-                           risk_free = 0, ppy = 52) {
+                           risk_free = 0, ppy = 52, distribution = c("t", "normal")) {
   fn <- "sharpe_haircut"
   .e5_choice(frequency, c("week", "day", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
+  .e5_choice(distribution, c("t", "normal"), fn, "distribution")   # seit 1.6.5 (Entscheidung 190)
+  distribution <- match.arg(distribution)
   # seit 1.6.4: n_tests ganze Zahl von 1 bis 10^8 (Entscheidung 16; C-017), Sharpe Ratios endlich, n_obs ganze Zahl
   if (!is.null(n_tests)) { chk_int1(n_tests, fn, "n_tests", lo = 1); chk_max(n_tests, 1e8, fn, "n_tests") }
   .of_check_common(fn, risk_free)
@@ -865,19 +1004,64 @@ sharpe_haircut <- function(x, n_obs = NULL, n_tests = NULL, frequency = c("week"
   # Attribut n_tests nannte den angegebenen Wert)
   if (!is.null(n_tests) && n_tests < length(sr)) chk_stop("ut2.n_tests", fn)
   M <- n_tests %||% length(sr)
-  tstat <- sr * sqrt(Tn); p <- 2 * .sl_pnorm(-abs(tstat))
-  padj <- function(method) {
-    pp <- c(p, rep(1, max(0, M - length(p))))                       # unbekannte weitere Tests: p = 1
-    stats::p.adjust(pp, method = method, n = max(M, length(p)))[seq_along(p)]
+  # seit 1.6.5 (Entscheidung 190): Standard t-Verteilung mit T - 1 Freiheitsgraden in beiden Richtungen (Harvey & Liu
+  # 2015, Gl. 3); distribution = "normal" rechnet wie bis 1.6.4 mit der Normalverteilung
+  if (distribution == "t" && Tn < 2) chk_stop("b2.haircut_t", fn)
+  nu <- if (distribution == "t") Tn - 1 else Inf
+  tstat <- sr * sqrt(Tn)
+  p <- if (distribution == "t") 2 * .sl_pt(-abs(tstat), nu) else 2 * .sl_pnorm(-abs(tstat))
+  back <- function(pa) {                                            # oberes Ende
+    q <- if (distribution == "t") .sl_qt(pmin(pa, 1) / 2, nu, lower.tail = FALSE) else .sl_qnorm(pmin(pa, 1) / 2, lower.tail = FALSE)
+    sign(sr) * q / sqrt(Tn) * sqrt(ppy)
   }
-  back <- function(pa) sign(sr) * .sl_qnorm(pmin(pa, 1) / 2, lower.tail = FALSE) / sqrt(Tn) * sqrt(ppy)   # oberes Ende
+  # seit 1.6.5 (CR2-I-2, Entscheidung 189 Weg a): wo p unterlaeuft (p < 1e-290), im Log-Massstab ueber die Kerne
+  # tail_logp und tail_logp_inv (bis 1.6.4 p = 0, abgeschlagene Sharpe Ratio Inf und Abschlag -Inf)
+  low <- p < 1e-290
+  lp <- log(p)
+  if (any(low)) lp[low] <- log(2) + .research_vec(6L, abs(tstat[low]), nu, sum(low))
   out <- data.frame(id = ids, sharpe = sr * sqrt(ppy), t = tstat, p = p)
   meth <- c(bonferroni = "bonferroni", holm = "holm", bhy = "BY")
   for (nm in names(meth)) {
-    pa <- padj(meth[[nm]]); sa <- back(pa)
+    pa <- .of_p_adjust(p, meth[[nm]], M); sa <- back(pa)
+    if (any(low)) {
+      lpa <- .of_p_adjust_log(lp, meth[[nm]], M)
+      sa[low] <- sign(sr[low]) * .research_vec(7L, lpa[low] - log(2), nu, sum(low)) / sqrt(Tn) * sqrt(ppy)
+    }
     out[[paste0("p_", nm)]] <- pa; out[[paste0("sharpe_", nm)]] <- sa
     out[[paste0("haircut_", nm)]] <- ifelse(out$sharpe != 0, 1 - sa / out$sharpe, NA)
   }
   attr(out, "n_tests") <- M; attr(out, "n_obs") <- Tn
+  attr(out, "distribution") <- distribution
   out[order(-out$sharpe), ]
 }
+
+# p.adjust(p, method, n = M) fuer p ohne NA, ohne die bis 1.6.4 mit p = 1 aufgefuellten Tests (CR2-I-1, Entscheidung
+# 189): Bonferroni min(1, M p), Holm cummax((M - i + 1) p_(i)), BY cummin(q M / i p_(i)) von oben mit
+# q = sum(1 / (1:M)) aus dem Kern (ohne Vektor); Bit fuer Bit wie stats::p.adjust ueber die aufgefuellten Werte
+.of_p_adjust <- function(p, method, M) {
+  lp <- length(p)
+  if (M <= 1) return(p)
+  switch(method,
+    bonferroni = pmin(1, M * p),
+    holm = { i <- seq_len(lp); o <- order(p); ro <- order(o); pmin(1, cummax((M - i + 1L) * p[o]))[ro] },
+    BY = { i <- lp:1L; o <- order(p, decreasing = TRUE); ro <- order(o)
+           q <- .research_vec(2L, M, numeric(0), 1L)
+           pmin(1, cummin(q * M / i * p[o]))[ro] })
+}
+# dasselbe im Log-Massstab (fuer unterlaufende p, CR2-I-2): log der angepassten p-Werte, hoechstens 0
+.of_p_adjust_log <- function(lp, method, M) {
+  n <- length(lp)
+  if (M <= 1) return(lp)
+  switch(method,
+    bonferroni = pmin(0, log(M) + lp),
+    holm = { i <- seq_len(n); o <- order(lp); ro <- order(o); pmin(0, cummax(log(M - i + 1) + lp[o]))[ro] },
+    BY = { i <- n:1L; o <- order(lp, decreasing = TRUE); ro <- order(o)
+           q <- .research_vec(2L, M, numeric(0), 1L)
+           pmin(0, cummin(log(q * M / i) + lp[o]))[ro] })
+}
+
+# Hilfskerne seit 1.6.5 (core/research_core_impl.h, research_vec; Python _signals_core.research_vec, Julia
+# SignalsCore.research_vec): 1 erwartetes Maximum von N Standardnormalen, 2 sum(1 / (1:n)) wie R, 3 Risikozustand der
+# Zielvolatilitaet, 4 expandierender Median, 5 Drawdown-Polster
+.research_vec <- function(op, x, par, nout)
+  .Call(C_research_vec, as.integer(op), as.numeric(x), as.numeric(par), as.numeric(nout))

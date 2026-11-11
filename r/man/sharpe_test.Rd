@@ -12,7 +12,10 @@ sharpe_test(
   B = 2000L,
   block = NULL,
   ppy = NULL,
-  seed = NULL
+  seed = NULL,
+  studentize = TRUE,
+  kernel = NULL,
+  prewhiten = NULL
 )
 }
 \arguments{
@@ -36,9 +39,11 @@ gebildet und nur gemeinsame Perioden-Enddaten verwendet.
 den Standardwert von \code{ppy}.}
 
 \item{method}{\code{"hac"} (Standard): Delta-Methode mit
-Newey-West-Kovarianz (Bartlett-Kern, Lag
-\eqn{\lfloor 4 (T/100)^{2/9} \rfloor}); \code{"bootstrap"}:
-stationaerer Block-Bootstrap der Renditepaare (Standardfehler =
+HAC-Kovarianz (Standard Newey-West, Bartlett-Kern, Lag
+\eqn{\lfloor 4 (T/100)^{2/9} \rfloor}; siehe \code{kernel}, \code{prewhiten}); \code{"bootstrap"}:
+seit 1.6.5 studentisierter zirkulaerer Block-Bootstrap der Renditepaare nach Ledoit & Wolf (2008,
+Abschnitt 3.2.2, siehe \code{studentize} und Details); mit \code{studentize = FALSE}
+stationaerer Block-Bootstrap wie bis 1.6.4 (Standardfehler =
 Standardabweichung der Bootstrap-Differenzen, p-Wert = Anteil der
 Wiederholungen mit \eqn{|d^* - d| \ge |d|}, Intervall = 2.5- und
 97.5-\%-Quantil der Bootstrap-Differenzen).}
@@ -47,11 +52,16 @@ Wiederholungen mit \eqn{|d^* - d| \ge |d|}, Intervall = 2.5- und
 bei \code{method = "bootstrap"}.
 Seit 1.6.4 hoechstens 10^8.}
 
-\item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden
+\item{block}{Blocklaenge in Perioden: mit \code{studentize = TRUE} die feste Laenge \eqn{b} der Bloecke des
+zirkulaeren Block-Bootstraps (ganze Zahl), sonst die mittlere Blocklaenge des stationaeren Bootstraps
 (geometrisch verteilte Blocklaengen, Bloecke laufen zyklisch ueber das
 Ende); \code{NULL} (Standard) = \code{max(2, round(T^(1/3)))} mit
 \eqn{T} = Anzahl Renditepaare. Nur bei \code{method = "bootstrap"}.
-Seit 1.6.4 eine Zahl >= 1.}
+Seit 1.6.4 eine Zahl >= 1. Mit \code{studentize = TRUE} seit 1.6.5 hoechstens
+\eqn{T/4}: die Block-Kovarianz \eqn{\hat\Psi^*} braucht mindestens 4 Bloecke
+(\eqn{l = \lfloor T/b \rfloor \ge 4}, sonst Fehler; bei weniger Bloecken ist sie
+singulaer und p-Wert und Intervall sind unbrauchbar). Die Guete des Tests sinkt schon
+vorher mit wachsender Blocklaenge; \eqn{T/4} ist nur die Mindestbedingung.}
 
 \item{ppy}{Perioden je Jahr fuer die Annualisierung. \code{NULL}
 (Standard) = bei Vektoren 252 (\code{"day"}), 52 (\code{"week"}) bzw. 12
@@ -64,6 +74,21 @@ Seit 1.6.4 eine Zahl > 0.}
 Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
 Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
 Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
+
+\item{studentize}{Logisch (seit 1.6.5, Standard \code{TRUE}): bei \code{method = "bootstrap"} der
+studentisierte zirkulaere Block-Bootstrap nach Ledoit & Wolf (2008); \code{FALSE} = der nicht studentisierte
+stationaere Block-Bootstrap bis 1.6.4 (bitgleich).}
+
+\item{kernel}{Kern der HAC-Kovarianz (seit 1.6.5): \code{"bartlett"} (Lag
+\eqn{\lfloor 4 (T/100)^{2/9} \rfloor}) oder \code{"qs"} (Quadratic Spectral mit automatischer Bandbreite
+\eqn{S_T = 1.3221 (\hat\alpha(2) T)^{1/5}} nach Andrews 1991 aus AR(1)-Naeherungen je Moment).
+\code{NULL} (Standard) = \code{"bartlett"} bei \code{method = "hac"} (bitgleich zu 1.6.4 ausser 142),
+\code{"qs"} beim studentisierten Bootstrap (Standardfehler der Ausgangsstichprobe wie bei Ledoit & Wolf 2008).}
+
+\item{prewhiten}{Logisch (seit 1.6.5): Prewhitening mit einem VAR(1) nach Andrews & Monahan (1992).
+\code{NULL} (Standard) = \code{FALSE} bei \code{method = "hac"}, \code{TRUE} beim studentisierten
+Bootstrap. Ausser bei Bartlett ohne Prewhitening (Newey-West wie bisher) rechnet SimLev den Schaetzer von
+Ledoit & Wolf (2008, Abschnitt 3.1) mit dem Faktor \eqn{T/(T-4)}.}
 }
 \value{
 Benannter numerischer Vektor: \code{sharpe_x}, \code{sharpe_y}
@@ -77,7 +102,8 @@ p. a.), \code{se} (Standardfehler der Differenz, p. a.), \code{z}
 Prueft, ob sich die Sharpe Ratios zweier Strategien unterscheiden, robust
 gegen Autokorrelation, Heteroskedastie und dicke Raender (Ledoit & Wolf
 2008): mit der Delta-Methode und Newey-West-Kovarianz (\code{"hac"}) oder
-einem stationaeren Block-Bootstrap der Renditepaare (\code{"bootstrap"}).
+einem Block-Bootstrap der Renditepaare (\code{"bootstrap"}, seit 1.6.5 studentisiert und zirkulaer wie bei
+Ledoit & Wolf).
 Der klassische Jobson-Korkie-Test unterstellt Normalverteilung und
 unabhaengige Renditen und ist fuer Finanzdaten zu optimistisch.
 }
@@ -90,6 +116,19 @@ eines risikolosen Zinses, annualisiert mit \eqn{\sqrt{ppy}}.
 Mindestens 10 gemeinsame Renditepaare sind noetig, und keine der beiden
 Reihen darf die Varianz 0 haben (sonst Fehler). Identische Reihen ergeben
 \code{difference = 0}, \code{se = 0}, \code{z = 0} und \code{p_value = 1}.
+
+Studentisierter Bootstrap (Standard bei \code{method = "bootstrap"} seit 1.6.5, Ledoit & Wolf 2008,
+Abschnitt 3.2.2 und Bemerkung 3.2): \eqn{\Delta = \mu_x/\sigma_x - \mu_y/\sigma_y}; Standardfehler
+\eqn{s(\hat\Delta) = \sqrt{\nabla f' \hat\Psi \nabla f / T}} (Gl. 5) mit der HAC-Kovarianz der Momente
+\eqn{(r_x, r_y, r_x^2, r_y^2)}; Teststatistik \eqn{d = |\hat\Delta| / s(\hat\Delta)}. Je Wiederholung
+\eqn{m} werden Bloecke der festen Laenge \eqn{b} mit gleichverteiltem Start zyklisch gezogen; der
+Standardfehler der Stichprobe ist \eqn{s(\hat\Delta^*_m)} aus
+\eqn{\hat\Psi^* = l^{-1} \sum_{j=1}^{l} \zeta_j \zeta_j'}, \eqn{\zeta_j = b^{-1/2} \sum_{t=1}^{b} y^*_{(j-1)b+t}},
+\eqn{l = \lfloor T/b \rfloor} (Gl. 8), \eqn{d^*_m = |\hat\Delta^*_m - \hat\Delta| / s(\hat\Delta^*_m)}.
+p-Wert \eqn{(\#\{d^*_m \ge d\} + 1)/(B + 1)} (Gl. 9), Intervall
+\eqn{\hat\Delta \pm z^*_{0.95}\, s(\hat\Delta)} mit dem 95-\%-Quantil der \eqn{d^*_m} (Gl. 7); \code{se} ist
+\eqn{s(\hat\Delta)}, \code{z} = \code{difference / se}. Die Blocklaenge waehlt SimLev nicht
+datenabhaengig (die Kalibrierung von Ledoit & Wolf, Algorithmus 3.1, ist nicht umgesetzt).
 }
 \examples{
 set.seed(1); n <- 3 * 365
@@ -111,6 +150,12 @@ sharpe_test(diff(d$a) / d$a[-n], diff(d$b) / d$b[-n], ppy = 365)
 Ledoit, O. & Wolf, M. (2008), Robust performance hypothesis
 testing with the Sharpe ratio, Journal of Empirical Finance 15(5),
 850-859.
+
+Andrews, D. W. K. (1991), Heteroskedasticity and autocorrelation consistent covariance matrix estimation,
+Econometrica 59(3), 817-858.
+
+Andrews, D. W. K. & Monahan, J. C. (1992), An improved heteroskedasticity and autocorrelation consistent
+covariance matrix estimator, Econometrica 60(4), 953-966.
 }
 \seealso{
 \code{\link[=sharpe_min_track_record]{sharpe_min_track_record()}}, \code{\link[=sharpe_probabilistic]{sharpe_probabilistic()}},

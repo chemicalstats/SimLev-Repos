@@ -25,6 +25,7 @@ engine_reason	4	Liquidation:
 engine_reason	5	Steuerereignis:
 engine_reason	6	Split:
 engine_reason	7	Freibetrag:
+engine_reason	8	Depotgebühr:
 engine_detail	201	%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n
 engine_detail	202	\t\t=> Vorabpauschale-Anrechnung (§ 19 InvStG): %.2f EUR\n
 engine_detail	203	\t\t=> Sparerpauschbetrag: %.2f EUR (verbleibend: %.2f EUR)\n
@@ -138,7 +139,7 @@ eval_warn	3	_NOT_ converged in 1000 iterations
 eval_warn	10	simulation: geldgewichtete Rendite (cagr) mit Einzahlungen nicht bestimmbar (Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR): kein interner Zinsfuß gefunden; cagr = NA.
 eval_warn	11	simulation: Endwert negativ (%.2f EUR, %s); Verlust über 100 %%: cagr und ttwror sind nicht definiert (NA), Drawdowns auf 100 %% begrenzt.
 eval_warn	11.offen	offene Steuerschuld %.2f EUR
-eval_warn	11.ungedeckt	nicht gedeckte Steuerschuld
+eval_warn	11.ungedeckt	nicht gedeckte Steuer- oder Gebührenschuld
 eval_warn	12	simulation: zeitgewichteter Wertindex wird negativ (Tagesrendite unter -100 %); ttwror ist nicht definiert (NA).
 eval_warn	13	simulation: Zeitraum %s (Laufzeit 0 Jahre): cagr und ttwror sind nicht definiert (NA).
 eval_warn	14	simulation: Depotwert am Starttag %.2f EUR: cagr ist nicht definiert (NA).
@@ -403,3 +404,510 @@ eingabe	rs.horizont_kurz	%s: Historie zu kurz für den Horizont.
 eingabe	rs.objective	%s: objective '%s' nicht in metrics(): %s
 eingabe	ke.prozent_teilen	; Prozentangaben durch 100 teilen
 eingabe	ke.zahl_bereich_prozent	%s: %s muss eine einzelne endliche Zahl %s sein; Prozentangaben durch 100 teilen.
+eingabe	d.name_fehlt	%s: kein Element mit dem Namen '%s'.
+eingabe	a.tarif_nul	%s: Datei '%s' enthält ein NUL-Byte (keine Textdatei); erwartet wird eine CSV-Datei in UTF-8.
+eingabe	a.sfw_doppelt	%s: doppelte Namen in %s: %s; jedes Asset nur einmal angeben.
+eingabe	a.sfw_fremd	%s: Namen in %s, die kein Asset der Strategie sind: %s (Assets: %s).
+eingabe	a.trigger_und	%s: combine = "and" verlangt Teil-Trigger der Typen "abs_leverage", "rel_leverage" oder "vol_band" (triggers[[%s]] ist "combined").
+eingabe	a.zve_jahr_na	%s: taxable_income: Jahr fehlt in Zeile %s (Spalte %s).
+eingabe	a.werte_positiv	%s: %s muss endliche Werte > 0 enthalten (Kursniveaus bzw. Indexstände; erstmals in Zeile %s).
+eingabe	a.werte_positiv_datum	%s: %s muss endliche Werte > 0 enthalten (Kursniveaus bzw. Indexstände; erstmals am %s).
+eingabe	a.stufe_spaet	%s: die Stufentabelle %s beginnt erst am %s, nach dem ersten Datentag (%s); davor gilt ihr erster Wert.
+eingabe	a.event_gewicht	Hinweis: simulation: an %s Ereignistagen war event_weight nicht verwendbar (Wert fehlt oder nicht endlich bzw. Summe der Gewichte nicht > 0), erstmals am %s; an diesen Tagen galten die Strategie-Gewichte.
+eingabe	a.label_depot	Depotgebühr
+eingabe	a.dt_zahlung_anderes	Steuerereignis:\tZahlung %s %s EUR für %s aus dem Geldbestand von %s am %s\n
+eingabe	a.dt_depot	Depotgebühr:\t%s EUR (Depotwert %s EUR, Anteil des Jahres %s) am %s\n
+eingabe	a.rf_zahl	%s: risk_free muss größer als -100 sein (Zins in Prozent p. a.).
+eingabe	a.rf_spalte	%s: Spalte '%s' (risk_free) muss Zinsen größer als -100 enthalten (Prozent p. a.; erstmals in Zeile %s).
+eingabe	a.locf_luecken	Hinweis: %s Zeilen, erwartet %s Kalendertage. Fehlende Tage werden aufgefüllt (LOCF; Signale = FALSE); %s Lücken über 5 Kalendertage (mehr als Wochenende und Feiertage), die größte mit %s Tagen ab %s.
+eingabe	a.date_fehlt	%s: Spalte 'date' fehlt in 'data'; das Datum muss eine eigene Spalte mit dem Namen 'date' sein (nicht der Zeilenindex bzw. die Zeilennamen; eine anders benannte Datumsspalte umbenennen).
+eingabe	a.m_asset_config	asset_config: asset_class = "etn_standard" ist veraltet; stattdessen asset_class = "etn" mit deliverable = FALSE verwenden.
+eingabe	a.m_asset_config_2	asset_config: asset_class = "etn_deliverable" ist veraltet; stattdessen asset_class = "etn" mit deliverable = TRUE verwenden.
+eingabe	a.m_num1	asset_config: %s muss eine einzelne Zahl sein.
+eingabe	a.m_num1_2	asset_config: start ist kein Datum (erwartet Date oder "JJJJ-MM-TT").
+eingabe	a.m_num1_3	asset_config: bei trading = "signal" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).
+eingabe	a.m_num1_4	asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein.
+eingabe	a.m_num1_5	asset_config: tax_regime ist ungültig; erlaubt sind %s (oder NULL: aus asset_class abgeleitet).
+eingabe	a.m_to_date	%s: Datum ist numerisch; erwartet Date, POSIXct oder Text 'JJJJ-MM-TT'.
+eingabe	a.m_dp_frame	'%s' muss ein data.frame mit Spalte 'date' sein.
+eingabe	a.m_dp_frame_2	'%s': keine Datumsspalte; Spalte '%s' ist numerisch (z. B. Zeilennummern aus write.csv). Spalte 'date' (Date oder 'JJJJ-MM-TT') angeben.
+eingabe	a.m_dp_frame_3	'%s': keine numerische Spalte.
+eingabe	a.m_series_align	series_align: Die Quellen überlappen sich nicht.
+eingabe	a.m_series_align_2	series_align: Spaltenname '%s' kommt mehrfach vor.
+eingabe	a.m_series_convert_currency	series_convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s).
+eingabe	a.m_index_total_return	index_total_return: dates müssen vollständig und aufsteigend sortiert sein (wie price).
+eingabe	a.m_series_deflate	series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.
+eingabe	a.m_series_deflate_2	series_deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date später wählen.
+eingabe	a.m_cpi_level	%s: Spalte '%s' fehlt im Datensatz.
+eingabe	a.m_series_splice	series_splice: 'dates' angeben, wenn Vektoren übergeben werden.
+eingabe	a.m_series_splice_2	series_splice: Die erste Reihe hat keine Werte.
+eingabe	a.m_strategy_from_weights	weights muss benannt sein.
+eingabe	a.m_strategy_from_weights_2	Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen).
+eingabe	a.m_sfw_wrappers	wrapper: Eintrag '%s' muss ein Objekt aus wrapper_config() sein.
+eingabe	a.m_portfolio_template	portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name liefert portfolio_template() die Liste der Vorlagen.
+eingabe	a.m_portfolio_template_2	Unbekannte Vorlage '%s'. Verfügbar: %s
+eingabe	a.m_portfolio_template_3	map muss benannt sein: Rolle -> Spaltenname, z. B. c(stocks = "msci_world").
+eingabe	a.m_portfolio_template_4	map: unbekannte Rolle(n) %s für Vorlage '%s'; Rollen: %s.
+eingabe	a.m_portfolio_template_5	map: mehrere Rollen zeigen auf dieselbe Spalte %s; je Spalte nur eine Rolle (Gewichte sonst selbst zusammenfassen und strategy_from_weights() verwenden).
+eingabe	a.m_check_taxable_income	%s: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: %s.
+eingabe	a.m_check_taxable_income_2	%s: taxable_income: Spalte '%s' (Betrag) muss numerisch sein.
+eingabe	a.m_check_taxable_income_3	%s: taxable_income muss %s sein.
+eingabe	a.m_check_taxable_income_4	%s: taxable_income enthält einen ungültigen Wert%s; erwartet werden endliche Beträge in EUR.
+eingabe	a.m_check_taxable_income_5	%s: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. "2024").
+eingabe	a.m_blk_num	%s: '%s' muss %s sein.
+eingabe	a.m_blk_lgl	%s: '%s' muss TRUE oder FALSE sein.
+eingabe	a.m_blk_days	%s: days muss ganze Zahlen von 1 bis 31 enthalten.
+eingabe	a.m_blk_days_2	%s: days enthält doppelte Tage (%s); jeder Tag ergibt nur einen Termin, verwendet wird days = %s.
+eingabe	a.m_blk_start	%s: start ist kein Datum (erwartet Date oder "JJJJ-MM-TT").
+eingabe	a.m_blk_check	simulation: %s muss NULL oder ein Objekt aus %s() sein.
+eingabe	a.m_one	%s: 'value' muss eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR).
+eingabe	a.m_rebalance_plan	rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert.
+eingabe	a.m_rebalance_plan_2	rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein.
+eingabe	a.m_rebalance_plan_3	rebalance_plan: event_weight wirkt nur zusammen mit event_col und wird ignoriert.
+eingabe	a.m_split_rule	split_rule: thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein.
+eingabe	a.m_income_tariff	income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der Simulation) fehlt.
+eingabe	a.m_income_tariff_2	income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.
+eingabe	a.m_harvest_rule	harvest_rule: day im Format 'MM-TT' (Monat 01 bis 12, Tag 01 bis 31) und vor dem 31.12. angeben (z. B. '12-15').
+eingabe	a.m_tax_profile	tax_profile: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9).
+eingabe	a.m_tax_profile_2	tax_profile: rate und church_tax schließen sich aus; rate gilt nur ohne Kirchensteuer (mit church_tax gilt der Satz nach § 32d Abs. 1 EStG).
+eingabe	a.m_tax_profile_3	tax_profile: 'base_rate' muss NULL, eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt) oder der Name einer Spalte in data sein.
+eingabe	a.m_tax_profile_4	tax_profile: income muss NULL, ein Objekt aus income_rate() oder aus income_tariff() sein (beide schließen sich aus).
+eingabe	a.m_tax_profile_5	tax_profile: harvest muss NULL oder ein Objekt aus harvest_rule() sein.
+eingabe	a.m_funds_costs	funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s).
+eingabe	a.m_sim_check_names	%s: %s gibt es nicht mehr; bitte %s%s.
+eingabe	a.m_sim_check_names_2	%s: unbekannter Pfad "%s"; möglich sind die Bausteine mit ihren Parametern: %s.
+eingabe	a.m_sim_check_names_3	%s: unbekanntes Argument %s für simulation(); möglich sind %s sowie Pfade zu Parametern der Bausteine (z. B. "dca.value").
+eingabe	a.m_sim_args_set	%s: %s muss NULL oder ein Objekt aus %s() sein.
+eingabe	a.m_sim_args_set_2	%s: die Pfade %s passen zu keinem Baustein für %s (%s).
+eingabe	a.m_sim_risk_free	risk_free: Spalte '%s' fehlt im Datensatz.
+eingabe	a.m_sim_build_state	simulation: signal_buy-Spalte '%s' fehlt im Datensatz (Asset '%s').
+eingabe	a.m_sim_build_state_2	simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s').
+eingabe	a.m_sim_build_calendar	simulation: %s_start ist kein Datum (erwartet Date oder "JJJJ-MM-TT").
+eingabe	a.m_sim_build_calendar_2	simulation: %s liegt nach dem letzten Datentag (%s); es gäbe keine Termine.
+eingabe	a.m_sim_build_calendar_3	simulation: event_col '%s' nicht im Datensatz gefunden.
+eingabe	a.m_sim_build_calendar_4	simulation: event_weight muss benannt sein (Asset = Spaltenname), z. B. c(A = "wA", B = "wB").
+eingabe	a.m_sim_build_calendar_5	simulation: event_weight-Spalte '%s' (Asset '%s') fehlt in 'data'.
+eingabe	a.m_sim_build_calendar_6	simulation: event_weight-Spalte '%s' muss nicht negative Zahlen enthalten.
+eingabe	a.m_sim_build_calendar_7	simulation: event_weight nennt nicht alle Assets (es fehlt: %s); an Event-Tagen gelten dann die Strategie-Gewichte.
+eingabe	a.m_sim_build_calendar_8	simulation: start von '%s' liegt nach dem letzten Datentag (%s); das Asset wäre nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.
+eingabe	a.m_sim_build_calendar_9	simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse später); mindestens ein Asset muss ab Beginn handelbar sein.
+eingabe	a.m_sim_check_inputs	simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).
+eingabe	a.m_sim_check_inputs_2	simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()).
+eingabe	a.m_sim_check_inputs_3	simulation: Alle Assets in 'strategy' müssen benannt sein (Name = Kursspalte in 'data').
+eingabe	a.m_sim_check_inputs_4	simulation: Asset-Name '%s' kommt in 'strategy' mehrfach vor; jeder Name darf nur einmal vorkommen.
+eingabe	a.m_sim_check_inputs_5	simulation: Spaltenname '%s' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein.
+eingabe	a.m_sim_check_inputs_6	simulation: Asset '%s' in 'strategy' muss eine Liste bzw. asset_config() sein.
+eingabe	a.m_sim_check_inputs_7	simulation: asset_class von Asset '%s' ist ungültig; erlaubt sind %s (veraltet: etn_standard, etn_deliverable). Strategie am besten mit create_strategy()/asset_config() bauen.
+eingabe	a.m_sim_check_inputs_8	simulation: tax_regime von Asset '%s' ist ungültig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden.
+eingabe	a.m_sim_check_inputs_9	simulation: trading von Asset '%s' ist ungültig; erlaubt sind "bnh" und "signal".
+eingabe	a.m_sim_check_inputs_10	simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein.
+eingabe	a.m_sim_check_inputs_11	simulation: Asset '%s' ist ein Fonds-Wrapper; dafür ist nur trading = "bnh" möglich (keine Signale auf den Anteilswert).
+eingabe	a.m_sim_check_inputs_12	simulation: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); 'data' darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet). Spalte umbenennen oder entfernen.
+eingabe	a.m_sim_check_inputs_13	simulation: %s %s in 'data'; je Asset der Strategie wird eine Spalte gleichen Namens erwartet (vorhanden: %s).
+eingabe	a.m_sim_check_inputs_14	simulation: 'data' enthält keine Zeilen.
+eingabe	a.m_sim_check_inputs_15	simulation: Spalte 'date' muss die Klasse Date haben.
+eingabe	a.m_sim_check_inputs_16	simulation: In der ersten Zeile von 'data' fehlen alle Kurse (NA); mindestens ein Asset muss am ersten Tag notieren. Daten erst ab dem ersten Kurs übergeben.
+eingabe	a.m_sim_check_inputs_17	simulation: Kursspalte '%s' muss numerisch sein.
+eingabe	a.m_sim_check_inputs_18	simulation: Kursspalte '%s' enthält ungültige Kurse (<= 0 oder unendlich), erstmals am %s; erwartet werden positive Kursniveaus.
+eingabe	a.m_sim_check_inputs_19	simulation: Kursspalte '%s' enthält nur NA.
+eingabe	a.m_sim_check_inputs_20	simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000).
+eingabe	a.m_frac_warn	simulation: '%s' muss TRUE oder FALSE sein.
+eingabe	a.m_frac_warn_2	simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.
+eingabe	a.m_create_strategy	create_strategy: Assets entweder über ... oder über assets angeben, nicht beides.
+eingabe	a.m_create_strategy_2	create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data).
+eingabe	a.m_create_strategy_3	create_strategy: alle Assets müssen benannt sein (Name = Kursspalte in data), z. B. create_strategy(ETF = asset_config("etf")).
+eingabe	a.m_create_strategy_4	create_strategy: Asset-Name '%s' kommt mehrfach vor; jeder Name darf nur einmal vorkommen.
+eingabe	a.m_create_strategy_5	create_strategy: Asset '%s' muss ein asset_config()-Objekt oder eine Liste sein.
+eingabe	a.m_strategy_validate	strategy_validate: strategy muss ein Objekt der Klasse "strategy" sein (aus create_strategy()).
+eingabe	a.m_strategy_validate_2	strategy_validate: Asset '%s' ist kein asset_config()-Objekt.
+eingabe	a.m_strategy_validate_3	strategy_validate: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); data darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet).
+eingabe	a.m_strategy_validate_4	strategy_validate: Kursspalte(n) %s fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: %s).
+eingabe	a.m_strategy_validate_5	strategy_validate: signal_buy-Spalte '%s' fehlt in data (Asset '%s').
+eingabe	a.m_strategy_validate_6	strategy_validate: signal_sell-Spalte '%s' fehlt in data (Asset '%s').
+eingabe	a.m_strategy_add_asset	strategy_add_asset: strategy muss ein Objekt der Klasse "strategy" sein (aus create_strategy()).
+eingabe	a.m_strategy_add_asset_2	strategy_add_asset: asset muss ein asset_config()-Objekt sein.
+eingabe	a.m_strategy_add_asset_3	strategy_add_asset: Ein Asset mit diesem Namen ist schon in der Strategie; zum Ändern strategy_update_asset() verwenden.
+eingabe	a.m_strategy_update_asset	strategy_update_asset: strategy muss ein Objekt der Klasse "strategy" sein (aus create_strategy()).
+eingabe	a.m_strategy_update_asset_2	strategy_update_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).
+eingabe	a.m_strategy_remove_asset	strategy_remove_asset: strategy muss ein Objekt der Klasse "strategy" sein (aus create_strategy()).
+eingabe	a.m_strategy_remove_asset_2	strategy_remove_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).
+eingabe	a.m_strategy_remove_asset_3	strategy_remove_asset: Nach dem Entfernen von '%s' enthält die Strategie keine Assets mehr.
+eingabe	a.m_tax_tariff	tax_tariff: Die mitgelieferte Datei extdata/steuertarif.csv wurde nicht gefunden (Paket unvollständig installiert?).
+eingabe	a.m_tax_tariff_read	tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.
+eingabe	a.m_tax_tariff_read_2	tax_tariff: Datei '%s' nicht gefunden.
+eingabe	a.m_tax_tariff_read_3	tax_tariff: In '%s' wurde nur eine Spalte gelesen. Erwartet wird Komma als Trennzeichen%s und Punkt als Dezimalzeichen, z. B. 'zone,69879,0,1,0,0.42,-11135.63'.
+eingabe	a.m_tax_tariff_read_4	tax_tariff: Datei '%s' ist keine lesbare CSV-Datei (%s).
+eingabe	a.m_num	tax_tariff: Die Datei enthält keine Tarifzone (art = "zone").
+eingabe	a.m_num_2	tax_tariff: Die erste Zone muss bei ab = 0 beginnen.
+eingabe	a.m_num_3	tax_tariff: Die Soli-Freigrenze (ab) darf nicht negativ sein.
+eingabe	a.m_num_4	tax_tariff: Soli-%s muss zwischen 0 und 100 Prozent liegen.
+eingabe	a.m_wrapper_config	wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die create_strategy() annimmt).
+eingabe	a.m_wrapper_config_2	wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein.
+eingabe	a.m_wrapper_config_3	wrapper_config: Asset '%s' der inneren Strategie hat selbst einen Wrapper; verschachtelte Wrapper sind nicht möglich.
+eingabe	a.m_wrapper_config_4	wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.
+eingabe	a.m_wrapper_config_5	wrapper_config: costs muss ein Objekt aus funds_costs() sein.
+eingabe	a.m_wrapper_config_6	wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR).
+eingabe	a.m_wrapper_nav_calc	%s: keine Handelstage in der inneren Rechnung (alle Tage aufgefüllt).
+eingabe	a.m_wrapper_nav_calc_2	%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert.
+eingabe	a.m_wrapper_nav	wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.
+eingabe	a.m_wrapper_nav_2	wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.
+eingabe	a.m_split_rule_2	split_rule: thresh = c(%s, %s) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich).
+eingabe	a.m_is_private	simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enthält aber Assets mit tax_regime = "private_sale"; Gewinne nach Paragraf 23 EStG werden dann möglicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).
+eingabe	a.m_tax_tariff_read_5	tax_tariff: Datei '%s' ist keine lesbare CSV-Datei (no lines available in input).
+eingabe	a.m_sfw_wrappers_2	wrapper muss ein Objekt aus wrapper_config() (gilt für alle Assets) oder eine benannte Liste solcher Objekte sein (Name = Asset).
+eingabe	a.m_wrapper_config_7	wrapper_config: order_fee enthält feste Beträge in EUR (fixed, min oder max); dafür ist das Fondsvolumen 'volume' in EUR nötig (die innere Rechnung startet dann mit diesem Volumen). Ohne volume gehen nur Prozentgebühren (order_fee = list(percent = ...)).
+eingabe	a.m_idx_rate	%s: nicht interpretierbare Angabe (Skalar, Vektor der Länge %s, Spaltenname, data.frame(date, Wert) oder benannter Vektor mit Datumsnamen).
+eingabe	a.m_to_frame	simulation: alle Spalten von 'data' müssen gleich lang sein.
+eingabe	a.m_to_date_2	%s: nicht lesbares Datum (%s)
+eingabe	a.m_series_convert_currency_2	series_convert_currency: Wechselkurs fx muss positiv sein; %s Zeilen ungültig (erstmals Zeile %s).
+eingabe	a.m_index_total_return_2	index_total_return: dates hat Länge %s, price %s.
+eingabe	a.m_scalar	wrapper: Asset '%s' hat trading = "signal"; mit wrapper ist nur trading = "bnh" möglich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie).
+eingabe	a.m_base_setproperty	SimLevResult: Feld %s ist nicht änderbar
+eingabe	a.m_yrname	%s: taxable_income: Jahr %s kommt mehrfach vor.
+eingabe	a.m_sim_kv	sim_args muss eine benannte Liste sein (RList, NamedTuple, Dict oder Pair-Vektor).
+eingabe	a.m_cabi_layout_check	SimLev: flaches Feld %s hat %s statt %s Werte (julia/src/sim_engine.jl, _CABI_LAYOUT)
+eingabe	a.m_sim_check_inputs_21	simulation: tax_regime von Asset '%s' ist ungültig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern tax = NULL verwenden.
+eingabe	a.m_sim_check_inputs_22	simulation: Spalte 'date' ist Text und Zeile %s ist kein Datum im Format JJJJ-MM-TT; vorher mit as.Date(..., format = ...) umwandeln.
+eingabe	a.m_sim_check_inputs_23	simulation: Spalte 'date' enthält NA (erstmals in Zeile %s).
+eingabe	a.m_sim_check_inputs_24	simulation: Datum %s kommt in 'data' mehrfach vor (%s doppelte Zeilen); je Tag genau eine Zeile.
+eingabe	a.m_rframe	simulation: Attribut 'filled' von 'data' hat %s Zeilen, 'data' aber %s (z. B. nach Zeilenauswahl einer series_align()-Ausgabe); es wird ignoriert, aufgefüllte Tage gelten dann als Handelstage. Zeitraum besser mit series_align(..., start =, end =) wählen.
+eingabe	a.m_sim_build_state_3	simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt.
+eingabe	a.m_sim_build_state_4	simulation: base_rate-Spalte '%s' fehlt in data (tax_profile(base_rate = "%s") braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: %s).
+eingabe	a.m_tax_tariff_read_6	tax_tariff: In '%s' hat Datenzeile %s insgesamt %s Felder, die Kopfzeile %s. Dezimalzeichen ist der Punkt (0.42, nicht 0,42); Komma nur als Trennzeichen.
+eingabe	a.m_tax_tariff_read_7	tax_tariff: Datenzeile %s hat ein ungültiges art; erlaubt sind "zone" und "soli".
+eingabe	a.m_num_5	tax_tariff: Spalte '%s' in Datenzeile %s (art = %s) ist nicht numerisch bzw. nicht endlich.
+eingabe	a.m_num_6	tax_tariff: Es muss genau eine soli-Zeile geben (gefunden: %s).
+eingabe	a.m_num_7	tax_tariff: Die Zonen müssen streng aufsteigend sein (Zone %s).
+eingabe	a.m_num_8	tax_tariff: teiler muss > 0 sein (Zone %s).
+eingabe	a.m_wrapper_nav_3	wrapper_nav: Spalte 'date' enthält NA (erstmals in Zeile %s).
+eingabe	a.mm_luecke	%s: %s hat fehlende Werte (erstmals am %s); die Zinsreihe muss lückenlos sein.
+eingabe	a.mm_faktor	%s: am %s ist der Tagesfaktor 1 + (Zins - spread) / 100 · Tage / basis nicht positiv; der Index bliebe nicht positiv.
+eingabe	a.dt_gebuehr_zahlung	Depotgebühr:\tZahlung %s EUR aus dem Geldbestand von %s am %s\n
+eingabe	a.dt_gebuehr_teil	Depotgebühr:\tTeilzahlung %s EUR aus dem Geldbestand am %s\n
+eingabe	a.dt_gebuehr_anderes	Depotgebühr:\tZahlung %s EUR für %s aus dem Geldbestand von %s am %s\n
+eingabe	c.cvar_grenze	%s: die Schrittgrenze (%s Schritte) wurde erreicht; die Gewichte sind möglicherweise nicht auskonvergiert.
+eingabe	c.sharpe_rand	%s: das beste Portfolio liegt am Rand des Suchbereichs der Risikoaversion (lambda · größte Varianz zwischen 1e-12 und 1e12); das Ergebnis ist möglicherweise nicht optimal.
+eingabe	c.cov_ueberlauf	%s: Renditen zu groß (Varianz nicht darstellbar), Spalte(n) %s.
+eingabe	c.lw_hinweis	%s: cov = "ledoit_wolf": die Varianzen der Anlagen unterscheiden sich um mehr als das 100-Fache; die Schrumpfung auf die skalierte Einheitsmatrix hebt die Schwankung ruhiger Anlagen an und verschiebt die Gewichte (für Anlagen sehr verschiedener Schwankung eher cov = "sample").
+eingabe	c.front_flach	Hinweis: Sharpe Ratio auf der ganzen Grenze gleich (Anlage ohne Schwankung); markiert ist der Punkt mit der höchsten Rendite.
+eingabe	c.cop_rand	%s: der Parameter der Familie '%s' liegt am Rand des Suchbereichs (%s); Schätzung, Log-Likelihood und AIC dieser Familie sind dort unzuverlässig.
+eingabe	c.covar_perioden	%s: %s Perioden für %s Koeffizienten; mindestens %s Perioden nötig.
+eingabe	c.covar_rand	%s: nur %s Perioden bei q = %s; im Rand liegen erwartet weniger als 5 Beobachtungen, das Quantil ist kaum schätzbar.
+eingabe	c.dep_konstant	%s: Reihe %s ist im Auswertungszeitraum konstant; mit conditions ist keine Blocklänge bestimmbar (block angeben oder die Reihe entfernen).
+eingabe	c.view_vol0	%s: Standardabweichung 0 – die Gewichte fallen auf Szenarien mit genau dem Mittelwert (meist ein einziges Szenario).
+eingabe	c.view_gleich	%s: var1 und var2 müssen verschiedene Spalten sein.
+eingabe	c.view_rang	%s: vars muss mindestens zwei Spalten nennen (vars[1] >= vars[2] >= ...).
+eingabe	c.copula_rand	%s: das Stressband von '%s' reicht in den äußersten Rand (unter 1/T bzw. über 1 - 1/T, T = %s Perioden); die Randverteilungen enden am historischen Minimum bzw. Maximum, schlechtere Werte als beobachtet entstehen nicht.
+eingabe	c.krise_name	%s: Anlage(n) %s heißen wie eine Ergebnisspalte; bitte die Kursspalte(n) umbenennen.
+eingabe	c.krise_teil	%s: Krise '%s' nur teilweise in den Daten (verwendet %s bis %s, Krise %s bis %s).
+eingabe	c.krise_keine	%s: Keine Krise liegt im Datenzeitraum.
+eingabe	c.bc_spalte_leer	%s: Spalte '%s' (%s) enthält keinen Wert.
+eingabe	c.bc_spalte_spaet	%s: Spalte '%s' (%s) beginnt erst nach %s Zeilen ohne Wert; davor gilt ihr erster Wert.
+eingabe	c.bc_kollinear	%s: drag und spread wirken beide je Kalendertag und sind bei festem Hebel gemeinsam nicht bestimmbar; geschätzt wird nur drag, spread bleibt bei seinem festen Wert (über fixed setzbar).
+eingabe	c.bc_rand	%s: der Schätzwert von %s (%s) liegt an der Grenze des Suchbereichs; bounds bzw. grid erweitern.
+eingabe	c.bc_konvergenz	%s: die Suche über mehrere Parameter ist nicht konvergiert (convergence = %s).
+eingabe	c.bc_ende	%s: die Produktkurse enden am %s; die %s Zeilen danach sind fortgeschrieben (source = "filled").
+eingabe	c.da_ohne_datum	Hinweis: '%s': %s Zeilen ohne Datum entfernt.
+eingabe	c.da_sharpe	Hinweis: '%s': Sharpe Ratio nicht definiert (Überrendite ohne Schwankung).
+eingabe	c.dict_reihenfolge	%s: ein Dict hat keine feste Reihenfolge; die Einträge werden in der Reihenfolge der Hash-Tabelle verarbeitet und das Ergebnis kann von R und Python abweichen. Paare ["a" => …, "b" => …] oder RList verwenden.
+eingabe	c.hmm_grenze	%s: die Schätzung hat die Iterationsgrenze max_iter = %s erreicht und ist möglicherweise nicht konvergiert; max_iter erhöhen.
+eingabe	c.dash_ordner	%s: der Ordner '%s' existiert nicht.
+eingabe	c.dash_zeichnen	%s: das Dashboard lässt sich in dieser Größe nicht zeichnen (%s); width bzw. height vergrößern.
+eingabe	c.m_resolve_series	%s: data.frame braucht die Spalten date und Wert.
+eingabe	c.m_bc_check_args	'leverage' muss eine Zahl ungleich 0 sein.
+eingabe	c.m_bc_prepare	'data' muss ein data.frame sein.
+eingabe	c.m_bc_prepare_2	'data' braucht eine Spalte 'date'.
+eingabe	c.m_bc_prepare_3	'data$date' enthält fehlende Daten.
+eingabe	c.m_bc_prepare_4	'data$date' muss streng aufsteigend und ohne Duplikate sein.
+eingabe	c.m_bc_prepare_5	Spalte '%s' fehlt im Datensatz.
+eingabe	c.m_bc_prepare_6	Indexwerte müssen positiv sein.
+eingabe	c.m_backcast_fit	'fit' darf nur 'drag', 'spread' und 'beta' enthalten.
+eingabe	c.m_backcast_fit_2	'bounds' muss eine benannte Liste mit Einträgen drag, spread und/oder beta sein, z. B. list(drag = c(-5, 5)).
+eingabe	c.m_backcast_fit_3	bounds$%s muss c(unten, oben) mit unten < oben sein.
+eingabe	c.m_backcast_fit_4	'beta' wird bei Regressionsmodellen über die Regression geschätzt und hier ignoriert.
+eingabe	c.m_backcast_fit_5	'spread' ist bei leverage = 1 nicht identifizierbar und wird ignoriert.
+eingabe	c.m_backcast_fit_6	Zu wenige gemeinsame Beobachtungen von Produkt und Index (mindestens 20).
+eingabe	c.m_fit_reg	Zu wenige aufeinanderfolgende Beobachtungen für das Regressionsmodell.
+eingabe	c.m_run_fit	method = 'grid' unterstützt genau einen Parameter in 'fit'.
+eingabe	c.m_backcast	'fit' muss ein SimLevBackcastFit-Objekt sein.
+eingabe	c.m_backcast_2	Ohne 'fit' muss 'data' angegeben werden.
+eingabe	c.m_backcast_3	'product' und 'index' müssen angegeben werden.
+eingabe	c.m_backcast_4	Ohne Fit ist nur model = 'structural' möglich.
+eingabe	c.m_backcast_5	splice: "inception", "none" oder ein Datum ('JJJJ-MM-TT').
+eingabe	c.m_da_series	'%s': data.frame braucht eine Spalte 'date' (vorhanden: %s)%s.
+eingabe	c.m_da_series_2	'%s': keine numerische Wertspalte gefunden.
+eingabe	c.m_da_series_3	'%s': Wertspalte '%s' ist nicht numerisch.
+eingabe	c.m_da_series_4	'%s': Wertspalte '%s' hat keine Werte.
+eingabe	c.m_da_series_5	'%s': mindestens zwei Daten mit Wert nötig.
+eingabe	c.m_da_series_6	'%s' muss ein SimLevResult oder ein data.frame(date, value) sein.
+eingabe	c.m_result_analysis	x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.
+eingabe	c.m_result_analysis_2	rolling_years muss mindestens 2/12 (zwei Monate) betragen.
+eingabe	c.m_result_analysis_3	var_levels: Wahrscheinlichkeiten als Anteile zwischen 0 und 1, z. B. c(0.01, 0.05).
+eingabe	c.m_result_analysis_4	benchmark muss ein Name aus x sein (%s).
+eingabe	c.m_result_analysis_5	x enthält bereits eine Reihe 'Benchmark'; benchmark = "Benchmark" wählen oder die Reihe in x umbenennen.
+eingabe	c.m_plot_simlevanalysis	series: Name oder Nummer einer Reihe (%s).
+eingabe	c.m_plot_simlevanalysis_2	metric: 'cagr', 'volatility', 'sharpe', 'max_drawdown', 'beta' oder 'excess_cagr'.
+eingabe	c.m_dep_sort_dates	%s: Spalte 'date' enthält fehlende Daten (Zeile %s).
+eingabe	c.m_dep_sort_dates_2	%s: doppelte Daten in 'date' (%s%s); erwartet ist eine Zeile je Datum.
+eingabe	c.m_dep_check_prices	Kursspalte '%s': Kurse müssen positiv und endlich sein, gefunden am %s%s (fehlende Kurse als NA angeben).
+eingabe	c.m_dep_returns	data.frame mit Spalte 'date' erwartet.
+eingabe	c.m_copula_fit	copula_fit: mindestens 20 Beobachtungen nötig.
+eingabe	c.m_copula_fit_2	copula_fit: unbekannte Familie %s; erlaubt sind gaussian, t, frank sowie clayton und gumbel mit optionaler Rotation _90, _180 oder _270.
+eingabe	c.m_copula_fit_3	copula_fit: x oder y ist konstant (keine Rangstreuung); keine Copula schätzbar.
+eingabe	c.m_tail_dependence	tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen.
+eingabe	c.m_tail_dependence_2	tail_dependence: mindestens zwei Paare mit endlichen Werten nötig.
+eingabe	c.m_dependence_dcc	dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.
+eingabe	c.m_dependence_dcc_2	dependence_dcc: Reihe %s ist konstant; keine Korrelation schätzbar.
+eingabe	c.m_dependence_dcc_3	dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.
+eingabe	c.m_dependence_analysis	Zustand '%s': zu wenige Beobachtungen.
+eingabe	c.m_quantile_regression	quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein.
+eingabe	c.m_quantile_regression_2	quantile_regression: y muss numerisch sein.
+eingabe	c.m_quantile_regression_3	quantile_regression: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() in Indikatorspalten umwandeln).
+eingabe	c.m_quantile_regression_4	quantile_regression: X muss numerisch sein.
+eingabe	c.m_quantile_regression_5	quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).
+eingabe	c.m_quantile_regression_6	quantile_regression: Regressoren linear abhängig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).
+eingabe	c.m_quantile_regression_7	quantile_regression: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem Zielwert als die MM-Näherung (bzw. die MM-Näherung selbst, falls keine solche Ecke gefunden wurde).
+eingabe	c.m_tail_regression	tail_regression: zu wenige Perioden.
+eingabe	c.m_dependence_validate	boot muss ein bootstrap_result sein.
+eingabe	c.m_aggr	Zu wenige Perioden nach Aggregation.
+eingabe	c.m_regime_subset	condition muss die Länge nrow(data) haben.
+eingabe	c.m_regime_subset_2	regime_subset: keine Episode erfüllt condition und min_run.
+eingabe	c.m_opt_returns	x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.
+eingabe	c.m_opt_bounds	%s: numerischer Wert bzw. Vektor ohne NA erwartet.
+eingabe	c.m_opt_check_bounds	lower: Untergrenzen müssen >= 0 sein (Long-only).
+eingabe	c.m_mu_miss	%s: mu für alle Anlagen angeben; es fehlt ein Wert für %s (benannter Vektor mit allen Anlagen oder ein Wert je Spalte in Spaltenreihenfolge).
+eingabe	c.m_fx	%s: Anlage(n) %s ohne Schwankung (Volatilität 0); das Verfahren ist dafür nicht definiert. Anlage entfernen oder z. B. min_variance verwenden.
+eingabe	c.m_fx_2	equal: Grenzen werden ignoriert.
+eingabe	c.m_fx_3	inverse_vol: Grenzen werden ignoriert.
+eingabe	c.m_fx_4	risk_parity: Grenzen werden ignoriert.
+eingabe	c.m_fx_5	budget: Risikobudgets müssen >= 0 sein, mit positiver Summe.
+eingabe	c.m_fx_6	hrp: Grenzen werden ignoriert.
+eingabe	c.m_portfolio_optimize	mu: endliche Werte in Prozent p. a. erwartet.
+eingabe	c.m_opt_summary	Portfolio ohne Schwankung (Volatilität 0, nur Anlagen mit konstanter Rendite): Sharpe Ratio, Diversifikationsverhältnis und Risikoanteile sind nicht definiert (NA).
+eingabe	c.m_portfolio_rolling	portfolio_rolling: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in ...: ohne Namen.
+eingabe	c.m_portfolio_rolling_2	portfolio_rolling: data.frame mit Spalte 'date' erwartet.
+eingabe	c.m_portfolio_rolling_3	Historie kürzer als das Fenster.
+eingabe	c.m_portfolio_risk_contribut	weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).
+eingabe	c.m_portfolio_cpcv	portfolio_cpcv: test_groups muss kleiner als n_groups sein, sonst bleibt keine Trainingsgruppe.
+eingabe	c.m_portfolio_cpcv_2	portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.
+eingabe	c.m_portfolio_cpcv_3	portfolio_cpcv: Eintrag '%s' von methods muss eine benannte Argumentliste sein.
+eingabe	c.m_portfolio_cpcv_4	portfolio_cpcv: unbekannte Argumente für portfolio_optimize() in '%s': %s.
+eingabe	c.m_plot_simlevresult	plot.SimLevResult: panels muss ein Zeichenvektor sein; möglich: %s.
+eingabe	c.m_plot_simlevresult_2	plot.SimLevResult: unbekannte(s) Panel(s) %s in panels; möglich: %s.
+eingabe	c.m_plot_simlevresult_3	plot.SimLevResult: panels wirkt nur mit style = "custom" und wird bei style = "%s" ignoriert.
+eingabe	c.m_plot_simlevresult_4	plot.SimLevResult: colors muss eine benannte Liste (oder ein benannter Zeichenvektor) sein, z. B. list(primary = "#003366"); möglich: %s.
+eingabe	c.m_plot_simlevresult_5	plot.SimLevResult: unbekannte Farbe(n) %s in colors; möglich: %s.
+eingabe	c.m_plot_simlevresult_6	plot.SimLevResult: ungültige Farbe(n) in colors: %s; erwartet je Element ein R-Farbname (z. B. "navy", siehe grDevices::colors()) oder ein Hex-Code "#RRGGBB" bzw. "#RRGGBBAA".
+eingabe	c.m_alpha_col	plot.SimLevResult: Panel(s) %s nicht gezeichnet: %s ein Vergleichsergebnis (compare).
+eingabe	c.m_export_dashboard	export_dashboard: Datei '%s' nicht schreibbar.
+eingabe	c.m_regime_hmm	regime_hmm: k muss eine ganze Zahl >= 2 sein; ein Zustand wäre eine einzige Normalverteilung ohne Regime.
+eingabe	c.m_regime_hmm_2	regime_hmm: Spalte(n) %s ohne Schwankung (alle Periodenrenditen gleich, z. B. konstante Kurse); kein Modell schätzbar.
+eingabe	c.m_regime_hmm_3	regime_hmm: Schätzung fehlgeschlagen.
+eingabe	c.m_regime_states	Geglättete bzw. Viterbi-Zustände nutzen Zukunftsdaten - nur zur Beschreibung verwenden.
+eingabe	c.m_regime_states_2	Wahrscheinlichkeit nicht für Viterbi.
+eingabe	c.m_view_value	%s: value muss eine endliche Zahl%s sein.
+eingabe	c.m_sd_of	View '%s' passt nicht zu den Szenarien.
+eingabe	c.m_sd_of_2	view_vol: Standardabweichung muss >= 0 sein.
+eingabe	c.m_ll_t	stress: benannte Liste von Quantilbändern je Anlage erwartet, z. B. list(aktien = c(0, 0.05)).
+eingabe	c.m_ll_t_2	stress: Band für '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent).
+eingabe	c.m_scenario_risk	x muss ein SimLevScenarios sein.
+eingabe	c.m_scenario_risk_2	scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.
+eingabe	c.m_scenario_risk_3	scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).
+eingabe	c.m_scenario_crisis	scenario_crisis: data.frame mit Spalte 'date' erwartet.
+eingabe	c.m_scenario_crisis_2	scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.
+eingabe	c.m_scenario_crisis_3	scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).
+eingabe	c.m_sl_opt_control	optim: control muss eine Liste sein
+eingabe	c.m_num1	optim: Steuerwert %s muss eine Zahl sein
+eingabe	c.m_num1_2	optim: factr und reltol nicht zugleich angeben
+eingabe	c.m_num1_3	optim: Steuerwert parscale passt nicht zu par
+eingabe	c.m_sl_optim	optim: par muss ein nichtleerer Zahlenvektor sein
+eingabe	c.m_fn1	optim: Schranken nur mit L-BFGS-B bzw. PBFGS (nicht %s)
+eingabe	c.m_dependence_dcc_4	dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '%s' und '%s': Korrelation %s); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen.
+eingabe	c.m_draw	stress: Bänder gemeinsam zu unwahrscheinlich (Trefferquote %s bei %s Ziehungen); Bänder erweitern oder weniger Anlagen stressen.
+eingabe	c.m_check_svg_file	%s: file muss ein Dateiname (Zeichenkette) sein, nicht %s.
+eingabe	c.m_as_data	%s: die Grafikmethode lieferte keine Daten als dict (sondern %s).
+eingabe	c.m_as_plot	%s: die Grafikmethode lieferte kein SVG (sondern %s).
+eingabe	c.m_plot_dashboard	plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein; NULL = kein Vergleich.
+eingabe	c.m_plot_dashboard_2	plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein (%s statt %s Tage); NULL = kein Vergleich.
+eingabe	c.m_copula_fit_4	copula_fit: x und y müssen gleich lang sein (%s bzw. %s Werte).
+eingabe	c.m_tail_dependence_3	tail_dependence: x und y müssen gleich lang sein (%s bzw. %s Werte).
+eingabe	c.m_quantile_regression_8	quantile_regression: X hat %s Zeilen, y aber %s Werte.
+eingabe	c.m_quantile_regression_9	quantile_regression: %s vollständige Beobachtungen für %s Koeffizienten.
+eingabe	c.m_tail_regression_2	tail_regression: keine der %s Bootstrap-Stichproben schätzbar (singuläre Regressoren); keine Standardfehler.
+eingabe	c.m_kendall_tau_core	kendall_tau_core: 'y' muss mindestens die Länge %s haben (erhalten: %s).
+eingabe	c.m_quantile_reg_core	quantile_reg_core: 'y' ist zu kurz (%s statt mindestens %s).
+eingabe	c.m_quantile_reg_core_2	quantile_reg_core: 'beta0' ist zu kurz (%s statt mindestens %s).
+eingabe	c.m_hmm_em	hmm_em: ungültige Abmessungen.
+eingabe	c.m_goal_dp	goal_dp: ungültige Abmessungen.
+eingabe	c.m_pbo_cscv	pbo_cscv: ungültige Abmessungen.
+eingabe	c.m_portfolio_optimize_2	Zu wenige Beobachtungen für die Optimierung (%s Perioden für %s Anlagen, mindestens %s).
+eingabe	c.m_drop_rows	portfolio_cpcv: keine Optimierung erfolgreich (z. B. '%s' in Aufteilung %s: %s).
+eingabe	c.m_need	%s: '%s' ist zu kurz (%s statt mindestens %s).
+eingabe	c.m_regime_hmm_4	regime_hmm: zu wenige Perioden für die Zustandszahl (%s Perioden, mindestens %s).
+eingabe	c.m_scenario_entropy_pooling	scenario_entropy_pooling: prior muss %s endliche Werte >= 0 mit positiver Summe haben (einer je Szenario).
+eingabe	c.m_gr	Annahmen nicht vollständig erfüllbar (Abweichung %s).
+eingabe	c.m_as_plotdata	%s: die Grafikmethode lieferte keine Daten als RList (sondern %s).
+eingabe	c.m_plot_method	%s: %s zusätzliche(s) Positionsargument(e) wird/werden ignoriert; Optionen bitte als Schlüsselwort angeben.
+eingabe	b1.param_unbekannt	%s: unbekannter Parameter '%s' in %s; möglich sind %s.
+eingabe	b1.gitter_verfahren	%s: ess_grid: Parameter '%s' wird bei method = "%s" nicht verwendet (verwendet: %s).
+eingabe	b1.gitter_na	%s: ess_grid darf keine fehlenden Werte (NA, NaN) enthalten.
+eingabe	b1.ess_ohne_pfad	%s: %s von %s Parameterkombinationen erhalten bei n = %s keine Pfade und entfallen (n mindestens so groß wie die Zahl der Kombinationen wählen).
+eingabe	b1.vol_window	%s: params$vol_window darf höchstens so groß sein wie die Historie (%s %s).
+eingabe	b1.n_regimes	%s: params$n_regimes darf höchstens %s sein (mindestens 10 Beobachtungen je Regime, %s Renditen).
+eingabe	b1.vol_days	%s: params$vol_unit = "days" braucht in data eine Spalte 'date' mit streng aufsteigenden Datumswerten.
+eingabe	b1.kennzahl_pfad	%s: metrics() muss für jeden Pfad dieselben Kennzahlen liefern; Pfad %s (Strategie '%s'): %s.
+eingabe	b1.probs	%s: probs muss ein numerischer Vektor mit Werten von 0 bis 1 ohne NA sein.
+eingabe	b1.plot_keine	%s: Kennzahl '%s' hat für keine Strategie mindestens 2 endliche Werte; keine Grafik möglich.
+eingabe	b1.plot_undef	%s: Kennzahl '%s' ist für %s nicht definiert (weniger als 2 endliche Werte); diese Strategien fehlen in der Grafik.
+eingabe	b1.pfad_date	%s: Der Pfad hat eine Spalte 'date'; der Name ist für die Datumsspalte reserviert (Spalte umbenennen).
+eingabe	b1.letf_feld	%s: unbekanntes Feld '%s' in letfs[[%s]]; erlaubt sind base, leverage, finance, expense, spread, days, rate_basis, ter_basis und name.
+eingabe	b1.chunk_tmp	%s: chunk_dir: %s verwaiste Zwischendatei(en) eines abgebrochenen Laufs entfernt.
+eingabe	b1.pfad_lang	%s: Hinweis: path_length (%s Zeilen) ist mehr als 5-mal so lang wie die Historie (%s Renditen); die Pfade wiederholen dieselben Daten vielfach.
+eingabe	b1.garch_kurz	%s: Hinweis: Die Schätzung für method = "%s" stützt sich auf %s Renditen; unter etwa 500 Beobachtungen sind die GARCH-Parameter, besonders die Persistenz, unsicher (Hwang, Valls Pereira 2006).
+eingabe	b1.speicher	%s: Die Pfade brauchen etwa %s GB Arbeitsspeicher, mehr als frei ist; n oder path_length verringern oder bootstrap_study() verwenden (hält nicht alle Pfade im Speicher).
+eingabe	b1.niveau	%s: Spalte '%s' enthält ungültige Werte (<= 0 oder unendlich), erstmals am %s; erwartet werden positive Kurs- bzw. Indexniveaus.
+eingabe	b1.wmr_grenze	%s: schon upper = %s erreicht die Zielquote; das Ergebnis ist die Suchgrenze, keine Eigenschaft der Daten (upper erhöhen)%s.
+eingabe	b1.wmr_nie	; die Regel '%s' entnimmt einen Anteil des Depots und kann nicht scheitern
+eingabe	b1.hz_unbenutzt	%s: %s wird bei type = "%s" nicht verwendet.
+eingabe	b1.hz_mean	%s: mean liegt außerhalb von [min, max]; fast alle Laufzeiten fallen dann auf eine Grenze.
+eingabe	b1.ssr_werte	%s: Spalte '%s' muss Werte > 0 enthalten (%s).
+eingabe	b1.ssr_median	%s: Spalte '%s' sieht nicht wie Brutto-Renditen aus (Median unter 0.5; %s).
+eingabe	b1.ssr_brutto	Brutto-Renditen erwartet, z. B. 1.001 für +0,1 Prozent
+eingabe	b1.ssr_kurse	Kursniveaus erwartet
+eingabe	b1.ssr_kurz	%s: Für die Verschiebung sind mindestens 2 Kurse bzw. Datumswerte mit einer Spanne > 0 nötig.
+eingabe	b1.periode_luecke	%s: %s Periode(n) ohne Daten%s (erste Lücke zwischen %s und %s); die Renditen über die Lücke entfallen.
+eingabe	b1.years_periods	%s: years und periods schließen einander aus; die Laufzeit entweder in Jahren (years) oder in Perioden (periods) angeben.
+eingabe	b1.pwr_legacy	%s: Hinweis: %s Pfad(e) mit Totalverlust im letzten Jahr; das Erbe (legacy > 0) ist dort nicht erreichbar, die PWR ist NA.
+eingabe	b1.dict_reihenfolge	%s: %s als Dict hat keine feste Reihenfolge, das Ergebnis hängt aber von ihr ab; Paare ["a" => …] oder RList verwenden (künftig ein Fehler).
+eingabe	b1.m_bootstrap_config	aux_type: '%s' ist keine Zusatzreihe aus aux (verfügbar: %s).
+eingabe	b1.m_get_col	Renditen sehen nicht wie Brutto-Tagesrenditen aus (Median |R - 1| > 0.5). input = 'prices' vergessen?
+eingabe	b1.m_bootstrap_validate	Keine gültigen Pfade nach Validierung übrig
+eingabe	b1.m_ms_garch_check	MS-GARCH: Varianzmodell je Regime (params ms_garch_model, ms_ar_garch_model bzw. tvtp_garch_model) muss "sGARCH" oder "gjrGARCH" sein.
+eingabe	b1.m_ms_garch_check_2	MS-GARCH: Anzahl Regime (params ms_n_regimes, ms_ar_n_regimes bzw. tvtp_n_regimes) muss eine ganze Zahl >= 2 und <= 64 sein.
+eingabe	b1.m_chk	withdrawal_rule: %s muss %s sein.
+eingabe	b1.m_chk_2	withdrawal_rule: rate muss zwischen 0 und 100 Prozent liegen (z. B. 4).
+eingabe	b1.m_chk_3	withdrawal_rule: skip_inflation muss TRUE oder FALSE sein.
+eingabe	b1.m_chk_4	withdrawal_rule: min_real darf nicht größer als max_real sein.
+eingabe	b1.m_chk_5	withdrawal_rule('vpw'): max_rate = 0 erlaubt keine Entnahme; Höchstsatz in Prozent > 0 angeben (z. B. 100).
+eingabe	b1.m_wd_ppy	frequency muss 'year', 'quarter' oder 'month' sein.
+eingabe	b1.m_withdrawal_perfect_rate	withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).
+eingabe	b1.m_withdrawal_simulation	withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren > 0 sein.
+eingabe	b1.m_chk_6	withdrawal_simulation: '%s' muss %s sein.
+eingabe	b1.m_frac	withdrawal_simulation: %s = %s wird als %s %s gelesen (Prozent-Konvention); gemeint war vermutlich %s.
+eingabe	b1.m_frac_2	withdrawal_simulation: 'vorabpauschale' muss TRUE oder FALSE sein.
+eingabe	b1.m_frac_3	start_value: Endwert der Ansparphase (SimLevResult) ist %s EUR; withdrawal_simulation() braucht ein positives Startvermögen%s.
+eingabe	b1.m_num1	Periodenzahl ist kein Vielfaches eines Jahres; letztes Planjahr unvollständig.
+eingabe	b1.m_num1_2	income: start und end müssen Planjahre mit start <= end sein.
+eingabe	b1.m_withdrawal_max_rate	withdrawal_max_rate: Die Regel '%s' nutzt rate nicht; eine Suche über rate ist dafür nicht möglich.
+eingabe	b1.m_num1_3	withdrawal_max_rate: lower und upper müssen Raten in Prozent mit 0 <= lower < upper <= 100 sein.
+eingabe	b1.m_num1_4	withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005).
+eingabe	b1.m_withdrawal_horizon	withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.
+eingabe	b1.m_wd_tax_mode	withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein.
+eingabe	b1.m_wd_tax_mode_2	withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() oder income_tariff() (Basiszins über base_rate von withdrawal_simulation()).
+eingabe	b1.m_wd_zve	%s: taxable_income (income_tariff()) nach Kalenderjahren lässt sich nur mit einem SimLevResult als start_value auf Planjahre abbilden (Planjahr 1 = tax_report$next_year$year); erwartet wird %s.
+eingabe	b1.m_frac_4	cost_basis: Näherung 100 x (Startwert brutto + Einzahlungen) / Endwert, da das Ansparergebnis keine offenen Lots enthält (simulation() ohne tax = tax_profile() oder älteres Ergebnis); realisierte Gewinne und Cash zählen dabei als stille Reserven. Für genaue Werte die Ansparphase mit tax = tax_profile() rechnen oder cost_basis angeben.
+eingabe	b1.m_chunk_write	chunk_dir: Wert vom Typ %s nicht speicherbar
+eingabe	b1.m_chunk_read	chunk_dir: unbekannter Eintrag %s im Binärformat
+eingabe	b1.m_quelle_steuer	Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); vorabpauschale = FALSE oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelzählung.
+eingabe	b2.rendite_unter	%s: x darf keine Renditen unter -1 (Verlust über 100 Prozent) enthalten.
+eingabe	b2.datum_spanne	%s: dates muss mindestens zwei verschiedene Tage enthalten.
+eingabe	b2.wf_keine_kennzahl	%s: im Trainingsfenster ab %s hat kein Punkt eine Kennzahl (alle ohne Schwankung).
+eingabe	b2.wf_flach	%s: %s von %s Kennzahlwerten (je Punkt und Trainings- bzw. Testfenster) ohne Schwankung (Standardabweichung bzw. Abwärtsschwankung <= 1e-10 je Tag) als NA nicht gewertet.
+eingabe	b2.wf_totalverlust	%s: Überrendite unter -1 (Totalverlust abzüglich risk_free) bei Punkt(en) %s; die geometrische Kennzahl ist dort nicht definiert (NaN) und wird in diesen Fenstern nicht gewertet.
+eingabe	b2.pbo_ohne	%s: %s von %s Aufteilungen ohne Kennzahl (z. B. Hälfte ohne Schwankung); PBO und Verlustanteil über die übrigen Aufteilungen.
+eingabe	b2.haircut_t	%s: n_obs muss mindestens 2 sein (t-Verteilung mit n_obs - 1 Freiheitsgraden; sonst distribution = "normal").
+eingabe	b2.pb_include	%s: include enthält den Namen %s, der für einen Suchpunkt vergeben ist.
+eingabe	b2.when_mehrere	%s: when in rules[[%s]] enthält mehrere Ausdrücke; je Regel genau ein Ausdruck (Bedingungen mit & oder | verbinden).
+eingabe	b2.when_laenge	%s: die Bedingung in rules[[%s]] hat die Länge %s, data hat %s Zeilen.
+eingabe	b2.bench_spalte	%s: benchmark: unbekannte Spalte.
+eingabe	b2.bench_leer	%s: benchmark: die gewählte Spalte enthält keinen endlichen Wert.
+eingabe	b2.bench_inf	%s: benchmark darf keine unendlichen Renditen enthalten.
+eingabe	b2.rc_perioden	%s: x braucht mindestens drei Perioden (nach dem Entfernen der Zeilen mit fehlenden Werten).
+eingabe	b2.st_luecke	Hinweis: %s: %s Perioden-Enddaten nur in einer der beiden Reihen; die Renditen werden zwischen den gemeinsamen Perioden-Enddaten gebildet.
+eingabe	b2.st_block	%s: block darf höchstens die Zahl der Renditepaare (%s) sein.
+eingabe	b2.st_var0	%s: in %s von %s Bootstrap-Stichproben hat eine der Reihen die Varianz 0 (Reihe zu kurz oder zu viele Nullrenditen); method = "hac" oder eine längere Reihe verwenden.
+eingabe	b2.ema_na	%s: x enthält fehlende Werte (erstmals in Zeile %s); der exponentielle Durchschnitt beginnt nach führenden NA und endet beim ersten NA danach.
+eingabe	b2.kurs_positiv	%s: x muss Kurse > 0 enthalten.
+eingabe	b2b.dim_doppelt	%s: Dimension '%s' ist mehrfach angegeben; jeder Name darf nur einmal vorkommen.
+eingabe	b2b.dim_datum	%s: Dimension '%s' darf kein Datum sein (Rasterwerte sind Zahlen, Texte oder Wahrheitswerte).
+eingabe	b2b.step_punkte	%s: step ergibt %s Rasterpunkte, höchstens %s sind erlaubt.
+eingabe	b2b.weniger_punkte	Hinweis: %s: der Suchraum enthält nur %s verschiedene zulässige Punkte (n = %s).
+eingabe	b2b.burn_in	%s: burn_in (%s) muss kleiner als die Zahl der Datenzeilen (%s) sein.
+eingabe	b2b.alle_fehl	%s: Alle %s Läufe fehlgeschlagen: %s
+eingabe	b2b.teil_fehl	%s: %s von %s Läufen fehlgeschlagen (fehlen in der Tabelle): %s
+eingabe	b2b.frequenz_wert	%s: frequencies: Eintrag '%s' braucht als Einheit "month", "quarter" oder "year" und als Abstand eine ganze Zahl von 1 bis %s.
+eingabe	b2b.months_horizont	%s: months (%s) darf höchstens 12 × horizon (%s Jahre) sein.
+eingabe	b2b.index_positiv	%s: Indexspalte '%s' muss nach dem Auffüllen endliche Werte > 0 enthalten (erstmals verletzt in Zeile %s).
+eingabe	b2b.lev_asset	%s: strategy muss das Asset 'LEV' (die Hebelreihe) enthalten.
+eingabe	b2b.lev_spalte	%s: data darf keine Spalte 'LEV' enthalten (Name der Hebelreihe).
+eingabe	b2b.lev_gleichauf	Hinweis: %s: beim besten Wert von %s liegen mehrere Hebel gleichauf (Unterschied höchstens relativ 1e-12, z. B. Sharpe ohne Finanzierungskosten und ohne risikolosen Zins); der optimale Hebel ist NA.
+eingabe	b2b.lev_gleichauf_druck	%s: mehrere Hebel gleichauf (Unterschied nur Rundungsrauschen), kein optimaler Hebel
+eingabe	b2b.st_block_ganz	%s: block muss mit studentize = TRUE eine ganze Zahl sein (feste Blocklänge des zirkulären Block-Bootstraps).
+eingabe	b2b.st_prewhiten	%s: Prewhitening nicht möglich (VAR(1)-Matrix der Momente singulär); prewhiten = FALSE verwenden.
+eingabe	b2b.st_bandbreite	%s: automatische Bandbreite nach Andrews (1991) nicht bestimmbar (Autokorrelation 1 oder Moment ohne Schwankung); kernel = "bartlett" verwenden.
+eingabe	b2b.m_signal_analysis	signal_analysis: data muss ein data.frame mit Spalte 'date' sein.
+eingabe	b2b.m_getcol	signal_analysis: %s: Spalte '%s' fehlt in data (vorhanden: %s).
+eingabe	b2b.m_getcol_2	signal_analysis: target muss ein Spaltenname sein.
+eingabe	b2b.m_int1	signal_analysis: step muss eine ganze Zahl >= 1 sein.
+eingabe	b2b.m_int1_2	signal_analysis: bins muss eine ganze Zahl >= 2 sein.
+eingabe	b2b.m_int1_3	signal_analysis: breaks braucht mindestens 3 streng aufsteigende Grenzen (erste und letzte werden zu -Inf und Inf), z. B. c(-Inf, 0, Inf).
+eingabe	b2b.m_int1_4	signal_analysis: Signal ist an allen Stichtagen gleich; keine Bereiche möglich.
+eingabe	b2b.m_sharpe_test	sharpe_test: x und y müssen dieselbe Art sein: beide Renditevektoren oder beide Kursreihen/Ergebnisse (data.frame bzw. SimLevResult).
+eingabe	b2b.m_sharpe_test_2	sharpe_test: Renditen von %s haben die Varianz 0; die Sharpe Ratio ist nicht definiert.
+eingabe	b2b.m_result_heatmap	result_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.
+eingabe	b2b.m_flat_na	metric: 'sharpe', 'sortino', 'geometric' oder 'mean'.
+eingabe	b2b.m_of_drop_flat	%s: alle Spalten ohne Schwankung (Standardabweichung <= 1e-10); Sharpe Ratio nicht definiert.
+eingabe	b2b.m_param_space	param_space: alle Dimensionen müssen benannt sein.
+eingabe	b2b.m_param_space_2	param_space: Dimension '%s' muss ein Vektor oder param_range() sein.
+eingabe	b2b.m_param_range	param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein.
+eingabe	b2b.m_param_range_2	param_range: step muss eine Zahl > 0 sein.
+eingabe	b2b.m_ok_rows	param_search: kein zulässiger Punkt im Suchraum (constraint prüfen).
+eingabe	b2b.m_param_search	param_search: keep_returns ist "day" oder "none" (früher TRUE/FALSE).
+eingabe	b2b.m_param_search_3	param_search: 'builder' oder 'strategy' angeben.
+eingabe	b2b.m_planning_lumpsum_vs_dca	Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung (Index der Einmalanlage).
+eingabe	b2b.m_signal_crossover	fast muss kleiner als slow sein.
+eingabe	b2b.m_signal_drawdown	buy_dd darf nicht größer als sell_dd sein.
+eingabe	b2b.m_signal_combine	Keine Signale übergeben.
+eingabe	b2b.m_sig_ok	signal_combine: Signale haben unterschiedliche Längen (%s); alle aus derselben Kursreihe erzeugen.
+eingabe	b2b.m_period_last	every: 'day', 'week', 'month', 'quarter' oder 'year'.
+eingabe	b2b.m_e5_rexpr_parse	RExpr: komplexe Zahlen werden nicht unterstützt
+eingabe	b2b.m_e5_rexpr_env	RExpr: '%s' wird in Ausdrücken nicht unterstützt
+eingabe	b2b.m_tactical_rotation	breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score für vollen Schutz).
+eingabe	b2b.m_tactical_rotation_2	Zu kurze Historie für den Rückblick.
+eingabe	b2b.m_tactical_target_volatili	max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über Hebelprodukte abbilden).
+eingabe	b2b.m_tactical_target_volatili_2	Zu kurze Historie für das Volatilitätsfenster.
+eingabe	b2b.m_e5_risk_check	weights: SimLevWeights oder benannter Gewichtsvektor erwartet.
+eingabe	b2b.m_risk_vol	Sichere Anlage '%s' fehlt in data.
+eingabe	b2b.m_risk_vol_2	weights passt nicht zu data (andere Daten); Gewichte aus demselben Datensatz erzeugen.
+eingabe	b2b.m_tactical_conditional_vol	base muss zwischen 0 und max_exposure liegen.
+eingabe	b2b.m_tactical_conditional_vol_2	min_exposure muss zwischen 0 und base liegen.
+eingabe	b2b.m_tactical_conditional_vol_3	upper muss zwischen 0 und 1 liegen.
+eingabe	b2b.m_tactical_conditional_vol_4	lower muss zwischen 0 und upper liegen.
+eingabe	b2b.m_tactical_conditional_vol_5	scaling = 'fixed' braucht high_exposure (und low_exposure, wenn lower gesetzt ist).
+eingabe	b2b.m_tactical_conditional_vol_6	high_exposure darf nicht über base liegen.
+eingabe	b2b.m_tactical_conditional_vol_7	low_exposure muss zwischen base und max_exposure liegen.
+eingabe	b2b.m_tactical_glidepath	tactical_glidepath: end liegt vor start; für den umgekehrten Weg from und to tauschen.
+eingabe	b2b.m_tactical_blend	tactical_blend: ... muss aus SimLevWeights bestehen.
+eingabe	b2b.m_tactical_simulation	weights muss ein SimLevWeights sein.
+eingabe	b2b.m_metric_pairs	metrics() muss einen benannten numerischen Vektor liefern
+eingabe	b2b.m_of_drop_flat_2	%s: %s Spalte(n) ohne Schwankung (Standardabweichung <= 1e-10 je Periode, z. B. Geldmarkt mit festem Zins; Punkt(e) %s) ausgeschlossen - Sharpe Ratio dort nicht definiert.
+eingabe	b2b.m_as_weights_m	Gewichte: %s Zeilen ohne positive Gewichte.
+eingabe	b2b.m_tactical_rotation_3	top muss zwischen 1 und der Anzahl der Anlagen in assets (%s) liegen.
+eingabe	e.spread_negativ	asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %%).
+eingabe	e.teilfreistellung_bereich	asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %%).
+eingabe	e.teilfreistellung_anteil	asset_config: partial_exemption = %s wird als %s %% Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich %s.
+eingabe	e.prozent_anteil	%s: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.
+eingabe	e.grenzsteuersatz	income_rate: marginal_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %%).
+eingabe	e.steuersatz	tax_profile: rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für 26,375 %%).
+eingabe	e.kirchensteuer_anteil	tax_profile: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.
+eingabe	e.kirchensteuer_hoch	tax_profile: church_tax = %s %% ist ungewöhnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %%).
+eingabe	e.prozent_spalte	simulation: %s-Spalte '%s' hat den Median %s und wird als %s %% gelesen (Prozent-Konvention); gemeint waren vermutlich Werte x 100 (Median %s).
+eingabe	e.gebuehr_ungedeckt	simulation: %s von %s EUR am %s: das Depot reicht nicht aus; %s EUR bleiben als negativer Geldbestand (offene Gebühr) bei '%s'.
+eingabe	e.preisindex_ende	%s: Der Preisindex endet am %s, %s Tage vor dem letzten Datum der Reihe (%s); danach gilt sein letzter Stand (keine weitere Inflation).
+eingabe	e.datum_format	%s: %s Datumswerte nicht als 'JJJJ-MM-TT' lesbar (erstmals in Zeile %s). Andere Formate vorher umwandeln, z. B. Tag.Monat.Jahr ('31.12.2024') oder Tag-Monat-Jahr mit dem passenden Datumsformat einlesen.
+eingabe	e.zahl_text	'%s': Spalte %s enthält Zahlen als Text bzw. Faktor, vermutlich mit Dezimalkomma. Vorher umwandeln, z. B. beim Einlesen das Dezimalkomma angeben oder das Komma durch einen Punkt ersetzen und in Zahlen umwandeln.
+eingabe	e.alpha_anteil	%s: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste 5 %%%s.
+eingabe	e.success_anteil	withdrawal_max_rate: success muss ein Anteil mit 0 < success <= 1 sein (0.95 = 95 %%)%s.
+eingabe	e.legacy_anteil	withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens).
+eingabe	e.kurz_jahr	Hinweis: Auswertung über %s (unter einem Jahr); annualisierte Kennzahlen (CAGR, Sharpe, Sortino, Calmar und weitere) sind hochgerechnet.
+eingabe	pf2.st_bloecke	%s: block darf mit studentize = TRUE höchstens %s sein (ein Viertel der %s Renditepaare, abgerundet): die Block-Kovarianz des studentisierten Bootstraps braucht mindestens 4 Blöcke.

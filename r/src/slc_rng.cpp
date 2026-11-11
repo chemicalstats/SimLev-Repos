@@ -113,9 +113,12 @@ int32_t sl_rng_seed31(sl_rng *g)
     return (int32_t) (sl_rng_next(g) >> 33);
 }
 
+/* seit 1.6.5 (CR1-Y8-1): für k = 2^53 - 1 rundet k + 1/2 auf 2^53, das ergäbe genau 1 (rnorm dann NaN); dieser eine
+ * Wert wird auf 1 - 2^-53 begrenzt, alle übrigen bleiben bitgleich */
 double sl_unif01(sl_rng *r)
 {
-    return ((double) (sl_rng_next(r) >> 11) + 0.5) * SLC_TWO_M53;
+    double u = ((double) (sl_rng_next(r) >> 11) + 0.5) * SLC_TWO_M53;
+    return (u < 1.0) ? u : 1.0 - SLC_TWO_M53;
 }
 
 int sl_runif(sl_ctx *cx, sl_rng *r, int64_t n, double a, double b, double *out)

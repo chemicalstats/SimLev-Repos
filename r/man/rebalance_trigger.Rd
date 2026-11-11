@@ -23,7 +23,8 @@
       um mehr als \code{threshold} abweicht.
     }
     \item{\code{"combined"}}{
-      OR-Verknüpfung mehrerer Sub-Trigger-Specs aus \code{triggers}.
+      OR-Verknüpfung mehrerer Sub-Trigger-Specs aus \code{triggers}
+      (seit 1.6.5 mit \code{combine = "and"} UND-Verknüpfung).
     }
   }
   Der Referenzwert (gehaltener Hebel bzw. Volatilität) ist der erste nicht
@@ -32,9 +33,14 @@
   wird nicht ausgelöst) und wird nur an Tagen fortgeschrieben, an denen dieser Trigger
   auslöst (nicht an kalendarischen Rebalancing-Tagen in
   \code{\link{simulation}}). Ausgelöst wird bei einer Abweichung
-  \emph{größer} als die Schwelle; \code{NA}-Werte lösen nicht aus. Bei
-  \code{"rel_leverage"} und \code{"vol_band"} wird nicht ausgelöst, solange
-  der Referenzwert 0 ist.
+  \emph{größer} als die Schwelle; \code{NA}-Werte lösen nicht aus. Seit
+  1.6.5 mit einer kleinen Toleranz, damit eine Abweichung genau auf der
+  Schwelle nicht je nach Rundung auslöst (absolut: Abweichung größer als
+  \code{threshold + 1e-12 * max(1, |Referenz|)}, relativ: größer als
+  \code{threshold + 1e-12}). Bei \code{"rel_leverage"} und
+  \code{"vol_band"} ersetzt seit 1.6.5 der erste Wert ungleich 0 einen
+  Referenzwert 0, ohne auszulösen (bis 1.6.4 wurde dann nie mehr
+  ausgelöst).
 }
 \usage{
 rebalance_trigger(
@@ -44,7 +50,8 @@ rebalance_trigger(
   lev_col   = "target_leverage",
   vol_col   = "sigma_ewma",
   triggers  = NULL,
-  out_col   = "rebal_trigger"
+  out_col   = "rebal_trigger",
+  combine   = "or"
 )
 }
 \arguments{
@@ -81,15 +88,28 @@ rebalance_trigger(
     Jeder Eintrag ist eine Liste mit \code{type} und ggf. \code{threshold}
     (in Prozent, fehlt er: \code{10}), \code{lev_col}, \code{vol_col}.
     Ein eigenes \code{df} braucht dieselbe Zeilenzahl; andere Felder (auch
-    \code{out_col}) sind ein Fehler.
+    \code{out_col}) sind ein Fehler; \code{combine} ist seit 1.6.5 erlaubt.
     Jeder Sub-Trigger führt seinen eigenen Referenzwert; die Ergebnisse
-    werden OR-verknüpft. Standard: \code{NULL}.
+    werden OR-verknüpft (zu \code{combine = "and"} siehe dort). Seit 1.6.5
+    ist eine benannte Liste (ein Teil-Trigger ohne äußere Liste) ein Fehler
+    wie in Python und Julia. Standard: \code{NULL}.
   }
   \item{out_col}{
     Character. Name der zu erzeugenden logischen Spalte in \code{df}.
     Standard: \code{"rebal_trigger"}.
   
 Seit 1.6.4 darf die Spalte in df noch nicht vorhanden sein (vorher still ueberschrieben).}
+  \item{combine}{
+    Character, nur bei \code{type = "combined"} (seit 1.6.5).
+    \code{"or"} (Standard): ausgelöst, wenn ein Sub-Trigger auslöst; jeder
+    führt seinen eigenen Referenzwert. \code{"and"}: ausgelöst, wenn alle
+    Sub-Trigger am selben Tag ihre Schwelle überschreiten, gemessen gegen
+    gemeinsame Referenzwerte, die an jedem Auslösetag für alle Sub-Trigger
+    fortgeschrieben werden; ein \code{NA} in einem Sub-Trigger verhindert
+    die Auslösung. Mit \code{"and"} sind nur die Typen
+    \code{"abs_leverage"}, \code{"rel_leverage"} und \code{"vol_band"} als
+    Sub-Trigger erlaubt (kein verschachteltes \code{"combined"}).
+  }
 }
 \value{
   \code{df} mit einer zusätzlichen logischen Spalte \code{out_col}.
@@ -121,6 +141,15 @@ data <- rebalance_trigger(data, type = "combined",
     list(type = "vol_band",     threshold = 20)
   ),
   out_col = "rebal_combined"
+)
+
+# Kombinierter Trigger (AND, seit 1.6.5): beide Bedingungen zugleich
+data <- rebalance_trigger(data, type = "combined",
+  triggers = list(
+    list(type = "abs_leverage", threshold = 10),
+    list(type = "vol_band",     threshold = 20)
+  ),
+  out_col = "rebal_and", combine = "and"
 )
 
 # In simulation() verwenden

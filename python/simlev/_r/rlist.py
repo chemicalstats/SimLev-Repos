@@ -8,7 +8,8 @@ __all__ = ["RList"]
 
 class _PrintFormat:
     """``print()`` über ``format()``; gibt das Objekt zurück (wie R's ``print``). Seit 1.6.4 eine Fassung für die
-    Ergebnisklassen mit eigener ``format()``-Methode (bis 1.6.3 zwölf gleiche Methoden)."""
+    Ergebnisklassen mit eigener ``format()``-Methode (bis 1.6.3 zwölf gleiche Methoden); seit 1.6.5 hat ``RList`` selbst
+    ``print()``, die Mischklasse bleibt für Klassen außerhalb von ``RList``."""
 
     __slots__ = ()
 
@@ -47,7 +48,14 @@ class RList(OrderedDict):
             raise AttributeError(name) from None
 
     def format(self) -> str:  # pragma: no cover - Unterklassen
-        return "<%s: %s>" % (type(self).__name__, ", ".join(self.keys()))
+        # seit 1.6.5 (CR2-W3-3): Schlüssel, die kein Text sind, als Text (bis 1.6.4 roher TypeError)
+        return "<%s: %s>" % (type(self).__name__, ", ".join(map(str, self.keys())))
+
+    def print(self):
+        """Ausgabe wie R's ``print`` (Text von ``format()``); gibt das Objekt zurück. Seit 1.6.5 für alle Ergebnisse
+        (CR2-W1-1; bis 1.6.4 nur bei 13 von 48 Klassen, sonst ``AttributeError``)."""
+        print(self.format())
+        return self
 
     def __str__(self) -> str:
         return self.format()

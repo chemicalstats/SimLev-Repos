@@ -17,6 +17,7 @@ module DataPrep
 import ..SimLev
 using ..SimLev: _match_arg, _which_min   # util.jl (_match_arg auch für Backcast über DP.) (seit 1.6.1 eine Fassung)
 using ..SimLev: chk_numvec   # pruefen.jl (seit 1.6.4)
+using ..SimLev: chk_msg, chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 using ..SimLev: RList, RFrame, RVector, nrow, attrs, NA, rows,
                 register_print!, inherits
 using Dates
@@ -153,7 +154,8 @@ function _names_as_dates_optional(nms)
     r === nothing ? fill(NA, length(nms)) : r
 end
 
-const _RX4 = r"^[0-9]{4}[-/]"
+# seit 1.6.5 (CR2-C-3, Entscheidung 185 K27): vierstellige Jahreszahl vorn, nach dem Tag nur das Ende oder eine Uhrzeit
+const _RX4 = r"^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}([ T][0-9]{1,2}:[0-9]{2}.*)?$"s
 _trimws(s) = s === nothing ? nothing : String(strip(s, [' ', '\t', '\r', '\n']))
 
 # seit 1.6.4 ohne Eingabewert (Entscheidung 8)
@@ -176,7 +178,7 @@ function _to_date(x, what = "date"; strict::Bool = true)
     x isa RVector && (x = x.values)
     x isa Union{Date,DateTime,AbstractString,Real,Missing} && (x = [x])
     x isa Tuple && (x = collect(x))
-    x isa AbstractVector || error("$what: nicht lesbares Datum ($(typeof(x)))")
+    x isa AbstractVector || chk_stop("a.m_to_date_2", what, typeof(x))
     T = nonmissingtype(eltype(x))
     if T <: Date
         return any(ismissing, x) ? Union{Missing,Date}[v for v in x] : Date[v for v in x]
@@ -189,6 +191,8 @@ function _to_date(x, what = "date"; strict::Bool = true)
         return _as_dates([v === missing || v === nothing ? NA : _day_of(v) for v in x])
     end
     if (T <: Real && !(T <: Bool) && T !== Union{}) || (!isempty(vals) && all(_isnum, vals))
+        # seit 1.6.5 (CR2-C-3): nur NA ergibt NA wie in R und Python
+        (!isempty(x) && isempty(vals)) && return _as_dates(fill(NA, length(x)))
         _todate_numeric_error(what, isempty(x) ? missing : (x[1] === nothing ? missing : x[1]))
     end
     s = Union{Nothing,String}[_isna(v) || v isa Bool ? (v isa Bool ? (v ? "TRUE" : "FALSE") : nothing) : string(v) for v in x]
@@ -202,8 +206,7 @@ function _to_date(x, what = "date"; strict::Bool = true)
     end
     bad = [i for i in eachindex(s) if s[i] !== nothing && (isnan(d[i]) || !occursin(_RX4, s[i]))]
     if !isempty(bad) && strict
-        error(_sprintf("%s: %d Datumswerte nicht als 'JJJJ-MM-TT' lesbar (erstmals in Zeile %d). Andere Formate vorher umwandeln, z. B. as.Date(x, format = \"%%d.%%m.%%Y\") für '31.12.2024' oder format = \"%%d-%%m-%%Y\".",
-                       what, length(bad), bad[1]))
+        chk_stop("e.datum_format", what, length(bad), bad[1])   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
     end
     d[bad] .= NA
     return _as_dates(d)
@@ -405,12 +408,13 @@ function _is_date_col(v)
     return !isempty(vals) && all(e -> e isa Union{Date,DateTime}, vals)
 end
 
+# seit 1.6.5 (CR2-X42-1) wie R's as.numeric über r_as_numeric (R_strtod: Hex, "1e", Überlauf, Rundung wie R; "NA"
+# als Text NA mit Warnung, leerer Text ohne; bis 1.6.4 tryparse, das manche Texte anders las)
 function _parse_num(s::AbstractString)
     t = _trimws(String(s))
-    (t == "" || t == "NA") && return (NA, false)
-    r = tryparse(Float64, t)
-    r === nothing && return (NA, true)
-    return (r, false)
+    t == "" && return (NA, false)
+    r = SimLev.r_as_numeric(String(s))
+    return SimLev.isna_strict(r) ? (NA, true) : (r, false)
 end
 
 "`as.numeric(v)` (Text → Zahl mit Warnung bei NA durch Umwandlung)."
@@ -492,8 +496,7 @@ end
 function _num_text_stop(x, cols, name)
     cols isa AbstractString && (cols = [cols])
     # seit 1.6.4 ohne Beispielwert aus den Daten (Entscheidung 8)
-    error(_sprintf("'%s': Spalte %s enthält Zahlen als Text bzw. Faktor, vermutlich mit Dezimalkomma. Vorher umwandeln, z. B. mit read.csv2() oder as.numeric(sub(\",\", \".\", x, fixed = TRUE)).",
-                   name, join(("'" * c * "'" for c in cols), ", ")))
+    chk_stop("e.zahl_text", name, join(("'" * c * "'" for c in cols), ", "))   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
 end
 
 "Benannter numerischer Vektor (`RVector` mit Namen, Paare oder Dict aus Zahlen)?"
@@ -557,7 +560,7 @@ function _dp_frame(x, name, fn = nothing)
         x = RFrame("date" => _to_date(nm, "'$(name)' (Namen)"), "value" => vals)
     end
     x = _as_frame(x)
-    x isa RFrame || error("'$(name)' muss ein data.frame mit Spalte 'date' sein.")
+    x isa RFrame || chk_stop("a.m_dp_frame", name)
     nms = _names(x)
     dcol = if "date" in nms
         "date"
@@ -565,10 +568,10 @@ function _dp_frame(x, name, fn = nothing)
         dc = [k for k in nms if _is_date_col(_col(x, k))]
         isempty(dc) ? (isempty(nms) ? nothing : nms[1]) : dc[1]
     end
-    dcol === nothing && error("'$(name)': keine numerische Spalte.")
+    dcol === nothing && chk_stop("a.m_dp_frame_3", name)
     fn !== nothing && x[dcol] isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", fn, dcol)   # seit 1.6.4 (Entscheidung 15)
     _is_numeric_col(_col(x, dcol)) &&
-        error("'$(name)': keine Datumsspalte; Spalte '$(dcol)' ist numerisch (z. B. Zeilennummern aus write.csv). Spalte 'date' (Date oder 'JJJJ-MM-TT') angeben.")
+        chk_stop("a.m_dp_frame_2", name, dcol)
     num = [k for k in nms if _is_numeric_col(_col(x, k)) && k != dcol]
     nr = nrow(x)
     rn = [k for k in num if k == "X" && nr > 0 && (v = _as_numeric(_col(x, k)); all(i -> v[i] == i, 1:nr))]
@@ -578,12 +581,14 @@ function _dp_frame(x, name, fn = nothing)
     end
     txt = _num_text_cols(x, [dcol])
     isempty(txt) || _num_text_stop(x, txt, name)
-    isempty(num) && error("'$(name)': keine numerische Spalte.")
+    isempty(num) && chk_stop("a.m_dp_frame_3", name)
     days = _days(_to_date(_col(x, dcol), "'$(name)': Spalte '$(dcol)'"))
     cols = [_as_numeric(_col(x, k)) for k in num]
     cn = length(num) == 1 ? [String(name)] : num
     keep = findall(!isnan, days)
     days = days[keep]; cols = [c[keep] for c in cols]
+    # seit 1.6.5 (CR2-I-5): Quelle ohne Zeilen mit Meldung
+    (isempty(days) && fn !== nothing) && chk_stop("zeilen_keine", fn, "'$(name)'")
     o = _stable_order(days)
     days = days[o]; cols = [c[o] for c in cols]
     dup = _duplicated(days; from_last = true)
@@ -715,7 +720,7 @@ function series_align(args...; calendar = ("day", "union", "intersect"), range =
         hi = any(isnan, e0) ? NA : minimum(vcat([hi], e0))
     end
     (isnan(lo) || isnan(hi)) && error("missing value where TRUE/FALSE needed")
-    lo > hi && error("series_align: Die Quellen überlappen sich nicht.")
+    lo > hi && chk_stop("a.m_series_align")
     dates = if calendar == "day"
         [lo + i for i in 0:Int(floor(hi - lo))]
     elseif calendar == "union"
@@ -740,7 +745,7 @@ function series_align(args...; calendar = ("day", "union", "intersect"), range =
         in_life = [d >= fd[1] && d <= fd[end] for d in dates]
         for k in names(f)
             k == "date" && continue
-            k in onames && error("series_align: Spaltenname '$(k)' kommt mehrfach vor.")
+            k in onames && chk_stop("a.m_series_align_2", k)
             vals = f[k]
             v = Float64[m > 0 ? vals[m] : NA for m in mi]
             obs = .!isnan.(v)
@@ -792,7 +797,8 @@ Kursreihen prüfen.
 Erstellt einen Prüfbericht für eigene Kursreihen, bevor sie in `simulation()` oder die Analysefunktionen
 gehen. Erwartet wird ein Tabelle (RFrame) mit Spalte `date` und Kursspalten (Niveaus, keine Renditen), z. B.
 aus `series_align()`. Gemeldet werden: fehlende oder nicht lesbare Daten (z. B. Leerzeile am Dateiende),
-doppelte oder unsortierte Daten, Kalenderlücken über 5 Tage, fehlende Werte innerhalb der Laufzeit, Sprünge,
+doppelte oder unsortierte Daten, Kalenderlücken (seit 1.6.5 über max(5, 1,5 × Median der Datumsabstände) Tage,
+also bei Tagesdaten über 5, bei Wochendaten über 10,5, bei Monatsdaten über rund 46 Tage), fehlende Werte innerhalb der Laufzeit, Sprünge,
 wahrscheinliche Splits (Sprung nahe einem ganzzahligen Verhältnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne
 Rücklauf), Spikes (Sprung mit sofortigem Rücklauf, typischer Datenfehler), Werte <= 0 und stehende Kurse. Die
 Funktion ändert die Daten nicht.
@@ -817,7 +823,8 @@ Objekt der Klasse `SimLevDataCheck`, eine Liste mit
   `spikes`, `splits`, `stale_max` (längste Folge gleicher Werte in Zeilen), `nonpositive` (Anzahl Werte <= 0).
 - issues: Tabelle (RFrame) je Fund: `column`, `date`, `type` (Art des Funds), `value` (Kurs) und `info` (bei
   Sprüngen die Veränderung in Prozent, bei Kalenderlücken die Tage, bei stehenden Kursen die Zeilen).
-- settings: benannter Vektor `jump`, `stale`, `revert`.
+- settings: benannter Vektor `jump`, `stale`, `revert` und (seit 1.6.5) `gap` (verwendete Schwelle der Kalenderlücke
+  in Tagen).
 
 `print()` zeigt die Zusammenfassung und die ersten `max_issues` (Standard 25) Funde.
 
@@ -877,7 +884,11 @@ function series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0
     if any(<(0), dg)
         add("date", okd[findfirst(<(0), dg) + 1], "Datum nicht sortiert", NA)
     end
-    for i in findall(>(5), dg)
+    # seit 1.6.5 (CR2-B-6, Entscheidung 185 K24): Kalenderlücke, wenn der Abstand größer ist als
+    # max(5, 1.5 * Median der positiven Abstände) Tage (Tagesdaten 5 wie bisher, Wochen 10.5, Monate rund 46)
+    dpos = Float64[g for g in dg if !isnan(g) && g > 0]
+    gap = isempty(dpos) ? 5.0 : max(5.0, 1.5 * SimLev.r_median(dpos))
+    for i in findall(>(gap), dg)
         add("date", okd[i+1], "Kalenderlücke (Tage)", dg[i])
     end
     cand = vcat(Float64[2, 3, 4, 5, 6, 7, 8, 9, 10], [1 / k for k in 2:10])
@@ -955,12 +966,13 @@ function series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0
     res = RList(; class = ["SimLevDataCheck"])
     res["summary"] = S
     res["issues"] = I
-    res["settings"] = RVector(Float64[jump, stale, revert]; names = ["jump", "stale", "revert"])
+    res["settings"] = RVector(Float64[jump, stale, revert, gap]; names = ["jump", "stale", "revert", "gap"])
     return res
 end
 
 "Druckausgabe von `SimLevDataCheck` (wie `print.SimLevDataCheck(x, max_issues = 25)`)."
 function format_SimLevDataCheck(x; max_issues = 25)
+    max_issues = Int(chk_int1(max_issues, "print", "max_issues"; lo = 0))   # seit 1.6.5 (CR2-W1-2)
     F = SimLev.RFmt
     io = IOBuffer()
     print(io, "SimLev-Datenprüfung\n\n")
@@ -1141,6 +1153,9 @@ einen US-Index in USD nach EUR, bevor er in `simulation()` geht. Erwartet wird e
 `date` und Kursniveaus (z. B. aus `series_align()`). Je Zeile wird der Kurs durch den Wechselkurs geteilt
 (`"divide"`) oder mit ihm multipliziert (`"multiply"`); eine Kurssicherung wird nicht abgebildet.
 
+Seit 1.6.5 ergibt eine Stufentabelle als `fx`, die erst nach dem ersten Datentag beginnt, eine Warnung (davor
+gilt ihr erster Wert).
+
 # Argumente
 - `data`: Tabelle (RFrame) mit Spalte `date` und den Kursspalten.
 - `columns`: Zeichenvektor der umzurechnenden Spalten.
@@ -1176,14 +1191,15 @@ function series_convert_currency(data, columns, fx; method = ("divide", "multipl
     data = _as_frame(data)
     nms = _names(data)
     miss = unique([c for c in columns if !(c in nms)])
-    isempty(miss) || error("series_convert_currency: Spalte(n) $(join(("'" * m * "'" for m in miss), ", ")) fehlen in data (vorhanden: $(join(nms, ", "))).")
+    isempty(miss) || chk_stop("a.m_series_convert_currency", join(("'" * m * "'" for m in miss), ", "), join(nms, ", "))
     _e5_numcols(data, columns, fn)
     chk_nofactor(fx, fn, "fx")
     (fx isa Union{AbstractVector,Tuple} && length(fx) == 1 && first(fx) isa AbstractString) && (fx = first(fx))
     fx isa AbstractString && fx in nms && _e5_numcols(data, [String(fx)], fn)
+    SimLev.Bonds._step_start_warn(fx, data, fn, "fx")   # seit 1.6.5 (CR2-V3-4 Punkt 4, Entscheidung 189)
     f = SimLev.Backcast._resolve_series(fx, data, "fx")
     bad = [i for i in eachindex(f) if !isfinite(f[i]) || f[i] <= 0]
-    isempty(bad) || error("series_convert_currency: Wechselkurs fx muss positiv sein; $(length(bad)) Zeilen ungültig (erstmals Zeile $(bad[1])).")
+    isempty(bad) || chk_stop("a.m_series_convert_currency_2", length(bad), bad[1])
     data = copy(data)
     for k in columns
         nm = suffix === nothing ? k : k * suffix
@@ -1201,7 +1217,7 @@ _rep_len(x, n) = (v = x isa AbstractVector ? x : [x]; n == 0 ? Float64[] : Float
 
 Total-Return-Index aus Kursindex und Ausschüttungen.
 
-r_t = fracP_t + D_t (1 - w)P_t-1 - 1 + (y_t)/(100)(1-w)(Δ t)/(365.25) mit Ausschüttung je Anteil D_t am
+r_t = (P_t + D_t (1 - w)) / P_{t-1} - 1 + y_t/100 · (1 - w) · Δt/365.25 mit Ausschüttung je Anteil D_t am
 Ex-Tag, Quellensteuer w und alternativ laufend aufgezinster Dividendenrendite y_t (Prozent p. a.). Δ t ist der
 Abstand zur Vorzeile in Kalendertagen.
 
@@ -1265,13 +1281,16 @@ function index_total_return(price; dividends = nothing, yield = nothing, yield_ 
     n = length(p)
     w = withholding / 100
     any(isnan, p) && (p = SimLev.Backcast._fill_na(p, "locf"))
+    # seit 1.6.5 (CR2-I-4, Entscheidung 189): Kurse endlich und > 0 (bis 1.6.4 still NaN)
+    ib = findfirst(v -> !isnan(v) && (isinf(v) || v <= 0), p)
+    ib === nothing || chk_stop("a.werte_positiv", fn, "price", ib)
     D = dividends === nothing ? zeros(n) : (x = _as_numeric(dividends); x[isnan.(x)] .= 0; x)
     y = yv === nothing ? zeros(n) : _rep_len(_as_numeric(yv), n)
     if dates !== nothing
         dd = _days(_to_date(dates, "index_total_return: dates"))
-        length(dd) != n && error("index_total_return: dates hat Länge $(length(dd)), price $(n).")
+        length(dd) != n && chk_stop("a.m_index_total_return_2", length(dd), n)
         (any(isnan, dd) || any(i -> dd[i+1] < dd[i], 1:length(dd)-1)) &&
-            error("index_total_return: dates müssen vollständig und aufsteigend sortiert sein (wie price).")
+            chk_stop("a.m_index_total_return")
         dt = vcat(0.0, [dd[i+1] - dd[i] for i in 1:n-1])
     else
         dt = ones(n)
@@ -1291,20 +1310,24 @@ function _cpi_level(cpi, data, dts, what)
     dd = _days(dts)
     if cpi isa AbstractString || (cpi isa AbstractVector{<:AbstractString} && length(cpi) == 1)
         c = cpi isa AbstractString ? String(cpi) : String(cpi[1])
-        c in _names(data) || error("$(what): Spalte '$(c)' fehlt im Datensatz.")
-        return SimLev.Backcast._fill_na(_as_numeric(_col(data, c)), "locf"; keep_leading = true)
+        c in _names(data) || chk_stop("a.m_cpi_level", what, c)
+        v0 = _as_numeric(_col(data, c))
+        ok = findlast(x -> !isnan(x), v0)
+        _cpi_end_warn(ok === nothing ? nothing : Float64(dd[ok]), dd, what)
+        return SimLev.Backcast._fill_na(v0, "locf"; keep_leading = true)
     end
     cf = _as_frame(cpi)
-    first_ = nothing
+    first_ = nothing; last_ = nothing
     if cf isa RFrame
         nm = _names(cf)
         dcol = "date" in nm ? "date" : nm[1]
         fd = filter(!isnan, _days(_to_date(_col(cf, dcol), "$(what): Datum")))
         first_ = isempty(fd) ? Inf : minimum(fd)
+        last_ = isempty(fd) ? nothing : maximum(fd)
     elseif _is_named_numeric(cpi)
         nms, _ = _named_parts(cpi)
         nd = _names_as_dates_optional(nms)
-        any(isnan, nd) || (first_ = minimum(nd))
+        any(isnan, nd) || (first_ = minimum(nd); last_ = maximum(nd))
     end
     v = SimLev.Backcast._resolve_series(cpi, RFrame("date" => _as_dates(dd)), what)
     if first_ !== nothing
@@ -1313,7 +1336,19 @@ function _cpi_level(cpi, data, dts, what)
             dd[i] < first_ && (v[i] = NA)
         end
     end
+    _cpi_end_warn(last_, dd, what)
     return v
+end
+
+"""Preisindex endet mehr als 92 Tage vor dem letzten Datum der Reihe: Warnung (seit 1.6.5, CR2-X5-1, Entscheidung 189;
+R `.cpi_end_warn`); danach gilt sein letzter Stand."""
+function _cpi_end_warn(last_, dd, what)
+    (last_ === nothing || isempty(dd) || all(isnan, dd)) && return nothing
+    d1 = maximum(x for x in dd if !isnan(x))
+    gap = d1 - Float64(last_)
+    (isfinite(gap) && gap > 92) &&
+        @warn chk_msg("e.preisindex_ende", what, SimLev.fmt_date(Int(last_)), _sprintf("%.0f", gap), SimLev.fmt_date(Int(d1)))
+    return nothing
 end
 
 """
@@ -1326,6 +1361,8 @@ cpi_b / cpi_t mit der Bezugszeile b. Erwartet wird ein Tabelle (RFrame) mit Spal
 als Niveau (z. B. Verbraucherpreisindex), keine Inflationsrate. Die realen Spalten kommen als neue Spalten
 hinzu und können wie Kursspalten in `simulation()` oder `result_analysis()` verwendet werden; für die reale
 Auswertung fertiger Ergebnisse hat `result_analysis()` ein eigenes Argument `inflation`.
+
+Seit 1.6.5 muss der Preisindex endliche Werte > 0 haben und `suffix` darf nicht leer sein (sonst Fehler).
 
 # Argumente
 - `data`: Tabelle (RFrame) mit Spalte `date` und den Spalten aus `columns`.
@@ -1365,13 +1402,17 @@ function series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real
     cpi isa AbstractString && cpi in names(data) && _e5_numcols(data, [String(cpi)], fn)
     base_date = chk_date1(base_date, fn, "base_date"; null_ok = true)
     suffix = chk_text1(suffix, fn, "suffix")
+    suffix == "" && chk_stop("name", fn, "suffix")   # seit 1.6.5 (CR2-V1-4; bis 1.6.4 überschrieb "" die Spalten)
     data = SimLev.as_rframe(data)
     cpi = SimLev.as_rframe(cpi)
     data = _as_frame(data)
     dts = _days(_to_date(_col(data, "date"), "series_deflate: data\$date"))
     c0 = _cpi_level(cpi, data, dts, "cpi")
+    # seit 1.6.5 (CR2-V1-4): Preisindex endlich und > 0
+    ib = findfirst(v -> !isnan(v) && (isinf(v) || v <= 0), c0)
+    ib === nothing || chk_stop("a.werte_positiv", fn, "cpi", ib)
     known = findall(!isnan, c0)
-    isempty(known) && error("series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
+    isempty(known) && chk_stop("a.m_series_deflate")
     known[1] > 1 && message("Hinweis: series_deflate: Preisindex erst ab $(_date_str(dts[known[1]])) bekannt; $(known[1] - 1) Zeilen davor bleiben NA.")
     b = if base_date === nothing
         known[1]
@@ -1379,7 +1420,7 @@ function series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real
         bd = _days(_to_date(base_date, "base_date"))
         something(_which_min([abs(t - bd[1]) for t in dts]), 0)
     end
-    isnan(c0[b]) && error("series_deflate: am Bezugsdatum $(_date_str(dts[b])) ist kein Preisindex bekannt (erster Wert am $(_date_str(dts[known[1]]))); base_date später wählen.")
+    isnan(c0[b]) && chk_stop("a.m_series_deflate_2", _date_str(dts[b]), _date_str(dts[known[1]]))
     data = copy(data)
     for k in columns
         data[k * suffix] = _as_numeric(_col(data, k)) ./ c0 .* c0[b]
@@ -1435,7 +1476,7 @@ function series_splice(args...; dates = nothing, series...)
     fn = "series_splice"
     # seit 1.6.4 (K42 E5): Vektoren numerisch und gleich lang wie dates (B-047)
     if !all(s -> _as_frame(s[2]) isa RFrame, src)
-        dates === nothing && error("series_splice: 'dates' angeben, wenn Vektoren übergeben werden.")
+        dates === nothing && chk_stop("a.m_series_splice")
         chk_nofactor(dates, fn, "dates")
         nd = dates isa Union{AbstractVector,Tuple} ? length(dates) : 1
         for (i, (k, v)) in enumerate(src)
@@ -1445,6 +1486,14 @@ function series_splice(args...; dates = nothing, series...)
         end
     end
     Fl = nothing
+    # seit 1.6.5 (CR2-C-5): je Reihe mindestens eine Zeile
+    if all(s -> _as_frame(s[2]) isa RFrame, src)
+        for (k, v) in src
+            nrow(_as_frame(v)) == 0 && chk_stop("zeilen_keine", fn, "'$(k)'")
+        end
+    elseif (dates isa Union{AbstractVector,Tuple} ? length(dates) : 1) == 0
+        chk_stop("zeilen_keine", fn, "dates")
+    end
     if all(s -> _as_frame(s[2]) isa RFrame, src)
         al = series_align((k => _as_frame(v) for (k, v) in src)...; range = "all")
         # Quelle mit mehreren Wertspalten (seit 1.6.4 Meldung wie R und Python, T3-N7; bis 1.6.3 KeyError)
@@ -1456,11 +1505,19 @@ function series_splice(args...; dates = nothing, series...)
         F = attrs(al)["filled"]
         Fl = [Bool.(F[k]) for k in nms]
     else
-        dates === nothing && error("series_splice: 'dates' angeben, wenn Vektoren übergeben werden.")
+        dates === nothing && chk_stop("a.m_series_splice")
         V = [_as_numeric(v) for (_, v) in src]
     end
     n = length(V[1])
     nc = length(V)
+    # seit 1.6.5 (CR2-C-5): Werte endlich und > 0 oder NA (bis 1.6.4 ungeprüft verkettet)
+    for j in 1:nc
+        ib = findfirst(v -> !isnan(v) && (isinf(v) || v <= 0), V[j])
+        if ib !== nothing
+            dd = _days(_to_date(dates, "series_splice: dates"))
+            chk_stop("a.werte_positiv_datum", fn, "'$(nms[j])'", SimLev.fmt_date(Int(dd[ib])))
+        end
+    end
     Rm = [vcat(NA, Float64[c[t] / c[t-1] - 1 for t in 2:n]) for c in V]
     p = copy(V[1])
     if Fl !== nothing
@@ -1482,7 +1539,7 @@ function series_splice(args...; dates = nothing, series...)
     pick = [something(findfirst(j -> isfinite(Rm[j][i]), 1:nc), 0) for i in 1:n]
     r = Float64[pick[i] > 0 ? Rm[pick[i]][i] : NA for i in 1:n]
     a = findfirst(!isnan, p)
-    a === nothing && error("series_splice: Die erste Reihe hat keine Werte.")
+    a === nothing && chk_stop("a.m_series_splice_2")
     lv = fill(NA, n)
     lv[a] = p[a]
     for t in a+1:n
@@ -1534,8 +1591,8 @@ den Standardwerten von `asset_config()` (ETF, Buy and Hold, ohne Spread).
 - `kwargs...`: Weitere Argumente für `asset_config()` (z. B. `asset_class`, `spread` in Prozent,
   `partial_exemption` in Prozent). Ein unbenannter einzelner Wert gilt für alle Assets; benannte Vektoren
   werden je Asset zugeordnet, auch mit einem einzigen Element wie `partial_exemption = (aktien = 30,)`
-  (fehlende Assets behalten den Standardwert, Namen ohne passendes Asset werden ignoriert). Nur ein einzelner
-  benannter Wert, dessen Name kein Asset ist, gilt für alle Assets.
+  (fehlende Assets behalten den Standardwert). Seit 1.6.5 sind Namen, die kein Asset sind, und doppelte Namen
+  ein Fehler (bis 1.6.4 still übergangen; ein einzelner benannter Wert mit fremdem Namen galt für alle Assets).
   Seit 1.6.4 ist ein unbekanntes Argument oder share (setzt die Funktion aus weights) ein Fehler mit einheitlicher
   Meldung.
 
@@ -1558,7 +1615,7 @@ println(st)
 """
 function strategy_from_weights(weights; kwargs...)
     nms, vals = _named(weights)
-    (nms === nothing || any(k -> k === missing || k == "", nms)) && error("weights muss benannt sein.")
+    (nms === nothing || any(k -> k === missing || k == "", nms)) && chk_stop("a.m_strategy_from_weights")
     dup = _duplicated(nms)
     if any(dup)
         u = unique(nms[dup])
@@ -1566,9 +1623,10 @@ function strategy_from_weights(weights; kwargs...)
     end
     chk_numvec(collect(vals), "strategy_from_weights", "weights")   # seit 1.6.4 (bis 1.6.3: Text MethodError)
     w = Float64[_isna(v) ? NA : Float64(v) for v in vals]
-    (any(isnan, w) || any(<=(0), w)) && error("Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen).")
+    (any(isnan, w) || any(<=(0), w)) && chk_stop("a.m_strategy_from_weights_2")
     s = SimLev.r_sum(w)
-    abs(s - 1) > 1e-6 && error(_sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", s))
+    # seit 1.6.5 (CR2-E-6) mit 8 Stellen (bis 1.6.4 %.4f: "1.0000" bei einer Abweichung von 2e-06)
+    abs(s - 1) > 1e-6 && error(_sprintf("Gewichte summieren sich zu %.8g; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", s))
     # seit 1.6.4 (Entscheidung 21): Argumente für asset_config() vor dem Aufruf prüfen (bis 1.6.3 eigene Meldung bzw.
     # MethodError); share setzt die Funktion selbst
     SimLev.chk_dots(keys(kwargs), [f for f in SimLev._FIELDS if f != "share"], "strategy_from_weights"; taken = ["share"])
@@ -1578,7 +1636,19 @@ function strategy_from_weights(weights; kwargs...)
         wmap = _sfw_wrappers(kwargs[:wrapper], nms)
         kwargs = pairs((; (k => v for (k, v) in kwargs if k !== :wrapper)...))
     end
-    per_asset(v) = (vn = _named(v)[1]; vn !== nothing && (_rlen(v) > 1 || (_rlen(v) == 1 && vn[1] in nms)))
+    # Benannt -> je Asset (auch bei einem Element); unbenannt ein Wert für alle. Seit 1.6.5 (CR2-E-5, Entscheidung
+    # 185 K30) sind Namen, die kein Asset sind, und doppelte Namen ein Fehler (bis 1.6.4 still übergangen; ein
+    # einzelner benannter Wert mit fremdem Namen galt für alle)
+    per_asset(v) = _named(v)[1] !== nothing
+    for (key, v) in kwargs
+        vn = _named(v)[1]
+        vn === nothing && continue
+        dv = _duplicated(vn)
+        any(dv) && chk_stop("a.sfw_doppelt", "strategy_from_weights", String(key), join(("'" * k * "'" for k in unique(vn[dv])), ", "))
+        unk = unique([k for k in vn if !(k in nms)])
+        isempty(unk) || chk_stop("a.sfw_fremd", "strategy_from_weights", String(key), join(("'" * k * "'" for k in unk), ", "),
+                                 join(nms, ", "))
+    end
     scalar(v) = v isa Union{AbstractVector,Tuple} && length(v) == 1 ? first(v) :
                 v isa Union{NamedTuple,AbstractDict} && length(v) == 1 ? first(values(v)) :
                 v isa Pair ? v.second : v
@@ -1605,7 +1675,7 @@ function strategy_from_weights(weights; kwargs...)
             SimLev.asset_config(; share = w[i], a..., wrapper = wr)
         catch e
             (e isa ErrorException && e.msg == SimLev._AC_MSG_WRAPPER_SIGNAL) || rethrow()
-            error("wrapper: Asset '$nm' hat trading = \"signal\"; mit wrapper ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie).")
+            chk_stop("a.m_scalar", nm)
         end
         push!(assets, nm => ac)
     end
@@ -1625,7 +1695,7 @@ function _sfw_wrappers(wv, assets::Vector{String})
     wv === nothing && return Dict{String,Any}()
     inherits(wv, "SimLevWrapperConfig") && return Dict{String,Any}(nm => wv for nm in assets)
     if wv isa RFrame || !(wv isa Union{AbstractDict,NamedTuple,AbstractVector,Tuple,Pair})
-        error("wrapper muss ein Objekt aus wrapper_config() (gilt für alle Assets) oder eine benannte Liste solcher Objekte sein (Name = Asset).")   # seit 1.6.4 ohne Klasse
+        chk_stop("a.m_sfw_wrappers_2")   # seit 1.6.4 ohne Klasse
     end
     _rlen(wv) == 0 && return Dict{String,Any}()
     nm, vals = wv isa Tuple ? (nothing, collect(Any, wv)) : _named(wv)
@@ -1640,7 +1710,7 @@ function _sfw_wrappers(wv, assets::Vector{String})
     isempty(unk) || error("wrapper: $(join(("'" * k * "'" for k in unk), ", ")) $(length(unk) == 1 ? "ist kein Asset der Strategie" : "sind keine Assets der Strategie") (Assets: $(join(assets, ", "))).")
     for (k, v) in zip(nm, vals)
         inherits(v, "SimLevWrapperConfig") ||
-            error("wrapper: Eintrag '$k' muss ein Objekt aus wrapper_config() sein.")
+            chk_stop("a.m_sfw_wrappers", k)
     end
     return Dict{String,Any}(zip(nm, vals))
 end
@@ -1700,26 +1770,26 @@ println(st)
 function portfolio_template(name_pos = nothing; name = name_pos, map = nothing, kwargs...)
     if name === nothing
         (map !== nothing || !isempty(kwargs)) &&
-            error("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name liefert portfolio_template() die Liste der Vorlagen.")
+            chk_stop("a.m_portfolio_template")
         return _template_list()
     end
     name = chk_name1(name, "portfolio_template", "name")   # seit 1.6.4 (K42 E5)
     i = findfirst(p -> p.first == name, _PORTFOLIO_TEMPLATES)
-    i === nothing && error("Unbekannte Vorlage '$(name)'. Verfügbar: $(join(first.(_PORTFOLIO_TEMPLATES), ", "))")
+    i === nothing && chk_stop("a.m_portfolio_template_2", name, join(first.(_PORTFOLIO_TEMPLATES), ", "))
     w = _PORTFOLIO_TEMPLATES[i].second
     roles = String[p.first for p in w]
     vals = Float64[p.second for p in w]
     if map !== nothing
         mn, mv = _named(map)
         (mn === nothing || any(k -> k == "", mn) || any(v -> !(v isa AbstractString) || isempty(v), mv)) &&
-            error("map muss benannt sein: Rolle -> Spaltenname, z. B. c(stocks = \"msci_world\").")
+            chk_stop("a.m_portfolio_template_3")
         unk = unique([k for k in mn if !(k in roles)])
         isempty(unk) || error("map: unbekannte Rolle(n) $(join(("'" * k * "'" for k in unk), ", ")) für Vorlage '$(name)'; Rollen: $(join(roles, ", ")).")
         roles = [(j = findfirst(==(r), mn); j === nothing ? r : string(mv[j])) for r in roles]
         dup = _duplicated(roles)
         if any(dup)
             u = unique(roles[dup])
-            error("map: mehrere Rollen zeigen auf dieselbe Spalte $(join(("'" * k * "'" for k in u), ", ")); je Spalte nur eine Rolle (Gewichte sonst selbst zusammenfassen und strategy_from_weights() verwenden).")
+            chk_stop("a.m_portfolio_template_5", join(("'" * k * "'" for k in u), ", "))
         end
     end
     return strategy_from_weights(RVector(vals; names = roles); kwargs...)

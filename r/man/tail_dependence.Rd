@@ -25,9 +25,11 @@ Ueberschreitungen oder Streuung 0), \code{n_lower}, \code{n_upper}
 \description{
 Misst fuer zwei Reihen (z. B. Periodenrenditen), wie oft extreme Werte
 gemeinsam auftreten, ohne ein Copula-Modell anzunehmen:
-\deqn{\hat\lambda_L(q) = \frac{\#\{u_i \le q, v_i \le q\}}{n q}, \quad
-      \hat\lambda_U(q) = \frac{\#\{u_i > 1 - q, v_i > 1 - q\}}{n q}}
-auf Pseudo-Beobachtungen \eqn{u_i, v_i} (Rang / (n + 1)). Unter
+\deqn{\hat\lambda_L(q) = \frac{\#\{R_i \le q (n + 1), S_i \le q (n + 1)\}}{n q}, \quad
+      \hat\lambda_U(q) = \frac{\#\{n + 1 - R_i \le q (n + 1), n + 1 - S_i \le q (n + 1)\}}{n q}}
+mit den Raengen \eqn{R_i, S_i} (Mittel bei Bindungen). Seit 1.6.5 sind
+beide Raender spiegelbildlich (bis 1.6.4 oben \eqn{u_i > 1 - q} mit
+\eqn{u_i = R_i / (n + 1)}, eine Grenzbeobachtung weniger als unten). Unter
 Unabhaengigkeit ist \eqn{\hat\lambda(q) \approx q}, bei
 Gauss-Abhaengigkeit faellt es fuer \eqn{q \to 0} gegen 0, bei echter
 Tail-Abhaengigkeit bleibt es positiv.

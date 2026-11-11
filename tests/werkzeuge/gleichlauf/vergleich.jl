@@ -20,16 +20,23 @@ include(joinpath(@__DIR__, "..", "..", "lib", "faelle.jl"))
 "Fälle der Datei f prüfen, Ausgabe nach io; (ok, n)."
 function pruefe_datei(io, f, k, verbose, strict)
     stat = Dict{String,Vector{Int}}(); order = String[]
+    zeit = Dict{String,Vector{Float64}}()
+    zf = get(ENV, "SIMLEV_ZEITEN", "")   # seit 1.6.5 (FB-14): Laufzeit je Fall, Zeilen „jl<TAB>Kennung<TAB>Sekunden“
+    zh = isempty(zf) ? nothing : open(zf, "a")
     je_fall(f) do store, c
         key = kennung(c)
         k !== nothing && !occursin(k, key) && return
         m = split(key, "/")[1]
-        haskey(stat, m) || (stat[m] = [0, 0]; push!(order, m))
+        haskey(stat, m) || (stat[m] = [0, 0]; push!(order, m); zeit[m] = Float64[])
+        t0 = time()
         errs = try
             pruefe_fall(c, store; strict_na = strict)
         catch e
             ["Werkzeugfehler: " * sprint(showerror, e)]
         end
+        dt = time() - t0
+        push!(zeit[m], dt)
+        zh === nothing || println(zh, "jl\t", key, "\t", round(dt; digits = 6))
         stat[m][2] += 1
         if isempty(errs)
             stat[m][1] += 1
@@ -40,11 +47,18 @@ function pruefe_datei(io, f, k, verbose, strict)
             end
         end
     end
+    zh === nothing || close(zh)
     ok = n = 0
     for m in order
         println(io, rpad(m, 16), " $(stat[m][1])/$(stat[m][2]) bitgleich")
         ok += stat[m][1]; n += stat[m][2]
     end
+    for m in order   # seit 1.6.5 (FB-14): Laufzeit je Modul
+        ts = sort(zeit[m])
+        println(io, "zeit ", rpad(m, 16), " n=$(length(ts)) median=", round(1000 * ts[length(ts) ÷ 2 + 1]; digits = 3),
+                " ms summe=", round(sum(ts); digits = 3), " s")
+    end
+    GC.gc()   # seit 1.6.5: Speicher je Datei freigeben (Speicher je Prozess unter 2 GB)
     return ok, n
 end
 

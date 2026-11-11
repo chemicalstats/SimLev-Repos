@@ -102,28 +102,28 @@ println(r["tax_report"]["total_taxes_paid"])
 function wrapper_config(strategy; rebalance = nothing, costs = funds_costs(), order_fee = nothing, volume = nothing)
     @nospecialize
     strategy === nothing &&
-        error("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die create_strategy() annimmt).")
+        chk_stop("a.m_wrapper_config")
     if !inherits(strategy, "strategy")
         (_is_mapping(strategy) || strategy isa Union{AbstractVector,Tuple}) ||
-            error("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein.")   # seit 1.6.4 ohne Klasse
+            chk_stop("a.m_wrapper_config_2")   # seit 1.6.4 ohne Klasse
         strategy = create_strategy(; assets = strategy)
     end
     strategy_validate(strategy)
     nested = _strategy_wrappers(strategy)
     isempty(nested) ||
-        error("wrapper_config: Asset '$(nested[1])' der inneren Strategie hat selbst einen Wrapper; verschachtelte Wrapper sind nicht möglich.")
+        chk_stop("a.m_wrapper_config_3", nested[1])
     total = r_sum(Float64[Float64(a["share"]) for (_, a) in strategy])
     abs(total - 1) > 1e-6 &&
-        error(r_sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.4f, müssen aber 1 ergeben.", total))
+        error(r_sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.8g, müssen aber 1 ergeben.", total))
     (rebalance === nothing || inherits(rebalance, "SimLevRebalancePlan")) ||
-        error("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.")
+        chk_stop("a.m_wrapper_config_4")
     inherits(costs, "SimLevFundsCosts") ||
-        error("wrapper_config: costs muss ein Objekt aus funds_costs() sein.")
+        chk_stop("a.m_wrapper_config_5")
     order_fee = _blk_fee_check(order_fee, "wrapper_config", "order_fee")   # seit 1.6.4 (A-046)
     fs = _fee_spec(order_fee, "wrapper_config", "order_fee")
     volume = chk_scalar(volume)   # Länge 1 wie Einzelwert (Entscheidung 4)
     if volume !== nothing && (!_blk_one(volume) || volume <= 0)
-        error("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR).")
+        chk_stop("a.m_wrapper_config_6")
     end
     if fs !== nothing && volume === nothing && (fs.fixed > 0 || fs.min > 0 || isfinite(fs.max))
         error("wrapper_config: order_fee enthält feste Beträge in EUR (fixed, min oder max); dafür ist das Fondsvolumen " *
@@ -269,15 +269,17 @@ function _wrapper_nav_calc_q(data::_Frame, wrapper, splits, tag::String, who::St
         e isa InterruptException && rethrow()
         error("$who (innere Rechnung): $(_wrapper_errmsg(e))")
     end
-    rdays = Int[to_days(z) for z in res["dates"]]
+    # seit 1.6.5 (CR2-D-8): Datumsumrechnung und Zeilenzuordnung in typisierten Hilfen (Funktionsgrenze), Zuordnung über
+    # searchsortedfirst auf den aufsteigenden Tagen wie in Python (bis 1.6.4 Dict und Schleifen über untypisierte Spalten,
+    # mehr Zeit als die innere Rechnung); gleiche Stellen
+    rdays = _wn_days(res["dates"])
     rfilled = res["filled"]
-    pos = Dict{Int,Int}(z => i for (i, z) in enumerate(rdays))
-    idx = Int[pos[Int(z)] for z in d.cols["date"]]
+    idx = _wn_index(rdays, d.cols["date"])
     idx = idx[.!rfilled[idx]]
-    isempty(idx) && error("$who: keine Handelstage in der inneren Rechnung (alle Tage aufgefüllt).")
+    isempty(idx) && chk_stop("a.m_wrapper_nav_calc", who)
     day = rdays[idx]
     G = Float64.(res["worth"])[idx]
-    yr = Int[year_of(z) for z in day]
+    yr = _wn_years(day)
     fee = Float64(wrapper["costs"]["fee"]); pf = Float64(wrapper["costs"]["performance_fee"])
     n = length(idx)
     # Tagesschleife im Kern (core/wrapper_core_impl.h, wrapper_nav_core; bis 1.5.0 hier in Julia)
@@ -291,13 +293,39 @@ function _wrapper_nav_calc_q(data::_Frame, wrapper, splits, tag::String, who::St
     if bad[] >= 0
         t = Int(bad[]) + 1
         G_prev = t == 1 ? Float64(S) : G[t-1]
-        error("$who: innerer Wert am $(fmt_date(day[t])) ist $(r_format1(G[t])) (vorher $(r_format1(G_prev))); der Anteilswert ist dann nicht definiert.")
+        chk_stop("a.m_wrapper_nav_calc_2", who, fmt_date(day[t]), r_format1(G[t]), r_format1(G_prev))
     end
-    out = RFrame("date" => Date[from_days(z) for z in day], "nav" => nav, "gross" => gross, "fee" => fee_t,
+    out = RFrame("date" => _wn_dates(day), "nav" => nav, "gross" => gross, "fee" => fee_t,
                  "perf_fee" => acc_t, "perf_paid" => paid_t, "hwm" => hwm;
                  class = ["SimLevWrapperNav", "data.frame"], attrs = Dict{String,Any}("inner" => res, "wrapper" => wrapper))
     return out, !msg.used && !wlog.seen[]
 end
+
+# typisierte Hilfen von _wrapper_nav_calc_q (seit 1.6.5, CR2-D-8)
+_wn_days(v) = _wn_days_t(collect(v))
+_wn_days_t(v::Vector{Date}) = Int[to_days(z) for z in v]
+_wn_days_t(v::AbstractVector) = Int[to_days(z) for z in v]
+function _wn_index(rdays::Vector{Int}, dd::AbstractVector)
+    n = length(rdays)
+    sorted = all(i -> rdays[i+1] > rdays[i], 1:n-1)
+    out = Vector{Int}(undef, length(dd))
+    if sorted
+        @inbounds for k in eachindex(dd)
+            z = Int(dd[k])
+            j = searchsortedfirst(rdays, z)
+            if j > n || rdays[j] != z
+                sorted = false
+                break
+            end
+            out[k] = j
+        end
+        sorted && return out
+    end
+    pos = Dict{Int,Int}(z => i for (i, z) in enumerate(rdays))   # wie bis 1.6.4 (fehlender Tag: KeyError)
+    return Int[pos[Int(z)] for z in dd]
+end
+_wn_years(day::Vector{Int}) = Int[year_of(z) for z in day]
+_wn_dates(day::Vector{Int}) = Date[from_days(z) for z in day]
 
 """
     wrapper_nav(data, wrapper; splits = nothing)
@@ -387,18 +415,18 @@ function wrapper_nav(data, wrapper; splits = nothing)
     # seit 1.6.4 Meldungen ohne Klasse (Entscheidung 8); data nur als RFrame, die Meldung nennt die Umwandlung
     # (Entscheidung 6, wie simulation(); bis 1.6.3 auch NamedTuple, Dict und Paare)
     inherits(wrapper, "SimLevWrapperConfig") ||
-        error("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.")
+        chk_stop("a.m_wrapper_nav")
     (splits === nothing || inherits(splits, "SimLevSplitRule")) ||
-        error("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.")
+        chk_stop("a.m_wrapper_nav_2")
     (data isa RFrame && haskey(data, "date")) || chk_stop("e1.tabelle_spalten", "wrapper_nav", chk_msg("tabelle.formen"))
     data["date"] isa SimLev.RFmt.RFactor && chk_stop("spalte_faktor", "wrapper_nav", "date")   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
     fa = get(attrs(data), "filled", nothing)
     dates = SimLev.DataPrep._to_date(data["date"], "wrapper_nav: data\$date")
     i_na = findfirst(ismissing, dates)
-    i_na === nothing || error("wrapper_nav: Spalte 'date' enthält NA (erstmals in Zeile $i_na).")
+    i_na === nothing || chk_stop("a.m_wrapper_nav_3", i_na)
     data = copy(data)
     data["date"] = Date[z for z in dates]
-    zd = Int[to_days(z) for z in data["date"]]
+    zd = _wn_days(data["date"])   # seit 1.6.5 typisiert (CR2-D-8)
     fr_filled = fa
     if any(i -> zd[i+1] < zd[i], 1:length(zd)-1)        # nach Datum sortieren (wie simulation())
         o = sortperm(zd; alg = MergeSort)

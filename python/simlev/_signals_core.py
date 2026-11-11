@@ -11,7 +11,7 @@ import numpy as np
 
 from . import _ext
 
-__all__ = ["roll_mean_core", "roll_cov_core"]
+__all__ = ["roll_mean_core", "roll_cov_core", "research_vec"]
 
 _I32 = 2147483647
 
@@ -51,3 +51,14 @@ def roll_cov_core(x, y, n):
 # R's NA_real_ ist ein signalisierendes NaN; numpy-Warnungen "invalid value" unterdrücken (R kennt sie nicht).
 roll_mean_core = np.errstate(invalid="ignore")(roll_mean_core)
 roll_cov_core = np.errstate(invalid="ignore")(roll_cov_core)
+
+
+def research_vec(op, x, par, nout):
+    """``.research_vec(op, x, par, nout)``: Hilfskerne seit 1.6.5 (``core/research_core_impl.h``, ``research_vec``):
+    1 erwartetes Maximum von N Standardnormalen, 2 harmonische Summe wie R, 3 Risikozustand der Zielvolatilität,
+    4 expandierender Median, 5 Drawdown-Polster."""
+    x = np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
+    par = np.ascontiguousarray(np.asarray(par, dtype=np.float64).ravel())
+    out = np.empty(int(nout))
+    _ext.research_vec(int(op), x, par, out)
+    return out

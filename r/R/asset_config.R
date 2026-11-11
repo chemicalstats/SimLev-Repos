@@ -31,8 +31,8 @@
 #'   Spread; wer Spreads abbilden will, gibt sie an).
 #' @param partial_exemption Zahl. Teilfreistellung in Prozent (0 bis 100) fuer ETFs:
 #'   \describe{
-#'     \item{30}{Aktien-ETFs (Aktienfonds, >51\% Aktien)}
-#'     \item{15}{Mischfonds-ETFs (Mischfonds, >25\% Aktien)}
+#'     \item{30}{Aktien-ETFs (Aktienfonds, fortlaufend mehr als 50\% Aktien, § 2 Abs. 6 InvStG)}
+#'     \item{15}{Mischfonds-ETFs (Mischfonds, fortlaufend mindestens 25\% Aktien, § 2 Abs. 7 InvStG)}
 #'     \item{0}{Renten-/sonstige ETFs oder Nicht-ETF-Assets}
 #'   }
 #'   Standard: 0.
@@ -101,11 +101,11 @@ asset_config <- function(
   
   # Abwaertskompatibilitaet
   if (asset_class == "etn_standard") {
-    warning("asset_config: asset_class = \"etn_standard\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = FALSE verwenden.")
+    warning(chk_msg("a.m_asset_config"))
     asset_class <- "etn"
     deliverable <- FALSE
   } else if (asset_class == "etn_deliverable") {
-    warning("asset_config: asset_class = \"etn_deliverable\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = TRUE verwenden.")
+    warning(chk_msg("a.m_asset_config_2"))
     asset_class <- "etn"
     deliverable <- TRUE
   }
@@ -115,7 +115,7 @@ asset_config <- function(
   # Zahlen muessen Zahlen sein (kein Text wie "0.5"), Prozentangaben plausibel
   .num1 <- function(x, arg) {
     if (!is.numeric(x) || length(x) != 1L || is.na(x))
-      stop(sprintf("asset_config: %s muss eine einzelne Zahl sein.", arg))   # seit 1.6.4 ohne Eingabewert
+      stop(chk_msg("a.m_num1", arg))   # seit 1.6.4 ohne Eingabewert
   }
   .num1(share, "share"); .num1(spread, "spread"); .num1(partial_exemption, "partial_exemption")
 
@@ -126,35 +126,38 @@ asset_config <- function(
   }
   
   if (spread < 0) {
-    stop("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 f\u00fcr 0,1 %).")
+    stop(chk_msg("e.spread_negativ"))   # seit 1.6.5 aus der Tabelle (193, Paket E)
   }
   if (spread == Inf) chk_stop("zahl", "asset_config", "spread")   # seit 1.6.4: Spread endlich (bis 1.6.3 still angenommen)
   
   if (partial_exemption < 0 || partial_exemption > 100) {
-    stop("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 f\u00fcr 30 %).")
+    stop(chk_msg("e.teilfreistellung_bereich"))
   }
   if (partial_exemption > 0 && partial_exemption < 1)
-    warning(sprintf("asset_config: partial_exemption = %s wird als %s %% Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                    format(partial_exemption), format(partial_exemption), format(partial_exemption * 100)), call. = FALSE)
+    warning(chk_msg("e.teilfreistellung_anteil", format(partial_exemption), format(partial_exemption),
+                    format(partial_exemption * 100)), call. = FALSE)
 
   if (!is.null(start)) {
     # seit 1.6.4 nur Date, Datum-Uhrzeit oder Text (bis 1.6.3 auch Zahlen als Tage seit 1970, Faktoren und +-Inf;
     # Entscheidung 7); Meldung ohne Eingabewert
+    # seit 1.6.5 (CR2-C-8, Entscheidung 185 K27) nach der Regel von .to_date(): vierstellige Jahreszahl vorn, danach
+    # nur eine Uhrzeit; Zeitstempel ergeben den Kalendertag ihrer eigenen Zeitzone (bis 1.6.4 as.Date: "05-01-2024"
+    # still als 20.01.0005, Zeitstempel als Tag in UTC)
     st <- if (length(start) == 1L && (inherits(start, c("Date", "POSIXt")) || is.character(start)))
-            tryCatch(as.Date(start), error = function(e) NA) else NA
+            tryCatch(.to_date(start, "asset_config: start", strict = FALSE), error = function(e) NA) else NA
     if (length(st) != 1L || !is.finite(unclass(st)))
-      stop("asset_config: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+      stop(chk_msg("a.m_num1_2"))
     start <- st
   }
   
   if (trading == "signal" && (is.null(signal_buy) || is.null(signal_sell))) {
-    stop("asset_config: bei trading = \"signal\" m\u00fcssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
+    stop(chk_msg("a.m_num1_3"))
   }
   
   # Fonds-Wrapper: keine Signale auf den Anteilswert
   if (!is.null(wrapper)) {
     if (!inherits(wrapper, "SimLevWrapperConfig"))
-      stop("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein.")
+      stop(chk_msg("a.m_num1_4"))
     if (trading == "signal") stop(.ac_msg_wrapper_signal)
   }
 
@@ -175,8 +178,7 @@ asset_config <- function(
   } else {
     valid_regimes <- c("investment_fund", "capital_gains", "private_sale")
     if (!(is.character(tax_regime) && length(tax_regime) == 1L && tax_regime %in% valid_regimes)) {   # seit 1.6.4 Laenge 1
-      stop(sprintf("asset_config: tax_regime ist ung\u00fcltig; erlaubt sind %s (oder NULL: aus asset_class abgeleitet).",
-                   paste(valid_regimes, collapse = ", ")))
+      stop(chk_msg("a.m_num1_5", paste(valid_regimes, collapse = ", ")))
     }
   }
   

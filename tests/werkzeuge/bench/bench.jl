@@ -50,11 +50,20 @@ y8 = sim_msgjr(2000, [2e-6, 2e-5], [0.02, 0.05], [0.04, 0.10], [0.92, 0.85], [0.
 
 fp(x) = @sprintf("%.17g", RB.r_sum(vec(x)))
 println("Daten: S30 ", fp(A), ", T ", fp(em), ", W ", fp(W), ", T8 ", fp(y8))
+# seit 1.6.5 (Messung gegen 1.6.4): T10 drei Signale aus einer Kursreihe mit 10^6 Zeilen (Seed 3)
+SimLev.simlev_seed(3); x10 = path(100, 1000000, 2e-4, 0.01)
+s10 = [signal_sma(x10; n = 200), signal_volatility(x10; n = 20, threshold = 25), signal_momentum(x10; n = 60)]
+println("Daten2: T10 ", fp(x10), ", Signale ", join([string(count(==(true), z["buy"]) + 2 * count(==(true), z["sell"])) for z in s10], " "))
 
 st30 = create_strategy(A = asset_config("etf", "bnh"; share = 0.7), B = asset_config("etf", "bnh"; share = 0.3))
 cfg = bootstrap_config((akt = "aktien",); input = "prices")
 st = create_strategy(akt = asset_config("etf", "bnh"))
 A4 = ["aktien", "bonds", "gold", "em"]
+# seit 1.6.5: T3s Studie mit zwei Anlagen, Steuer und Rebalancing (Blocklänge fest 20, in 1.6.4 und 1.6.5 gleich);
+# T9 bootstrap_pooled aus zwei Ländern (aktien, em als Spalte A)
+cfg2 = bootstrap_config(SimLev.RList("akt" => "aktien", "bo" => "bonds"); input = "prices")
+st2 = create_strategy("akt" => asset_config("etf", "bnh"; share = 0.6), "bo" => asset_config("etf", "bnh"; share = 0.4))
+ds9 = SimLev.RList("x" => RFrame("date" => d["date"], "A" => d["aktien"]), "y" => RFrame("date" => d["date"], "A" => d["em"]))
 
 const TASKS = [
     "S30" => () -> simulation(d30, st30; start_value = 1e4, dca = dca_plan(; value = 200, span = 1), rebalance = rebalance_plan(; unit = "quarter"), tax = tax_profile(; base_rate = 2)),
@@ -72,6 +81,12 @@ const TASKS = [
     "T6" => () -> portfolio_optimize(d; assets = A4, method = "min_cvar"),
     "T7" => () -> portfolio_optimize(d; assets = A4, method = "hrp"),
     "T8" => () -> SimLev.MsGarch._ms_garch_fit(y8, 2, "gjrGARCH"),
+    "T3s" => () -> bootstrap_study(d, cfg2, "stationary"; n = 200, path_length = 2520, seed = 1, progress = false, params = SimLev.RList("L" => 20),
+                                   strategies = SimLev.RList("a" => st2), sim_args = SimLev.RList("rebalance" => rebalance_plan(; unit = "quarter"),
+                                                                                                  "tax" => tax_profile(; base_rate = 2)), cores = 1),
+    "T4m" => () -> withdrawal_max_rate(W, withdrawal_rule("constant"); success = 0.9),
+    "T9" => () -> bootstrap_pooled(ds9, "A"; n = 2000, years = 15, frequency = "month", seed = 1),
+    "T10" => () -> signal_combine(s10[1], s10[2], s10[3]),
     "P1c1" => () -> bootstrap(d, cfg, "stationary"; n = 400, seed = 1, progress = false, path_length = 2520, cores = 1),
     "P1c2" => () -> bootstrap(d, cfg, "stationary"; n = 400, seed = 1, progress = false, path_length = 2520, cores = 2),
 ]

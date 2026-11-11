@@ -76,6 +76,20 @@ _kvpairs(x::AbstractVector{<:Pair}) = [String(string(p.first)) => p.second for p
 _kvpairs(x::AbstractDict) = [String(string(k)) => v for (k, v) in x]
 
 _to_date_or_nothing(x) = (z = _as_date(x); z === nothing ? nothing : from_days(z))
+# Bezugsdatum start (asset_config, Bausteine): seit 1.6.5 (CR2-C-8, Entscheidung 185 K27) nach der Regel von
+# .to_date() (vierstellige Jahreszahl vorn, danach nur eine Uhrzeit; DateTime ergibt seinen Kalendertag); Date
+# oder nothing
+function _start_date(x, what)
+    @nospecialize
+    x isa Union{AbstractVector,Tuple} && (length(x) == 1 || return nothing; x = first(x))
+    d = try
+        SimLev.DataPrep._to_date(x, what; strict = false)
+    catch
+        return nothing
+    end
+    (isempty(d) || d[1] === missing) && return nothing
+    return d[1]
+end
 
 "Datum, Zeitpunkt oder Text, auch als Vektor der Länge 1 (R: `Date`, `POSIXt` oder `character`; seit 1.6.4)."
 function _is_date_like(@nospecialize(x))
@@ -157,7 +171,8 @@ eingesetzt.
 - `spread`: Numerisch. Voller Bid-Ask-Spread **in Prozent** (z. B. `0.1` = 0,1 %), nicht negativ. Pro Seite
   wird der halbe Spread angewandt. Standard: `0` (ohne Spread; wer Spreads abbilden will, gibt sie an).
 - `partial_exemption`: Numerisch. Teilfreistellungssatz nach § 20 Abs. 1 InvStG **in Prozent** (0 bis 100; z.
-  B. `30` für Aktien-ETFs, `15` für Mischfonds). Wirkt nur im Regime `"investment_fund"`. Werte zwischen 0 und
+  B. `30` für Aktien-ETFs, `15` für Mischfonds; Aktienfonds legen fortlaufend mehr als 50 %, Mischfonds
+  mindestens 25 % in Aktien an, § 2 Abs. 6 und 7 InvStG). Wirkt nur im Regime `"investment_fund"`. Werte zwischen 0 und
   1 (vermutlich ein Anteil statt Prozent, z. B. `0.3`) werden mit Warnung angenommen. Standard: `0`.
 - `deliverable`: Logisch. Physisch lieferbar (relevant für ETC/ETN: `true` → `"private_sale"`-Regime wie
   Xetra-Gold)? Standard: `false`.
@@ -239,38 +254,38 @@ function _asset_config(vals::Dict{String,Any})
     signal_sell = chk_scalar(get(vals, "signal_sell", nothing))
     wrapper = get(vals, "wrapper", nothing)
     if asset_class == "etn_standard"
-        @warn "asset_config: asset_class = \"etn_standard\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = FALSE verwenden."
+        @warn chk_msg("a.m_asset_config")
         asset_class = "etn"; deliverable = false
     elseif asset_class == "etn_deliverable"
-        @warn "asset_config: asset_class = \"etn_deliverable\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = TRUE verwenden."
+        @warn chk_msg("a.m_asset_config_2")
         asset_class = "etn"; deliverable = true
     end
     for (x, arg) in ((share, "share"), (spread, "spread"), (partial_exemption, "partial_exemption"))
-        _is_num1(x) || error("asset_config: $arg muss eine einzelne Zahl sein.")   # seit 1.6.4 ohne Eingabewert
+        _is_num1(x) || chk_stop("a.m_num1", arg)   # seit 1.6.4 ohne Eingabewert
     end
     # bei 1 < share <= 100 wertfreier Hinweis (Entscheidung 12; seit 1.6.4, K43 KE)
     (share <= 0 || share > 1) && error("asset_config: share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %)" *
                                        (1 < share <= 100 ? chk_msg("ke.prozent_teilen") : "") * ".")
-    spread < 0 && error("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %).")
+    spread < 0 && chk_stop("e.spread_negativ")   # seit 1.6.5 aus der Tabelle (193, Paket E)
     # seit 1.6.4: Spread endlich (bis 1.6.3 still angenommen); seit K43 T1-B1 über die Umwandlung geprüft (big(10)^400)
     isfinite(Float64(spread)) || chk_stop("zahl", "asset_config", "spread")
     (partial_exemption < 0 || partial_exemption > 100) &&
-        error("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %).")
+        chk_stop("e.teilfreistellung_bereich")
     if partial_exemption > 0 && partial_exemption < 1
-        @warn "asset_config: partial_exemption = $(r_format1(partial_exemption)) wird als $(r_format1(partial_exemption)) % Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(partial_exemption * 100))."
+        @warn chk_msg("e.teilfreistellung_anteil", r_format1(partial_exemption), r_format1(partial_exemption),
+                      r_format1(partial_exemption * 100))
     end
     if start !== nothing
         # seit 1.6.4 nur Date, DateTime oder Text (bis 1.6.3 auch Zahlen als Tage seit 1970; Entscheidung 7)
-        st = _is_date_like(start) ? ((start isa Union{AbstractVector,Tuple}) ? _to_date_or_nothing(first(start)) :
-                                     _to_date_or_nothing(start)) : nothing
-        st === nothing && error("asset_config: start ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+        st = _is_date_like(start) ? _start_date(start, "asset_config: start") : nothing
+        st === nothing && chk_stop("a.m_num1_2")
         start = st
     end
     if trading == "signal" && (signal_buy === nothing || signal_sell === nothing)
-        error("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
+        chk_stop("a.m_num1_3")
     end
     if wrapper !== nothing   # Fonds-Wrapper: keine Signale auf den Anteilswert
-        _is_wrapper(wrapper) || error("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein.")
+        _is_wrapper(wrapper) || chk_stop("a.m_num1_4")
         trading == "signal" && error(_AC_MSG_WRAPPER_SIGNAL)
     end
     # seit 1.6.4: Signalspalten als einzelner Name, deliverable nur true/false (bis 1.6.3 ungeprüft)
@@ -282,7 +297,7 @@ function _asset_config(vals::Dict{String,Any})
                      asset_class in ("etn", "etc") ? (_isTRUE(deliverable) ? "private_sale" : "capital_gains") :
                      "capital_gains"
     elseif !(tax_regime isa AbstractString && tax_regime in VALID_REGIMES)
-        error("asset_config: tax_regime ist ungültig; erlaubt sind $(join(VALID_REGIMES, ", ")) (oder NULL: aus asset_class abgeleitet).")
+        chk_stop("a.m_num1_5", join(VALID_REGIMES, ", "))
     end
     d = RList("asset_class" => asset_class, "trading" => trading, "share" => share,
               "spread" => spread, "partial_exemption" => partial_exemption, "deliverable" => deliverable,
@@ -397,7 +412,7 @@ println(st)
 """
 function create_strategy(args...; assets = nothing, kwargs...)
     n_dots = length(args) + length(kwargs)
-    assets !== nothing && n_dots > 0 && error("create_strategy: Assets entweder über ... oder über assets angeben, nicht beides.")
+    assets !== nothing && n_dots > 0 && chk_stop("a.m_create_strategy")
     dots = Pair{String,Any}[]
     unnamed = false
     for a in args
@@ -413,16 +428,16 @@ function create_strategy(args...; assets = nothing, kwargs...)
     end
     if assets !== nothing
         if !_is_mapping(assets)
-            error("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data).")   # seit 1.6.4 ohne Klasse
+            chk_stop("a.m_create_strategy_2")   # seit 1.6.4 ohne Klasse
         end
         dots = Pair{String,Any}[p for p in _kvpairs(assets)]
     end
     isempty(dots) && error("create_strategy: mindestens eine Asset-Konfiguration angeben, z. B. create_strategy(ETF = asset_config(\"etf\")).")
     (unnamed || any(p -> isempty(p.first), dots)) &&
-        error("create_strategy: alle Assets müssen benannt sein (Name = Kursspalte in data), z. B. create_strategy(ETF = asset_config(\"etf\")).")
+        chk_stop("a.m_create_strategy_3")
     seen = Set{String}()
     for p in dots
-        p.first in seen && error("create_strategy: Asset-Name '$(p.first)' kommt mehrfach vor; jeder Name darf nur einmal vorkommen.")
+        p.first in seen && chk_stop("a.m_create_strategy_4", p.first)
         push!(seen, p.first)
     end
     out = RList()
@@ -435,7 +450,7 @@ function create_strategy(args...; assets = nothing, kwargs...)
             _asset_list_fields(cfg, name, "create_strategy")   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
             out[name] = _config_from_mapping(cfg)
         else
-            error("create_strategy: Asset '$name' muss ein asset_config()-Objekt oder eine Liste sein.")
+            chk_stop("a.m_create_strategy_5", name)
         end
     end
     return Strategy(out)
@@ -506,16 +521,16 @@ println(strategy_validate(st, d))
 """
 function strategy_validate(strategy, data_pos = nothing; data = data_pos)
     inherits(strategy, "strategy") ||
-        error("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+        chk_stop("a.m_strategy_validate")
     for (name, a) in strategy
-        inherits(a, "asset_config") || error("strategy_validate: Asset '$name' ist kein asset_config()-Objekt.")
+        inherits(a, "asset_config") || chk_stop("a.m_strategy_validate_2", name)
     end
     chk_df(data, "strategy_validate", "data"; null_ok = true)   # seit 1.6.4 (bis 1.6.3: Liste/Matrix je Sprache anders)
     if data !== nothing
         cols = _colnames(data)
         # Fonds-Wrapper: der Asset-Name ist keine Kursspalte, geprüft werden die Spalten der inneren Strategie
         coll = [w for w in _strategy_wrappers(strategy) if w in cols]
-        isempty(coll) || error("strategy_validate: Asset '$(coll[1])' ist ein Fonds-Wrapper (asset_config(wrapper = )); data darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet).")
+        isempty(coll) || chk_stop("a.m_strategy_validate_3", coll[1])
         miss = [n for n in _strategy_columns(strategy) if !(n in cols)]
         isempty(miss) || error("strategy_validate: Kursspalte(n) " * join(("'$m'" for m in miss), ", ") *
                                " fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: $(join(cols, ", "))).")
@@ -525,8 +540,8 @@ function strategy_validate(strategy, data_pos = nothing; data = data_pos)
                 continue
             end
             if a["trading"] == "signal"
-                a["signal_buy"] in cols || error("strategy_validate: signal_buy-Spalte '$(a["signal_buy"])' fehlt in data (Asset '$name').")
-                a["signal_sell"] in cols || error("strategy_validate: signal_sell-Spalte '$(a["signal_sell"])' fehlt in data (Asset '$name').")
+                a["signal_buy"] in cols || chk_stop("a.m_strategy_validate_5", a["signal_buy"], name)
+                a["signal_sell"] in cols || chk_stop("a.m_strategy_validate_6", a["signal_sell"], name)
             end
         end
     end
@@ -591,12 +606,12 @@ println(collect(keys(st)))
 """
 function strategy_add_asset(strategy, name, asset)
     inherits(strategy, "strategy") ||
-        error("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
-    inherits(asset, "asset_config") || error("strategy_add_asset: asset muss ein asset_config()-Objekt sein.")
+        chk_stop("a.m_strategy_add_asset")
+    inherits(asset, "asset_config") || chk_stop("a.m_strategy_add_asset_2")
     name = chk_name1(name, "strategy_add_asset", "name")   # seit 1.6.4 (bis 1.6.3 MethodError bei anderen Typen)
     # seit 1.6.4 kein stilles Überschreiben (Entscheidung 5): Ändern geht über strategy_update_asset()
     haskey(strategy, name) &&
-        error("strategy_add_asset: Ein Asset mit diesem Namen ist schon in der Strategie; zum Ändern strategy_update_asset() verwenden.")
+        chk_stop("a.m_strategy_add_asset_3")
     out = Strategy(RList(collect(strategy)...))
     out[String(name)] = asset
     return out
@@ -662,9 +677,9 @@ println(st["MSCI"]["share"])
 """
 function strategy_update_asset(strategy, name; updates...)
     inherits(strategy, "strategy") ||
-        error("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+        chk_stop("a.m_strategy_update_asset")
     name = chk_name1(name, "strategy_update_asset", "name")   # seit 1.6.4 (Länge 1 wie Einzelwert)
-    haskey(strategy, name) || error("strategy_update_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
+    haskey(strategy, name) || chk_stop("a.m_strategy_update_asset_2", name, join(keys(strategy), ", "))
     asset = RList(collect(strategy[name])...)
     upd = [String(k) => v for (k, v) in updates]
     # seit 1.6.4 (K43 T1-R14, Entscheidung 21): unbekannte Angaben sind ein Fehler (bis dahin nur eine Warnung)
@@ -743,12 +758,12 @@ println(collect(keys(strategy_remove_asset(st, "BOND"))))
 """
 function strategy_remove_asset(strategy, name)
     inherits(strategy, "strategy") ||
-        error("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+        chk_stop("a.m_strategy_remove_asset")
     name = chk_name1(name, "strategy_remove_asset", "name")   # seit 1.6.4 (Länge 1 wie Einzelwert)
-    haskey(strategy, name) || error("strategy_remove_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
+    haskey(strategy, name) || chk_stop("a.m_strategy_remove_asset_2", name, join(keys(strategy), ", "))
     out = Strategy(RList(collect(strategy)...))
     delete!(out, String(name))
-    length(out) == 0 && @warn "strategy_remove_asset: Nach dem Entfernen von '$name' enthält die Strategie keine Assets mehr."
+    length(out) == 0 && @warn chk_msg("a.m_strategy_remove_asset_3", name)
     return out
 end
 

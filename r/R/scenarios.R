@@ -32,6 +32,22 @@
 #'     an das zweite Moment um diesen festen Wert; verschiebt sich der
 #'     Mittelwert durch andere Annahmen, kann die Standardabweichung nach
 #'     der Umgewichtung davon abweichen.}
+#'   \item{view_cor}{(seit 1.6.5, Meucci 2008) Korrelation zweier Spalten,
+#'     umgesetzt als Bedingung an \eqn{E[(x_1 - m_1)(x_2 - m_2)] = \rho s_1 s_2}
+#'     mit festen Mitteln \eqn{m} und Standardabweichungen \eqn{s} (aus
+#'     Annahmen \code{view_mean}/\code{view_vol} mit \code{op = "="} fuer
+#'     dieselbe Spalte, sonst aus der Ausgangsverteilung). Seit der
+#'     Pruefrunde 1.6.5 (Entscheidung 199) haelt
+#'     [scenario_entropy_pooling()] dazu Mittel und Standardabweichung beider
+#'     Spalten als Gleichungen fest (Mittel \eqn{m}, zweites Moment um
+#'     \eqn{m} gleich \eqn{s^2}), damit die Korrelation nach der
+#'     Umgewichtung die Annahme trifft. Eigene Annahmen gehen vor: kein
+#'     festes Mittel fuer eine Spalte mit \code{view_mean} oder
+#'     \code{view_rank}, keine feste Streuung fuer eine Spalte mit
+#'     \code{view_vol}; verschieben diese Mittel oder Streuung, kann die
+#'     Korrelation danach abweichen.}
+#'   \item{view_rank}{(seit 1.6.5, Meucci 2008) Rangfolge der
+#'     Erwartungswerte, je benachbartes Paar eine Ungleichung an die Mittel.}
 #' }
 #' @param var Spaltenname der Szenario-Tabelle (Zeichenkette, Anlage oder
 #'   Zustandsvariable).
@@ -47,9 +63,18 @@
 #'   die Regeltexte von [tactical_rules()]; auch eine Funktion der
 #'   Szenario-Tabelle (Ergebnis ein Wert je Szenario).
 #' @param op Art der Bedingung: \code{"="} (Standard), \code{"<="} oder
-#'   \code{">="}.
-#' @return Liste mit \code{type} (\code{"mean"}, \code{"prob"} oder
-#'   \code{"vol"}), \code{var} bzw. \code{expr}, \code{value} und \code{op}.
+#'   \code{">="}. Seit 1.6.5 genau einer dieser Texte (bis 1.6.4 wurde z. B.
+#'   \code{"<"} still als \code{"<="} genommen).
+#' @param var1,var2 \code{view_cor} (seit 1.6.5): zwei verschiedene
+#'   Spaltennamen; \code{value} ist dort eine Korrelation zwischen -1 und 1.
+#' @param vars \code{view_rank} (seit 1.6.5): mindestens zwei Spaltennamen,
+#'   absteigend nach Erwartungswert (\code{vars[1] >= vars[2] >= ...}).
+#' @return Liste mit \code{type} (\code{"mean"}, \code{"prob"}, \code{"vol"},
+#'   \code{"cor"} oder \code{"rank"}), \code{var} bzw. \code{expr},
+#'   \code{value} und \code{op}. \code{view_vol} mit \code{value = 0} gibt
+#'   seit 1.6.5 einen Hinweis (die Gewichte fallen auf Szenarien mit genau dem
+#'   Mittelwert); die Korrelation im Ergebnis ist fuer eine Spalte ohne
+#'   Streuung \code{NA} (ohne englische Rohwarnung).
 #' @seealso [scenario_entropy_pooling()], [scenario_risk()].
 #' @examples
 #' set.seed(1); X <- data.frame(aktien = rnorm(1000, 0.15, 2), anleihen = rnorm(1000, 0.05, 0.6))
@@ -64,7 +89,15 @@ NULL
 #' @export
 view_mean <- function(var, value, op = c("=", "<=", ">=")) {
   chk_name1(var, "view_mean", "var")                              # seit 1.6.4 (K42 E4)
-  list(type = "mean", var = var, value = .view_value(value, "view_mean"), op = match.arg(op))
+  list(type = "mean", var = var, value = .view_value(value, "view_mean"), op = .view_op(op, "view_mean"))
+}
+
+# op der Annahmen: genau einer von "=", "<=", ">=" (seit 1.6.5, CR2-V3-4 Punkt 2: bis 1.6.4 match.arg mit
+# Teilabgleich, "<" wurde still "<=", und englische Rohmeldungen)
+.view_op <- function(op, fn) {
+  if (identical(op, c("=", "<=", ">="))) return("=")
+  chk_choice(op, fn, "op", c("=", "<=", ">="))
+  op
 }
 
 #' Zielwert einer Annahme pruefen (eine endliche Zahl, ggf. mit Bereich)
@@ -72,8 +105,7 @@ view_mean <- function(var, value, op = c("=", "<=", ">=")) {
 #' @noRd
 .view_value <- function(value, what, lo = -Inf, hi = Inf) {
   if (is.factor(value) || !is.numeric(value) || length(value) != 1 || !is.finite(value) || value < lo || value > hi)   # seit 1.6.4 ohne Wert
-    stop(sprintf("%s: value muss eine endliche Zahl%s sein.", what,
-                 if (is.finite(lo) && is.finite(hi)) sprintf(" zwischen %g und %g", lo, hi) else if (is.finite(lo)) sprintf(" >= %g", lo) else ""))
+    stop(chk_msg("c.m_view_value", what, if (is.finite(lo) && is.finite(hi)) sprintf(" zwischen %g und %g", lo, hi) else if (is.finite(lo)) sprintf(" >= %g", lo) else ""))
   value
 }
 
@@ -81,14 +113,36 @@ view_mean <- function(var, value, op = c("=", "<=", ">=")) {
 #' @export
 view_prob <- function(expr, value, op = c("=", "<=", ">=")) {
   if (!is.function(expr)) chk_name1(expr, "view_prob", "expr")   # seit 1.6.4 (K42 E4); Funktion: Entscheidung 72
-  list(type = "prob", expr = expr, value = .view_value(value, "view_prob", 0, 1), op = match.arg(op))
+  list(type = "prob", expr = expr, value = .view_value(value, "view_prob", 0, 1), op = .view_op(op, "view_prob"))
 }
 
 #' @rdname views
 #' @export
 view_vol <- function(var, value, op = c("=", "<=", ">=")) {
   chk_name1(var, "view_vol", "var")                               # seit 1.6.4 (K42 E4)
-  list(type = "vol", var = var, value = .view_value(value, "view_vol", 0), op = match.arg(op))
+  value <- .view_value(value, "view_vol", 0); op <- .view_op(op, "view_vol")
+  if (value == 0) message(chk_msg("c.view_vol0", "view_vol"))     # seit 1.6.5 (CR2-V3-4 Punkt 1, Entscheidung 189)
+  list(type = "vol", var = var, value = value, op = op)
+}
+
+#' @rdname views
+#' @export
+view_cor <- function(var1, var2, value, op = c("=", "<=", ">=")) {
+  # seit 1.6.5 (E-T3-3, Meucci 2008): Korrelation zweier Spalten bei festen Mitteln und Standardabweichungen
+  fn <- "view_cor"
+  chk_name1(var1, fn, "var1"); chk_name1(var2, fn, "var2")
+  if (identical(var1, var2)) chk_stop("c.view_gleich", fn)
+  list(type = "cor", var = c(var1, var2), value = .view_value(value, fn, -1, 1), op = .view_op(op, fn))
+}
+
+#' @rdname views
+#' @export
+view_rank <- function(vars) {
+  # seit 1.6.5 (E-T3-3, Meucci 2008): Rangfolge der Erwartungswerte, vars[1] >= vars[2] >= ...
+  fn <- "view_rank"
+  .e4_names(vars, fn, "vars", no_date = FALSE)
+  if (length(vars) < 2L) chk_stop("c.view_rang", fn)
+  list(type = "rank", var = vars, value = 0, op = ">=")
 }
 
 #' Szenario-Matrix aus Daten (Renditen in Prozent je Periode, Zustaende verzoegert)
@@ -102,7 +156,7 @@ view_vol <- function(var, value, op = c("=", "<=", ">=")) {
   .e4_disjoint(assets, states, fn, "assets", "states")
   if (is.data.frame(x) && "date" %in% names(x)) .e4_data(x, c(assets, states), fn)
   else if (is.data.frame(x)) { chk_cols(x, c(assets, states), fn); for (k in c(assets, states)) .e4_numcol(x, k, fn) }
-  else if (is.matrix(x) && is.numeric(x)) { if (!is.null(colnames(x))) chk_cols(as.data.frame(x), c(assets, states), fn) }
+  else if (is.matrix(x) && is.numeric(x)) chk_cols(as.data.frame(x), c(assets, states), fn)   # seit 1.6.5 auch ohne Namen (V1, ...)
   else chk_stop("e4.szenarien", fn)
   if (is.data.frame(x) && "date" %in% names(x)) {
     if (nrow(x) < 2L) chk_stop("e4.wenige", fn)                   # seit 1.6.4 (0 oder 1 Zeile)
@@ -112,7 +166,10 @@ view_vol <- function(var, value, op = c("=", "<=", ">=")) {
     if (nrow(rd) < 2L) chk_stop("e4.wenige", fn)
     return(rd)
   }
-  as.data.frame(x)
+  S <- as.data.frame(x)
+  # seit 1.6.5 (CR2-P-6): fertige Szenario-Tabelle nur mit endlichen Werten (bis 1.6.4 Rohfehler bzw. still Inf/NaN)
+  for (k in c(assets, states)) if (!all(is.finite(S[[k]]))) chk_stop("e3.werte", fn, sprintf("Spalte '%s'", k))
+  S
 }
 
 #' Entropy Pooling: Szenarien auf eigene Annahmen umgewichten
@@ -179,7 +236,7 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
   fn <- "scenario_entropy_pooling"
   env <- parent.frame()                                           # freie Namen der Ausdruecke (Entscheidung 72)
   if (!is.list(views) || is.data.frame(views) || !all(vapply(views, function(v) is.list(v) && length(v$type) == 1L &&
-                                                                 isTRUE(v$type %in% c("mean", "prob", "vol")), TRUE)))
+                                                                 isTRUE(v$type %in% c("mean", "prob", "vol", "cor", "rank")), TRUE)))
     chk_stop("e4.views", fn)                                      # seit 1.6.4 (K42 E4)
   S <- .scen_frame(x, assets, states, frequency, fn)
   Tn <- nrow(S)
@@ -188,20 +245,45 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
   p <- prior %||% rep(1 / Tn, Tn); p <- p / sum(p)
   vars <- intersect(c(assets, states), names(S))
   m0 <- vapply(vars, function(v) sum(p * S[[v]]), 0)
-  mean_view <- stats::setNames(rep(NA_real_, length(vars)), vars)
+  mean_view <- vol_view <- stats::setNames(rep(NA_real_, length(vars)), vars)
   for (v in views) if (v$type == "mean" && v$op == "=") mean_view[v$var] <- v$value
+  for (v in views) if (v$type == "vol" && v$op == "=") vol_view[v$var] <- v$value
+  # seit 1.6.5 (E-T3-3): Korrelation mit festen Mitteln und Standardabweichungen (aus Annahmen mit op "=", sonst
+  # aus der Ausgangsverteilung); Rangfolge als Ungleichungen der Mittel benachbarter Spalten
+  mu_of <- function(k) if (is.na(mean_view[k])) m0[k] else mean_view[k]
+  sd_of <- function(k) if (!is.na(vol_view[k])) vol_view[k] else sqrt(sum(p * (S[[k]] - mu_of(k))^2))
+  views0 <- views
+  views <- unlist(lapply(views, function(v) {
+    if (identical(v$type, "rank")) lapply(seq_len(length(v$var) - 1L), function(j)
+      list(type = "rank", var = v$var[j:(j + 1L)], value = 0, op = ">=")) else list(v) }), recursive = FALSE)
+  for (v in views) if (v$type %in% c("cor", "rank")) { miss <- setdiff(v$var, vars)
+    if (length(miss)) stop(chk_msg("c.m_sd_of", miss[1])) }
+  # seit 1.6.5 (PR2-2, Entscheidung 199): view_cor haelt Mittel und Streuung beider Spalten fest (Gleichungen an das
+  # Mittel mu_of und das zweite Moment um mu_of mit sd_of wie in der Korrelationsbedingung), sonst verschieben sich
+  # Mittel und Streuungen und die Korrelation danach trifft die Annahme nicht; eigene Annahmen gehen vor (Mittel:
+  # view_mean oder view_rank mit der Spalte, Streuung: view_vol); angehaengt nach allen Annahmen, je Spalte in der
+  # Reihenfolge des ersten Auftretens erst alle Mittel, dann alle Streuungen
+  cv <- unique(unlist(lapply(views, function(v) if (v$type == "cor") v$var)))
+  if (length(cv)) {
+    own_m <- unlist(lapply(views, function(v) if (v$type %in% c("mean", "rank")) v$var))
+    own_v <- unlist(lapply(views, function(v) if (v$type == "vol") v$var))
+    views <- c(views,
+      lapply(setdiff(cv, own_m), function(k) list(type = "mean", var = k, value = unname(mu_of(k)), op = "=")),
+      lapply(setdiff(cv, own_v), function(k) list(type = "vol", var = k, value = unname(sd_of(k)), op = "=")))
+  }
   rx <- if (any(vapply(views, function(v) v$type == "prob" && is.character(v$expr), TRUE))) .e5_rexpr_env(env)
   rows <- lapply(views, function(v) {
     f <- switch(v$type,
       mean = S[[v$var]],
+      cor = (S[[v$var[1]]] - mu_of(v$var[1])) * (S[[v$var[2]]] - mu_of(v$var[2])),
+      rank = S[[v$var[1]]] - S[[v$var[2]]],
       prob = as.numeric(if (is.function(v$expr)) v$expr(S)               # seit 1.6.4 auch eine Funktion (Entscheidung 72)
                         else eval(.e5_rexpr_parse(v$expr), .sp_rexpr_data(S, rx), rx)),   # RExpr-Umfang wie tactical_rules (59)
       vol = { mu <- if (is.na(mean_view[v$var])) m0[v$var] else mean_view[v$var]; (S[[v$var]] - mu)^2 },
       stop("Unbekannter View-Typ."))
-    if (is.null(f) || length(f) != Tn) stop(sprintf("View '%s' passt nicht zu den Szenarien.",
-                                                     v$var %||% (if (is.function(v$expr)) "<Funktion>" else v$expr)))
-    if (v$type == "vol" && !(is.numeric(v$value) && v$value >= 0)) stop("view_vol: Standardabweichung muss >= 0 sein.")
-    val <- if (v$type == "vol") v$value^2 else v$value
+    if (is.null(f) || length(f) != Tn) stop(chk_msg("c.m_sd_of", v$var %||% (if (is.function(v$expr)) "<Funktion>" else v$expr)))
+    if (v$type == "vol" && !(is.numeric(v$value) && v$value >= 0)) stop(chk_msg("c.m_sd_of_2"))
+    val <- if (v$type == "vol") v$value^2 else if (v$type == "cor") v$value * sd_of(v$var[1]) * sd_of(v$var[2]) else v$value
     sg <- switch(v$op, "=" = 0, "<=" = 1, ">=" = -1)
     list(f = if (sg == -1) -f else f, b = if (sg == -1) -val else val, ineq = sg != 0)
   })
@@ -225,9 +307,15 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
                      sd_prior = vapply(vars, function(v) wsd(S[[v]], p), 0), sd_post = vapply(vars, function(v) wsd(S[[v]], q), 0),
                      row.names = NULL, stringsAsFactors = FALSE)
   Xa <- as.matrix(S[, assets, drop = FALSE]); mu <- colSums(Xa * q); C <- .sl_crossprod(sweep(Xa, 2, mu) * sqrt(q))
-  structure(list(scenarios = S, prob = q, prior = p, assets = assets, states = states, views = views,
+  # seit 1.6.5 (CR2-V3-4 Punkt 1): Varianz 0 in der Korrelation als NA ohne die englische Rohwarnung von cov2cor
+  dv <- diag(C); okv <- is.finite(dv) & dv > 0
+  Cr <- if (all(okv)) stats::cov2cor(C) else {
+    Cr <- matrix(NA_real_, nrow(C), ncol(C), dimnames = dimnames(C))
+    if (any(okv)) Cr[okv, okv] <- stats::cov2cor(C[okv, okv, drop = FALSE])
+    Cr }
+  structure(list(scenarios = S, prob = q, prior = p, assets = assets, states = states, views = views0,
                  effective_n = exp(-sum(q[q > 0] * log(q[q > 0]))), summary = summ,
-                 correlation = stats::cov2cor(C), frequency = frequency, kind = "entropy_pooling"),
+                 correlation = Cr, frequency = frequency, kind = "entropy_pooling"),
             class = "SimLevScenarios")
 }
 
@@ -323,12 +411,16 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
   qmarg <- lapply(seq_len(k), function(j) { s <- sort(X[, j]); function(u) .sl_approx((seq_len(Tn) - 0.5) / Tn, s, u, rule = 2)$y })
   if (!is.null(stress)) {
     if (!is.list(stress) || !length(stress) || is.null(names(stress)) || any(names(stress) == "") || anyDuplicated(names(stress)))
-      stop("stress: benannte Liste von Quantilb\u00e4ndern je Anlage erwartet, z. B. list(aktien = c(0, 0.05)).")
+      stop(chk_msg("c.m_ll_t"))
     unk <- setdiff(names(stress), assets)
     if (length(unk)) stop(sprintf("stress: unbekannte Anlage(n) %s; vorhanden: %s.", paste0("'", unk, "'", collapse = ", "), paste(assets, collapse = ", ")))
     for (a in names(stress)) { b <- stress[[a]]
       if (is.factor(b) || !is.numeric(b) || length(b) != 2 || any(!is.finite(b)) || b[1] < 0 || b[2] > 1 || b[1] >= b[2])   # seit 1.6.4 ohne Wert
-        stop(sprintf("stress: Band f\u00fcr '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent).", a)) }
+        stop(chk_msg("c.m_ll_t_2", a)) }
+    # seit 1.6.5 (K20, CR2-3): Hinweis, wenn ein Band in den aeussersten Rand reicht (unter 1/T bzw. ueber 1 - 1/T); die
+    # Raender enden am historischen Minimum bzw. Maximum
+    for (a in names(stress)) { b <- stress[[a]]
+      if (b[1] < 1 / Tn || b[2] > 1 - 1 / Tn) message(chk_msg("c.copula_rand", fn, a, Tn)) }
   }
   sim <- {
     rs <- .sl_main_stream(seed, "scenario_copula")                                 # Hauptstrom
@@ -442,11 +534,11 @@ print.SimLevScenarios <- function(x, ...) {
 #' scenario_risk(ep, c(aktien = 0.6, anleihen = 0.4))
 #' @export
 scenario_risk <- function(x, weights, alpha = 0.05) {
-  if (!inherits(x, "SimLevScenarios")) stop("x muss ein SimLevScenarios sein.")
+  if (!inherits(x, "SimLevScenarios")) stop(chk_msg("c.m_scenario_risk"))
   if (is.factor(alpha) || !is.numeric(alpha) || length(alpha) != 1 || !is.finite(alpha) || alpha <= 0 || alpha >= 1)   # seit 1.6.4 ohne Wert
-    stop("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.")
+    stop(chk_msg("c.m_scenario_risk_2"))
   if (is.factor(weights) || !is.numeric(weights) || !is.null(dim(weights)) || is.null(names(weights)) || any(names(weights) == ""))
-    stop("scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).")
+    stop(chk_msg("c.m_scenario_risk_3"))
   if (!all(is.finite(weights))) chk_stop("e3.werte", "scenario_risk", "weights")   # seit 1.6.4 (B-026)
   if (anyDuplicated(names(weights))) chk_stop("e2.doppelt", "scenario_risk", "weights")
   unk <- setdiff(names(weights), names(x$scenarios))
@@ -454,7 +546,9 @@ scenario_risk <- function(x, weights, alpha = 0.05) {
   X <- as.matrix(x$scenarios[, names(weights), drop = FALSE]); q <- x$prob
   r <- unname(drop(X %m% weights))
   o <- order(r); cw <- cumsum(q[o])
-  qf <- function(a) r[o][which(cw >= a)[1]]
+  # seit 1.6.5 (CR2-4): Vergleich mit Toleranz wie quantile(type = 1) (bis 1.6.4 ein Szenario daneben, wenn die
+  # Summe der Gewichte knapp unter a blieb)
+  qf <- function(a) r[o][which(cw >= a - 4 * .Machine$double.eps * a)[1]]
   var_a <- -qf(alpha)
   # CVaR nach Rockafellar & Uryasev (2002): Masse alpha der schlechtesten Szenarien, Grenzszenario anteilig
   take <- pmin(q[o], pmax(0, alpha - c(0, cw[-length(cw)])))
@@ -530,12 +624,12 @@ scenario_risk <- function(x, weights, alpha = 0.05) {
 scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
   crises <- crises %||% .default_crises
   fn <- "scenario_crisis"
-  if (!is.data.frame(data) || !"date" %in% names(data)) stop("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
+  if (!is.data.frame(data) || !"date" %in% names(data)) stop(chk_msg("c.m_scenario_crisis"))
   if (!is.data.frame(crises) || !all(c("crisis", "start", "end") %in% names(crises)))
-    stop("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+    stop(chk_msg("c.m_scenario_crisis_2"))
   if (is.factor(weights) || !is.numeric(weights) || !is.null(dim(weights)) || is.null(names(weights)) || any(names(weights) == "") ||
       any(!is.finite(weights)))
-    stop("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+    stop(chk_msg("c.m_scenario_crisis_3"))
   if (anyDuplicated(names(weights))) chk_stop("e2.doppelt", fn, "weights")   # seit 1.6.4 (B-052)
   unk <- setdiff(names(weights), setdiff(names(data), "date"))
   if (length(unk)) stop(sprintf("scenario_crisis: Kursspalte(n) %s fehlen in data.", paste0("'", unk, "'", collapse = ", ")))
@@ -544,6 +638,9 @@ scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
   for (k in c("start", "end")) chk_col_nofactor(crises, k, fn)
   chk_bool1(rebalance, fn, "rebalance")
   if (sum(weights) <= 0) chk_stop("ut3.krise_summe", fn)          # seit 1.6.4 ohne Wert und Zusatz (Entscheidung 8, T3-B2)
+  # seit 1.6.5 (K31, CR2-E-1): Anlage mit dem Namen einer Ergebnisspalte ist ein Fehler
+  res_cols <- c("crisis", "start", "end", "portfolio", "max_drawdown", "days_to_recover", if (rebalance) "days_to_recover_rebalanced")
+  if (length(kol <- intersect(names(weights), res_cols))) chk_stop("c.krise_name", fn, paste0("'", kol, "'", collapse = ", "))
   data <- .dep_sort_dates(data)
   d <- data$date; a <- names(weights); w <- weights / sum(weights)
   crises$start <- .to_date(crises$start, "scenario_crisis: crises$start"); crises$end <- .to_date(crises$end, "scenario_crisis: crises$end")
@@ -551,21 +648,32 @@ scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
   if (!is.matrix(P)) P <- matrix(P, ncol = length(a), dimnames = list(NULL, a))
   rows <- lapply(seq_len(nrow(crises)), function(i) {
     s <- which(d >= crises$start[i])[1]; e <- utils::tail(which(d <= crises$end[i]), 1)
-    if (is.na(s) || !length(e) || e <= s || anyNA(P[s, ])) return(NULL)
+    # seit 1.6.5 (CR2-E-2): Anlagen mit Gewicht 0 zaehlen bei der Pruefung auf fehlende Startkurse nicht
+    if (is.na(s) || !length(e) || e <= s || anyNA(P[s, w != 0])) return(NULL)
+    # seit 1.6.5 (CR2-E-2): Hinweis bei angeschnittener Krise (Daten beginnen mehr als 7 Tage nach dem Start bzw. enden
+    # mehr als 7 Tage vor dem Ende)
+    if (as.numeric(d[s] - crises$start[i]) > 7 || as.numeric(crises$end[i] - d[e]) > 7)
+      message(chk_msg("c.krise_teil", fn, crises$crisis[i], format(d[s]), format(d[e]), format(crises$start[i]), format(crises$end[i])))
     rel <- sweep(P[s:e, , drop = FALSE], 2, P[s, ], "/")
-    port <- if (rebalance) cumprod(c(1, drop((rel[-1, , drop = FALSE] / rel[-nrow(rel), , drop = FALSE]) %m% w))) else drop(rel %m% w)
+    nz <- w != 0; Pw <- P[, nz, drop = FALSE]; wn <- w[nz]; relw <- rel[, nz, drop = FALSE]   # Gewicht 0 rechnet nicht mit
+    port <- if (rebalance) cumprod(c(1, drop((relw[-1, , drop = FALSE] / relw[-nrow(relw), , drop = FALSE]) %m% wn))) else drop(relw %m% wn)
     dd <- min(port / cummax(port) - 1)
-    after <- if (e < length(d)) {
-      relx <- sweep(P[e:length(d), , drop = FALSE], 2, P[s, ], "/")
-      px <- drop(relx %m% w)
-      k <- which(px >= 1)[1]; if (is.na(k)) NA_real_ else as.numeric(d[e + k - 1] - d[e])
-    } else NA_real_
-    data.frame(crisis = crises$crisis[i], start = d[s], end = d[e], portfolio = 100 * (port[length(port)] - 1),
-               max_drawdown = 100 * dd, days_to_recover = after,
-               as.list(stats::setNames(100 * (rel[nrow(rel), ] - 1), a)), check.names = FALSE, stringsAsFactors = FALSE)
+    # seit 1.6.5 (CR2-E-2) auch, wenn das Fenster an der letzten Datenzeile endet (Wert dort >= Start: 0)
+    relx <- sweep(Pw[e:length(d), , drop = FALSE], 2, Pw[s, ], "/")
+    px <- drop(relx %m% wn)
+    k <- which(px >= 1)[1]; after <- if (is.na(k)) NA_real_ else as.numeric(d[e + k - 1] - d[e])
+    out_i <- data.frame(crisis = crises$crisis[i], start = d[s], end = d[e], portfolio = 100 * (port[length(port)] - 1),
+                        max_drawdown = 100 * dd, days_to_recover = after, stringsAsFactors = FALSE)
+    if (rebalance) {                                 # seit 1.6.5 (E-T3-1): Erholung des umgeschichteten Portfolios
+      pr <- port[length(port)] * cumprod(c(1, if (e < length(d))
+        drop((Pw[(e + 1):length(d), , drop = FALSE] / Pw[e:(length(d) - 1), , drop = FALSE]) %m% wn)))
+      kr <- which(pr >= 1)[1]
+      out_i$days_to_recover_rebalanced <- if (is.na(kr)) NA_real_ else as.numeric(d[e + kr - 1] - d[e])
+    }
+    cbind(out_i, data.frame(as.list(stats::setNames(100 * (rel[nrow(rel), ] - 1), a)), check.names = FALSE))
   })
   out <- do.call(rbind, rows)
-  if (is.null(out)) stop("Keine Krise liegt im Datenzeitraum.")
+  if (is.null(out)) chk_stop("c.krise_keine", fn)                 # seit 1.6.5 mit Funktionsnamen (CR2-E-2)
   rownames(out) <- NULL
   out
 }

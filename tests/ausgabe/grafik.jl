@@ -309,7 +309,8 @@ end
     @test _bits(r_plot(bl).data["backcast"]["value"]) == _bits(bl["value"][ok]) && !all(ok)
     st = _plot_case_obj("bootstrap/study_basic")
     @test occursin("width=\"700\"", r_plot(st; metric = "max_drawdown", width = 700).svg)
-    @test occursin("bw.nrd0: mindestens 2 Werte nötig", _api_err(() -> r_plot(_plot_case_obj("bootstrap/study_print_paired"))))   # Meldung der C-Bibliothek wie R (.sl_kde)
+    # seit 1.6.5 (CR2-X4-3): Strategie mit < 2 Werten fehlt mit Hinweis (bis 1.6.4 Fehler bw.nrd0 der C-Bibliothek)
+    @test occursin("<svg", redirect_stderr(devnull) do; r_plot(_plot_case_obj("bootstrap/study_print_paired")).svg; end)
     da = _plot_case_obj("deep_analysis/da_df_aligned")
     g = r_plot(da).data
     v = da["series"]["al"]["value"]

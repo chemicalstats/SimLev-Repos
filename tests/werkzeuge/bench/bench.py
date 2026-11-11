@@ -81,11 +81,20 @@ def fp(x):
 
 
 print("Daten: S30 %s, T %s, W %s, T8 %s" % (fp(d30["A"].to_numpy()), fp(d["em"].to_numpy()), fp(W), fp(y8)))
+# seit 1.6.5 (Messung gegen 1.6.4): T10 drei Signale aus einer Kursreihe mit 10^6 Zeilen (Seed 3)
+sl.simlev_seed(3); x10 = path(100, 1000000, 2e-4, 0.01)
+s10 = [sl.signal_sma(x10, n=200), sl.signal_volatility(x10, n=20, threshold=25), sl.signal_momentum(x10, n=60)]
+print("Daten2: T10 %s, Signale %s" % (fp(x10), " ".join("%d" % (int(np.sum(np.asarray(z["buy"]) == True)) + 2 * int(np.sum(np.asarray(z["sell"]) == True))) for z in s10)))
 
 st30 = sl.create_strategy(A=sl.asset_config(asset_class="etf", trading="bnh", share=0.7), B=sl.asset_config(asset_class="etf", trading="bnh", share=0.3))
 cfg = sl.bootstrap_config({"akt": "aktien"}, input="prices")
 st = sl.create_strategy(akt=sl.asset_config(asset_class="etf", trading="bnh"))
 A4 = ["aktien", "bonds", "gold", "em"]
+# seit 1.6.5: T3s Studie mit zwei Anlagen, Steuer und Rebalancing (Blocklänge fest 20, in 1.6.4 und 1.6.5 gleich);
+# T9 bootstrap_pooled aus zwei Ländern (aktien, em als Spalte A)
+cfg2 = sl.bootstrap_config({"akt": "aktien", "bo": "bonds"}, input="prices")
+st2 = sl.create_strategy(akt=sl.asset_config(asset_class="etf", trading="bnh", share=0.6), bo=sl.asset_config(asset_class="etf", trading="bnh", share=0.4))
+ds9 = {"x": pd.DataFrame({"date": d["date"], "A": d["aktien"]}), "y": pd.DataFrame({"date": d["date"], "A": d["em"]})}
 
 TASKS = {
     "S30": lambda: sl.simulation(d30, st30, start_value=1e4, dca=sl.dca_plan(value=200, span=1), rebalance=sl.rebalance_plan(unit="quarter"), tax=sl.tax_profile(base_rate=2)),
@@ -105,6 +114,12 @@ TASKS = {
     "T6": lambda: sl.portfolio_optimize(d, assets=A4, method="min_cvar"),
     "T7": lambda: sl.portfolio_optimize(d, assets=A4, method="hrp"),
     "T8": lambda: _ms_garch_fit(y8, 2, "gjrGARCH"),
+    "T3s": lambda: sl.bootstrap_study(d, cfg2, "stationary", n=200, path_length=2520, seed=1, progress=False, params={"L": 20},
+                                      strategies={"a": st2}, sim_args={"rebalance": sl.rebalance_plan(unit="quarter"),
+                                                                        "tax": sl.tax_profile(base_rate=2)}, cores=1),
+    "T4m": lambda: sl.withdrawal_max_rate(W, rule=sl.withdrawal_rule(type="constant"), success=0.9),
+    "T9": lambda: sl.bootstrap_pooled(ds9, "A", n=2000, years=15, frequency="month", seed=1),
+    "T10": lambda: sl.signal_combine(s10[0], s10[1], s10[2]),
     "P1c1": lambda: sl.bootstrap(d, cfg, method="stationary", n=400, seed=1, progress=False, path_length=2520, cores=1),
     "P1c2": lambda: sl.bootstrap(d, cfg, method="stationary", n=400, seed=1, progress=False, path_length=2520, cores=2),
 }

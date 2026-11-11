@@ -24,7 +24,7 @@ from ._r.rnum import r_mean
 from ._signals_core import roll_cov_core, roll_mean_core
 from ._r.base import quiet_fp
 from .data_prep import _as_numeric, _match_arg
-from ._pruefen import chk_int1, chk_num1, chk_scalar, chk_stop
+from ._pruefen import chk_int1, chk_msg, chk_num1, chk_scalar, chk_stop
 
 _IMAX = 2147483647
 
@@ -95,10 +95,24 @@ def _rfilter_recursive1(x, f, init):
     return np.asarray(_st.filter(x, f, method="recursive", init=init), dtype=np.float64).ravel()
 
 
+def _sig_ema_na(x, fn):
+    """Hinweis bei fehlenden Kursen für den exponentiellen Durchschnitt (seit 1.6.5, CR2-V1-5)."""
+    i = np.flatnonzero(np.isnan(np.asarray(x, dtype=np.float64)))
+    if i.size:
+        import warnings
+        warnings.warn(chk_msg("b2.ema_na", fn, int(i[0]) + 1), UserWarning, stacklevel=3)
+
+
 def _ema(x, n):
-    """Exponentieller gleitender Durchschnitt (Start mit dem einfachen Mittel der ersten ``n`` Werte)."""
-    n = int(n)
+    """Exponentieller gleitender Durchschnitt (Start mit dem einfachen Mittel der ersten ``n`` Werte; seit 1.6.5
+    nach führenden NA, CR2-V1-5)."""
     x = np.asarray(x, dtype=np.float64)
+    nn = np.flatnonzero(~np.isnan(x))
+    if nn.size and nn[0] > 0:
+        out = np.full(len(x), _NAN)
+        out[nn[0]:] = _ema(x[nn[0]:], n)
+        return out
+    n = int(n)
     m = len(x)
     out = np.full(m, _NAN)
     if n < 1 or n > m:
@@ -296,6 +310,7 @@ def signal_ema(x, *, n=200, band=0, lag=0):
     band = chk_num1(band, fn, "band", lo=0)
     lag = _sig_win(lag, fn, "lag", lo=0)
     xv = _as_numeric(x)
+    _sig_ema_na(xv, fn)
     s = _ema(xv, n)
     return _sig_out(_cmp(np.greater_equal, xv, s * (1 + band / 100)), _cmp(np.less, xv, s * (1 - band / 100)), lag)
 
@@ -371,10 +386,12 @@ def signal_crossover(x, *, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0
     slow = _sig_win(slow, fn, "slow")
     type_ = _match_arg(chk_scalar(type), ("sma", "ema"))
     if fast >= slow:
-        raise ValueError("fast muss kleiner als slow sein.")
+        chk_stop("b2b.m_signal_crossover")
     band = chk_num1(band, fn, "band", lo=0)
     lag = _sig_win(lag, fn, "lag", lo=0)
     xv = _as_numeric(x)
+    if type_ == "ema":
+        _sig_ema_na(xv, fn)
     f = _roll_mean(xv, fast) if type_ == "sma" else _ema(xv, fast)
     s = _roll_mean(xv, slow) if type_ == "sma" else _ema(xv, slow)
     return _sig_out(_cmp(np.greater_equal, f, s * (1 + band / 100)), _cmp(np.less, f, s * (1 - band / 100)), lag)
@@ -533,7 +550,7 @@ def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
     lag = _sig_win(lag, fn, "lag", lo=0)
     x = _as_numeric(x)
     if buy_dd > sell_dd:
-        raise ValueError("buy_dd darf nicht größer als sell_dd sein.")
+        chk_stop("b2b.m_signal_drawdown")
     xp = np.where(np.isnan(x), -math.inf, x)
     if window is None:
         peak = np.maximum.accumulate(xp) if len(xp) else xp
@@ -620,12 +637,15 @@ def signal_volatility(x, *, n=20, threshold=25, band=0, ppy=365.25, lag=0):
     """
     fn = "signal_volatility"
     _sig_x(x, fn)
-    n = _sig_win(n, fn, "n")
+    n = _sig_win(n, fn, "n", lo=2)                 # seit 1.6.5 (CR2-R-4): n >= 2, Kurse > 0
     threshold = chk_num1(threshold, fn, "threshold", lo=0)
     band = chk_num1(band, fn, "band", lo=0)
     ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True)
     lag = _sig_win(lag, fn, "lag", lo=0)
     x = _as_numeric(x)
+    with np.errstate(invalid="ignore"):
+        if (x <= 0).any():
+            chk_stop("b2.kurs_positiv", fn)
     r = np.concatenate([[_NAN], np.diff(_libm.log(x))]) if len(x) else np.empty(0)
     r0 = r.copy()
     r0[np.isnan(r0)] = 0
@@ -707,67 +727,100 @@ def signal_combine(*signals, op=("and", "or")):
     op = _match_arg(chk_scalar(op), ("and", "or"))
     s = list(signals)
     if not s:
-        raise ValueError("Keine Signale übergeben.")
+        chk_stop("b2b.m_signal_combine")
     # seit 1.6.4 (B-008, Entscheidung 1): je Signal buy und sell, jeweils True/False oder 0/1 (NA erlaubt, bleibt NA
     # wie in R; bis 1.6.3 las Python NaN und Text als True)
     vb, vs = [], []
     for i, z in enumerate(s, start=1):
-        b = _sig_vals(_get(z, "buy")) if isinstance(z, Mapping) or hasattr(z, "buy") else None
-        c = _sig_vals(_get(z, "sell")) if isinstance(z, Mapping) or hasattr(z, "sell") else None
+        # seit 1.6.5 (CR2-G-1 Nebenpunkt, Entscheidung 185 K37): eine Tabelle (DataFrame) ist kein Signal (wie R)
+        tab = type(z).__name__ == "DataFrame" and type(z).__module__.startswith("pandas")
+        b = _sig_vals(_get(z, "buy")) if not tab and (isinstance(z, Mapping) or hasattr(z, "buy")) else None
+        c = _sig_vals(_get(z, "sell")) if not tab and (isinstance(z, Mapping) or hasattr(z, "sell")) else None
         if b is None or c is None:
             chk_stop("e1.signal", "signal_combine", i)
         vb.append(b)
         vs.append(c)
-    lens = [len(b) for b in vb]
-    slen = [len(c) for c in vs]
+    lens = [b[0].size for b in vb]
+    slen = [c[0].size for c in vs]
     if any(L != lens[0] for L in lens) or any(a != b for a, b in zip(slen, lens)):
         raise ValueError("signal_combine: Signale haben unterschiedliche Längen (%s); alle aus derselben "
                          "Kursreihe erzeugen." % ", ".join(str(L) for L in lens))
-    if any(e is None for v in vb + vs for e in v):   # mit NA: dreiwertig wie R (&, |, all, any)
+    if any(bool(m.any()) for _, m in vb + vs):   # mit NA: dreiwertig wie R (&, |, all, any)
         return {"buy": _sig_comb(vb, op == "and"), "sell": _sig_comb(vs, op != "and")}
-    B = np.column_stack([np.asarray(v, dtype=bool) for v in vb])
-    S = np.column_stack([np.asarray(v, dtype=bool) for v in vs])
+    B = np.column_stack([v for v, _ in vb])
+    S = np.column_stack([v for v, _ in vs])
     if op == "and":
         return {"buy": B.all(axis=1), "sell": S.any(axis=1)}
     return {"buy": B.any(axis=1), "sell": S.all(axis=1)}
 
 
 def _sig_vals(v):
-    """Signalvektor als Liste aus True/False/None (NA); None, wenn kein Signal (Text, andere Zahlen, Matrix)."""
+    """Signalvektor als Paar (Werte, NA-Maske) aus bool-Feldern; ``None``, wenn kein Signal (Text, andere Zahlen,
+    Matrix). Seit 1.6.5 (CR2-G-1): Felder vom Typ bool und Zahlenfelder vektorisiert geprüft, nur object-Felder,
+    gemischte Listen und Einzelwerte Element für Element (bis 1.6.4 jedes Element als Python-Objekt); gleiche
+    Annahme und gleiche Werte (True/False, 0/1, NA = None, pd.NA, NaN)."""
     import pandas as pd
     if v is None or isinstance(v, (str, bytes, Mapping, pd.DataFrame)) or (isinstance(v, np.ndarray) and v.ndim > 1):
         return None
+    a = None
     if isinstance(v, pd.Series):
         if isinstance(v.dtype, pd.CategoricalDtype):
             return None
-        arr = list(v.to_numpy(dtype=object))
-    elif isinstance(v, (np.ndarray, list, tuple)):
-        arr = list(np.asarray(v, dtype=object).ravel()) if isinstance(v, np.ndarray) else list(v)
+        a = v.to_numpy()
+    elif isinstance(v, np.ndarray):
+        a = v.ravel()
+    elif isinstance(v, (list, tuple)):
+        try:
+            a = np.asarray(v)
+        except (ValueError, TypeError):
+            a = None
+        if a is not None and a.ndim != 1:
+            a = None
+        arr = list(v)
     else:
         arr = [v]
-    out = []
-    for e in arr:
+    if a is not None:
+        k = a.dtype.kind
+        if k == "b":
+            return a.astype(bool, copy=False), np.zeros(a.size, dtype=bool)
+        if k in "iu":
+            if not bool(((a == 0) | (a == 1)).all()):
+                return None
+            return a == 1, np.zeros(a.size, dtype=bool)
+        if k == "f":
+            na = np.isnan(a)
+            if not bool((na | (a == 0) | (a == 1)).all()):
+                return None
+            return a == 1, na
+        arr = a.tolist() if k != "O" else list(a)
+    vals = np.zeros(len(arr), dtype=bool)
+    na = np.zeros(len(arr), dtype=bool)
+    for i, e in enumerate(arr):
         if _isna1(e):
-            out.append(None)
+            na[i] = True
         elif isinstance(e, (bool, np.bool_)):
-            out.append(bool(e))
+            vals[i] = bool(e)
         elif isinstance(e, (int, float, np.integer, np.floating)) and e in (0, 1):
-            out.append(bool(e))
+            vals[i] = bool(e)
         else:
             return None
-    return out
+    return vals, na
 
 
 def _sig_comb(vs, conj):
-    """Elementweise all (conj) bzw. any mit NA wie R; Ergebnis als object-Feld aus True/False/None."""
-    n = len(vs[0]) if vs else 0
-    out = np.empty(n, dtype=object)
-    for i in range(n):
-        col = [v[i] for v in vs]
-        if conj:
-            out[i] = False if any(e is False for e in col) else (None if any(e is None for e in col) else True)
-        else:
-            out[i] = True if any(e is True for e in col) else (None if any(e is None for e in col) else False)
+    """Elementweise all (conj) bzw. any mit NA wie R; Ergebnis als object-Feld aus True/False/None. Seit 1.6.5
+    (CR2-G-1) über die Masken (Wert, NA) statt Element für Element."""
+    V = np.column_stack([v for v, _ in vs])
+    N = np.column_stack([m for _, m in vs])
+    anyna = N.any(axis=1)
+    if conj:
+        dec = (~V & ~N).any(axis=1)           # ein sicheres False entscheidet
+        res, na = ~dec & ~anyna, ~dec & anyna
+    else:
+        dec = (V & ~N).any(axis=1)            # ein sicheres True entscheidet
+        res, na = dec, ~dec & anyna
+    out = res.astype(object)
+    out[na] = None
     return out
 
 

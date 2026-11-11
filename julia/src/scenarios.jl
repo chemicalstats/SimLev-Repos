@@ -17,8 +17,9 @@ module Scenarios
 
 import ..SimLev
 using Dates
+using ..SimLev: chk_msg, chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 
-export view_mean, view_prob, view_vol, scenario_entropy_pooling, scenario_copula, scenario_risk, scenario_crisis
+export view_mean, view_prob, view_vol, view_cor, view_rank, scenario_entropy_pooling, scenario_copula, scenario_risk, scenario_crisis
 
 const _NA = SimLev.NA
 const RFrame = SimLev.RFrame
@@ -41,12 +42,19 @@ function _view_value(value, what, lo = -Inf, hi = Inf)
     if !ok
         rng = (isfinite(lo) && isfinite(hi)) ? _D()._sprintf(" zwischen %g und %g", lo, hi) :
               isfinite(lo) ? _D()._sprintf(" >= %g", lo) : ""
-        error("$what: value muss eine endliche Zahl$rng sein.")   # seit 1.6.4 ohne Wert
+        chk_stop("c.m_view_value", what, rng)   # seit 1.6.4 ohne Wert
     end
     value isa AbstractVector ? value[1] : value
 end
 
 const _ops = ("=", "<=", ">=")
+
+"`.view_op` (seit 1.6.5, CR2-V3-4 Punkt 2): genau einer von \"=\", \"<=\", \">=\" (bis 1.6.4 Teilabgleich)."
+function _view_op(op, fn)
+    (op isa Tuple && op == _ops) && return "="
+    SimLev.chk_choice(op, fn, "op", collect(_ops))
+    String(op)
+end
 
 """
     view_mean(var, value; op = "=")
@@ -86,7 +94,7 @@ println(ep["summary"])
 ```
 """
 view_mean(var, value, op_pos = _ops; op = op_pos) =
-    (var = SimLev.chk_name1(var, "view_mean", "var"); v = _view_value(value, "view_mean"); RList("type" => "mean", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
+    (var = SimLev.chk_name1(var, "view_mean", "var"); v = _view_value(value, "view_mean"); RList("type" => "mean", "var" => var, "value" => v, "op" => _view_op(op, "view_mean")))
 
 """
     view_prob(expr, value; op = "=")
@@ -129,7 +137,7 @@ println(ep["summary"])
 ```
 """
 view_prob(expr, value, op_pos = _ops; op = op_pos) =
-    (expr = expr isa Function ? expr : SimLev.chk_name1(expr, "view_prob", "expr"); v = _view_value(value, "view_prob", 0, 1); RList("type" => "prob", "expr" => expr, "value" => v, "op" => _D()._match_arg(op, _ops)))
+    (expr = expr isa Function ? expr : SimLev.chk_name1(expr, "view_prob", "expr"); v = _view_value(value, "view_prob", 0, 1); RList("type" => "prob", "expr" => expr, "value" => v, "op" => _view_op(op, "view_prob")))
 
 """
     view_vol(var, value; op = "=")
@@ -168,8 +176,59 @@ ep = scenario_entropy_pooling(X, ["aktien", "anleihen"], [view_vol("anleihen", 0
 println(ep["summary"])
 ```
 """
-view_vol(var, value, op_pos = _ops; op = op_pos) =
-    (var = SimLev.chk_name1(var, "view_vol", "var"); v = _view_value(value, "view_vol", 0); RList("type" => "vol", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
+function view_vol(var, value, op_pos = _ops; op = op_pos)
+    var = SimLev.chk_name1(var, "view_vol", "var")
+    v = _view_value(value, "view_vol", 0)
+    o = _view_op(op, "view_vol")
+    v == 0 && SimLev.Dependence.message(SimLev.chk_msg("c.view_vol0", "view_vol"))   # seit 1.6.5 (CR2-V3-4 Punkt 1)
+    RList("type" => "vol", "var" => var, "value" => v, "op" => o)
+end
+
+"""
+    view_cor(var1, var2, value, op = "=")
+
+Annahme an die Korrelation zweier Spalten (seit 1.6.5, E-T3-3; Meucci 2008). Umgesetzt als Bedingung an
+E[(x_1 - m_1)(x_2 - m_2)] = value · s_1 · s_2 mit festen Mitteln m und Standardabweichungen s: aus Annahmen
+`view_mean`/`view_vol` mit `op = "="` für dieselbe Spalte, sonst aus der Ausgangsverteilung. Seit der Prüfrunde
+1.6.5 (Entscheidung 199) hält `scenario_entropy_pooling()` dazu Mittel und Standardabweichung beider Spalten als
+Gleichungen fest (Mittel m, zweites Moment um m gleich s²), damit die Korrelation nach der Umgewichtung die Annahme
+trifft. Eigene Annahmen gehen vor: kein festes Mittel für eine Spalte mit `view_mean` oder `view_rank`, keine feste
+Streuung für eine Spalte mit `view_vol`; verschieben diese Mittel oder Streuung, kann die Korrelation danach abweichen.
+
+# Argumente
+- `var1`, `var2`: zwei verschiedene Spaltennamen der Szenario-Tabelle.
+- `value`: Korrelation zwischen -1 und 1.
+- `op`: Art der Bedingung: `"="` (Standard), `"<="` oder `">="`.
+
+# Rückgabe
+Liste mit `type` (`"cor"`), `var` (beide Namen), `value` und `op`.
+"""
+function view_cor(var1, var2, value, op_pos = _ops; op = op_pos)
+    fn = "view_cor"
+    var1 = SimLev.chk_name1(var1, fn, "var1"); var2 = SimLev.chk_name1(var2, fn, "var2")
+    var1 == var2 && SimLev.chk_stop("c.view_gleich", fn)
+    RList("type" => "cor", "var" => [String(var1), String(var2)], "value" => _view_value(value, fn, -1, 1),
+          "op" => _view_op(op, fn))
+end
+
+"""
+    view_rank(vars)
+
+Annahme an die Rangfolge der Erwartungswerte (seit 1.6.5, E-T3-3; Meucci 2008): `vars[1] >= vars[2] >= ...`, je
+benachbartes Paar eine Ungleichung an die Mittel.
+
+# Argumente
+- `vars`: mindestens zwei Spaltennamen der Szenario-Tabelle, absteigend nach Erwartungswert.
+
+# Rückgabe
+Liste mit `type` (`"rank"`), `var` (die Namen), `value` (0) und `op` (`">="`).
+"""
+function view_rank(vars)
+    fn = "view_rank"
+    vs = _D()._e4_names(vars, fn, "vars"; no_date = false)
+    length(vs) < 2 && SimLev.chk_stop("c.view_rang", fn)
+    RList("type" => "rank", "var" => vs, "value" => 0.0, "op" => ">=")
+end
 
 "Szenario-Tabelle aus Daten (Renditen in Prozent je Periode, Zustände verzögert) oder `as.data.frame(x)`."
 function _scen_frame(x, assets, states, frequency, fn)
@@ -191,6 +250,8 @@ function _scen_frame(x, assets, states, frequency, fn)
         SimLev.chk_cols([c => nothing for c in x.colnames], cols, fn)   # seit 1.6.4 wie R (T3-N6; bis 1.6.3 KeyError)
     elseif !(x isa NamedMat || (x isa AbstractMatrix && all(D._e4_numscalar, x)))
         SimLev.chk_stop("e4.szenarien", fn)
+    else                                                       # seit 1.6.5: Matrix ohne Namen hat V1, V2, ... (wie R)
+        SimLev.chk_cols(["V$j" => nothing for j in 1:size(x, 2)], cols, fn)
     end
     if D._is_frame(x) && haskey(D._as_frame(x), "date")
         SimLev.nrow(D._as_frame(x)) < 2 && SimLev.chk_stop("e4.wenige", fn)   # seit 1.6.4 (0 oder 1 Zeile)
@@ -202,13 +263,19 @@ function _scen_frame(x, assets, states, frequency, fn)
         count(ok) < 2 && SimLev.chk_stop("e4.wenige", fn)
         return SimLev.rows(rd, findall(ok))
     end
-    D._is_frame(x) && return D._as_frame(x)
-    if x isa NamedMat && x.colnames !== nothing
+    S = if D._is_frame(x)
+        D._as_frame(x)
+    elseif x isa NamedMat && x.colnames !== nothing
         M = _fmat(x)
-        return RFrame((x.colnames[j] => M[:, j] for j in 1:size(M, 2))...)
+        RFrame((x.colnames[j] => M[:, j] for j in 1:size(M, 2))...)
+    else
+        M = _fmat(x)
+        RFrame(("V$j" => M[:, j] for j in 1:size(M, 2))...)
     end
-    M = _fmat(x)
-    RFrame(("V$j" => M[:, j] for j in 1:size(M, 2))...)
+    for k in cols                                              # seit 1.6.5 (CR2-P-6): nur endliche Werte
+        all(isfinite, _fvec(S[k])) || SimLev.chk_stop("e3.werte", fn, "Spalte '$k'")
+    end
+    S
 end
 
 "`stats::cov2cor`."
@@ -222,7 +289,7 @@ _vget(v, k) = SimLev.Dependence._getopt(v, k)
 Entropy Pooling: Szenarien auf eigene Annahmen umgewichten.
 
 Sucht die Szenario-Wahrscheinlichkeiten q, die alle Annahmen erfüllen und dabei der Ausgangsverteilung p
-(Standard: gleichgewichtete Historie) am nächsten kommen, min_q Σ_j q_j log(q_j / p_j)quadu. d. N. Aq = b, Gq
+(Standard: gleichgewichtete Historie) am nächsten kommen, min_q Σ_j q_j log(q_j / p_j) u. d. N. Aq = b, Gq
 ≤ h, Σ q = 1. Gelöst über das duale Problem (projizierter BFGS der C-Bibliothek von SimLev). Damit lassen sich
 Fragen stellen wie: "Wie sieht die gemeinsame Verteilung von Aktien und Anleihen aus, wenn die Inflation im
 Mittel 5 % beträgt?" - alle Abhängigkeiten bleiben aus der Historie erhalten, nur die Gewichte der Szenarien
@@ -276,7 +343,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
     D = _D()
     frequency = D._match_arg(frequency, ("week", "day", "month"))
     fn = "scenario_entropy_pooling"
-    (views isa Union{AbstractVector,Tuple} && all(v -> (t = _vget(v, "type"); t isa AbstractString && t in ("mean", "prob", "vol")), views)) ||
+    (views isa Union{AbstractVector,Tuple} && all(v -> (t = _vget(v, "type"); t isa AbstractString && t in ("mean", "prob", "vol", "cor", "rank")), views)) ||
         SimLev.chk_stop("e4.views", fn)                        # seit 1.6.4 (K42 E4)
     S = _scen_frame(x, assets, states, frequency, fn)
     assets = D._as_names(assets)
@@ -290,7 +357,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
             pf = _fvec(pa)
             bad = !all(isfinite, pf) || any(<(0), pf) || SimLev.r_sum(pf) <= 0
         end
-        bad && error("scenario_entropy_pooling: prior muss $Tn endliche Werte >= 0 mit positiver Summe haben (einer je Szenario).")   # seit 1.6.4 ohne Wert
+        bad && chk_stop("c.m_scenario_entropy_pooling", Tn)   # seit 1.6.4 ohne Wert
         p = _fvec(pa)
     else
         p = fill(1 / Tn, Tn)
@@ -300,14 +367,59 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
     cols = Dict(v => _fvec(S[v]) for v in vars)
     m0 = Dict(v => SimLev.r_sum(p .* cols[v]) for v in vars)
     views = views === nothing ? Any[] : collect(views)
+    views0 = views
     mean_view = Dict{String,Float64}()
+    vol_view = Dict{String,Float64}()
     for v in views
         (_vget(v, "type") == "mean" && _vget(v, "op") == "=") && (mean_view[String(_vget(v, "var"))] = Float64(_vget(v, "value")))
+        (_vget(v, "type") == "vol" && _vget(v, "op") == "=") && (vol_view[String(_vget(v, "var"))] = Float64(_vget(v, "value")))
+    end
+    # seit 1.6.5 (E-T3-3): Korrelation mit festen Mitteln und Standardabweichungen, Rangfolge als Ungleichungen
+    mu_of(k) = haskey(mean_view, k) ? mean_view[k] : m0[k]
+    sd_of(k) = haskey(vol_view, k) ? vol_view[k] : (dk = cols[k] .- mu_of(k); sqrt(SimLev.r_sum(p .* (dk .* dk))))
+    ex = Any[]
+    for v in views
+        if _vget(v, "type") == "rank"
+            vv = String.(collect(_vget(v, "var")))
+            for j in 1:(length(vv)-1)
+                push!(ex, RList("type" => "rank", "var" => vv[j:j+1], "value" => 0.0, "op" => ">="))
+            end
+        else
+            push!(ex, v)
+        end
+    end
+    views = ex
+    for v in views
+        if _vget(v, "type") in ("cor", "rank")
+            miss = [k for k in String.(collect(_vget(v, "var"))) if !(k in vars)]
+            isempty(miss) || chk_stop("c.m_sd_of", miss[1])
+        end
+    end
+    # seit 1.6.5 (PR2-2, Entscheidung 199): view_cor hält Mittel und Streuung beider Spalten fest (Gleichungen an das
+    # Mittel mu_of und das zweite Moment um mu_of mit sd_of wie in der Korrelationsbedingung); eigene Annahmen gehen
+    # vor (Mittel: view_mean oder view_rank mit der Spalte, Streuung: view_vol); Reihenfolge wie R
+    cv = String[]
+    for v in views
+        _vget(v, "type") == "cor" && append!(cv, [k for k in String.(collect(_vget(v, "var"))) if !(k in cv)])
+    end
+    if !isempty(cv)
+        vars_of = v -> (x = _vget(v, "var"); x isa AbstractString ? [String(x)] : String.(collect(x)))
+        own_m = Set{String}(k for v in views if _vget(v, "type") in ("mean", "rank") for k in vars_of(v))
+        own_v = Set{String}(k for v in views if _vget(v, "type") == "vol" for k in vars_of(v))
+        views = vcat(views,
+                     Any[RList("type" => "mean", "var" => k, "value" => mu_of(k), "op" => "=") for k in cv if !(k in own_m)],
+                     Any[RList("type" => "vol", "var" => k, "value" => sd_of(k), "op" => "=") for k in cv if !(k in own_v)])
     end
     Fs = Vector{Float64}[]; bs = Float64[]; ineqs = Bool[]
     for v in views
         t = _vget(v, "type")
-        f = if t == "mean"
+        f = if t == "cor"
+            a1, a2 = String.(collect(_vget(v, "var")))
+            (cols[a1] .- mu_of(a1)) .* (cols[a2] .- mu_of(a2))
+        elseif t == "rank"
+            a1, a2 = String.(collect(_vget(v, "var")))
+            cols[a1] .- cols[a2]
+        elseif t == "mean"
             haskey(S, String(_vget(v, "var"))) ? _fvec(S[String(_vget(v, "var"))]) : nothing
         elseif t == "prob"
             ex = _vget(v, "expr")
@@ -328,11 +440,12 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
         if f === nothing || length(f) != Tn
             nm = _vget(v, "var") !== nothing ? _vget(v, "var") : _vget(v, "expr")
             nm isa Function && (nm = "<Funktion>")
-            error("View '$nm' passt nicht zu den Szenarien.")
+            chk_stop("c.m_sd_of", nm)
         end
         val0 = _vget(v, "value")
-        t == "vol" && !(_is_num_scalar(val0) && val0 >= 0) && error("view_vol: Standardabweichung muss >= 0 sein.")
-        val = t == "vol" ? Float64(val0) * Float64(val0) : Float64(val0)
+        t == "vol" && !(_is_num_scalar(val0) && val0 >= 0) && chk_stop("c.m_sd_of_2")
+        val = t == "vol" ? Float64(val0) * Float64(val0) :
+              t == "cor" ? Float64(val0) * sd_of(String(_vget(v, "var")[1])) * sd_of(String(_vget(v, "var")[2])) : Float64(val0)
         sg = Dict("=" => 0, "<=" => 1, ">=" => -1)[_vget(v, "op")]
         push!(Fs, sg == -1 ? -f : f); push!(bs, sg == -1 ? -val : val); push!(ineqs, sg != 0)
     end
@@ -368,7 +481,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
             ineq[i] && (viol[i] = isnan(viol[i]) ? viol[i] : max(viol[i], 0.0))
         end
         mv = D._rmax(abs.(viol))
-        mv > 1e-4 * D._rmax(1.0, abs.(b)) && @warn "Annahmen nicht vollständig erfüllbar (Abweichung $(D._sprintf("%.2e", mv)))."
+        mv > 1e-4 * D._rmax(1.0, abs.(b)) && @warn chk_msg("c.m_gr", D._sprintf("%.2e", mv))
     end
     wsd(v, w) = (m = SimLev.r_sum(w .* v); dv = v .- m; sqrt(SimLev.r_sum(w .* (dv .* dv))))
     summ = RFrame("var" => vars, "mean_prior" => Float64[m0[v] for v in vars],
@@ -390,10 +503,21 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
     out["prior"] = p
     out["assets"] = assets
     out["states"] = states
-    out["views"] = views
+    out["views"] = views0
     out["effective_n"] = SimLev.RLibm.exp(-SimLev.r_sum(qp .* SimLev.RLibm.log.(qp)))
     out["summary"] = summ
-    out["correlation"] = NamedMat(_cov2cor(C); rownames = assets, colnames = assets)
+    # seit 1.6.5 (CR2-V3-4 Punkt 1): Varianz 0 als NA ohne die Rohwarnung von cov2cor (R scenario_entropy_pooling)
+    dvv = [C[i, i] for i in 1:size(C, 1)]
+    okv = [isfinite(v) && v > 0 for v in dvv]
+    Cr = if all(okv)
+        _cov2cor(C)
+    else
+        M0 = fill(_NA, size(C))
+        ix = findall(okv)
+        isempty(ix) || (M0[ix, ix] = _cov2cor(C[ix, ix]))
+        M0
+    end
+    out["correlation"] = NamedMat(Cr; rownames = assets, colnames = assets)
     out["frequency"] = frequency
     out["kind"] = "entropy_pooling"
     out
@@ -439,7 +563,9 @@ t-Copula).
 - `family`: Copula: `"t"` (Standard) oder `"gaussian"`.
 - `stress`: Optional benannte Liste von Quantilbändern je Anlage als Anteile `[von, bis]` mit 0 <= von < bis
   <= 1, z. B. `(aktien = [0, 0.05],)` (schlechteste 5 % der Perioden). Unbenannte Einträge, unbekannte Anlagen
-  und ungültige Bänder sind ein Fehler. `nothing` (Standard) = unbedingte Simulation.
+  und ungültige Bänder sind ein Fehler. `nothing` (Standard) = unbedingte Simulation. Die Randverteilungen sind empirisch und enden am historischen Minimum bzw. Maximum: Stress-Szenarien
+  werden nie schlechter als die schlechteste beobachtete Periode, und ein Band unter 1/T häuft sich auf diesem Wert.
+  Reicht ein Band unter 1/T bzw. über 1 - 1/T (T = Anzahl Perioden), kommt seit 1.6.5 ein Hinweis.
 - `frequency`: Renditefrequenz bei Kursdaten: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
 - `seed`: Startwert der Ziehung. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und
   der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein Startwert aus dem
@@ -525,7 +651,7 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
         st_list = _named_list(stress)
         if st_list === nothing || isempty(st_list) || any(p -> p.first == "", st_list) ||
            length(unique(first.(st_list))) < length(st_list)
-            error("stress: benannte Liste von Quantilbändern je Anlage erwartet, z. B. list(aktien = c(0, 0.05)).")
+            chk_stop("c.m_ll_t")
         end
         unk = [p.first for p in st_list if !(p.first in assets)]
         isempty(unk) || error("stress: unbekannte Anlage(n) $(join(["'$u'" for u in unique(unk)], ", ")); vorhanden: $(join(assets, ", ")).")
@@ -533,7 +659,13 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
             ba = b isa AbstractVector || b isa Tuple ? collect(b) : Any[b]
             good = length(ba) == 2 && all(_is_num_scalar, ba) && all(v -> isfinite(Float64(v)), ba) &&
                    ba[1] >= 0 && ba[2] <= 1 && ba[1] < ba[2]
-            good || error("stress: Band für '$a' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent).")   # seit 1.6.4 ohne Wert
+            good || chk_stop("c.m_ll_t_2", a)   # seit 1.6.4 ohne Wert
+        end
+        # seit 1.6.5 (K20, CR2-3): Hinweis, wenn ein Band in den äußersten Rand reicht (R scenario_copula)
+        for (a, b) in st_list
+            ba = b isa AbstractVector || b isa Tuple ? collect(b) : Any[b]
+            (Float64(ba[1]) < 1 / Tn || Float64(ba[2]) > 1 - 1 / Tn) &&
+                SimLev.Dependence.message(SimLev.chk_msg("c.copula_rand", fn, a, Tn))
         end
     end
     n = Int(n)
@@ -697,14 +829,14 @@ println(scenario_risk(ep, (aktien = 0.6, anleihen = 0.4)))
 function scenario_risk(x, weights; alpha = 0.05)
     x = SimLev.as_rframe(x)
     D = _D()
-    SimLev.inherits(x, "SimLevScenarios") || error("x muss ein SimLevScenarios sein.")
+    SimLev.inherits(x, "SimLevScenarios") || chk_stop("c.m_scenario_risk")
     av = alpha isa AbstractVector ? alpha : [alpha]
     (length(av) == 1 && _is_num_scalar(av[1]) && isfinite(Float64(av[1])) && 0 < av[1] < 1 && !(alpha isa SimLev.RFmt.RFactor)) ||
-        error("scenario_risk: alpha muss ein Anteil echt zwischen 0 und 1 sein.")   # seit 1.6.4 ohne Wert
+        chk_stop("c.m_scenario_risk_2")   # seit 1.6.4 ohne Wert
     alpha = Float64(av[1])
     nms, vals = _named_weights(weights)
     (!_isnum_arr(vals) || nms === nothing || isempty(nms) || any(==(""), nms) || weights isa SimLev.RFmt.RFactor) &&
-        error("scenario_risk: weights muss ein benannter numerischer Vektor sein (Namen = Anlagespalten der Szenarien).")
+        chk_stop("c.m_scenario_risk_3")
     all(v -> isfinite(Float64(v)), vals) || SimLev.chk_stop("e3.werte", "scenario_risk", "weights")   # seit 1.6.4 (B-026)
     length(unique(nms)) < length(nms) && SimLev.chk_stop("e2.doppelt", "scenario_risk", "weights")
     unk = unique([k for k in nms if !haskey(x["scenarios"], k)])
@@ -716,7 +848,7 @@ function scenario_risk(x, weights; alpha = 0.05)
     o = D._order(r)
     cw = SimLev.r_cumsum(q[o])
     ro = r[o]
-    qf(a) = (h = findfirst(>=(a), cw); h === nothing ? _NA : ro[h])
+    qf(a) = (h = findfirst(>=(a - 4 * eps(Float64) * a), cw); h === nothing ? _NA : ro[h])   # seit 1.6.5 (CR2-4) mit Toleranz wie R
     var_a = -qf(alpha)
     prev = vcat([0.0], cw[1:end-1])
     take = [min(q[o][i], max(0.0, alpha - prev[i])) for i in eachindex(o)]
@@ -765,6 +897,12 @@ Tabelle (RFrame) je Krise im Datenzeitraum: `crisis`, `start`, `end` (tatsächli
 Fenster in Prozent, negativ), `days_to_recover` (Kalendertage ab Fensterende, bis der Kaufen-und-Halten-Wert
 des Portfolios (auch bei `rebalance = true`) wieder den Wert bei Fensterbeginn erreicht; 0 = am Fensterende
 nicht darunter; `NA` = nicht erholt bzw. Daten enden) und je Anlage deren Rendite im Fenster in Prozent.
+Seit 1.6.5: `days_to_recover` auch, wenn das Fenster an der letzten Datenzeile endet (0, wenn der Wert dort
+nicht unter dem Start liegt); mit `rebalance = true` zusätzlich die Spalte `days_to_recover_rebalanced`
+(Erholung des täglich umgeschichteten Portfolios, nach dem Fenster mit denselben Umschichtungen fortgeschrieben,
+E-T3-1). Eine Anlage, die wie eine Ergebnisspalte heißt, ist ein Fehler; liegt eine Krise nur teilweise in den
+Daten (Beginn bzw. Ende mehr als 7 Tage daneben), kommt ein Hinweis; Anlagen mit Gewicht 0 brauchen keinen
+Startkurs.
 
 # Details
 Eingebaute Krisen (`crises = nothing`): Ölkrise 1973/74 (1973-01-11 bis 1974-10-03), Schwarzer Montag 1987
@@ -789,13 +927,13 @@ function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_po
     fn = "scenario_crisis"
     crises === nothing && (crises = _DEFAULT_CRISES)
     # seit 1.6.4 nur Tabellen (Entscheidung 6; bis 1.6.3 auch NamedTuple, Dict)
-    (data isa RFrame && haskey(data, "date")) || error("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
+    (data isa RFrame && haskey(data, "date")) || chk_stop("c.m_scenario_crisis")
     (crises isa RFrame && all(c -> haskey(crises, c), ("crisis", "start", "end"))) ||
-        error("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+        chk_stop("c.m_scenario_crisis_2")
     nms, vals = _named_weights(weights)
     (!_isnum_arr(vals) || nms === nothing || isempty(nms) || any(==(""), nms) || !all(v -> isfinite(Float64(v)), vals) ||
      weights isa SimLev.RFmt.RFactor) &&
-        error("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+        chk_stop("c.m_scenario_crisis_3")
     length(unique(nms)) < length(nms) && SimLev.chk_stop("e2.doppelt", fn, "weights")   # seit 1.6.4 (B-052)
     unk = unique([k for k in nms if !(k in setdiff(names(data), ["date"]))])
     isempty(unk) || error("scenario_crisis: Kursspalte(n) $(join(["'$u'" for u in unk], ", ")) fehlen in data.")
@@ -810,6 +948,11 @@ function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_po
     wv = _fvec(vals)
     sw = SimLev.r_sum(wv)
     sw <= 0 && SimLev.chk_stop("ut3.krise_summe", fn)          # seit 1.6.4 ohne Wert und Zusatz (Entscheidung 8, T3-B2)
+    # seit 1.6.5 (K31, CR2-E-1): Anlage mit dem Namen einer Ergebnisspalte ist ein Fehler
+    res_cols = vcat(["crisis", "start", "end", "portfolio", "max_drawdown", "days_to_recover"],
+                    rebalance ? ["days_to_recover_rebalanced"] : String[])
+    kol = [k for k in unique(nms) if k in res_cols]
+    isempty(kol) || SimLev.chk_stop("c.krise_name", fn, join(["'$k'" for k in kol], ", "))
     data = D._dep_sort_dates(data)
     d = collect(data["date"])
     dd = D._days(d)
@@ -823,32 +966,43 @@ function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_po
     for i in 1:SimLev.nrow(crises)
         s = findfirst(>=(cs[i]), dd)
         e = findlast(<=(ce[i]), dd)
-        (s === nothing || e === nothing || e <= s || any(isnan, P[s, :])) && continue
+        nz = w .!= 0                                           # seit 1.6.5 (CR2-E-2): Gewicht 0 rechnet nicht mit
+        (s === nothing || e === nothing || e <= s || any(isnan, P[s, nz])) && continue
+        if dd[s] - cs[i] > 7 || ce[i] - dd[e] > 7              # seit 1.6.5 (CR2-E-2): angeschnittene Krise
+            D.message(SimLev.chk_msg("c.krise_teil", fn, string(crises["crisis"][i]), D._date_str(dd[s]), D._date_str(dd[e]),
+                                     D._date_str(cs[i]), D._date_str(ce[i])))
+        end
         rel = P[s:e, :] ./ permutedims(P[s, :])
+        Pw = P[:, nz]; wn = w[nz]; relw = rel[:, nz]
         port = if rebalance
-            g = D._matvec(rel[2:end, :] ./ rel[1:end-1, :], w)
+            g = D._matvec(relw[2:end, :] ./ relw[1:end-1, :], wn)
             _cumprod(vcat([1.0], g))
         else
-            D._matvec(rel, w)
+            D._matvec(relw, wn)
         end
         ddn = D._rmin(port ./ _cummax(port) .- 1)
         after = _NA
-        if e < nd
-            relx = P[e:end, :] ./ permutedims(P[s, :])
-            px = D._matvec(relx, w)
-            kk = findfirst(>=(1), px)
-            kk !== nothing && (after = dd[e+kk-1] - dd[e])
-        end
+        # seit 1.6.5 (CR2-E-2) auch, wenn das Fenster an der letzten Datenzeile endet
+        relx = Pw[e:end, :] ./ permutedims(Pw[s, :])
+        px = D._matvec(relx, wn)
+        kk = findfirst(>=(1), px)
+        kk !== nothing && (after = dd[e+kk-1] - dd[e])
         row = Dict{String,Any}("crisis" => crises["crisis"][i], "start" => d[s], "end" => d[e],
                                "portfolio" => 100 * (port[end] - 1), "max_drawdown" => 100 * ddn, "days_to_recover" => after)
+        if rebalance                                           # seit 1.6.5 (E-T3-1): Erholung umgeschichtet
+            gx = e < nd ? D._matvec(Pw[e+1:end, :] ./ Pw[e:nd-1, :], wn) : Float64[]
+            pr = port[end] .* _cumprod(vcat([1.0], gx))
+            kr = findfirst(>=(1), pr)
+            row["days_to_recover_rebalanced"] = kr === nothing ? _NA : Float64(dd[e+kr-1] - dd[e])
+        end
         last = 100 .* (rel[end, :] .- 1)
         for (j, a) in enumerate(nms)
             row[a] = last[j]
         end
         push!(rowsv, row)
     end
-    isempty(rowsv) && error("Keine Krise liegt im Datenzeitraum.")
-    cols = vcat(["crisis", "start", "end", "portfolio", "max_drawdown", "days_to_recover"], unique(nms))
+    isempty(rowsv) && SimLev.chk_stop("c.krise_keine", fn)    # seit 1.6.5 mit Funktionsnamen (CR2-E-2)
+    cols = vcat(res_cols, unique(nms))
     RFrame((c => (c == "crisis" ? [r[c] for r in rowsv] : c in ("start", "end") ? Date[r[c] for r in rowsv] :
                   Float64[r[c] for r in rowsv]) for c in cols)...)
 end

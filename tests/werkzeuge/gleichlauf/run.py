@@ -99,7 +99,9 @@ REFLIBS = {
 # Fall, ein Prozess prüft aber alle FUZZ_REF-Familien; ohne Grenze wuchs er bei --full bis 4 GB und wurde neben R
 # (eigen_fuzz full mit Rmpfr, 2 GB) bei 7 GB Speicher beendet.
 JULIA = ["julia", "--project=julia"]
-JULIA_VGL = [*JULIA, "--heap-size-hint=2G"]
+# Seit 1.6.5 1200M (Plan 1.6.5 D: Speicher je Prozess unter 2 GB; im Finaltest 1.6.4 belegte der Julia-Vergleich mit 2G
+# bei eigen_fuzz 2 924 MB) und GC.gc() nach jeder Datei (vergleich.jl)
+JULIA_VGL = [*JULIA, "--heap-size-hint=1200M"]
 REFDIR_VAR, REFDIR_STANDARD = "SIMLEV_GLEICHLAUF_REF", "/home/claude/gleichlauf_ref"
 # Zufallsprüfungen mit abgelegter Referenz, in dieser Reihenfolge:
 # (Name: tests/werkzeuge/gleichlauf/<name>_fuzz.R, Fälle quick, Fälle full, Startwert, Referenz aus REFLIBS)
@@ -133,6 +135,8 @@ FUZZ_REF = [
     ("fmt", 300, 2000, 20261122, "164"),      # sprintf, formatC, format, round/signif (core/slc_rbase_fmt.cpp)
     # seit 1.6.2: genauere Formeln (expm1/log1p, CAGR, Periodenaggregation, Copula-Dichte), Fehler in ulp gegen Rmpfr
     ("prec", 300, 2000, 20261123, "164"),
+    # seit 1.6.5: Zufallsausdrücke der Regeltexte (RExpr) samt Warnungen (E-T4-6, E-T4-5); R rechnet mit Basisfunktionen
+    ("rexpr", 300, 2000, 20261124, "164"),
 ]
 # Protokolle der Zusammenfassung (Schritt 7) mit Zeilen nach MUSTER; danach je FUZZ_REF fz_<name>_{r,py,jl}
 ZUSAMMENFASSUNG = ["faelle_diff", "fz_date_py", "fz_date_jl", "fz_rbase_py", "fz_rbase_jl", "fz_tariff"]
@@ -159,20 +163,33 @@ def fail():
         status = 1
 
 
+# Speicher je Prozess (seit 1.6.5, Plan 1.6.5 D): höchster belegter Speicher (ru_maxrss über os.wait4) steht in der
+# Ergebniszeile; über SPEICHER_MB folgt eine Zeile „SPEICHER“ im Bericht (kein Fehler)
+SPEICHER_MB = 2048
+
+
 def step(name, log, cmd, env=None, cwd=None):
-    """Schritt mit Protokoll log (stdout und stderr); Ergebniszeile in den Bericht; False und status = 1 bei Fehler."""
+    """Schritt mit Protokoll log (stdout und stderr); Ergebniszeile mit Dauer und höchstem Speicher des Prozesses in den
+    Bericht; False und status = 1 bei Fehler."""
     t0 = time.time()
+    mb = None
     with open(log, "wb") as h:
         try:
-            rc = subprocess.run(cmd, stdout=h, stderr=subprocess.STDOUT, cwd=cwd,
-                                env=None if env is None else {**os.environ, **env}).returncode
+            p = subprocess.Popen(cmd, stdout=h, stderr=subprocess.STDOUT, cwd=cwd,
+                                 env=None if env is None else {**os.environ, **env})
+            _, st, ru = os.wait4(p.pid, 0)
+            p.returncode = rc = os.waitstatus_to_exitcode(st)
+            mb = ru.ru_maxrss / 1024.0   # Linux: KiB
         except OSError as e:   # Programm fehlt (Shell: Rückgabewert 127, Meldung im Protokoll)
             h.write(("run.py: %s: %s\n" % (cmd[0], e.strerror)).encode())
             rc = 127
+    sp = "" if mb is None else ", %d MB" % round(mb)
+    if mb is not None and mb > SPEICHER_MB:
+        note("SPEICHER %s: %d MB (Grenze %d MB je Prozess)" % (name, round(mb), SPEICHER_MB))
     if rc == 0:
-        note("ok      %s (%d s)" % (name, int(time.time() - t0)))
+        note("ok      %s (%d s%s)" % (name, int(time.time() - t0), sp))
         return True
-    note("FEHLER  %s (%d s; Protokoll %s)" % (name, int(time.time() - t0), log))
+    note("FEHLER  %s (%d s%s; Protokoll %s)" % (name, int(time.time() - t0), sp, log))
     fail()
     return False
 
@@ -239,7 +256,7 @@ def dauer_alt(path):
     """Dauer je Schritt aus einem früheren bericht.txt (Zeilen „ok      <Name> (<n> s)“, „FEHLER  <Name> (<n> s; …)“)."""
     d = {}
     for z in lies_zeilen(path) if os.path.isfile(path) else []:
-        m = re.match(r"(?:ok|FEHLER) +(.*) \((\d+) s[;)]", z)
+        m = re.match(r"(?:ok|FEHLER) +(.*) \((\d+) s[;),]", z)   # seit 1.6.5 auch mit „, <n> MB“
         if m:
             d[m.group(1)] = int(m.group(2))
     return d

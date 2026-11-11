@@ -84,13 +84,30 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
   o <- if (!is.null(dd)) order(dd) else seq_len(n)
   if (type == "prices" && !is.null(dd) && anyDuplicated(dd))
     chk_stop("rs.preise_doppelt", fn)
-  if (is.null(ppy)) ppy <- if (!is.null(dd))
-    (n - (type == "prices")) / (as.numeric(max(dd, na.rm = TRUE) - min(dd, na.rm = TRUE)) / 365.25) else 252
+  # seit 1.6.5 (CR2-E-8): Werte > 0 (Brutto-Renditen bzw. Kurse), bei Renditen Median >= 0.5, mindestens 2 Zeilen
+  # bzw. eine Datumsspanne > 0 (bis 1.6.4 Unsinn bzw. Inf/NaN ohne klare Meldung)
+  for (k in columns) {
+    v <- as.numeric(data[[k]]); v <- v[!is.na(v)]
+    if (any(v <= 0)) chk_stop("b1.ssr_werte", fn, k, chk_msg(if (type == "returns") "b1.ssr_brutto" else "b1.ssr_kurse"))
+    if (type == "returns" && length(v) && stats::median(v) < 0.5) chk_stop("b1.ssr_median", fn, k, chk_msg("b1.ssr_brutto"))
+    if (type == "prices" && length(v) < 2L) chk_stop("b1.ssr_kurz", fn)
+  }
+  span <- if (!is.null(dd)) as.numeric(max(dd, na.rm = TRUE) - min(dd, na.rm = TRUE)) else NA
+  if (is.null(ppy) && !is.null(dd) && !(span > 0)) chk_stop("b1.ssr_kurz", fn)
+  # seit 1.6.5 (CR2-E-7, Entscheidung 185 K4): n - 1 Abstaende auch bei Renditen (bis 1.6.4 n Renditen auf n - 1
+  # Abstaende: Zielrendite bei Jahresdaten 3.59 statt 4 %)
+  if (is.null(ppy)) ppy <- if (!is.null(dd)) (n - 1) / (span / 365.25) else 252
   shift <- stats::setNames(numeric(length(columns)), columns)
   for (k in columns) {
     v <- as.numeric(data[[k]])
-    lr <- if (type == "returns") log(v) else diff(log(v[o]))
-    g_hist <- mean(lr, na.rm = TRUE); g_tgt <- log1p(target[[k]] / 100) / ppy
+    if (type == "returns") g_hist <- mean(log(v), na.rm = TRUE)
+    else {
+      # seit 1.6.5 (CR2-E-9): mittlere Log-Rendite aus erstem und letztem vorhandenen Kurs ueber ihren Zeilenabstand
+      # (bis 1.6.4 Mittel der Differenzen: eine Luecke liess die Rendite darueber fallen)
+      vo <- v[o]; ok <- which(!is.na(vo)); a <- ok[1L]; b <- ok[length(ok)]
+      g_hist <- (log(vo[b]) - log(vo[a])) / (b - a)
+    }
+    g_tgt <- log1p(target[[k]] / 100) / ppy
     delta <- g_tgt - g_hist
     if (type == "returns") data[[k]] <- v * exp(delta)
     else { pos <- integer(n); pos[o] <- seq_len(n); data[[k]] <- v * exp(delta * (pos - 1)) }   # Trend nach Zeitfolge
@@ -109,7 +126,21 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
   end <- .period_ends(d, frequency)   # withdrawal.R (seit 1.6.4 eine Fassung)
   V <- vapply(columns, function(k) .fill_na(as.numeric(df[[k]]), "locf", keep_leading = TRUE)[end], numeric(length(end)))
   if (!is.matrix(V)) V <- matrix(V, ncol = length(columns), dimnames = list(NULL, columns))
+  de <- d[end]
+  # seit 1.6.5 (CR2-K-3, Entscheidung 189): verwendete Periodenkurse endlich und > 0, sonst Fehler mit Spalte und Datum
+  # (bis 1.6.4 still Renditen 0, negativ oder Inf)
+  for (j in seq_along(columns)) .wd_check_level(V[, j], de, columns[j], fn %||% "portfolio_returns")
   G <- V[-1, , drop = FALSE] / V[-nrow(V), , drop = FALSE]
+  # seit 1.6.5 (CR2-K-1, Entscheidung 189): Rendite ueber eine fehlende Periode entfaellt, mit Hinweis (bis 1.6.4 still
+  # als eine Periode gezaehlt, z. B. Kurs Ende 2016 / Ende 2014 als Jahresrendite)
+  lt <- as.POSIXlt(de)
+  pn <- switch(frequency, year = lt$year, quarter = lt$year * 4L + lt$mon %/% 3L, month = lt$year * 12L + lt$mon)
+  gap <- which(diff(pn) > 1L)
+  if (length(gap)) {
+    message(chk_msg("b1.periode_luecke", fn %||% "portfolio_returns", as.integer(sum(diff(pn)[gap] - 1L)),
+                    if (is.null(land)) "" else sprintf(" im Datensatz '%s'", land), format(de[gap[1L]]), format(de[gap[1L] + 1L])))
+    G <- G[-gap, , drop = FALSE]
+  }
   G[stats::complete.cases(G), , drop = FALSE]
 }
 
@@ -156,6 +187,10 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 #' @param years Laenge jedes Pfads in Jahren (Standard 30); ergibt
 #'   \code{years} x Perioden je Jahr (1, 4 bzw. 12) Perioden. Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
 #'   \code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze Perioden ergab).
+#' @param periods Seit 1.6.5: Pfadlaenge in Perioden der gewaehlten \code{frequency}
+#'   (ganze Zahl von 1 bis 100 x Perioden je Jahr) statt \code{years}; erlaubt Laengen, die keine
+#'   ganzen Jahre sind (z. B. 30 Monate). \code{years} muss dann beim Standard 30 bleiben, sonst
+#'   Fehler. \code{NULL} (Standard) = \code{years} gilt.
 #' @param L Mittlere Blocklaenge in Perioden der gewaehlten \code{frequency}
 #'   (Blocklaenge = 1 + geometrisch verteilte Zahl mit Mittel \code{L} - 1).
 #'   \code{NULL} (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw.
@@ -210,7 +245,7 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 #' @export
 bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL,
                              frequency = c("year", "quarter", "month"), n = 1000L, years = 30L, L = NULL,
-                             country_weights = NULL, target = NULL, seed = NULL) {
+                             country_weights = NULL, target = NULL, seed = NULL, periods = NULL) {
   fn <- "bootstrap_pooled"
   .e3_choice(frequency, c("year", "quarter", "month"), fn, "frequency")   # Pruefung (Meldung auswahl)
   frequency <- match.arg(frequency)
@@ -235,6 +270,8 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
   # seit 1.6.4 ganze Jahre von 1 bis 100, auch bei frequency "quarter"/"month" (Entscheidungen 46 und 47; vorher
   # Baustein e3.jahre_perioden: jede Zahl > 0, die ganze Perioden ergab)
   chk_jahre(years, fn, "years")
+  # seit 1.6.5 (Entscheidung 173): Pfadlaenge wahlweise in Perioden von frequency (periods; years dann nur 30)
+  .chk_periods(years, periods, fn, ppy = ppy)
   chk_num1(L, fn, "L", lo = 1, null_ok = TRUE)
   if (!is.null(L)) chk_max(L, SL_MAX_JAHRE * ppy, fn, "L")   # seit 1.6.4 hoechstens 100 Jahre in Perioden (K43 T2-N1)
   if (!is.null(country_weights)) {
@@ -273,32 +310,24 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
     }
   }
   L <- L %||% (10 * ppy)
-  nper <- as.integer(years * ppy); nc <- length(G)
+  nper <- if (is.null(periods)) as.integer(years * ppy) else as.integer(periods); nc <- length(G)
   cw <- country_weights %||% rep(1 / nc, nc); cw <- cw / sum(cw)
   S <- .sl_main_stream(seed, "bootstrap_pooled")                                    # Hauptstrom
-  draw <- lapply(seq_len(n), function(i) {
-    ctry <- integer(nper); row <- integer(nper); t <- 1L
-    while (t <= nper) {
-      cidx <- .sl_sample(nc, 1L, prob = cw, stream = S); len <- 1L + .sl_rgeom(1L, 1 / L, stream = S)
-      nr <- nrow(G[[cidx]]); st <- .sl_sample(nr, 1L, stream = S)
-      # seit 1.6.4 (K43 T2-N1) Indizes nur fuer die genutzte Laenge take (wie Python und Julia; bis dahin fuer die
-      # ganze gezogene Blocklaenge, bei L = 1e6 1,9 s statt 0,02 s), gleiche Indizes
-      take <- seq_len(min(len, nper - t + 1L))
-      idx <- ((st - 1L + take - 1L) %% nr) + 1L
-      ctry[t - 1L + take] <- cidx; row[t - 1L + take] <- idx; t <- t + length(take)
-    }
-    list(c = ctry, r = row)
-  })
+  # seit 1.6.5 (Paket E, K40/CR2-6) im Kern (sl_pooled_draw): je Pfad und Block Land (Gewichte cw), Laenge
+  # 1 + rgeom(1 / L) und Startzeile, dieselben Zuege in derselben Reihenfolge wie bis 1.6.4 die Schleife hier (je Zug
+  # ein Aufruf); Land und Zeile je Periode und Pfad als nper x n-Matrizen
+  draw <- .sl_draw(C_sl_pooled_draw, S, as.double(vapply(G, nrow, 0L)), as.double(cw), as.double(L), as.double(nper),
+                   as.double(n))
   Gall <- do.call(rbind, lapply(G, function(g) as.matrix(g[, cols, drop = FALSE])))   # alle Laender untereinander
   off <- c(0L, cumsum(vapply(G, nrow, 0L)))[seq_len(nc)]
-  gi <- vapply(draw, function(dr) off[dr$c] + dr$r, numeric(nper))                 # Zeile in Gall je Periode und Pfad
+  gi <- off[draw$c] + draw$r                                                        # Zeile in Gall je Periode und Pfad
   A <- lapply(stats::setNames(cols, cols), function(k) matrix(Gall[gi, k], nper, n))
   w <- if (is.null(weights)) stats::setNames(rep(1 / length(columns), length(columns)), columns) else weights / sum(weights)
   Rp <- Reduce(`+`, lapply(names(w), function(k) w[[k]] * A[[k]]))
   Inf_m <- if (!is.null(inflation)) A[[inflation]] else matrix(1, nper, n)
   structure(list(returns = Rp, inflation = Inf_m, cape = NULL, base_rate = NULL, frequency = frequency,
                  historical = FALSE, start_dates = NULL, weights = NULL, source = "pooled_bootstrap",
-                 assets = A[columns], countries = matrix(names(datasets)[vapply(draw, `[[`, integer(nper), "c")], nper),
+                 assets = A[columns], countries = matrix(names(datasets)[draw$c], nper),
                  country_names = names(datasets)),
             class = "withdrawal_paths")
 }
@@ -502,7 +531,12 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
   wmax <- max(goal, start_value) * 20
   wmin <- max(1e-6, min(c(goal, start_value)[c(goal, start_value) > 0]) / 1000)
   # Ziel und Startwert als exakte Rasterpunkte (Stufe der Zielfunktion liegt auf dem Raster)
-  grid <- sort(unique(c(exp(seq(log(wmin), log(wmax), length.out = n_grid)), if (goal > 0) goal, start_value)))
+  # seit 1.6.5 (CR2-C-6): Rasterpunkte relativ naeher als 1e-12 an Ziel oder Startwert entfallen (bis 1.6.4 lagen sie
+  # z. B. 5 ulp daneben und ergaben je Fall hunderte Warnungen "collapsing to unique 'x' values")
+  ex <- c(if (goal > 0) goal, start_value)
+  g0 <- exp(seq(log(wmin), log(wmax), length.out = n_grid))
+  g0 <- g0[!vapply(g0, function(v) any(v != ex & abs(v - ex) <= 1e-12 * ex), NA)]
+  grid <- sort(unique(c(g0, ex)))
   ng <- length(grid)
   # Rueckwaertsrekursion im Kern (core/research_core_impl.h, goal_dp; bis 1.4.3 hier in R): Wertfunktion
   # 1(W >= goal) am Ende; dazwischen Interpolation linear in log(W) auf der Probit-Skala (Wahrscheinlichkeiten der
@@ -557,7 +591,8 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
 #' @keywords internal
 #' @export
 print.SimLevGoalPlan <- function(x, ...) {
-  eur <- function(v) formatC(round(v), format = "d", big.mark = " ")   # Leerzeichen als Tausendertrenner
+  # Leerzeichen als Tausendertrenner; seit 1.6.5 (CR2-X37-2) ueber "f" (bis 1.6.4 "d": ab 2^31 "NA")
+  eur <- function(v) formatC(round(v), format = "f", digits = 0, big.mark = " ")
   cat(sprintf("Zielplanung: Ziel %s in %d Perioden, Start %s%s\n", eur(x$goal), x$horizon, eur(x$start_value),
               if (any(x$contributions != 0)) sprintf(", Zahlungen %s je Periode", paste(eur(unique(x$contributions)), collapse = "/")) else ""))
   cat(sprintf("Zielwahrscheinlichkeit dynamisch: %.1f %% (Vorw\u00e4rtssimulation, SE %.1f Prozentpunkte; DP-Wert %.1f %%)\n",

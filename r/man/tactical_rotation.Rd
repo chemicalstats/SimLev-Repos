@@ -15,7 +15,8 @@ tactical_rotation(
   lookbacks = c(1, 3, 6, 12),
   type = c("average", "13612w"),
   every = c("month", "week", "quarter"),
-  weighting = c("equal", "inverse_vol")
+  weighting = c("equal", "inverse_vol"),
+  vol_window = 63L
 )
 }
 \arguments{
@@ -55,6 +56,10 @@ Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
 Seit 1.6.4 liegen die Termine dann erst ab Zeile 63 (volles Fenster; bis
 1.6.3 brach jeder fruehere Termin ab, mit Wochen- und Monatskursen auch mit den
 Standardrueckblicken).}
+
+\item{vol_window}{Seit 1.6.5 (Entscheidung 144): Fenster der Schwankung fuer
+\code{weighting = "inverse_vol"} in Zeilen (ganze Zahl >= 2, Standard 63);
+die Termine liegen erst ab Zeile \code{vol_window}.}
 }
 \value{
 \code{SimLevWeights} (data.frame mit \code{date} und

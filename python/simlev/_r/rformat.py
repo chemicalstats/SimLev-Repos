@@ -34,6 +34,7 @@ import re
 from typing import Any, Sequence
 
 import numpy as np
+import pandas as pd
 
 from . import fmt as _fmt
 from .. import _ext   # C-Kern sl_r_sprintf (core/slc_rbase_fmt.cpp, seit 1.6.0)
@@ -148,23 +149,27 @@ def r_format(x: Any, digits: int | None = None, nsmall: int = 0, big_mark: str =
             a = np.array(fv, dtype=np.float64)
             m = np.ascontiguousarray(r_isna_arr(a) | ~np.isnan(a), dtype=np.uint8)
             out = list(_ext.slc_r_encode_real(a, m, int(w), int(d), int(e), ".", "NA", False))
+        # seit 1.6.5 (CR2-D-13) wie R format.default: erst die Breite (.Internal(format)), dann die Tausenderzeichen
+        # (prettyNum, gemeinsame Breite); bis 1.6.4 umgekehrt (mit big_mark und width zu schmal)
+        if width:
+            out = [s.rjust(width) for s in out]
         if big_mark:
             out = [_insert_big_mark(s, big_mark) for s in out]
             ww = max(len(s) for s in out)
             out = [s.rjust(ww) for s in out]
-        if width:
-            out = [s.rjust(width) for s in out]
         return out
     if all(isinstance(v, (bool, np.bool_)) or v is None for v in vals):
         out = ["NA" if v is None else ("TRUE" if v else "FALSE") for v in vals]
-        w = max(len(s) for s in out)
+        w = max(width or 0, max(len(s) for s in out))   # seit 1.6.5 mit width wie R (CR2-D-13)
         return [s.rjust(w) for s in out]
     out = [_as_str(v) for v in vals]
     if all(v is None or (isinstance(v, _dt.date) and not isinstance(v, _dt.datetime))
            or (isinstance(v, np.datetime64) and np.datetime_data(v.dtype)[0] == "D") for v in vals):
         return out   # Datumswerte ohne gemeinsame Breite wie R format.Date (seit 1.6.4 mit Jahren ohne Auffüllen, C-005)
-    w = max(width or 0, max(len(s) for s in out))
-    return [s.ljust(w) for s in out]
+    # Anzeigebreite wie R (seit 1.6.5, CR2-D-13: _fmt._strwid statt Zeichenzahl; breite Zeichen zählen 2)
+    wd = [_fmt._strwid(s) for s in out]
+    w = max(width or 0, max(wd))
+    return [s + " " * (w - k) for s, k in zip(out, wd)]
 
 
 def r_format1(x: Any, **kw) -> str:
@@ -198,7 +203,7 @@ def _date_days(v: Any) -> int:
 
 
 def _as_str(v: Any) -> str:
-    if v is None:
+    if v is None or v is pd.NaT:   # pd.NaT wie NA (seit 1.6.5, CR2-X8-3; bis 1.6.4 Rohfehler aus toordinal)
         return "NA"
     if isinstance(v, str):
         return v
@@ -302,7 +307,14 @@ def r_deparse(x: Any) -> str:
     if isinstance(x, (list, tuple, np.ndarray)):
         vals = list(x)
         if not vals:
-            return "NULL" if isinstance(x, (list, tuple)) else "numeric(0)"
+            if isinstance(x, (list, tuple)):
+                return "NULL"
+            # seit 1.6.5 (CR2-C-11): leeres Feld nach Elementtyp wie R (bis 1.6.4 immer "numeric(0)")
+            k = x.dtype.kind
+            if k == "M":
+                return 'structure(numeric(0), class = "Date")'
+            return {"b": "logical(0)", "i": "integer(0)", "u": "integer(0)", "U": "character(0)", "S": "character(0)",
+                    "O": "character(0)"}.get(k, "numeric(0)")
         if any(isinstance(v, (list, tuple, dict)) for v in vals):
             return "list(" + ", ".join(r_deparse(v) for v in vals) + ")"
         vals = _rp_vals(vals, "r_deparse")

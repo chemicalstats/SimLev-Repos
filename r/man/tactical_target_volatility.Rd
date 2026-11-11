@@ -12,7 +12,18 @@ tactical_target_volatility(
   window = 63L,
   max_exposure = 1,
   every = c("month", "week", "day", "quarter"),
-  ppy = NULL
+  ppy = NULL,
+  risk = c("sd", "downside", "es", "var", "lpm"),
+  estimator = c("window", "ewma"),
+  alpha = 0.05,
+  lpm_order = 1,
+  lambda = 0.94,
+  exponent = 1,
+  min_exposure = 0,
+  risk_floor = NULL,
+  reference = c("fixed", "median"),
+  cushion = NULL,
+  cushion_window = 252L
 )
 }
 \arguments{
@@ -40,11 +51,58 @@ kennt).}
 \item{every}{Anpassungsrhythmus des Risikoanteils: \code{"month"}
 (Standard), \code{"week"}, \code{"day"} oder \code{"quarter"}.}
 
-\item{ppy}{Tage mit Kursbewegung je Jahr fuer die Annualisierung.
+\item{ppy}{Tage mit Kursbewegung je Jahr fuer die Annualisierung (seit 1.6.5 auch
+\code{"rolling"}: Tage mit Bewegung der letzten 365.25 Kalendertage je Zeile,
+im ersten Jahr der Daten deren Dichte; lit1 L9).
 Standard \code{NULL} = aus den Daten ermittelt (Zahl der Tage mit
 Bewegung geteilt durch die Laenge des Zeitraums in Jahren, z. B. rund
 252 bei Boersentagen, 365 bei
 einem Index, der auch am Wochenende notiert).}
+
+\item{risk}{Seit 1.6.5 (lit1 S3, Entscheidung 192): Risikomass je Zeile, annualisiert
+mit \eqn{\sqrt{ppy}}: \code{"sd"} (Standard, Standardabweichung mit Teiler
+\eqn{n - 1}), \code{"downside"} (Abwaertsschwankung, Wurzel des mittleren
+quadrierten negativen Teils), \code{"lpm"} (unteres partielles Moment der Ordnung
+\code{lpm_order}, \eqn{(E[\max(-r, 0)^q])^{1/q}}), \code{"var"} (Value at Risk:
+\eqn{-r_{(k)}}, \eqn{k = \max(1, \lfloor\alpha w\rfloor)}) oder \code{"es"} (Expected
+Shortfall, EWMA-gefiltert: Residuen \eqn{z_s = r_s / \sigma_{s|s-1}} der letzten
+\code{window} Bewegungstage, Mittel der \eqn{k} kleinsten mal der aktuellen
+EWMA-Schwankung). \code{target} gilt dann fuer dieses Mass.}
+
+\item{estimator}{\code{"window"} (Standard): die letzten \code{window} Tage mit
+Kursbewegung; \code{"ewma"}: exponentiell gewichtet mit \code{lambda}, Start mit
+dem Mittel der ersten 21 Bewegungstage, Mittelwert 0 (RiskMetrics); bei
+\code{risk = "var"} dann ebenfalls gefiltert wie \code{"es"} (lit1 S2).}
+
+\item{alpha}{Wahrscheinlichkeit fuer VaR und ES (Standard 0.05).}
+
+\item{lpm_order}{Ordnung des unteren partiellen Moments (1 bis 4, Standard 1).}
+
+\item{lambda}{Abklingfaktor der EWMA-Schaetzung (zwischen 0 und 1, Standard 0.94).}
+
+\item{exponent}{Exponent \eqn{p} der Potenzregel
+\eqn{k = \min(k_{max}, \max(k_{min}, (\rho_0 / \rho)^p))} (lit1 S1; Standard 1 wie bisher).}
+
+\item{min_exposure}{Kleinster Risikoanteil (Standard 0; hoechstens
+\code{max_exposure}; lit1 S5).}
+
+\item{risk_floor}{Boden der Risikoschaetzung als Anteil der Referenz
+\eqn{\rho_0} (z. B. 0.75: \eqn{\rho} zaehlt hoechstens bis \eqn{0.75 \rho_0} nach
+unten); \code{NULL} (Standard) = ohne (lit1 S5).}
+
+\item{reference}{Referenz \eqn{\rho_0}: \code{"fixed"} (Standard) =
+\code{target / 100}; \code{"median"} = Median der eigenen bisherigen Risikowerte
+je Zeile (expandierend, ab 63 Werten; \code{target} wird dann nicht verwendet;
+lit1 S4).}
+
+\item{cushion}{Drawdown-Polster: Tiefe \eqn{D} in Prozent (z. B. 30); der
+Risikoanteil wird mit \eqn{m = \min(1, \max(0, (D - DD)/(D (1 - DD))))}
+multipliziert, \eqn{DD} = Drawdown des Index des Risikoportfolios gegen sein Hoch
+der letzten \code{cushion_window} Bewegungstage (lit1 S7). \code{NULL}
+(Standard) = ohne.}
+
+\item{cushion_window}{Fenster des Hochs fuer \code{cushion} in Tagen mit
+Kursbewegung (Standard 252).}
 }
 \value{
 \code{SimLevWeights} (data.frame mit \code{date} und
@@ -57,7 +115,7 @@ Zeile, Anteil p. a., 0.15 = 15 \%).
 Skaliert den Risikoteil einer Gewichtsreihe so, dass die geschaetzte
 Volatilitaet des Risikoportfolios dem Ziel entspricht; der Rest geht in
 die sichere Anlage. Die Volatilitaet wird aus den Tagesrenditen der
-Risikoanlagen mit den aktuellen Gewichten ueber \code{window} Zeilen mit
+Risikoanlagen mit den aktuellen Gewichten (seit 1.6.5 je Zeile mit den Gewichten dieser Zeile, CR2-V1-1; Teiler n - 1, CR2-R-2) ueber \code{window} Zeilen mit
 Kursbewegung geschaetzt (Tage ohne Bewegung, etwa Wochenenden, zaehlen
 nicht).
 }

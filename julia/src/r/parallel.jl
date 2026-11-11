@@ -195,9 +195,9 @@ _ncores(cores) = cores isa Integer ? Int(cores) : unsafe_trunc(Int, Float64(core
     par_lapply(X, FUN, cores = 1)
 
 R: `.par_lapply(X, FUN, cores)`; Ergebnis `Vector{Any}` in der Reihenfolge
-von `X`. Parallel mit `Threads.@spawn`, wenn `Threads.nthreads() > 1`. Eine feste Zahl ≥ 2 verteilt seit 1.6.4
-(Entscheidung 133) über denselben Weg wie `cores = "auto"` (`_threaded` mit Mitschnitt der Warnungen), nur ohne
-Messung: min(cores, Elemente, Threads) Aufgaben; Ausgaben, Meldungen, Warnungen und Fehler wie `cores = 1`. Mit einem
+von `X`. Parallel mit `Threads.@spawn`, wenn `Threads.nthreads() > 1`. Eine feste Zahl ≥ 2 ist seit 1.6.5
+(Entscheidungen 140, 179) der Höchstwert der automatischen Wahl (`_auto` mit höchstens `cores` Aufgaben; 1.6.4,
+Entscheidung 133: min(cores, Elemente, Threads) Aufgaben ohne Messung); Ausgaben, Meldungen, Warnungen und Fehler wie `cores = 1`. Mit einem
 Thread nacheinander wie `cores = 1` (bis dahin `_sequential`: Warnungen verworfen). Im Paket K42 PAR rechnete
 `"auto"` die Studien nacheinander (Schlüsselwort `tasks = false`, entfallen mit K43 T2-R1/T2-R9).
 """
@@ -212,7 +212,9 @@ function par_lapply(X, FUN, cores = 1)
         _PRECOMPILE_THREADED[] || return Any[_unit(FUN, x) for x in xs]
         return _threaded(xs, FUN, min(n, 2))   # nur in der Arbeitslast beim Vorkompilieren (seit 1.6.3)
     end
-    return _threaded(xs, FUN, min(n, nt))
+    # seit 1.6.5 (Entscheidungen 140, 179): feste Zahl = Höchstwert der automatischen Wahl (_auto mit höchstens cores
+    # Aufgaben); 1.6.4 (Entscheidung 133): _threaded mit min(cores, Elemente, Threads) Aufgaben ohne Messung
+    return _auto(xs, FUN; max_runs = _ncores(cores))
 end
 
 "Nur für die Vorkompilier-Arbeitslast (precompile.jl): `_threaded` auch mit einem Thread übersetzen (J4, seit 1.6.3)."
@@ -236,7 +238,7 @@ Fehler wie `cores = 1`:
   `bootstrap_study`, T2-B3 Formatierpuffer je Thread, T2-B7 Sperre in `planning_lumpsum_vs_dca`), seitdem verteilt
   `"auto"` überall (Entscheidung 134).
 """
-function _auto(xs, FUN)
+function _auto(xs, FUN; max_runs::Union{Nothing,Integer} = nothing)
     n = length(xs)
     _PAR_LAST[] = (n, 1, 0)             # letzter Plan (gemessene Elemente, Aufgaben, Threads; intern, für Proben)
     (n <= 1 || Threads.nthreads() < 2 || SimLev.SLib.nprocs() < 2) && return Any[_unit(FUN, x) for x in xs]
@@ -253,7 +255,8 @@ function _auto(xs, FUN)
     end
     k >= n && return res
     u = k >= 2 ? t_rest / (k - 1) : t_first
-    c, cap = SimLev.SLib.par_plan(n - k, u, 0.0; sys = 2, max_runs = Threads.nthreads())
+    c, cap = SimLev.SLib.par_plan(n - k, u, 0.0; sys = 2,
+                                  max_runs = max_runs === nothing ? Threads.nthreads() : min(Threads.nthreads(), max_runs))
     _PAR_LAST[] = (k, c, cap)
     rest = xs[k+1:n]
     if c < 2

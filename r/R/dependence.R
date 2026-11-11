@@ -56,7 +56,8 @@
 .e4_numcol <- function(data, col, fn) {
   chk_col_nofactor(data, col, fn)                                 # Entscheidung 15, B-009
   v <- data[[col]]
-  if (!(is.numeric(v) || (is.logical(v) && all(is.na(v))))) chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
+  # seit 1.6.5 (CR2-X19-1) wie Python/Julia: Spalte nur aus NA gleich welchen Typs (kein Faktor) erlaubt
+  if (!(is.numeric(v) || all(is.na(v)))) chk_stop("spalte_typ", fn, col, chk_msg("typ.numerisch"))
   invisible(data)
 }
 
@@ -102,12 +103,10 @@
 #' @noRd
 .dep_sort_dates <- function(data, what = "data") {
   d <- data$date <- .to_date(data$date, sprintf("%s: Spalte 'date'", what))
-  if (anyNA(d)) stop(sprintf("%s: Spalte 'date' enth\u00e4lt fehlende Daten (Zeile %s).", what,
-                             paste(utils::head(which(is.na(d)), 5), collapse = ", ")))
+  if (anyNA(d)) stop(chk_msg("c.m_dep_sort_dates", what, paste(utils::head(which(is.na(d)), 5), collapse = ", ")))
   if (anyDuplicated(d)) {
     dup <- unique(d[duplicated(d)])
-    stop(sprintf("%s: doppelte Daten in 'date' (%s%s); erwartet ist eine Zeile je Datum.", what,
-                 paste(format(utils::head(dup, 5)), collapse = ", "), if (length(dup) > 5) sprintf(" und %d weitere", length(dup) - 5) else ""))
+    stop(chk_msg("c.m_dep_sort_dates_2", what, paste(format(utils::head(dup, 5)), collapse = ", "), if (length(dup) > 5) sprintf(" und %d weitere", length(dup) - 5) else ""))
   }
   if (is.unsorted(d)) {
     message(sprintf("%s: Zeilen sind nicht nach 'date' sortiert und werden aufsteigend sortiert.", what))
@@ -122,9 +121,7 @@
 .dep_check_prices <- function(v, a, d) {
   bad <- which(!is.na(v) & (!is.finite(v) | v <= 0))
   # seit 1.6.4 ohne den Wert (Entscheidung 8), mit dem Datum als Ort in data
-  if (length(bad)) stop(sprintf("Kursspalte '%s': Kurse m\u00fcssen positiv und endlich sein, gefunden am %s%s (fehlende Kurse als NA angeben).",
-                                a, format(d[bad[1]]),
-                                if (length(bad) > 1) sprintf(" und %d weitere Werte", length(bad) - 1) else ""))
+  if (length(bad)) stop(chk_msg("c.m_dep_check_prices", a, format(d[bad[1]]), if (length(bad) > 1) sprintf(" und %d weitere Werte", length(bad) - 1) else ""))
   v
 }
 
@@ -132,7 +129,7 @@
 #' @keywords internal
 #' @noRd
 .dep_returns <- function(data, assets, conditions = NULL, frequency = "week", drop_flat = TRUE) {
-  if (!is.data.frame(data) || !"date" %in% names(data)) stop("data.frame mit Spalte 'date' erwartet.")
+  if (!is.data.frame(data) || !"date" %in% names(data)) stop(chk_msg("c.m_dep_returns"))
   miss <- setdiff(c(assets, conditions), names(data))
   if (length(miss)) stop(sprintf("Spalten fehlen: %s", paste(miss, collapse = ", ")))
   data <- .dep_sort_dates(data)
@@ -215,7 +212,11 @@
       th <- par[1]
       if (abs(th) < 1e-8) return(0)
       e1 <- -expm1(-th)
-      log(th * e1) - th * (u + v) - 2 * log(abs(e1 - (-expm1(-th * u)) * (-expm1(-th * v))))
+      # seit 1.6.5 (CR2-X7-1, Entscheidung 189) Nenner ohne Ausloeschung: (1 - e^-th) - (1 - e^-th u)(1 - e^-th v) =
+      # e^-th u (1 - e^-th v) + e^-th v (1 - e^-th (1 - v)), beide Summanden mit gleichem Vorzeichen (bis 1.6.4 ab
+      # th u, th v > 36,7 genau 0 und die Strafe -1e10)
+      D <- exp(-th * u) * (-expm1(-th * v)) + exp(-th * v) * (-expm1(-th * (1 - v)))
+      log(th * e1) - th * (u + v) - 2 * log(abs(D))
     },
     stop(sprintf("Unbekannte Copula-Familie '%s'.", family)))
   s <- sum(ll)
@@ -328,6 +329,18 @@
 #' besten Rasterpunkt. Liegt das Maximum bei \eqn{\nu > 500} (auch
 #' \eqn{\nu = \infty}), steht in \code{par2} 500; \code{loglik} gilt fuer
 #' das gefundene \eqn{\nu}.
+#' Die Gauss-Copula wird seit 1.6.5 wie die t-Copula ueber \eqn{\mathrm{atanh}\,\rho}
+#' geschaetzt (ohne die fruehere Schranke \eqn{|\rho| \le 0.995}). Die
+#' Log-Dichte der Frank-Copula rechnet seit 1.6.5 ohne Ausloeschung (bis
+#' 1.6.4 blieb die Schaetzung bei starker positiver Abhaengigkeit bei
+#' \eqn{\theta \approx 37} stehen). Liegt der Parameter von Clayton,
+#' Gumbel oder Frank am Rand starker Abhaengigkeit des Suchbereichs
+#' (\eqn{\theta} bis 60 bzw. \eqn{\pm 60}), gibt die Funktion einen Hinweis;
+#' Schaetzung, Log-Likelihood und AIC dieser Familie sind dann unzuverlaessig.
+#' Ebenso seit 1.6.5 fuer Gauss und t bei nahezu vollstaendiger Abhaengigkeit
+#' (\eqn{1 - |\rho| \le 10^{-12}}, z. B. ein Index gegen seinen eigenen
+#' Hebelindex): die Log-Likelihood waechst dort unbeschraenkt, ihr Wert haengt
+#' nur von der Rundung ab und gewinnt den AIC-Vergleich ohne Aussage.
 #'
 #' @param x,y Numerische Vektoren gleicher Laenge (z. B. Renditen; nur die
 #'   Raenge zaehlen). Paare mit nicht endlichen Werten werden entfernt;
@@ -369,17 +382,16 @@ copula_fit <- function(x, y, families = NULL) {
   if (length(x) != length(y)) stop(sprintf("copula_fit: x und y m\u00fcssen gleich lang sein (%d bzw. %d Werte).", length(x), length(y)))
   ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]
   n <- length(x)
-  if (n < 20) stop("copula_fit: mindestens 20 Beobachtungen n\u00f6tig.")
+  if (n < 20) stop(chk_msg("c.m_copula_fit"))
   if (!is.null(families)) {
     base <- sub("_.*$", "", families); rot <- ifelse(grepl("_", families), sub("^[^_]*_", "", families), "")
     bad <- !base %in% c("gaussian", "t", "clayton", "gumbel", "frank") | !rot %in% c("", "90", "180", "270") |
       (base %in% c("gaussian", "t", "frank") & rot != "")
-    if (any(bad)) stop(sprintf("copula_fit: unbekannte Familie %s; erlaubt sind gaussian, t, frank sowie clayton und gumbel mit optionaler Rotation _90, _180 oder _270.",
-                               paste0("'", families[bad], "'", collapse = ", ")))
+    if (any(bad)) stop(chk_msg("c.m_copula_fit_2", paste0("'", families[bad], "'", collapse = ", ")))
   }
   u <- .pobs(x); v <- .pobs(y)
   tau <- .kendall(x, y)
-  if (!is.finite(tau)) stop("copula_fit: x oder y ist konstant (keine Rangstreuung); keine Copula sch\u00e4tzbar.")
+  if (!is.finite(tau)) stop(chk_msg("c.m_copula_fit_3"))
   if (is.null(families)) families <- if (tau >= 0)
     c("gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180")
     else c("gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270")
@@ -388,14 +400,22 @@ copula_fit <- function(x, y, families = NULL) {
     base <- sub("_.*$", "", fam)
     f <- function(p) -.cop_ll(fam, p, u, v)
     res <- switch(base,
-      gaussian = { o <- .sl_optimize(function(r) f(r), c(-0.995, 0.995)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) },
+      # seit 1.6.5 (E-T3-5) ueber atanh rho in [-20, 20] wie die t-Copula (Brent, tol 1e-10), ohne die Schranke 0,995
+      gaussian = { o <- .sl_optimize(function(th) f(tanh(th)), c(-20, 20), tol = 1e-10)
+                   # seit 1.6.5 (PRG2-4): Hinweis bei |rho| bis auf 1e-12 an 1 (Log-Likelihood dort Rundungsergebnis)
+                   list(par = c(tanh(o$minimum), NA), nll = o$objective, k = 1, edge = 1 - abs(tanh(o$minimum)) <= 1e-12) },
       t = {                                                     # Profil-Likelihood in nu
         o <- .cop_fit_t(u, v)
-        list(par = c(tanh(o[1]), min(o[2], 500)), nll = o[3], k = 2)
+        list(par = c(tanh(o[1]), min(o[2], 500)), nll = o[3], k = 2, edge = 1 - abs(tanh(o[1])) <= 1e-12)   # PRG2-4
       },
-      clayton = { o <- .sl_optimize(function(lt) f(exp(lt)), c(log(1e-4), log(60))); list(par = c(exp(o$minimum), NA), nll = o$objective, k = 1) },
-      gumbel = { o <- .sl_optimize(function(lt) f(1 + exp(lt)), c(log(1e-5), log(60))); list(par = c(1 + exp(o$minimum), NA), nll = o$objective, k = 1) },
-      frank = { o <- .sl_optimize(function(th) f(th), c(-60, 60)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) })
+      clayton = { o <- .sl_optimize(function(lt) f(exp(lt)), c(log(1e-4), log(60))); list(par = c(exp(o$minimum), NA), nll = o$objective, k = 1,
+                                                                                            edge = o$minimum > log(60) - 1e-3 * (log(60) - log(1e-4))) },
+      gumbel = { o <- .sl_optimize(function(lt) f(1 + exp(lt)), c(log(1e-5), log(60))); list(par = c(1 + exp(o$minimum), NA), nll = o$objective, k = 1,
+                                                                                             edge = o$minimum > log(60) - 1e-3 * (log(60) - log(1e-5))) },
+      frank = { o <- .sl_optimize(function(th) f(th), c(-60, 60)); list(par = c(o$minimum, NA), nll = o$objective, k = 1,
+                                                                         edge = abs(o$minimum) > 60 - 1e-3 * 120) })
+    # seit 1.6.5 (CR2-X7-1): Hinweis, wenn der Parameter am Rand starker Abhaengigkeit des Suchbereichs liegt
+    if (isTRUE(res$edge)) message(chk_msg("c.cop_rand", "copula_fit", fam, format(res$par[1], digits = 6)))
     lam <- .cop_lambda(fam, res$par)
     data.frame(family = fam, par1 = res$par[1], par2 = res$par[2], loglik = -res$nll,
                aic = 2 * res$k + 2 * res$nll, bic = log(n) * res$k + 2 * res$nll,
@@ -411,9 +431,11 @@ copula_fit <- function(x, y, families = NULL) {
 #'
 #' Misst fuer zwei Reihen (z. B. Periodenrenditen), wie oft extreme Werte
 #' gemeinsam auftreten, ohne ein Copula-Modell anzunehmen:
-#' \deqn{\hat\lambda_L(q) = \frac{\#\{u_i \le q, v_i \le q\}}{n q}, \quad
-#'       \hat\lambda_U(q) = \frac{\#\{u_i > 1 - q, v_i > 1 - q\}}{n q}}
-#' auf Pseudo-Beobachtungen \eqn{u_i, v_i} (Rang / (n + 1)). Unter
+#' \deqn{\hat\lambda_L(q) = \frac{\#\{R_i \le q (n + 1), S_i \le q (n + 1)\}}{n q}, \quad
+#'       \hat\lambda_U(q) = \frac{\#\{n + 1 - R_i \le q (n + 1), n + 1 - S_i \le q (n + 1)\}}{n q}}
+#' mit den Raengen \eqn{R_i, S_i} (Mittel bei Bindungen). Seit 1.6.5 sind
+#' beide Raender spiegelbildlich (bis 1.6.4 oben \eqn{u_i > 1 - q} mit
+#' \eqn{u_i = R_i / (n + 1)}, eine Grenzbeobachtung weniger als unten). Unter
 #' Unabhaengigkeit ist \eqn{\hat\lambda(q) \approx q}, bei
 #' Gauss-Abhaengigkeit faellt es fuer \eqn{q \to 0} gegen 0, bei echter
 #' Tail-Abhaengigkeit bleibt es positiv.
@@ -446,10 +468,10 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
   if (length(x) != length(y)) stop(sprintf("tail_dependence: x und y m\u00fcssen gleich lang sein (%d bzw. %d Werte).", length(x), length(y)))
   chk_nofactor(q, "tail_dependence", "q")
   if (!is.numeric(q) || !is.null(dim(q)) || !length(q) || any(!is.finite(q) | q <= 0 | q >= 1))   # seit 1.6.4 ohne Wert
-    stop("tail_dependence: q muss aus Anteilen echt zwischen 0 und 1 bestehen.")
+    stop(chk_msg("c.m_tail_dependence"))
   ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]; n <- length(x)
-  if (n < 2) stop("tail_dependence: mindestens zwei Paare mit endlichen Werten n\u00f6tig.")
-  u <- .pobs(x); v <- .pobs(y)
+  if (n < 2) stop(chk_msg("c.m_tail_dependence_2"))
+  u <- rank(x, ties.method = "average"); v <- rank(y, ties.method = "average")   # seit 1.6.5 Raenge (CR2-S-1)
   do.call(rbind, lapply(q, function(p) {
     r <- .tail_dep_core(x, y, u, v, n, p)
     data.frame(q = p, lower = r[[1L]], upper = r[[2L]], exceed_lower = r[[3L]], exceed_upper = r[[4L]],
@@ -460,9 +482,13 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 # Kern von tail_dependence fuer ein p auf endlichen Paaren (seit 1.6.4, B-064): je Reihe ein quantile() fuer p und
 # 1 - p (dieselben Ordnungsstatistiken wie zwei Einzelaufrufe; die Quantile gehen nur in Vergleiche ein), ohne
 # data.frame. Liste lower, upper, exceed_lower, exceed_upper, n_lower, n_upper.
+# Seit 1.6.5 (CR2-S-1, Entscheidung 189) u, v Raenge (Mittel bei Bindungen) und beide Raender spiegelbildlich: unten
+# Rang <= q (n + 1), oben n + 1 - Rang <= q (n + 1) (Toleranz 1e-7 gegen Rundung; Raenge sind Vielfache von 0,5);
+# bis 1.6.4 oben u > 1 - q, eine Grenzbeobachtung weniger als unten. Teiler n q wie bisher.
 .tail_dep_core <- function(x, y, u, v, n, p) {
   ec <- function(s) if (sum(s) >= 8 && .sl_sd(x[s]) > 0 && .sl_sd(y[s]) > 0) .sl_cor(x[s], y[s]) else NA_real_
-  lo <- u <= p & v <= p; hi <- u > 1 - p & v > 1 - p
+  cq <- p * (n + 1) + 1e-7
+  lo <- u <= cq & v <= cq; hi <- (n + 1 - u) <= cq & (n + 1 - v) <= cq
   qx <- stats::quantile(x, c(p, 1 - p), names = FALSE); qy <- stats::quantile(y, c(p, 1 - p), names = FALSE)
   el <- x <= qx[1L] & y <= qy[1L]; eh <- x >= qx[2L] & y >= qy[2L]
   list(sum(lo) / (n * p), sum(hi) / (n * p), ec(el), ec(eh), sum(lo), sum(hi))
@@ -476,8 +502,8 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
   p <- p[[1L]]                                                   # wie lapply(q, ...) in tail_dependence
   function(x, y) {
     ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]; n <- length(x)
-    if (n < 2) stop("tail_dependence: mindestens zwei Paare mit endlichen Werten n\u00f6tig.")
-    .tail_dep_core(x, y, .pobs(x), .pobs(y), n, p)
+    if (n < 2) stop(chk_msg("c.m_tail_dependence_2"))
+    .tail_dep_core(x, y, rank(x, ties.method = "average"), rank(y, ties.method = "average"), n, p)
   }
 }
 
@@ -512,6 +538,10 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'   korrelierte Reihen (singulaere Korrelationsmatrix der standardisierten
 #'   Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler.
 #'   Seit 1.6.4 geprueft: nur Zahlen, alle endlich.
+#'   Grenze der Einheit: eine Reihe mit Varianz unter 1e-16 (Streuung unter
+#'   1e-8, z. B. Renditen mal 1e-8) gilt als konstant; die geschaetzten
+#'   DCC-Parameter haengen in den letzten Stellen (etwa ab der 7.) von der
+#'   Einheit ab.
 #' @return Liste mit \code{a}, \code{b} (DCC-Parameter), \code{loglik}
 #'   (Korrelationsteil der Quasi-Log-Likelihood), \code{correlation} (Matrix
 #'   Zeit x Paare der bedingten Korrelationen \eqn{R_t}; Spaltennamen wie
@@ -538,13 +568,13 @@ dependence_dcc <- function(R) {
   else if (!(is.numeric(R) && is.matrix(R))) chk_stop("e4.matrix", "dependence_dcc")
   R <- as.matrix(R)
   if (!all(is.finite(R))) chk_stop("e3.werte", "dependence_dcc", "R")
-  if (ncol(R) < 2 || nrow(R) < 100) stop("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
+  if (ncol(R) < 2 || nrow(R) < 100) stop(chk_msg("c.m_dependence_dcc"))
   nm <- colnames(R) %||% paste0("V", seq_len(ncol(R)))
   g <- lapply(seq_len(ncol(R)), function(j) .fit_garch11(R[, j], quiet = TRUE))
   Z <- vapply(g, `[[`, numeric(nrow(R)), "z")
   if (!is.matrix(Z)) Z <- matrix(Z, ncol = ncol(R))
   flat <- which(apply(Z, 2, .sl_sd) == 0)
-  if (length(flat)) stop(sprintf("dependence_dcc: Reihe %s ist konstant; keine Korrelation sch\u00e4tzbar.", paste0("'", nm[flat], "'", collapse = ", ")))
+  if (length(flat)) stop(chk_msg("c.m_dependence_dcc_2", paste0("'", nm[flat], "'", collapse = ", ")))
   Qb <- .sl_cor(Z)
   # (nahezu) perfekt korrelierte Reihen: Qbar und damit R_t sind singulaer
   ev <- .sl_eigen_sym(Qb, only.values = TRUE)$values
@@ -559,7 +589,7 @@ dependence_dcc <- function(R) {
   o <- .sl_dcc_fit(Z, Qb)
   p <- c(o$a, o$b)
   fl <- .sl_dcc_filter(Z, p[1], p[2], Qb, TRUE)
-  if (!isTRUE(fl$ok)) stop("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht sch\u00e4tzbar.")
+  if (!isTRUE(fl$ok)) stop(chk_msg("c.m_dependence_dcc_3"))
   pn <- utils::combn(nm, 2, paste, collapse = " ~ ")
   C <- fl$R; colnames(C) <- pn
   list(a = p[1], b = p[2], loglik = -o$nll, correlation = C, pairs = pn,
@@ -588,10 +618,15 @@ dependence_dcc <- function(R) {
     }
     breaks <- c(-Inf, br, Inf)
   }
+  # seit 1.6.5 (CR2-X4-2): alle Grenzen mit so vielen gueltigen Stellen (3 bis 15), dass sie verschieden lauten (bis
+  # 1.6.4 immer 3: gleiche Namen fuer verschiedene Regime, R legte sie zusammen)
+  sf <- function(b, dg) if (dg <= 7L) format(signif(b, dg)) else format(signif(b, dg), digits = dg)
+  fb <- breaks[is.finite(breaks)]; dg <- 3L
+  while (dg < 15L && anyDuplicated(vapply(fb, function(b) sf(b, dg), ""))) dg <- dg + 1L
   lab <- vapply(seq_len(length(breaks) - 1L), function(i) {
     a <- breaks[i]; b <- breaks[i + 1L]
-    if (!is.finite(a)) sprintf("< %s", format(signif(b, 3))) else if (!is.finite(b)) sprintf(">= %s", format(signif(a, 3)))
-    else sprintf("%s bis %s", format(signif(a, 3)), format(signif(b, 3)))
+    if (!is.finite(a)) sprintf("< %s", sf(b, dg)) else if (!is.finite(b)) sprintf(">= %s", sf(a, dg))
+    else sprintf("%s bis %s", sf(a, dg), sf(b, dg))
   }, "")
   f <- cut(cv, breaks, labels = lab, right = FALSE)
   list(regime = f, breaks = breaks)
@@ -607,7 +642,8 @@ dependence_dcc <- function(R) {
   for (k in names(breaks)) {
     if (!k %in% conditions) chk_stop("e4.breaks_name", fn, k)
     b <- breaks[[k]]
-    if (is.factor(b) || !is.numeric(b) || !is.null(dim(b)) || length(b) < 2L || anyNA(b) || any(diff(b) <= 0)) chk_stop("e4.breaks", fn)
+    # seit 1.6.5 (CR2-X1-2): !isTRUE(all(diff > 0)), damit doppelte unendliche Grenzen (diff NaN) die Meldung geben
+    if (is.factor(b) || !is.numeric(b) || !is.null(dim(b)) || length(b) < 2L || anyNA(b) || !isTRUE(all(diff(b) > 0))) chk_stop("e4.breaks", fn)
   }
   invisible(breaks)
 }
@@ -822,6 +858,9 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
   cond <- diffs <- regimes <- NULL
   if (length(conditions)) {
     if (is.null(block)) {
+      # seit 1.6.5 (CR2-X51-1): Anlage ohne Schwankung -> klare Meldung (bis 1.6.4 je Sprache anders)
+      flat <- assets[vapply(seq_along(assets), function(j) !isTRUE(.sl_sd(X[, j]) > 0), TRUE)]
+      if (length(flat)) chk_stop("c.dep_konstant", fn, paste0("'", flat, "'", collapse = ", "))
       bl <- vapply(seq_len(nrow(pidx)), function(i) {
         x <- scale(X[, pidx[i, 1]])[, 1]; y <- scale(X[, pidx[i, 2]])[, 1]; .pw_block(x * y)[["stationary"]] }, 0)
       block <- min(max(2, max(bl)), n / 10)
@@ -829,7 +868,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
     cond <- list(); diffs <- list(); regimes <- list(); td_fun <- .tail_dep_fun(tail_q)
     for (cn in conditions) {
       cv <- rd[[cn]]; keep <- which(is.finite(cv))
-      if (length(keep) < 30) { warning(sprintf("Zustand '%s': zu wenige Beobachtungen.", cn)); next }
+      if (length(keep) < 30) { warning(chk_msg("c.m_dependence_analysis", cn)); next }
       rg <- .dep_regimes(cv[keep], breaks[[cn]], n_regimes)
       lv <- levels(rg$regime); Xk <- X[keep, , drop = FALSE]; rk <- rg$regime
       regimes[[cn]] <- data.frame(regime = lv, n = as.integer(table(rk)[lv]),
@@ -961,7 +1000,8 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
   .e4_pick(pair, pn, "plot.SimLevDependence", "pair")             # seit 1.6.4 (B-007)
   if (length(x$conditional)) .e4_pick(condition, names(x$conditional), "plot.SimLevDependence", "condition")
   i <- if (is.character(pair)) match(pair, pn) else pair
-  ab <- strsplit(pn[i], " ~ ")[[1]]
+  # seit 1.6.5 (CR2-L-2): Anlagen aus der Paarliste (Reihenfolge wie combn in dependence_analysis), nicht aus dem Text
+  ab <- x$assets[utils::combn(length(x$assets), 2)[, i]]
   X <- x$returns
   bp <- function() graphics::par(mar = c(3.8, 4.2, 2.6, 1), mgp = c(2.4, 0.6, 0), las = 1, cex.axis = 0.8)
   p_roll <- function() {
@@ -971,7 +1011,9 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
                    main = sprintf("%s: rollierend (%d) und DCC", pn[i], x$window))
     if (!is.null(x$dcc)) graphics::lines(X$date, x$dcc$correlation[, pn[i]], col = "#B5562B")
     graphics::abline(h = 0, col = "grey60", lty = 3)
-    graphics::legend("bottomleft", c("rollierend", "DCC"), col = c("#2C6E9B", "#B5562B"), lwd = 2, bty = "n", cex = 0.75)
+    # seit 1.6.5 (CR2-X7-4): "DCC" nur mit gerechneter DCC in der Legende (wie Python/Julia)
+    graphics::legend("bottomleft", c("rollierend", if (!is.null(x$dcc)) "DCC"), col = c("#2C6E9B", if (!is.null(x$dcc)) "#B5562B"),
+                     lwd = 2, bty = "n", cex = 0.75)
   }
   p_tail <- function() {
     qg <- c(0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
@@ -995,7 +1037,7 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
     if (!is.null(ct$pearson_lo)) graphics::arrows(mids, ct$pearson_lo, mids, ct$pearson_hi, angle = 90, code = 3, length = 0.04)
     graphics::points(mids, ct$lambda_lower, pch = 19, col = "#B5562B")
     graphics::abline(h = 0, col = "grey40")
-    graphics::legend("topleft", c("Pearson (90%-KI)", sprintf("lam unten (q = %g)", x$tail_q)), pch = c(15, 19),
+    graphics::legend("topleft", c(if (!is.null(ct$pearson_lo)) "Pearson (90%-KI)" else "Pearson", sprintf("lam unten (q = %g)", x$tail_q)), pch = c(15, 19),
                      col = c("#2C6E9B", "#B5562B"), bty = "n", cex = 0.72)
   }
   p_scatter <- function() {
@@ -1015,6 +1057,28 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
 # Quantilsregression, Tail-Regression, CoVaR
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Zentrieren/Skalieren der Regressoren fuer quantile_regression (seit 1.6.5, K5): Z = (X - m) / s je Spalte ausser der
+# Konstanten (erste Spalte bei intercept); m = Mittel (nur mit Konstante, sonst 0), s = Standardabweichung (0: max |x|)
+.qr_scale <- function(X, intercept) {
+  p <- ncol(X); m <- numeric(p); s <- rep(1, p)
+  for (j in seq_len(p)) {
+    if (intercept && j == 1L) next
+    v <- X[, j]
+    if (intercept) m[j] <- mean(v)
+    sj <- .sl_sd(v)
+    s[j] <- if (is.finite(sj) && sj > 0) sj else max(abs(v))
+  }
+  Z <- X
+  for (j in seq_len(p)) if (!(intercept && j == 1L)) Z[, j] <- (X[, j] - m[j]) / s[j]
+  list(Z = Z, m = m, s = s)
+}
+# Rueckrechnung: Steigung g_j / s_j, Konstante g_0 - sum(g_j m_j / s_j)
+.qr_unscale <- function(g, sx, intercept) {
+  b <- g / sx$s
+  if (intercept && length(g) > 1L) b[1L] <- g[1L] - sum(b[-1L] * sx$m[-1L])
+  b
+}
+
 #' Lineare Quantilsregression
 #'
 #' Schaetzt die Koeffizienten des bedingten \eqn{\tau}-Quantils von \code{y}
@@ -1023,7 +1087,12 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
 #' \eqn{\rho_\tau(r) = r(\tau - 1\{r < 0\})}. Geliefert wird die exakte
 #' Loesung dieses linearen Programms mit Optimalitaetsnachweis (Ausnahme:
 #' entartete Faelle, siehe unten), berechnet in zwei Schritten (Kern in
-#' C++):
+#' C++). Seit 1.6.5 werden die Regressoren vorher zentriert (mit Konstante)
+#' und auf Standardabweichung 1 skaliert, die Koeffizienten danach
+#' zurueckgerechnet; so haengt das Ergebnis nicht von Einheit oder Niveau
+#' der Regressoren ab (bis 1.6.4 bei Indexstaenden oder Jahreszahlen
+#' Steigungen bis 85 % daneben, mit der Warnung "Optimalitaet nicht
+#' nachgewiesen"):
 #' \enumerate{
 #'   \item MM-Algorithmus von Hunter & Lange (2000), ausgehend von der
 #'     KQ-Loesung: iterativ gewichtete kleinste Quadrate mit
@@ -1091,8 +1160,8 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
 #' @export
 quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 1e-10, maxit = 2000L) {
   if (!is.numeric(tau) || length(tau) != 1 || !is.finite(tau) || tau <= 0 || tau >= 1)   # seit 1.6.4 ohne Wert
-    stop("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein.")
-  if (is.factor(y) || !is.numeric(y) || !is.null(dim(y))) stop("quantile_regression: y muss numerisch sein.")   # seit 1.6.4 Vektor
+    stop(chk_msg("c.m_quantile_regression"))
+  if (is.factor(y) || !is.numeric(y) || !is.null(dim(y))) stop(chk_msg("c.m_quantile_regression_2"))   # seit 1.6.4 Vektor
   fn <- "quantile_regression"
   if (is.factor(X)) chk_stop("faktor", fn, "X")                   # Entscheidung 15
   chk_bool1(intercept, fn, "intercept")                           # B-051
@@ -1101,28 +1170,32 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
   y <- as.numeric(y)
   if (is.data.frame(X)) {
     nn <- names(X)[!vapply(X, is.numeric, TRUE)]
-    if (length(nn)) stop(sprintf("quantile_regression: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() in Indikatorspalten umwandeln).",
-                                 paste0("'", nn, "'", collapse = ", ")))
+    if (length(nn)) stop(chk_msg("c.m_quantile_regression_3", paste0("'", nn, "'", collapse = ", ")))
   }
   X <- if (is.null(X)) matrix(0, length(y), 0) else as.matrix(X)
-  if (!is.numeric(X)) stop("quantile_regression: X muss numerisch sein.")
+  if (!is.numeric(X)) stop(chk_msg("c.m_quantile_regression_4"))
   if (nrow(X) != length(y)) stop(sprintf("quantile_regression: X hat %d Zeilen, y aber %d Werte.", nrow(X), length(y)))
   nm <- colnames(X) %||% if (ncol(X)) paste0("x", seq_len(ncol(X))) else character(0)
   if (intercept) { X <- cbind(rep(1, nrow(X)), X); nm <- c("(Intercept)", nm) }   # 0 Zeilen ohne Warnung
   ok <- is.finite(y) & rowSums(!is.finite(X)) == 0; y <- y[ok]; X <- X[ok, , drop = FALSE]
-  if (!ncol(X)) stop("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
+  if (!ncol(X)) stop(chk_msg("c.m_quantile_regression_5"))
   if (length(y) < ncol(X)) stop(sprintf("quantile_regression: %d vollst\u00e4ndige Beobachtungen f\u00fcr %d Koeffizienten.", length(y), ncol(X)))
   qx <- .sl_lsfit(X, y)                                        # OLS-Start: Householder-QR
   if (qx$rank < ncol(X))
-    stop(sprintf("quantile_regression: Regressoren linear abh\u00e4ngig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).",
-                 paste0("'", nm[qx$pivot[(qx$rank + 1):ncol(X)]], "'", collapse = ", ")))
-  beta <- qx$coefficients
+    stop(chk_msg("c.m_quantile_regression_6", paste0("'", nm[qx$pivot[(qx$rank + 1):ncol(X)]], "'", collapse = ", ")))
+  # seit 1.6.5 (K5, CR2-E-10): Regressoren vor dem Kern zentrieren (mit Konstante) und auf Standardabweichung 1
+  # skalieren, Koeffizienten danach zurueckrechnen; die Toleranzen des Kerns (Eckensuche) wirken sonst in den
+  # Einheiten von X (Indexstand, Jahreszahl: Steigungen bis 85 % daneben). Spalte ohne Streuung (nur ohne Konstante
+  # moeglich): Teiler max |x|.
+  sx <- .qr_scale(X, intercept)
+  Z <- sx$Z
+  beta <- .sl_lsfit(Z, y)$coefficients
   sc <- max(.sl_sd(y), 1e-12)
-  storage.mode(X) <- "double"
-  beta <- .quantile_reg_core(y, X, tau, as.numeric(beta), sc, tol, as.integer(maxit))
-  if (!isTRUE(attr(beta, "optimal")))
-    warning("quantile_regression: Optimalit\u00e4t nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht gr\u00f6\u00dferem Zielwert als die MM-N\u00e4herung (bzw. die MM-N\u00e4herung selbst, falls keine solche Ecke gefunden wurde).")
-  stats::setNames(as.numeric(beta), nm)
+  storage.mode(Z) <- "double"
+  g <- .quantile_reg_core(y, Z, tau, as.numeric(beta), sc, tol, as.integer(maxit))
+  if (!isTRUE(attr(g, "optimal")))
+    warning(chk_msg("c.m_quantile_regression_7"))
+  stats::setNames(.qr_unscale(as.numeric(g), sx, intercept), nm)
 }
 
 #' Renditequantile in Abhaengigkeit von Drittvariablen
@@ -1199,12 +1272,17 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   rd <- .dep_returns(data, asset, drivers, frequency)
   rd <- rd[stats::complete.cases(rd[, c(asset, drivers)]), , drop = FALSE]
   y <- 100 * rd[[asset]]; X <- as.matrix(rd[, drivers, drop = FALSE]); n <- length(y)
-  if (n < 30) stop("tail_regression: zu wenige Perioden.")
+  if (n < 30) stop(chk_msg("c.m_tail_regression"))
   est <- vapply(quantiles, function(q) quantile_regression(y, X, q), numeric(ncol(X) + 1))
   if (!is.matrix(est)) est <- matrix(est, nrow = 1)
   X1 <- cbind(1, X); storage.mode(X1) <- "double"
+  # seit 1.6.5 (K5): Bootstrap auf denselben zentrierten/skalierten Treibern wie die Punktschaetzung (Mittel und
+  # Standardabweichung der ganzen Stichprobe), Start bei der umgerechneten Punktschaetzung, Ergebnis zurueckgerechnet
+  sx <- .qr_scale(X1, TRUE); Z1 <- sx$Z; storage.mode(Z1) <- "double"
+  g0 <- est; if (nrow(est) > 1L) for (k in seq_len(ncol(est))) {
+    g0[-1L, k] <- est[-1L, k] * sx$s[-1L]; g0[1L, k] <- est[1L, k] + sum(est[-1L, k] * sx$m[-1L]) }
   qfit <- function(yb, Xb, k)                                   # Bootstrap: Start bei der Punktschaetzung
-    as.numeric(.quantile_reg_core(yb, Xb, quantiles[k], est[, k], max(.sl_sd(yb), 1e-12), 1e-10, 2000L))
+    .qr_unscale(as.numeric(.quantile_reg_core(yb, Xb, quantiles[k], g0[, k], max(.sl_sd(yb), 1e-12), 1e-10, 2000L)), sx, TRUE)
   terms <- c("(Intercept)", drivers)
   se <- lo <- hi <- matrix(NA_real_, nrow(est), ncol(est))
   n_failed <- 0L
@@ -1212,7 +1290,7 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
     block <- block %||% min(max(2, .pw_block(abs(y - mean(y)))[["stationary"]]), n / 10)
     S <- .sl_main_stream(seed, "tail_regression")                                  # Hauptstrom
     bs <- lapply(seq_len(B), function(b) { idx <- .sl_boot_idx_stationary(n, n, block, stream = S)
-      yb <- y[idx]; Xb <- X1[idx, , drop = FALSE]
+      yb <- y[idx]; Xb <- Z1[idx, , drop = FALSE]
       # z. B. Treiber in der Stichprobe konstant -> singulaer: Wiederholung als NA
       tryCatch(vapply(seq_along(quantiles), function(k) qfit(yb, Xb, k), numeric(ncol(X) + 1)),
                error = function(e) matrix(NA_real_, ncol(X) + 1, length(quantiles))) })
@@ -1290,6 +1368,9 @@ plot.SimLevTailRegression <- function(x, ...) {
 #'   eigenen Einheit). \code{NULL} (Standard) = zeitkonstante Quantile.
 #'   Seit 1.6.4 keine Spalte aus system oder assets.
 #' @param q Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
+#'   Seit 1.6.5 ein Fehler bei weniger Perioden als Koeffizienten + 1 und
+#'   eine Warnung, wenn im Rand erwartet weniger als 5 Beobachtungen liegen
+#'   (Perioden mal min(q, 1 - q) < 5; eigene Schwelle).
 #' @param frequency Renditefrequenz: \code{"week"} (Standard, ISO-Woche),
 #'   \code{"day"} oder \code{"month"}.
 #' @return Objekt der Klasse \code{SimLevCoVaR} mit
@@ -1334,6 +1415,11 @@ tail_covar <- function(data, system, assets, state = NULL, q = 0.05, frequency =
   M <- if (length(state)) as.matrix(rd[, state, drop = FALSE]) else NULL
   if (!is.null(M)) storage.mode(M) <- "double"                   # Zustand nur NA (Entscheidung 14) wie Python/Julia
   ys <- 100 * rd[[system]]
+  # seit 1.6.5 (CR2-R-5, Entscheidung 189): Fehler bei weniger Perioden als Koeffizienten + 1, Warnung bei weniger
+  # als 5 erwarteten Randbeobachtungen (n min(q, 1 - q) < 5; eigene Schwelle)
+  n <- nrow(rd); kc <- 2L + if (is.null(M)) 0L else ncol(M)
+  if (n > 0L && n < kc + 1L) chk_stop("c.covar_perioden", fn, n, kc, kc + 1L)
+  if (n > 0L && n * min(q, 1 - q) < 5) warning(chk_msg("c.covar_rand", fn, n, chk_fmt(q)), call. = FALSE)
   res <- lapply(assets, function(a) {
     xi <- 100 * rd[[a]]
     bq <- quantile_regression(xi, M, q); bm <- quantile_regression(xi, M, 0.5)
@@ -1365,7 +1451,7 @@ print.SimLevCoVaR <- function(x, ...) {
 plot.SimLevCoVaR <- function(x, ...) {
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
   graphics::par(mar = c(3.6, 4.4, 2.6, 1), mgp = c(2.5, 0.6, 0), las = 1, cex.axis = 0.85)
-  s <- x$series; a <- unique(s$asset); cols <- c("#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C")[seq_along(a)]
+  s <- x$series; a <- unique(s$asset); cols <- rep_len(c("#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C"), length(a))   # seit 1.6.5 wie Python/Julia (CR2-X58-1)
   graphics::plot(range(s$date), range(s$delta_covar), type = "n", xlab = "", ylab = "Delta-CoVaR (%)",
                  main = sprintf("Delta-CoVaR f\u00fcr '%s' (q = %g)", x$system, x$q))
   for (j in seq_along(a)) graphics::lines(s$date[s$asset == a[j]], s$delta_covar[s$asset == a[j]], col = cols[j])
@@ -1427,7 +1513,7 @@ plot.SimLevCoVaR <- function(x, ...) {
 #' dependence_validate(b, d, agg = 5, q = 0.10)
 #' @export
 dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L) {
-  if (!inherits(boot, "bootstrap_result")) stop("boot muss ein bootstrap_result sein.")
+  if (!inherits(boot, "bootstrap_result")) stop(chk_msg("c.m_dependence_validate"))
   fn <- "dependence_validate"                                     # seit 1.6.4 (B-033, B-053)
   .e4_count(agg, fn, "agg")
   chk_num1(q, fn, "q", lo = 0, hi = 1, lo_open = TRUE, hi_open = TRUE)
@@ -1436,8 +1522,10 @@ dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L
     chk_stop("e1.ganz_inf", fn, "max_paths", chk_fmt(1))
   cfg <- boot$config
   if (length(cfg$index_names) < 2) stop("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
-  hist <- log(.extract_returns(data, cfg)$ret)
-  aggr <- function(L) { k <- nrow(L) %/% agg; if (k < 20) stop("Zu wenige Perioden nach Aggregation.")
+  # seit 1.6.5 (CR2-X6-1): nur Zahlenspalten wie bootstrap() (Entscheidung 39), Meldungen mit diesem Funktionsnamen
+  .boot_numcols(data, cfg, fn)
+  hist <- log(.extract_returns(data, cfg, who = fn)$ret)
+  aggr <- function(L) { k <- nrow(L) %/% agg; if (k < 20) stop(chk_msg("c.m_aggr"))
     rowsum(L[seq_len(k * agg), , drop = FALSE], rep(seq_len(k), each = agg)) }
   td_fun <- .tail_dep_fun(q)                                     # seit 1.6.4 ohne data.frame je Paar (B-064)
   stats_of <- function(L) {
@@ -1524,10 +1612,10 @@ regime_subset <- function(data, condition, min_run = 1L) {
           else if (is.function(condition)) condition(data)
           else condition
   cond <- .e4_cond(cond, fn)
-  if (length(cond) != nrow(data)) stop("condition muss die L\u00e4nge nrow(data) haben.")
+  if (length(cond) != nrow(data)) stop(chk_msg("c.m_regime_subset"))
   r <- rle(cond); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1L
   keep <- r$values & r$lengths >= min_run
-  if (!any(keep)) stop("regime_subset: keine Episode erf\u00fcllt condition und min_run.")
+  if (!any(keep)) stop(chk_msg("c.m_regime_subset_2"))
   rows <- unlist(Map(seq.int, starts[keep], ends[keep]))
   out <- data[rows, , drop = FALSE]
   ep <- data.frame(start = starts[keep], end = ends[keep], length = r$lengths[keep])

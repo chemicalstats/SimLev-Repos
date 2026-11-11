@@ -258,6 +258,37 @@ Hyperparameter.
 - Meucci, A. (2008). Fully flexible views: Theory and practice. *Risk*
   21(10), 97–102. – `scenario_entropy_pooling()`.
 
+## Kennzahlen der Simulation
+
+- Sharpe, W. F. (1966). Mutual fund performance. *The Journal of Business*
+  39(S1), ab S. 119. [doi:10.1086/294846](https://doi.org/10.1086/294846)
+  – `simulation()`: `statistics$sharpe` (Überschussrendite je Einheit
+  Schwankung).
+- Sharpe, W. F. (1994). The Sharpe ratio. *The Journal of Portfolio
+  Management* 21(1), 49–58.
+  [doi:10.3905/jpm.1994.409501](https://doi.org/10.3905/jpm.1994.409501) –
+  `statistics$sharpe` auf Überschussrenditen gegen `risk_free`.
+- Sortino, F. A., Price, L. N. (1994). Performance measurement in a
+  downside risk framework. *The Journal of Investing* 3(3), 59–64.
+  [doi:10.3905/joi.3.3.59](https://doi.org/10.3905/joi.3.3.59) –
+  `statistics$sortino` (Downside-Abweichung über alle Beobachtungen).
+- Martin, P. G., McCann, B. (1989). *The Investor's Guide to Fidelity
+  Funds: Winning Strategies for Mutual Fund Investors*. John Wiley & Sons. Ulcer Index und Ulcer Performance Index (Martin Ratio),
+  Formel auch auf der Seite des Autors:
+  [tangotools.com/ui/ui.htm](http://www.tangotools.com/ui/ui.htm)
+  („UPI = (Total return - Risk-free return) / UI“) –
+  `statistics$ulcer_index`, `statistics$martin_ratio` (seit 1.6.5 mit Abzug
+  des risikolosen Zinses).
+- AlternativeSoft: Ulcer Index and Serenity Ratio: can they help to select
+  better performers? (Webseite, abgerufen 10.11.2026)
+  [alternativesoft.com](https://www.alternativesoft.com/ulcer-index-and-serenity-ratio-can-they-help-to-select-better-performers.html),
+  dort nach KeyQuant (Baguenault de Viéville, Gelrubin, Lindet, Chevalier
+  2018, „An Alternative Portfolio Theory“; Originaltext nicht eingesehen) –
+  `statistics$serenity` = (Rendite − risikoloser Zins) / (Ulcer Index ·
+  Pitfall), Pitfall = CDaR / Volatilität. Das Niveau des CDaR (95 %) und die
+  jährliche Rechnung von Rendite, Zins und Volatilität legt SimLev selbst
+  fest; die Quelle nennt sie nicht.
+
 ## Überanpassung und Tests
 
 - Bailey, D. H., Borwein, J., López de Prado, M., Zhu, Q. J. (2017). The

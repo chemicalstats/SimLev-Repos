@@ -7,6 +7,20 @@
 
 static inline int py_interrupted(void *h) { (void) h; return PyErr_CheckSignals() < 0; }
 
+/* Abbruchhaken für Kerne, die ohne GIL laufen (seit 1.6.5, CR1-Y6-1, Entscheidung 188): nimmt die GIL kurz; der Kern
+ * ruft ihn nur aus dem aufrufenden Thread (Python behandelt Signale nur im Hauptthread). Die Ausnahme
+ * (KeyboardInterrupt) bleibt gesetzt und wird nach Py_END_ALLOW_THREADS gemeldet. */
+static inline int py_interrupted_nogil(void *h)
+{
+    int r;
+    PyGILState_STATE g;
+    (void) h;
+    g = PyGILState_Ensure();
+    r = PyErr_CheckSignals() < 0;
+    PyGILState_Release(g);
+    return r;
+}
+
 static inline void ctx_init(sl_ctx *cx)
 {
     sl_ctx_init(cx);

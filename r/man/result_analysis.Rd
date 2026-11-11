@@ -154,6 +154,14 @@ positiver Monate, Gewinn/Verlust-Verhaeltnis, historischer VaR und CVaR
 (taeglich und monatlich), bei SimLev-Ergebnissen auch Steuern und
 Transaktionen.
 
+Bei einem \code{SimLevResult} zaehlen die Kaufkosten am Starttag (Spread,
+Ordergebuehr) in Gesamtrendite, CAGR, MWRR, Calmar, UPI und Recovery
+Factor mit, wie in \code{\link[=simulation]{simulation()}} (seit 1.6.5):
+Bezug ist der Startbetrag brutto (\code{invested[1]}) bzw. der Indexstand
+100 vor den Kosten, nicht der Depotwert am Starttag (\code{start_value}
+der Kennzahlen). Ohne Einzahlungen ist \code{mwrr} dann gleich
+\code{simulation()$cagr}, die CAGR gleich \code{ttwror}.
+
 Gegen einen Benchmark: Alpha (annualisiert, CAPM auf Ueberschussrenditen),
 Beta, Korrelation gesamt sowie in Auf- und Abwaertsphasen, R²,
 Up-/Down-Capture (Monatsbasis), Capture Spread, aktive Rendite, Tracking

@@ -78,7 +78,7 @@ function _check_colors(colors)
     items = colors isa RVector ? (colors.names === nothing ? nothing : [n => v for (n, v) in zip(colors.names, colors.values)]) :
             _is_mapping(colors) ? _kvpairs(colors) : nothing
     if items === nothing || isempty(items) || any(p -> isempty(p.first), items)   # seit 1.6.4 leer wie R ein Fehler (B-057)
-        error("plot.SimLevResult: colors muss eine benannte Liste (oder ein benannter Zeichenvektor) sein, z. B. list(primary = \"#003366\"); möglich: $(join(defnames, ", ")).")
+        chk_stop("c.m_plot_simlevresult_4", join(defnames, ", "))
     end
     unk = unique([p.first for p in items if !(p.first in defnames)])
     isempty(unk) || error("plot.SimLevResult: unbekannte Farbe(n) $(join(("'$u'" for u in unk), ", ")) in colors; möglich: $(join(defnames, ", ")).")
@@ -99,7 +99,7 @@ function _check_colors(colors)
     bad = [p for p in items if !ok(p.second)]
     if !isempty(bad)
         # seit 1.6.4 nur die Namen (Entscheidung 8)
-        error("plot.SimLevResult: ungültige Farbe(n) in colors: $(join(("'$(p.first)'" for p in bad), ", ")); erwartet je Element ein R-Farbname (z. B. \"navy\", siehe grDevices::colors()) oder ein Hex-Code \"#RRGGBB\" bzw. \"#RRGGBBAA\".")
+        chk_stop("c.m_plot_simlevresult_6", join(("'$(p.first)'" for p in bad), ", "))
     end
     out = Dict{String,Any}(DEFAULT_COLORS)
     for (k, v) in items
@@ -115,19 +115,25 @@ function _format_amount(x; signif3::Bool = false)
     out = String[]
     for z in (x isa AbstractVector ? x : [x])
         z = Float64(z)
-        u = abs(z) >= 1e6 ? 1e6 : abs(z) >= 1e3 ? 1e3 : 1.0
-        v = z / u
-        local d::Int
-        if signif3
-            d = Int(r_max2(0.0, 2 - floor(_libm_log10(r_max2(abs(v), 1.0)))))
-        else
-            d = 3
-            for k in 0:2
-                if abs(v - r_round(v, k)) < 1e-8 * max(1, abs(v))
-                    d = k; break
+        function pick(u)
+            v = z / u
+            local d::Int
+            if signif3
+                d = Int(r_max2(0.0, 2 - floor(_libm_log10(r_max2(abs(v), 1.0)))))
+            else
+                d = 3
+                for k in 0:2
+                    if abs(v - r_round(v, k)) < 1e-8 * max(1, abs(v))
+                        d = k; break
+                    end
                 end
             end
+            (v, d, u)
         end
+        v, d, u = pick(abs(z) >= 1e6 ? 1e6 : abs(z) >= 1e3 ? 1e3 : 1.0)
+        # seit 1.6.5 (CR2-X16-2): Rundung auf 1000 -> nächste Einheit; Endwert höchstens 3 gültige Stellen (R)
+        (u < 1e6 && abs(parse(Float64, r_sprintf("%.*f", d, v))) >= 1000) && ((v, d, u) = pick(u * 1000))
+        (signif3 && d > 0 && abs(parse(Float64, r_sprintf("%.*f", d, v))) >= 10.0^(3 - d)) && (d -= 1)
         push!(out, r_sprintf("%.*f", d, v) * (u == 1e6 ? " Mio." : u == 1e3 ? " Tsd." : ""))
     end
     return out
@@ -545,23 +551,28 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
     width = SimLev.chk_num1(width, "plot_dashboard", "width"; lo = 300, hi = 10000)
     height = SimLev.chk_num1(height, "plot_dashboard", "height"; lo = 300, hi = 10000, null_ok = true)
     file === nothing || _check_svg_file(file, "plot_dashboard")
-    style = _match_arg(style, ("full", "compact", "custom"))
+    style = try                                                # seit 1.6.5 (CR2-V1-3): Paketmeldung
+        _match_arg(style, ("full", "compact", "custom"))
+    catch e
+        e isa InterruptException && rethrow()
+        SimLev.chk_stop("auswahl", "plot.SimLevResult", "style", "\"full\", \"compact\", \"custom\"")
+    end
     panels_given = panels !== nothing
     pv = panels === nothing ? collect(_DEFAULT_PANELS) : panels isa AbstractString ? [panels] : panels
     if !(pv isa Union{AbstractVector,Tuple}) || isempty(pv) || !all(p -> p isa AbstractString, pv)
-        error("plot.SimLevResult: panels muss ein Zeichenvektor sein; möglich: $(join(("\"$p\"" for p in _ALL_PANELS), ", ")).")   # seit 1.6.4 ohne Wert
+        chk_stop("c.m_plot_simlevresult", join(("\"$p\"" for p in _ALL_PANELS), ", "))   # seit 1.6.4 ohne Wert
     end
     pm = [_pmatch(String(p), _ALL_PANELS) for p in pv]
     if any(isnothing, pm)
         error("plot.SimLevResult: unbekannte(s) Panel(s) $(join(("\"$p\"" for (p, i) in zip(pv, pm) if i === nothing), ", ")) in panels; möglich: $(join(("\"$p\"" for p in _ALL_PANELS), ", ")).")
     end
     panels = unique([_ALL_PANELS[i] for i in pm])
-    panels_given && style != "custom" && @warn "plot.SimLevResult: panels wirkt nur mit style = \"custom\" und wird bei style = \"$style\" ignoriert."
+    panels_given && style != "custom" && @warn chk_msg("c.m_plot_simlevresult_3", style)
     col = _check_colors(colors)
     if compare !== nothing && (!inherits(compare, "SimLevResult") || length(compare["worth"]) != length(x["worth"]))
         # seit 1.6.4 ohne Klasse der Eingabe (Entscheidung 8)
-        inherits(compare, "SimLevResult") || error("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein; NULL = kein Vergleich.")
-        error("plot.SimLevResult: compare muss ein SimLevResult über dieselben Tage wie x sein ($(length(compare["worth"])) statt $(length(x["worth"])) Tage); NULL = kein Vergleich.")
+        inherits(compare, "SimLevResult") || chk_stop("c.m_plot_dashboard")
+        chk_stop("c.m_plot_dashboard_2", length(compare["worth"]), length(x["worth"]))
     end
     skipped = String[]
     if style == "custom" && compare === nothing && any(p -> p in ("correlation", "comparison"), panels)
@@ -659,7 +670,8 @@ erst mit `print(s)` bzw. `s`).
   „Depotwert Starttag“), `start_capital` (Startkapital in EUR: Argument `start_value` von `simulation`,
   berechnet als `invested[1]` minus Einzahlungen des Starttags; `NA` ohne `invested`), `end_value`, `invested`
   (EUR; Startwert plus Einzahlungen, brutto), `total_return_twr` (zeitgewichtete Gesamtrendite: mit Sparplan
-  letzter Wert von `twr_index` minus 1, sonst Endwert / Depotwert am Starttag - 1), `return_on_invested`
+  letzter Wert von `twr_index` minus 1, sonst Endwert / `invested[1]` - 1, also Bezug Startkapital plus Rate des
+  Starttags brutto; seit 1.6.5 zählen die Kaufkosten am Starttag mit), `return_on_invested`
   ((Endwert - Eingezahlt) / Eingezahlt), `total_return` (gleichwertiger Alias für `total_return_twr`), `cagr`,
   `ttwror` (Anteile; mit Sparplan ist `cagr` geldgewichtet), den Kennzahlen aus `statistics` (`sharpe`,
   `sortino`, `calmar`, `omega`, `gain_to_pain`, `serenity`, `martin_ratio`, `max_drawdown`,
@@ -720,6 +732,8 @@ function export_dashboard(x, filename_pos = "dashboard.svg"; filename = filename
     width = SimLev.chk_num1(width, fn, "width"; lo = 3, hi = 100)
     height = SimLev.chk_num1(height, fn, "height"; lo = 3, hi = 100)
     SimLev.chk_dots(collect(keys(kwargs)), ["style", "panels", "compare", "colors"], fn)
+    dn = dirname(filename)                                     # seit 1.6.5 (CR2-V1-3): Ordner vorab prüfen
+    isdir(isempty(dn) ? "." : dn) || SimLev.chk_stop("c.dash_ordner", fn, isempty(dn) ? "." : dn)
     _check_svg_file(filename, "export_dashboard")
     d = plot_dashboard(x; width = width * 100, height = height * 100, kwargs...)
     _write_svg(filename, d, "export_dashboard")

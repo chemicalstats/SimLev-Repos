@@ -34,7 +34,7 @@ Zusammenspiel mit den Daten (z. B. ob die Spalte \code{event_col} in \code{data}
 (\code{\link{wrapper_config}(costs = funds_costs())}); \code{simulation()} nimmt ihn nicht an.
 }
 \usage{
-sim_costs(order_fee = NULL, dca_fee = NULL)
+sim_costs(order_fee = NULL, dca_fee = NULL, custody_fee = NULL)
 
 dca_plan(value, span, days = NULL, unit = c("month", "quarter", "year"),
          anchor = c("start", "end"), start = NULL, skip = FALSE, fill_deficits = FALSE)
@@ -90,6 +90,18 @@ funds_costs(fee = 0.95, performance_fee = 5)
     Sparrate mit \code{dca_fee} angelegt (zwei Orders); fällt ein Sparplantermin auf einen
     Rebalancing-Tag, wird die Rate im Rebalancing mit angelegt. Standard (\code{NULL}): wie
     \code{order_fee}. Viele Broker führen Sparpläne kostenlos aus (\code{dca_fee = 0}).
+  }
+  \item{custody_fee}{
+    \code{sim_costs}: seit 1.6.5 jährliche Depotgebühr: \code{NULL} (keine, Standard), eine
+    Zahl (fester Betrag in EUR je Jahr) oder \code{list(fixed, percent, min, max)} mit
+    \code{percent} in Prozent p. a. des Depotwerts (Geld und Bestände zum Kurs) am 31.12.
+    Abgerechnet wird an jedem 31.12. im Zeitraum, im ersten (angebrochenen) Jahr anteilig nach
+    Kalendertagen; ein angebrochenes letztes Jahr (Ende vor dem 31.12.) wird am letzten Tag anteilig nach
+    Kalendertagen abgerechnet (seit Entscheidung 194). Gezahlt wird
+    zuerst aus den Geldbeständen der Assets (absteigend nach Wert), dann durch Verkauf wie eine
+    Steuerzahlung (mit Ordergebühr und Steuer auf den Veräußerungsgewinn; die Depotgebühr
+    selbst mindert keine Steuer, § 20 Abs. 9 EStG). Sie zählt in \code{fees_paid} und mindert
+    Depotwert und Rendite; \code{details = TRUE} zeigt je Jahr die Zeilen mit dem Präfix „Depotgebühr:“ (Betrag, Zahlung).
   }
   \item{value}{
     \code{dca_plan}: Betrag je Sparplan-Termin in EUR; Pflicht, eine einzelne endliche Zahl
@@ -325,6 +337,17 @@ funds_costs(fee = 0.95, performance_fee = 5)
   Rebalancing gekauft); nur mit \code{event_col}, \code{event_mode = "replace"} und
   \code{skip = TRUE} wird ausschließlich an Ereignistagen umgeschichtet.
   \code{tax = tax_profile()} steht für die persönliche Besteuerung.
+}
+\section{Rechtsstand}{
+  Die Steuerrechnung (\code{tax_profile()}, \code{income_rate()}, \code{income_tariff()},
+  Vorabpauschale) wendet auf alle simulierten Jahre das heutige Recht an, auch in Rückrechnungen
+  über frühere Jahre: Investmentsteuergesetz in der Fassung ab 2018 (Teilfreistellung,
+  Vorabpauschale), Sparer-Pauschbetrag und Freigrenze nach § 23 EStG mit den angegebenen Beträgen
+  (Standard je 1000 EUR, für alle Jahre gleich) und der Einkommensteuertarif der Tarifdatei
+  (mitgeliefert: ab VZ 2026). Früheres Recht wird nicht nachgebildet (z. B. Sparer-Pauschbetrag
+  801 EUR bis 2022, Freigrenze 600 EUR bis 2023, Investmentsteuer vor 2018). Weitere Vereinfachungen:
+  nur thesaurierende Fonds (keine Ausschüttungen), Erstattungen erst zum Jahreswechsel, keine
+  Cent-Rundung der Abgeltungsteuer.
 }
 \section{Fondskosten}{
   \code{funds_costs(fee, performance_fee)} ist der Kostenbaustein des Fonds-Wrappers:

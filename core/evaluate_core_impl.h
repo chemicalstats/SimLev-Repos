@@ -49,6 +49,7 @@
 
 #include "simlev_core.h"
 #include "slc_rbase.h"
+#include "slc_internal.h"   // slc_quantile7 (seit 1.6.5, Serenity)
 #include "engine_core_impl.h"   // simlev_engine::r_gt (seit 1.6.4)
 
 #include <cfloat>
@@ -177,6 +178,20 @@ static inline void mean_sd_narm(const std::vector<double>& x, std::vector<double
   for (double v : x) if (v == v) y.push_back(v);
   *mean = sl_r_mean((int64_t) y.size(), y.data());
   *sd = std::sqrt(sl_r_var((int64_t) y.size(), y.data()));
+}
+// seit 1.6.5 (MA2-4, Entscheidungen 186 M7 und 187): eine Streuung im Rundungsrauschen gilt als 0, damit eine
+// Kennzahl ohne Schwankung (Sharpe, Schiefe, Woelbung, Variationskoeffizient) "nicht definiert" ist statt rund 1e13:
+// sd <= 16 sqrt(N) eps (1 + max|x|) (bis 1.6.4 nur sd == 0). Massstab 1 + max|x|: eine Tagesrendite x = W_t / W_{t-1} - 1
+// traegt den Rundungsfehler des Quotienten (rund eps, nicht eps |x|); mit max|x| allein (Vorschlag MA2-4) bliebe der
+// Beleg des Befunds (Kurs 100 * 1.0001^t, sd 8.8e-17 bei max|x| 1e-4) ueber der Schwelle
+static inline double sd_eff(double sd, const std::vector<double>& x) {
+  if (!(sd > 0)) return sd;
+  double mx = 0.0;
+  for (double v : x) {
+    const double a = std::fabs(v);
+    if (a > mx) mx = a;
+  }
+  return sd <= 16.0 * std::sqrt((double) x.size()) * 2.220446049250313e-16 * (1.0 + mx) ? 0.0 : sd;
 }
 static inline void msg(std::vector<Msg>* m, int code, double a = 0.0, double b = 0.0, double c = 0.0, double d = 0.0) {
   if (m) m->push_back(Msg{code, {a, b, c, d}});
@@ -338,15 +353,22 @@ inline int evaluate(const In& I, Result& R) {
   tw.assign((std::size_t) n, 0.0);
   sl_r_rowsums_cols(n, na, I.total, 1, 0, tw.data());
   sl_r_rowsums_cols(n, na, I.flows, 1, 0, tf.data());
-  const double start_worth = tw[0], stopp_worth = tw[(std::size_t) (n - 1)];
+  const double stopp_worth = tw[(std::size_t) (n - 1)];
   const int64_t n_days = n;
   const double ann = days_between(I.stopp_date, I.start_date) / 365.25;
+  // seit 1.6.5 (MA2-1, Entscheidung 186 M4): Bezug aller Renditen ist das eingesetzte Kapital am ersten Tag (Startwert
+  // plus Sparrate des ersten Tags), nicht der Depotwert nach dem Startkauf; Spread und Gebuehren des Startkaufs
+  // mindern damit CAGR, TTWROR, Wertindex, Drawdowns und die Tagesrenditen (bis 1.6.4 nur mit spaeteren Einzahlungen)
+  const double f0 = tf[0] == tf[0] ? tf[0] : 0.0;
+  const double start_worth = simlev_add(I.start_value, f0);
   // CAGR
   {
     const int c = simlev_r_and(r_gt(start_worth, 0), r_gt(ann, 0));
     if (c == 2) return abort(S_CAGR, 1);
     R.cagr = c ? cagr_q(simlev_div(stopp_worth, start_worth), ann) : NA;   // seit 1.6.2 expm1(log(q) / Jahre)
   }
+  // Rendite des ersten Tags: Kosten des Startkaufs (seit 1.6.5, M4)
+  const double r0 = (start_worth == start_worth && start_worth > 0) ? simlev_div(tw[0], start_worth) - 1 : 0.0;
   // TTWROR: Periodenrenditen, an Zuflusstagen zum Zeitpunkt der Zahlung bewertet
   std::vector<double> pr;
   if (n >= 2) {
@@ -380,9 +402,9 @@ inline int evaluate(const In& I, Result& R) {
         pr[i] = simlev_mul(g1, g2) - 1;
       }
     }
-    pr[0] = NA;
+    pr[0] = r0;   // seit 1.6.5 (M4; bis 1.6.4 NA)
   } else {
-    pr.assign(1, NA);
+    pr.assign(1, r0);
   }
   if (ann > 0) {
     std::vector<double> g1p(pr.size());
@@ -401,7 +423,7 @@ inline int evaluate(const In& I, Result& R) {
   sl_r_cumsum(n, fl0.data(), R.invested.data());
   for (double& x : R.invested) x = simlev_add(I.start_value, x);
   {
-    std::vector<double> g(1, 1.0);
+    std::vector<double> g(1, std::isfinite(1 + r0) ? 1 + r0 : 1.0);   // seit 1.6.5 (M4): erste Stufe W_0 / (S + F_0)
     for (int64_t i = 1; i < n; i++) {
       const double x = 1 + pr[i];
       g.push_back(std::isfinite(x) ? x : 1.0);
@@ -497,6 +519,12 @@ inline int evaluate(const In& I, Result& R) {
   // Drawdowns (mit NaN-Schutz)
   std::vector<double> running_max(dd_series.size());
   sl_r_cummax((int64_t) dd_series.size(), dd_series.data(), running_max.data());
+  // seit 1.6.5 (M4): Hoechststand ab dem eingesetzten Kapital (Wertindex 1 bzw. Startwert plus erste Sparrate)
+  {
+    const double top0 = has_ext ? 1.0 : start_worth;
+    if (top0 == top0 && top0 > 0)
+      for (double& x : running_max) if (x == x && x < top0) x = top0;
+  }
   std::vector<double>& dd = R.drawdowns;
   dd.assign(dd_series.size(), 0.0);
   for (std::size_t i = 0; i < dd.size(); i++) {
@@ -540,6 +568,8 @@ inline int evaluate(const In& I, Result& R) {
     else r = simlev_div(simlev_sub(tw[i], tw[i - 1]), tw[i - 1]);
     if (!std::isfinite(r)) r = 0.0;
     const bool masked = I.filled && I.filled[i] != 0;
+    // seit 1.6.5 (M4): die Kosten des Startkaufs gehen in die erste Tagesrendite ein ((1 + r0)(1 + r) - 1)
+    if (!masked && rr.empty() && r0 != 0 && std::isfinite(r0)) r = simlev_mul(1 + r0, 1 + r) - 1;
     if (!masked) rr.push_back(r);
   }
   bool any_mask = false;
@@ -560,12 +590,13 @@ inline int evaluate(const In& I, Result& R) {
   std::vector<double> rr_ok, ex_ok;   // rr bzw. excess ohne NA/NaN
   double rr_mean, rr_sd;
   mean_sd_narm(rr, rr_ok, &rr_mean, &rr_sd);
+  const double rr_sd0 = sd_eff(rr_sd, rr_ok);   // seit 1.6.5 (M7): Rauschen gilt als 0 (cv, Schiefe, Woelbung)
   double daily_mean = rr_mean, daily_sd = rr_sd;
   if (!std::isfinite(daily_mean)) daily_mean = 0.0;
   if (!std::isfinite(daily_sd)) daily_sd = 0.0;
   S[ST_MEAN] = daily_mean;
   S[ST_SD] = daily_sd;
-  S[ST_CV] = daily_mean != 0 ? std::fabs(daily_sd / daily_mean) : NA;
+  S[ST_CV] = daily_mean != 0 ? std::fabs((std::isfinite(rr_sd0) ? rr_sd0 : 0.0) / daily_mean) : NA;
   // risk_free in Prozent p. a. je Tag (A-4): tagesaequivalent abziehen
   std::vector<double> rf_full(I.rf, I.rf + I.n_rf);
   for (double& x : rf_full) {
@@ -605,6 +636,7 @@ inline int evaluate(const In& I, Result& R) {
   S[ST_RF] = rf_ret.empty() ? 0.0 : sl_r_mean((int64_t) rf_ret.size(), rf_ret.data()) * 100;
   double mean_excess, sd_excess;
   mean_sd_narm(excess, ex_ok, &mean_excess, &sd_excess);
+  sd_excess = sd_eff(sd_excess, ex_ok);   // seit 1.6.5 (M7): Sharpe ohne Schwankung nicht definiert
   if (!std::isfinite(mean_excess)) mean_excess = 0.0;
   if (!std::isfinite(sd_excess)) sd_excess = 0.0;
   double down_sd = 0.0;
@@ -636,8 +668,29 @@ inline int evaluate(const In& I, Result& R) {
     ulcer = std::sqrt(sl_r_mean((int64_t) sq.size(), sq.data()));
     if (!std::isfinite(ulcer)) ulcer = 0.0;
   }
-  S[ST_MARTIN] = (ulcer > 0 && !rd_na) ? ret_dd / ulcer : NA;
-  S[ST_SERENITY] = (ulcer > 0 && max_dd > 0 && !rd_na) ? ret_dd / (ulcer * max_dd) : NA;
+  // seit 1.6.5 (MA2-3, Entscheidung 186 M6): Zaehler mit Abzug des mittleren risikolosen Zinses (wie statistics$risk_free;
+  // Martin, Ulcer Performance Index); bis 1.6.4 ohne Abzug
+  const double rf_mean = rf_ret.empty() ? 0.0 : sl_r_mean((int64_t) rf_ret.size(), rf_ret.data());
+  S[ST_MARTIN] = (ulcer > 0 && !rd_na) ? (ret_dd - rf_mean) / ulcer : NA;
+  // seit 1.6.5 (MA2-2, Entscheidungen 186 M5 und 194): Serenity Ratio nach KeyQuant (Baguenault de Vieville u. a. 2018,
+  // wiedergegeben bei AlternativeSoft): (Rendite - risikoloser Zins) / (Ulcer Index * Pitfall), Pitfall = CDaR / Volatilitaet.
+  // Eigene Festlegungen (die Quelle nennt sie nicht): CDaR zum Niveau 95 % = Mittel der Tages-Drawdowns ab ihrem
+  // 95-%-Quantil (Typ 7), Volatilitaet jaehrlich wie bei Sharpe (sd der Ueberschussrenditen * sqrt(dpy)), Rendite und
+  // Zins jaehrlich wie bei martin_ratio. Bis 1.6.4: Rendite / (Ulcer Index * Max Drawdown).
+  double cdar = 0.0;
+  {
+    std::vector<double> q;
+    for (double d : dd) if (d == d) q.push_back(d);
+    if (!q.empty()) {
+      std::vector<double> qs(q);
+      const double v = slc_quantile7(qs.data(), (int64_t) qs.size(), 0.95);
+      std::vector<double> tail;
+      for (double d : q) if (d >= v) tail.push_back(d);
+      cdar = tail.empty() ? 0.0 : sl_r_mean((int64_t) tail.size(), tail.data());
+    }
+  }
+  const double vol_ann = sd_excess * std::sqrt(dpy);
+  S[ST_SERENITY] = (ulcer > 0 && cdar > 0 && vol_ann > 0 && !rd_na) ? (ret_dd - rf_mean) * vol_ann / (ulcer * cdar) : NA;
   {
     std::vector<double> pos, negv;
     for (double x : rr) {
@@ -680,7 +733,7 @@ inline int evaluate(const In& I, Result& R) {
     }
   }
   R.longest_dd = longest;
-  moments(rr_ok, rr_mean, rr_sd, &S[ST_SKEW], &R.skew_lgl, &S[ST_KURT], &R.kurt_lgl);
+  moments(rr_ok, rr_mean, rr_sd0 == 0 ? 0.0 : rr_sd, &S[ST_SKEW], &R.skew_lgl, &S[ST_KURT], &R.kurt_lgl);
   S[ST_LPM] = partial(rr, true);
   S[ST_HPM] = partial(rr, false);
   S[ST_MAXDD] = max_dd;
@@ -723,8 +776,14 @@ inline int evaluate(const In& I, Result& R) {
       case ST_SORTINO:
         if (n_r < 1) few(mt, 1); else row(mt, RS_NO_NEG, D_SORTINO);
         break;
-      case ST_CALMAR: case ST_SERENITY:
+      case ST_CALMAR:
         if (rd_na) inherit(mt); else row(mt, RS_NO_DD, D_NO_DD);
+        break;
+      case ST_SERENITY:   // seit 1.6.5 (194): ohne Schwankung wie Sharpe nicht definiert
+        if (rd_na) inherit(mt);
+        else if (!(ulcer > 0 && cdar > 0)) row(mt, RS_NO_DD, D_NO_DD);
+        else if (n_r < 2) few(mt, 2);
+        else row(mt, RS_ZERO_VOL, D_SHARPE_VOL, (double) n_r);
         break;
       case ST_OMEGA: case ST_GTP:
         if (n_r < 1) few(mt, 1); else row(mt, RS_NO_NEG, D_NO_NEG);
@@ -749,5 +808,56 @@ inline int evaluate(const In& I, Result& R) {
 }
 
 }  // namespace simlev_eval
+
+// ---- Vorbereiteter Kernlauf (seit 1.6.5, Paket E, Entscheidung 176; FB-12) ----
+// Tagesengine (mit Vorbereitung) und Auswertung in einem Aufruf: Studien (bootstrap_study, param_search,
+// sensitivity_*, planning_*) bereiten Strategie, Kalender und Bausteine einmal vor und tauschen je Pfad bzw. Punkt nur
+// die Kurs- und Signalreihen (Hosts: r/R/sim_prepared.R, python/simlev/_sim_prepared.py, julia/src/sim_prepared.jl).
+// Rechnet dieselben Kernaufrufe in derselben Reihenfolge wie die Hosts mit sim_engine_run und sim_evaluate: die
+// Eingabe der Auswertung (Report-Reihen, Kurse nach Splits, Geld je Asset, Zahl der Kaeufe und Verkaeufe, nicht
+// gedeckte Steuer) stammt hier direkt aus dem Engine-Objekt statt ueber den Host. Die Auswertung rechnet nur nach einem
+// Engine-Lauf ohne Abbruch (sonst bricht der Host mit der Meldung der Engine ab, bevor er die Auswertung liest).
+// Rueckgabe: 0 Engine und Auswertung gerechnet, 1 Eingabe der Engine passt nicht (*bad = Code von setup_prepared),
+// 2 Abbruch der Engine (E.err; R nicht gerechnet), 3 Eingabe der Auswertung passt nicht.
+namespace simlev_run {
+
+struct EvalStatic {                         // Teile der Auswertung, die nicht vom Engine-Lauf abhaengen
+  const double* day = nullptr;              // flag_date als Tageszahl (n)
+  const int32_t* filled = nullptr;          // flag_filled (0/1) oder nullptr
+  double start_date = 0.0, stopp_date = 0.0, start_value = 0.0;
+  const double* rf = nullptr;               // risk_free je Tag oder nullptr
+  int64_t n_rf = 0;
+  int rf_ok = 1;
+};
+
+inline int run_prepared(simlev_engine::Engine& E, const simlev_engine::Input& I, const simlev_prepare::PrepFlat& F,
+                        const EvalStatic& S, simlev_eval::Result& R, int* bad = nullptr) {
+  const int b = E.setup_prepared(I, F);
+  if (bad) *bad = b;
+  if (b) return 1;
+  if (E.run() != 0) return 2;
+  const std::size_t na = (std::size_t) I.na;
+  std::vector<const double*> tot(na), flo(na), wor(na), mon(na), pri(na);
+  std::vector<double> st(8 * na), sm(na), nb(na), ns(na);
+  E.status_out(st.data());
+  for (std::size_t a = 0; a < na; a++) {
+    double* const* r = I.reports + 5 * a;   // worth, money, flows, total, share
+    wor[a] = r[0]; mon[a] = r[1]; flo[a] = r[2]; tot[a] = r[3];
+    pri[a] = E.px_changed[a] ? E.px[a].data() : I.price[a];
+    sm[a] = st[8 * a + 3];
+    nb[a] = (double) E.buys[a].size();
+    ns[a] = (double) E.sells[a].size();
+  }
+  simlev_eval::In V;
+  V.n = I.n; V.na = I.na;
+  V.total = tot.data(); V.flows = flo.data(); V.worth = wor.data(); V.money = mon.data(); V.price = pri.data();
+  V.day = S.day; V.filled = S.filled;
+  V.start_date = S.start_date; V.stopp_date = S.stopp_date; V.start_value = S.start_value; V.tax_unpaid = E.tax_unpaid;
+  V.status_money = sm.data(); V.n_buys = nb.data(); V.n_sells = ns.data();
+  V.rf = S.rf; V.n_rf = S.n_rf; V.rf_ok = S.rf_ok;
+  return simlev_eval::evaluate(V, R) == 2 ? 3 : 0;
+}
+
+}  // namespace simlev_run
 
 #endif

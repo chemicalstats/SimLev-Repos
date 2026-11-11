@@ -362,6 +362,10 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
     if length(br) == 1
         b0 = br[1]
         (isnan(b0) || b0 < 2) && error("invalid number of intervals")
+        if !(b0 + 1 < 2147483648.0)   # seit 1.6.5 (CR2-D-14) wie R: as.integer(breaks + 1) ist NA, seq.int bricht ab
+            @warn "NAs introduced by coercion to integer range"
+            error("'length.out' must be a finite number")
+        end
         nb = trunc(Int, b0 + 1)
         ok = filter(!isnan, xv)
         if isempty(ok)   # range(x, na.rm = TRUE) ohne Werte (Warnungen wie R, seit 1.6.0)
@@ -397,7 +401,9 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
             ok = all(i -> ch[i+1] != ch[i], 1:length(ch)-1)
             ok && break
         end
-        if ok
+        if ok && nb < 2   # seit 1.6.5 (CR2-D-14): weniger als zwei Grenzen wie R paste0 mit leeren Teilen
+            labs = [right ? (include_lowest ? "[,]" : "(,]") : "[,)"]
+        elseif ok
             labs = [(right ? "(" : "[") * ch[i] * "," * ch[i+1] * (right ? "]" : ")") for i in 1:nb-1]
             if include_lowest
                 if right
@@ -419,9 +425,9 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
         any(ismissing, labs) && error("cut: labels darf kein NA enthalten.")   # seit 1.6.4 (Entscheidung 67)
     end
     code = _bincode(xv, br, right, include_lowest)
-    if codes_only
-        any(==(0), code) && return _vec_out(Union{Missing,Int}[c == 0 ? missing : c for c in code])
-        return _vec_out(code)
+    if codes_only   # seit 1.6.5 (CR2-D-14) immer ein Vektor, auch bei einem Wert (bis 1.6.4 dann ein Skalar)
+        any(==(0), code) && return Union{Missing,Int}[c == 0 ? missing : c for c in code]
+        return collect(code)
     end
     # seit 1.6.4 wie R factor(code, seq_along(labels), labels): gleiche Beschriftungen ergeben eine Stufe
     # (C-009); NA als Beschriftung ist ein Fehler (oben)

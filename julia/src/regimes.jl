@@ -12,6 +12,7 @@ import ..SimLev
 using ..SimLev: _which_max   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _grid_lines!, _grid_svg
 using Dates
+using ..SimLev: chk_msg, chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 
 export regime_hmm, regime_states
 
@@ -47,6 +48,10 @@ end
 "Viterbi-Pfad aus Log-Emissionen, Log-Übergangsmatrix und Log-Startverteilung (`.hmm_viterbi`)."
 function _hmm_viterbi(lB, lA, lp0)
     lB = _fmat(lB); lA = _fmat(lA); lp0 = _fvec(lp0)
+    # seit 1.6.5 (CR2-X7-2) ohne NA/NaN über den Kern (sl_hmm_viterbi, erstes Maximum; gleicher Pfad)
+    if !(any(isnan, lB) || any(isnan, lA) || any(isnan, lp0))
+        return Int[Int(v) for v in SimLev.SLib.hmm_viterbi(lB, lA, lp0)]
+    end
     Tn, k = size(lB)
     dl = lp0 .+ lB[1, :]
     bp = zeros(Int, Tn, k)
@@ -276,7 +281,7 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
     rd = D._dep_returns(data, columns, nothing, frequency)
     X = reduce(hcat, [_fvec(rd[c]) for c in columns])
     Tn, d = size(X)
-    Tn < 50 * k && error("regime_hmm: zu wenige Perioden für die Zustandszahl ($Tn Perioden, mindestens $(50 * k)).")
+    Tn < 50 * k && chk_stop("c.m_regime_hmm_4", Tn, 50 * k)
     flat = [columns[j] for j in 1:d if SimLev.r_sd(X[:, j]) == 0]
     isempty(flat) || error("regime_hmm: Spalte(n) $(join(["'$f'" for f in flat], ", ")) ohne Schwankung (alle Periodenrenditen " *
                            "gleich, z. B. konstante Kurse); kein Modell schätzbar.")
@@ -300,6 +305,7 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
         end
     end
     fits = Any[]
+    n_failed = 0
     for i in inits
         f = try
             _hmm_em(X, k, i, max_iter, tol, ridge)
@@ -307,10 +313,12 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
             e isa InterruptException && rethrow()
             nothing
         end
-        f === nothing || push!(fits, f)
+        f === nothing ? (n_failed += 1) : push!(fits, f)   # seit 1.6.5 (K34, CR2-E-11)
     end
-    isempty(fits) && error("regime_hmm: Schätzung fehlgeschlagen.")
+    isempty(fits) && chk_stop("c.m_regime_hmm_3")
     f = fits[_which_max([fi.ll for fi in fits])]
+    converged = f.iter < Int(max_iter)
+    converged || @warn SimLev.chk_msg("c.hmm_grenze", fn, Int(max_iter))
     vol = [sqrt(SimLev.r_mean([s[i, i] for i in 1:d])) for s in f.S]
     o = D._order(vol)
     A = f.A[o, o]; mu = f.mu[o, :]; S = f.S[o]
@@ -340,6 +348,9 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
     out["frequency"] = frequency
     out["ppy"] = ppy
     out["share"] = D._colmeans(f.smoothed[:, o])
+    out["iterations"] = Int(f.iter)            # seit 1.6.5 (K34)
+    out["converged"] = converged
+    out["n_failed"] = n_failed
     out
 end
 
@@ -353,6 +364,11 @@ function _print_hmm(io::IO, x)
         print(io, D._sprintf("  Z%d: Anteil %.0f %%, erwartete Dauer %.1f Perioden, Rendite %s %% p. a., Vola %s %%", j,
                              100 * share[j], dur[j], join(D._sprintf_vec("%.1f", mu[j, :]), "/"),
                              join(D._sprintf_vec("%.1f", vo[j, :]), "/")) * "\n")
+    end
+    if haskey(x, "iterations")                 # seit 1.6.5 (K34): Schritte der Schätzung
+        nf = Int(x["n_failed"])
+        print(io, D._sprintf("  Schritte: %d%s%s", Int(x["iterations"]), x["converged"] === true ? "" : " (Grenze erreicht)",
+                             nf > 0 ? D._sprintf(", %d Startwert(e) verworfen", nf) : "") * "\n")
     end
     print(io, "\nÜbergangsmatrix\n")
     T = x["transition"]
@@ -429,13 +445,13 @@ function regime_states(x, dates; type = ("filtered", "smoothed", "viterbi"), out
     _e4_dates(dates isa RFrame ? dates["date"] : dates, fn)
     state_prob = SimLev.chk_int1(state_prob, fn, "state_prob"; lo = 1, hi = x["k"])   # B-007
     lag = SimLev.chk_int1(lag, fn, "lag"; lo = 0)              # B-012
-    type != "filtered" && @warn "Geglättete bzw. Viterbi-Zustände nutzen Zukunftsdaten - nur zur Beschreibung verwenden."
+    type != "filtered" && @warn chk_msg("c.m_regime_states")
     src = D._is_frame(dates) ? D._as_frame(dates)["date"] : dates
     d = D._to_date(src isa AbstractVector ? src : [src], "regime_states: dates")
     P = type == "filtered" ? x["filtered"] : type == "smoothed" ? x["smoothed"] : nothing
     prob = output == "probability"
     if prob
-        P === nothing && error("Wahrscheinlichkeit nicht für Viterbi.")
+        P === nothing && chk_stop("c.m_regime_states_2")
         v = _fmat(P)[:, Int(state_prob)]
     elseif P === nothing
         v = Vector{Union{Missing,Int}}(collect(x["viterbi"]))

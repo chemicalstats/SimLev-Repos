@@ -14,7 +14,8 @@ withdrawal_cohorts(
   wrap = FALSE,
   cape = NULL,
   base_rate = NULL,
-  inflation_type = c("level", "rate_pa")
+  inflation_type = c("level", "rate_pa"),
+  periods = NULL
 )
 }
 \arguments{
@@ -40,6 +41,8 @@ Eine Zahl muss endlich und > -100 sein. Genannte Spalten (auch \code{price}, \co
 12 x \code{years} Monate). Seit 1.6.4 eine ganze Zahl von 1 bis 100, auch bei
 \code{"quarter"} und \code{"month"} (vorher jede Zahl, die ganze
 Perioden ergab, z. B. 2.5).}
+
+\item{periods}{Seit 1.6.5: Kohortenlaenge in Perioden der gewaehlten \code{frequency} (ganze Zahl von 1 bis 100 x Perioden je Jahr) statt \code{years}; erlaubt Laengen, die keine ganzen Jahre sind (z. B. 30 Monate). \code{years} muss dann beim Standard 30 bleiben, sonst Fehler. \code{NULL} (Standard) = \code{years} gilt.}
 
 \item{frequency}{Periodenlaenge der Entnahme-Simulation: \code{"year"}
 (Standard), \code{"quarter"} oder \code{"month"}.}

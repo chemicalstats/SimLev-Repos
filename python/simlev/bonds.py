@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from ._r import libm as _libm
-from ._r.rnum import NA_REAL, r_cumprod, r_pow_vec
+from ._r.rnum import NA_REAL, r_cumprod
 from .backcast import _fill_na, _resolve_series
 from ._r.base import quiet_fp
 from .data_prep import _as_frame, _as_numeric, _col, _days, _to_date
@@ -29,6 +29,46 @@ def _idx_data(data, fn):
         chk_stop("spalte_faktor", fn, "date")
     if len(data) == 0:   # seit 1.6.4 Fehler (Entscheidung 25; bis 1.6.3 Python-Fehler, R 100)
         chk_stop("zeilen_keine", fn, "data")
+    # seit 1.6.5 (CR2-V1-4, CR2-V3-4): Datum aufsteigend und ohne NA (bis 1.6.4 gingen negative Tageszahlen still ein)
+    d = _days(_to_date(_col(_as_frame(data), "date"), "data$date"))
+    if np.isnan(d).any() or (np.diff(d) < 0).any():
+        chk_stop("e3.datum", fn)
+
+
+def _step_start_warn(x, data, fn, arg):
+    """Stufentabelle (``DataFrame(date, Wert)`` oder benannter Vektor mit Datumsnamen), die erst nach dem ersten
+    Datentag beginnt: Warnung (seit 1.6.5, CR2-V3-4 Punkt 4, Entscheidung 189; R ``.step_start_warn``); ungültige
+    Tabellen meldet danach ``_resolve_series`` wie bisher."""
+    from .data_prep import _is_named_numeric, _named_parts, _names, _names_as_dates_optional
+    from ._dates import fmt_date
+    first = None
+    try:
+        xf = _as_frame(x)
+        if isinstance(xf, pd.DataFrame):
+            if xf.shape[1] >= 2:
+                nm = _names(xf)
+                fd = _days(_to_date(_col(xf, "date" if "date" in nm else nm[0]), "x"))
+                if fd.size and not np.isnan(fd).any():
+                    first = float(fd.min())
+        elif _is_named_numeric(x):
+            nd = np.asarray(_names_as_dates_optional(_named_parts(x)[0]), dtype=np.float64)
+            if nd.size and not np.isnan(nd).any():
+                first = float(nd.min())
+    except Exception:  # noqa: BLE001 - ungültige Tabelle: Meldung später in _resolve_series
+        first = None
+    if first is None:
+        return
+    try:
+        d = _days(_to_date(_col(_as_frame(data), "date"), "x"))
+    except Exception:  # noqa: BLE001
+        return
+    if not d.size or np.isnan(d).all():
+        return
+    d0 = float(np.nanmin(d))
+    if first > d0:
+        import warnings
+        warnings.warn(chk_msg("a.stufe_spaet", fn, arg, fmt_date(int(first)), fmt_date(int(d0))), UserWarning,
+                      stacklevel=3)
 
 
 def _idx_numcol(data, col, fn):
@@ -88,16 +128,24 @@ class RVector(np.ndarray):
     def duration(self):
         return self.attrs.get("duration")
 
+    @property
+    def convexity(self):
+        return self.attrs.get("convexity")
+
 
 def _bond_price(y, coupon, maturity, m):
-    """Kurs einer Anleihe je 1 Nominal (R: ``.bond_price``)."""
+    """Kurs einer Anleihe je 1 Nominal (R: ``.bond_price``); seit 1.6.5 (CR2-X44-1) über ``L = log1p(i)``:
+    Abzinsung ``exp(-n L)``, Rentenbarwert ``-expm1(-n L) / i`` (bei ``i == 0``: ``n``), ohne Auslöschung bei sehr
+    kleinen Renditen (bis 1.6.4 ``(1 + i)^(-n)`` und ``(1 - dis) / i`` mit Schwelle 1e-10)."""
     y = np.asarray(y, dtype=np.float64)
     coupon = np.asarray(coupon, dtype=np.float64)
     i = y / m
     n = maturity * m
-    dis = r_pow_vec(1 + i, -n).reshape(i.shape)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        ann = np.where(np.abs(i) < 1e-10, n, (1 - dis) / i)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        L = _libm.log1p(i)
+        dis = _libm.exp(-n * L)
+        ann = -_libm.expm1(-n * L) / i
+    ann = np.where(i == 0, float(n), ann)
     return coupon / m * ann + dis
 
 
@@ -138,9 +186,9 @@ def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("e
 
     Bildet einen Total-Return-Index einer Staatsanleihe mit konstanter Restlaufzeit aus einer Renditereihe. An
     jedem Tag wird eine neue Par-Anleihe (Kupon = Rendite des Vortags) gekauft und am Folgetag zur neuen Rendite
-    bewertet: r_t = P(y_t; c = y_t-1, M) - 1 + y_t-1 Δ t mit Δ t = Kalendertage seit der Vorzeile / 365.25. Mit
-    ``method = "duration"`` wird die Kursänderung über modifizierte Duration und Konvexität angenähert, -D Δ y +
-    tfrac12 C Δ y^2 (wie bei Swinkels 2019). Roll-down-Effekte entlang der Zinskurve und Kosten sind nicht
+    bewertet: r_t = P(y_t; c = y_{t-1}, M) - 1 + y_{t-1} Δt mit Δt = Kalendertage seit der Vorzeile / 365.25. Mit
+    ``method = "duration"`` wird die Kursänderung über modifizierte Duration und Konvexität angenähert, -D Δy +
+    (1/2) C Δy^2 (wie bei Swinkels 2019). Roll-down-Effekte entlang der Zinskurve und Kosten sind nicht
     enthalten. Das Ergebnis kann als Kursspalte (Niveau) in ``simulation()`` oder ``bootstrap_config()`` verwendet
     werden.
 
@@ -162,9 +210,14 @@ def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("e
 
     Returns:
         Numerischer Indexvektor (Niveau, Länge ``nrow(data)``) mit Attribut ``duration`` (modifizierte Duration
-        der Par-Anleihe zur Rendite des jeweiligen Tages, in Jahren). Duration (und beim Verfahren ``"duration"``
-        die Konvexität) seit 1.6.4 geschlossen gerechnet, auf alle Stellen genau; bis 1.6.3 über zentrale
-        Differenzen (relativer Fehler bis etwa 2e-6 bei 30 Jahren).
+        der Par-Anleihe zur Rendite des jeweiligen Tages, in Jahren) und seit 1.6.5 ``convexity`` (Konvexität der
+        Par-Anleihe zur Rendite des jeweiligen Tages, in Jahren², geschlossen wie beim Verfahren ``"duration"``;
+        Zugriff ``x.attrs["convexity"]`` bzw. ``x.convexity``). Duration (und beim Verfahren ``"duration"`` die
+        Konvexität) seit 1.6.4 geschlossen gerechnet, auf alle Stellen genau; bis 1.6.3 über zentrale Differenzen
+        (relativer Fehler bis etwa 2e-6 bei 30 Jahren). Seit 1.6.5 muss ``date`` aufsteigend und ohne NA sein; der
+        Kurs der Anleihe wird über ``log1p`` ohne Auslöschung bei sehr kleinen Renditen gerechnet (Änderung in den
+        letzten Stellen); eine Stufentabelle als ``yield``, die erst nach dem ersten Datentag beginnt, ergibt eine
+        Warnung (davor gilt ihr erster Wert).
 
     Literatur:
         Swinkels, L. (2019), Treasury Bond Return Data Starting in 1962, Data 4(3), 91.
@@ -192,6 +245,7 @@ def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("e
     start = chk_num1(start, fn, "start", lo=0, lo_open=True)
     method = _match_arg(chk_scalar(method), ("exact", "duration"))
     data = _as_frame(data)
+    _step_start_warn(yield_, data, fn, "yield")
     y = _resolve_series(yield_, data, "yield") / 100
     m = coupon_frequency
     # seit 1.6.4 (K43 T1-R8): Renditen von -100 % je Kuponperiode oder weniger ablehnen (R wie Julia)
@@ -218,15 +272,19 @@ def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("e
         r[0] = 0
     out = start * r_cumprod(1 + r)
     dur = _bond_dur(y / m, nm, maturity, m)   # seit 1.6.4 geschlossen (K43 T1-R3)
-    return RVector(out, duration=dur)
+    cvx = _bond_cvx(y / m, nm, m)   # seit 1.6.5 (Entscheidung 151): Konvexität je Tag
+    return RVector(out, duration=dur, convexity=cvx)
 
 
 def index_money_market(data, rate, *, spread=0, basis=360, start=100):
     """Geldmarkt-Index aus einem Tageszins: ``I_t = I_{t-1} (1 + (i_{t-1} - s)/100 Δt/B)``.
 
     Bildet einen Geldmarkt- bzw. Tagesgeld-Index (Niveau) aus einem Zinssatz, z. B. ESTR oder EFFR, als Kursspalte
-    für ``simulation()``: I_t = I_t-1(1 + fraci_t-1 - s100·(Δ t)/(B)) mit Zins i des Vortags, Abschlag s (z. B.
-    Fondskosten), Kalendertagen Δ t seit der Vorzeile und Tagesbasis B (Act/360).
+    für ``simulation()``: I_t = I_{t-1} · (1 + (i_{t-1} - s)/100 · Δt/B) mit Zins i des Vortags, Abschlag s (z. B.
+    Fondskosten), Kalendertagen Δt seit der Vorzeile und Tagesbasis B (Act/360).
+
+    Seit 1.6.5 muss ``date`` aufsteigend und ohne NA sein (sonst Fehler); eine Stufentabelle als ``rate``, die erst
+    nach dem ersten Datentag beginnt, ergibt eine Warnung (davor gilt ihr erster Wert).
 
     Args:
         data: DataFrame mit Spalte ``date`` (eine Zeile je Indextag).
@@ -258,10 +316,21 @@ def index_money_market(data, rate, *, spread=0, basis=360, start=100):
     basis = chk_num1(basis, fn, "basis", lo=0, lo_open=True)
     start = chk_num1(start, fn, "start", lo=0, lo_open=True)
     data = _as_frame(data)
+    _step_start_warn(rate, data, fn, "rate")
     i = _resolve_series(rate, data, "rate")
     d = _days(_to_date(_col(data, "date"), "data$date"))
+    # seit 1.6.5 (CR2-V3-4 Punkt 3, wie Entscheidung 186 M8): Zinsreihe ohne Lücken, Tagesfaktor > 0
+    from ._dates import fmt_date
+    raw = (np.asarray(_col(data, rate), dtype=np.float64) if isinstance(rate, str) and rate in list(data.columns)
+           else np.asarray(i, dtype=np.float64))
+    k = np.flatnonzero(np.isnan(raw))
+    if k.size:
+        chk_stop("a.mm_luecke", fn, "rate", fmt_date(int(d[k[0]])))
     days = np.concatenate([[0.0], np.diff(d)])
     r = np.concatenate([[0.0], (i[:-1] - spread) / 100 * days[1:] / basis])
+    k = np.flatnonzero(~(1 + r > 0))
+    if k.size:
+        chk_stop("a.mm_faktor", fn, fmt_date(int(d[k[0]])))
     return start * r_cumprod(1 + r)
 
 
@@ -270,9 +339,13 @@ def index_currency_hedged(data, local, domestic_rate, foreign_rate, *, cost=0, b
 
     Näherung einer rollierend per Devisentermingeschäft gesicherten Anlage: Die Rendite in Lokalwährung plus die
     Zinsdifferenz zwischen Heimat- und Fremdwährung (gedeckte Zinsparität), abzüglich Sicherungskosten: r^h_t =
-    r^lokal_t + fraci^heim_t-1 - i^fremd_t-1100·(Δ t)/(B) - (k)/(100)·(Δ t)/(365) mit Zinsen des Vortags und
-    Kalendertagen Δ t seit der Vorzeile. Effekte aus der Absicherung nur des Anfangswerts einer Rollperiode
+    r^lokal_t + (i^heim_{t-1} - i^fremd_{t-1})/100 · Δt/B - k/100 · Δt/365 mit Zinsen des Vortags und
+    Kalendertagen Δt seit der Vorzeile. Effekte aus der Absicherung nur des Anfangswerts einer Rollperiode
     (Restrisiko auf Kursgewinne) sind nicht enthalten.
+
+    Seit 1.6.5 muss ``date`` aufsteigend und ohne NA sein und ``local`` (nach dem Füllen) endliche Werte > 0
+    haben (sonst Fehler); eine Stufentabelle als Zins, die erst nach dem ersten Datentag beginnt, ergibt eine
+    Warnung (davor gilt ihr erster Wert).
 
     Args:
         data: DataFrame mit Spalte ``date``.
@@ -322,6 +395,13 @@ def index_currency_hedged(data, local, domestic_rate, foreign_rate, *, cost=0, b
     data = _as_frame(data)
     x = _as_numeric(_col(data, local)) if isinstance(local, str) else _as_numeric(local)
     x = _fill_na(x, "locf")
+    # seit 1.6.5 (CR2-V1-4): Kurse endlich und > 0 (bis 1.6.4 still -Inf bzw. sinnlose Werte)
+    with np.errstate(invalid="ignore"):
+        bad = np.flatnonzero(~np.isnan(x) & (np.isinf(x) | (x <= 0)))
+    if bad.size:
+        chk_stop("a.werte_positiv", fn, "local", int(bad[0]) + 1)
+    _step_start_warn(domestic_rate, data, fn, "domestic_rate")
+    _step_start_warn(foreign_rate, data, fn, "foreign_rate")
     i_d = _resolve_series(domestic_rate, data, "domestic_rate")
     i_f = _resolve_series(foreign_rate, data, "foreign_rate")
     d = _days(_to_date(_col(data, "date"), "data$date"))

@@ -11,7 +11,8 @@ sharpe_haircut(
   frequency = c("week", "day", "month"),
   dates = NULL,
   risk_free = 0,
-  ppy = 52
+  ppy = 52,
+  distribution = c("t", "normal")
 )
 }
 \arguments{
@@ -39,6 +40,15 @@ Seit 1.6.4 ganze Zahl von 1 bis 10^8, mindestens die Anzahl Sharpe Ratios bzw. P
 \item{ppy}{Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 =
 Wochen). Bei Suche oder Matrix wird es wie bei \code{\link[=overfit_pbo]{overfit_pbo()}} bestimmt (aus
 dem Datum geschaetzt, sonst 252/52/12 je \code{frequency}).}
+
+\item{distribution}{Seit 1.6.5 (Entscheidung 190): Verteilung des t-Werts in beiden
+Richtungen (p-Wert und Rueckrechnung der abgeschlagenen Sharpe Ratio):
+\code{"t"} (Standard) = t-Verteilung mit \eqn{T - 1} Freiheitsgraden nach Harvey
+& Liu (2015, Gl. 3; braucht \code{n_obs >= 2}); \code{"normal"} =
+Normalverteilung wie bis 1.6.4. Wo der p-Wert unterlaeuft (unter 1e-290),
+rechnet SimLev im Log-Massstab (CR2-I-2; bis 1.6.4 Abschlag \code{-Inf}); die
+Spalten \code{p} und \code{p_*} zeigen dort 0. Die Korrektur nach Holm und BY
+rechnet ohne Auffuellen der weiteren Tests (CR2-I-1, gleiche Werte).}
 }
 \value{
 data.frame je Punkt, absteigend nach \code{sharpe} sortiert, mit

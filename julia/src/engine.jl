@@ -218,6 +218,7 @@ mutable struct Cfg
     strategy::Vector{Pair{String,Dict{String,Any}}}
     no_split::Vector{String}       # Fonds-Wrapper: Assets ohne Splits (Anteilswert)
     wrappers::Any                  # Fonds-Wrapper: RList der Anteilswerte (nur mit details = true), sonst nothing
+    fee_cust::Union{Nothing,FeeSpec}   # seit 1.6.5: Depotgebühr (setzt _simulation_flat)
 end
 
 mutable struct Flags
@@ -277,7 +278,7 @@ function calculate_skewness(x::AbstractVector; na_rm::Bool = true)
     n < 3 && return NA
     mean_x = r_mean(a)
     sd_x = r_sd(a)
-    sd_x == 0 && return NA
+    (!isfinite(sd_x) || sd_x == 0) && return NA   # seit 1.6.5 (CR2-X20-2) wie R und Python
     # seit 1.6.4 (K43 T1-R11) (d * d) * d statt pow, wie der Kern (simlev_eval::moments)
     return (n / ((n - 1.0) * (n - 2.0))) * r_sum((let d = v - mean_x; (d * d) * d end) for v in a) / r_pow(sd_x, 3.0)
 end
@@ -290,7 +291,7 @@ function calculate_kurtosis(x::AbstractVector; na_rm::Bool = true, excess::Bool 
     n < 4 && return NA
     mean_x = r_mean(a)
     sd_x = r_sd(a)
-    sd_x == 0 && return NA
+    (!isfinite(sd_x) || sd_x == 0) && return NA   # seit 1.6.5 (CR2-X20-2) wie R und Python
     nf = Float64(n)
     # seit 1.6.4 (K43 T1-R11) (d * d) * (d * d) statt pow, wie der Kern
     kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) *
@@ -311,4 +312,5 @@ include("sim_phases.jl")
 include("sim_engine.jl")   # Tagesengine im C++-Kern
 include("sim_evaluate.jl")
 include("sim_blocks.jl")
+include("sim_prepared.jl")  # Studienkern: vorbereiteter Kernlauf je Pfad (seit 1.6.5)
 include("wrapper.jl")       # Fonds-Wrapper: Anteilswert über simulation()

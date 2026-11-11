@@ -26,7 +26,7 @@ Seit 1.6.4 eine Zahl > 0.}
 
 \item{months}{Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
 Seit 1.6.4 eine ganze Zahl >= 1.
-Seit 1.6.4 hoechstens 1200.}
+Seit 1.6.4 hoechstens 1200; seit 1.6.5 hoechstens 12 * \code{horizon}.}
 
 \item{horizon}{Vergleichshorizont in Jahren ab Start (Standard 10).
 Seit 1.6.4 eine ganze Zahl >= 1.
@@ -54,11 +54,10 @@ viele, wie der freie Speicher traegt, und
 nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
-Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
-rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl: SimLev misst und plant wie mit
+\code{"auto"}, nimmt aber hoechstens so viele Prozesse (bis 1.6.4 immer so viele Prozesse ohne Messung);
+unter Windows rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster; hoechstens Zahl der Prozessoren:
 mehr wird mit einem Hinweis begrenzt.
-Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
 In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
 \code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
 der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).

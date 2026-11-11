@@ -41,7 +41,7 @@
 .sim_risk_free <- function(risk_free, data, n_days_sim) {
   if (is.null(risk_free)) risk_free <- 0          # NULL explizit wie 0 behandeln
   if (is.character(risk_free)) {
-    if (!risk_free %in% names(data)) stop(sprintf("risk_free: Spalte '%s' fehlt im Datensatz.", risk_free))
+    if (!risk_free %in% names(data)) stop(chk_msg("a.m_sim_risk_free", risk_free))
     as.numeric(data[[risk_free]])
   } else rep(as.numeric(risk_free), n_days_sim)
 }
@@ -119,23 +119,35 @@
 #' statistics, buys, sells, undefined_metrics.
 #' @keywords internal
 #' @noRd
-.sim_evaluate <- function(sim_mem, fl, cfg, data, prep, tax_unpaid) {
-  nm <- fl$flag_assets
-  n <- length(fl$flag_date)
-  rp <- sim_mem[["report"]]
-  rf <- .sim_capture(.sim_risk_free(cfg$risk_free, data, n))
+# Teile der Auswertung ohne den Engine-Lauf (seit 1.6.5 eigene Funktion, Paket E: der Studienkern R/sim_prepared.R
+# merkt sie sich): rf = Ergebnis von .sim_capture(.sim_risk_free()), s = Eingabe von C_sim_run_prepared
+.sim_eval_static <- function(fl, cfg, data, prep) {
+  rf <- .sim_capture(.sim_risk_free(cfg$risk_free, data, length(fl$flag_date)))
   rfv <- if (rf$failed) NULL else rf$value
-  inp <- list(
-    n = n, total = lapply(nm, function(a) rp[[a]][["total"]]), flows = lapply(nm, function(a) rp[[a]][["flows"]]),
-    worth = lapply(nm, function(a) rp[[a]][["worth"]]), money = lapply(nm, function(a) rp[[a]][["money"]]),
-    price = lapply(nm, function(a) as.numeric(sim_mem[["market"]][[a]][["asset_price"]])),
-    day = as.numeric(fl$flag_date), filled = if (any(fl$flag_filled)) as.integer(fl$flag_filled),
-    sc = c(as.numeric(prep$start_date), as.numeric(prep$stopp_date), as.numeric(cfg$start_value), as.numeric(tax_unpaid)),
-    status_money = vapply(nm, function(a) as.numeric(sim_mem[["status"]][[a]][["money"]]), 0, USE.NAMES = FALSE),
-    n_buys = vapply(nm, function(a) sim_mem[["trades"]][[a]][["n_buys"]], 0, USE.NAMES = FALSE),
-    n_sells = vapply(nm, function(a) sim_mem[["trades"]][[a]][["n_sells"]], 0, USE.NAMES = FALSE),
-    rf = if (is.double(rfv)) rfv else if (!is.null(rfv)) as.double(rfv), rf_ok = as.integer(!rf$failed))
-  ev <- .Call(C_sim_evaluate, inp)
+  list(rf = rf, s = list(day = as.numeric(fl$flag_date), filled = if (any(fl$flag_filled)) as.integer(fl$flag_filled),
+                         sc = c(as.numeric(prep$start_date), as.numeric(prep$stopp_date), as.numeric(cfg$start_value)),
+                         rf = if (is.double(rfv)) rfv else if (!is.null(rfv)) as.double(rfv), rf_ok = as.integer(!rf$failed)))
+}
+
+# core: Ergebnis der Auswertung aus C_sim_run_prepared (Studienkern, seit 1.6.5) mit rf aus .sim_eval_static; ohne
+# core rechnet .sim_evaluate die Auswertung selbst (C_sim_evaluate), mit st aus .sim_eval_static, falls schon gerechnet
+.sim_evaluate <- function(sim_mem, fl, cfg, data, prep, tax_unpaid, core = NULL, rf = NULL, st = NULL) {
+  nm <- fl$flag_assets
+  if (is.null(core)) {
+    rp <- sim_mem[["report"]]
+    if (is.null(st)) st <- .sim_eval_static(fl, cfg, data, prep)   # st: schon aus .sim_prep_capture (Studienkern)
+    rf <- st$rf; s <- st$s
+    inp <- list(
+      n = length(fl$flag_date), total = lapply(nm, function(a) rp[[a]][["total"]]), flows = lapply(nm, function(a) rp[[a]][["flows"]]),
+      worth = lapply(nm, function(a) rp[[a]][["worth"]]), money = lapply(nm, function(a) rp[[a]][["money"]]),
+      price = lapply(nm, function(a) as.numeric(sim_mem[["market"]][[a]][["asset_price"]])),
+      day = s$day, filled = s$filled, sc = c(s$sc, as.numeric(tax_unpaid)),
+      status_money = vapply(nm, function(a) as.numeric(sim_mem[["status"]][[a]][["money"]]), 0, USE.NAMES = FALSE),
+      n_buys = vapply(nm, function(a) sim_mem[["trades"]][[a]][["n_buys"]], 0, USE.NAMES = FALSE),
+      n_sells = vapply(nm, function(a) sim_mem[["trades"]][[a]][["n_sells"]], 0, USE.NAMES = FALSE),
+      rf = s$rf, rf_ok = s$rf_ok)
+    ev <- .Call(C_sim_evaluate, inp)
+  } else ev <- core
   # Meldungen: Warnungen von .sim_returns, Abbruch dort, Meldungen von risk_free, Abbruch in .sim_risk_stats
   cl <- sys.call()   # Aufruf der Phase; .sim_restore_call setzt den Aufruf von simulation()
   for (i in seq_along(ev$msg_code)) .sim_eval_warn(ev$msg_code[i], ev$msg_v[4L * (i - 1L) + 1:4], cl)
@@ -253,7 +265,7 @@
     }
   }
 
-  if (fees_on) results$fees_paid <- .fee_env$paid
+  if (fees_on || !is.null(cfg$fee_cust)) results$fees_paid <- .fee_env$paid   # seit 1.6.5 auch mit Depotgebuehr
   if (isTRUE(harvest_mode)) results$harvest_days <- flag_date[flag_harvest]
   if (length(cfg$wrappers)) results$wrappers <- cfg$wrappers   # nur mit details = TRUE und Wrapper-Assets
   class(results) <- "SimLevResult"

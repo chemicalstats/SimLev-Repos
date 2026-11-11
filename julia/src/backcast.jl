@@ -18,6 +18,7 @@ using ..SimLev: _bc_doc, _bc_panel
 using ..SimLev: RList, RFrame, RVector, nrow, ncol, attrs, NA, rows,
                 register_print!, register_summary!, register_plot!, inherits
 using Dates
+using ..SimLev: chk_msg, chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 
 export backcast_fit, backcast
 
@@ -51,7 +52,8 @@ function _bc_check_series(@nospecialize(x), data, fn, arg)
             vcol = [k for k in nm if k != dcol][1]
             x[dcol] isa SimLev.RFmt.RFactor && SimLev.chk_stop("spalte_faktor", fn, dcol)
             E._e4_numcol(x, vcol, fn)
-            all(isfinite, DP._as_numeric(x[vcol])) || SimLev.chk_stop("e3.werte", fn, arg)
+            # seit 1.6.5 (CR2-K-4): Tabelle ohne Zeile wie fehlende Werte abgelehnt
+            (nrow(x) > 0 && all(isfinite, DP._as_numeric(x[vcol]))) || SimLev.chk_stop("e3.werte", fn, arg)
         end
         return x
     end
@@ -61,7 +63,12 @@ function _bc_check_series(@nospecialize(x), data, fn, arg)
         isempty(xs) && SimLev.chk_stop("e4.reihe", fn, arg)
         if String(xs) in names(data)
             E._e4_numcol(data, String(xs), fn)
-            any(isinf, DP._as_numeric(data[String(xs)])) && SimLev.chk_stop("e1.spalte_endlich", fn, String(xs))
+            vv = DP._as_numeric(data[String(xs)])
+            any(isinf, vv) && SimLev.chk_stop("e1.spalte_endlich", fn, String(xs))
+            # seit 1.6.5 (CR2-H-4): Spalte ohne Wert Fehler, späterer Beginn Hinweis (R .bc_check_series)
+            i1 = findfirst(!isnan, vv)
+            (!isempty(vv) && i1 === nothing) && SimLev.chk_stop("c.bc_spalte_leer", fn, String(xs), arg)
+            (i1 !== nothing && i1 > 1) && SimLev.Dependence.message(SimLev.chk_msg("c.bc_spalte_spaet", fn, String(xs), arg, i1 - 1))
         end
         return x
     end
@@ -84,8 +91,12 @@ function _bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_
     end
     lv = leverage isa RVector ? leverage.values : leverage
     (!(lv isa SimLev.RFmt.RFactor) && _isnumval(lv) && length(lv) == 1 && isfinite(Float64(first(lv))) && Float64(first(lv)) != 0) ||
-        error("'leverage' muss eine Zahl ungleich 0 sein.")    # seit 1.6.4 auch NA und Inf
+        chk_stop("c.m_bc_check_args")    # seit 1.6.4 auch NA und Inf
     _bc_check_series(ter, data, fn, "ter"); _bc_check_series(rate, data, fn, "rate"); _bc_check_series(fx, data, fn, "fx")
+    # seit 1.6.5 (CR2-V3-4 Punkt 4): Stufentabelle beginnt nach dem ersten Datentag -> Warnung
+    SimLev.Bonds._step_start_warn(_pairs_as_named(ter), data, fn, "ter")
+    SimLev.Bonds._step_start_warn(_pairs_as_named(rate), data, fn, "rate")
+    SimLev.Bonds._step_start_warn(_pairs_as_named(fx), data, fn, "fx")
     SimLev.chk_int1(rate_lag, fn, "rate_lag"; lo = 0, hi = max(0, nrow(data) - 1))
     SimLev.chk_num1(ter_basis, fn, "ter_basis"; lo = 0, lo_open = true)
     SimLev.chk_num1(rate_basis, fn, "rate_basis"; lo = 0, lo_open = true)
@@ -117,6 +128,13 @@ function _bc_check_par(@nospecialize(p), fn, arg; null_ok::Bool = false)
     return p
 end
 
+# Vektor von Paaren mit Zahlenwerten (["2010-02-24" => 0.35, …]) als benannter Vektor (seit 1.6.5, CR2-H-5)
+function _pairs_as_named(x)
+    ok = x isa AbstractVector && !isempty(x) && all(p -> p isa Pair && p.second isa Real && !(p.second isa Bool), x)
+    ok || return x
+    RVector(Float64[Float64(p.second) for p in x]; names = String[string(p.first) for p in x])
+end
+
 """
     _resolve_series(x, data, what; default = 0)
 
@@ -130,9 +148,13 @@ function _resolve_series(x, data, what; default = 0)
     data = SimLev.as_rframe(data)
     n = DP._nrow(data)
     x === nothing && return fill(Float64(default), n)
+    # seit 1.6.5 (CR2-H-5): Vektor von Paaren "Datum" => Zahl ist ein benannter Vektor (bis 1.6.4 als Tabelle gedeutet)
+    x = _pairs_as_named(x)
+    # seit 1.6.5 (CR2-P-5): Stufentabelle bzw. benannter Vektor braucht die Spalte date in data (R .resolve_series)
+    ((x isa RFrame || DP._is_named_numeric(x)) && !("date" in DP._names(data))) && SimLev.chk_stop("spalten", what, "'date'")
     xf = DP._as_frame(x)
     if xf isa RFrame
-        ncol(xf) < 2 && error("$(what): data.frame braucht die Spalten date und Wert.")
+        ncol(xf) < 2 && chk_stop("c.m_resolve_series", what)
         nm = names(xf)
         dcol = "date" in nm ? "date" : nm[1]
         vcol = [k for k in nm if k != dcol][1]
@@ -145,7 +167,7 @@ function _resolve_series(x, data, what; default = 0)
     xs = x isa RVector ? x.values : x
     if xs isa AbstractString || (xs isa AbstractVector && length(xs) == 1 && xs[1] isa AbstractString)
         c = xs isa AbstractString ? String(xs) : String(xs[1])
-        c in DP._names(data) || error("$(what): Spalte '$(c)' fehlt im Datensatz.")
+        c in DP._names(data) || chk_stop("a.m_cpi_level", what, c)
         v = DP._as_numeric(DP._col(data, c))
         any(isnan, v) && (v = _fill_na(v, "locf"))
         return v
@@ -163,7 +185,7 @@ function _resolve_series(x, data, what; default = 0)
         length(a) == 1 && return fill(a[1], n)
         length(a) == n && return a
     end
-    error("$(what): nicht interpretierbare Angabe (Skalar, Vektor der Länge $(n), Spaltenname, data.frame(date, Wert) oder benannter Vektor mit Datumsnamen).")
+    chk_stop("a.m_idx_rate", what, n)
 end
 
 """
@@ -305,25 +327,25 @@ end
 function _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
                      ter_basis, rate_basis, accrual, index_fill, lag)
     data = DP._as_frame(data)
-    data isa RFrame || error("'data' muss ein data.frame sein.")
-    "date" in names(data) || error("'data' braucht eine Spalte 'date'.")
+    data isa RFrame || chk_stop("c.m_bc_prepare")
+    "date" in names(data) || chk_stop("c.m_bc_prepare_2")
     data = copy(data)
     dts = DP._to_date(data["date"], "'data\$date'")
     data["date"] = dts
     dd0 = DP._days(dts)
-    any(isnan, dd0) && error("'data\$date' enthält fehlende Daten.")
+    any(isnan, dd0) && chk_stop("c.m_bc_prepare_3")
     any(i -> dd0[i+1] <= dd0[i], 1:length(dd0)-1) &&
-        error("'data\$date' muss streng aufsteigend und ohne Duplikate sein.")
+        chk_stop("c.m_bc_prepare_4")
     for col in (product, index)
-        String(col) in names(data) || error("Spalte '$(col)' fehlt im Datensatz.")
+        String(col) in names(data) || chk_stop("c.m_bc_prepare_5", col)
     end
     lv = leverage isa RVector ? leverage.values : leverage
-    (_isnumval(lv) && length(lv) == 1 && Float64(first(lv)) != 0) || error("'leverage' muss eine Zahl ungleich 0 sein.")
+    (_isnumval(lv) && length(lv) == 1 && Float64(first(lv)) != 0) || chk_stop("c.m_bc_check_args")
     L = Float64(first(lv))
     idx = DP._as_numeric(data[String(index)])
     fx !== nothing && (idx = idx .* _resolve_series(fx, data, "fx"))
     any(isnan, idx) && (idx = _fill_na(idx, index_fill; keep_leading = true))
-    any(v -> !isnan(v) && v <= 0, idx) && error("Indexwerte müssen positiv sein.")
+    any(v -> !isnan(v) && v <= 0, idx) && chk_stop("c.m_bc_prepare_6")
     prod = DP._as_numeric(data[String(product)])
     for i in eachindex(prod)
         (!isnan(prod[i]) && prod[i] <= 0) && (prod[i] = NA)
@@ -593,7 +615,10 @@ zwischen simuliertem und echtem Produkt minimal wird (täglich, kumuliert oder b
   gefüllt).
 - `ter`: Laufende Kosten in Prozent p. a. (0.5 = 0,5 Prozent; Standard 0): Skalar, Vektor der Länge
   `nrow(data)`, Spaltenname, Tabelle (RFrame)(date, ter) (Stufenfunktion, gültig ab Datum) oder benannter
-  Vektor mit Datumsnamen, z. B. `["2010-02-24" = 0.35, "2023-10-10" = 0.50]`.
+  Vektor mit Datumsnamen, z. B. `["2010-02-24" => 0.35, "2023-10-10" => 0.50]`.
+  Seit 1.6.5 (für `ter`, `rate`, `fx` gleich): eine Spalte ohne einen Wert ist ein Fehler, führende fehlende
+  Werte erhalten den ersten Wert der Spalte (mit Hinweis), eine Tabelle ohne Zeile ist ein Fehler, eine
+  Stufentabelle, die nach dem ersten Datentag beginnt, gibt eine Warnung (davor gilt ihr erster Wert).
 - `leverage`: Hebel L des Produkts relativ zum Index als Zahl ungleich 0 (Standard 1; z. B. 2, -1, -2). Ist
   der Index bereits ein Hebelindex (z. B. MSCI USA Leveraged 2x Daily), ist `leverage = 1` zu setzen.
 - `rate`: Finanzierungszins in Prozent p. a. (Tagesgeld, z. B. ESTR, EONIA, SOFR, EFFR) in denselben Formen
@@ -610,6 +635,10 @@ zwischen simuliertem und echtem Produkt minimal wird (täglich, kumuliert oder b
   (Restabweichung in Prozent p. a.), `"spread"` (Spread auf den finanzierten Anteil in Prozent p. a., nur für
   L != 1, sonst mit Warnung ignoriert) und `"beta"` (effektiver Hebel-Multiplikator, Faktor; nur
   Strukturmodell). `character(0)` schätzt nichts (reine Kostenrechnung).
+  `drag` und `spread` wirken beide je Kalendertag und sind gemeinsam nicht bestimmbar: stehen beide in `fit`,
+  wird seit 1.6.5 mit Warnung nur `drag` geschätzt (`spread` bleibt beim festen Wert aus `fixed`). Liegt ein
+  Schätzwert an der Grenze von `bounds` bzw. auf dem ersten oder letzten Gitterpunkt, warnt die Funktion seit
+  1.6.5; das Ergebnis enthält seit 1.6.5 `convergence` (0 = konvergiert).
 - `fixed`: Benannte Liste fester Parameterwerte, z. B. `(spread = 0.4,)`; nicht genannte Parameter: drag = 0,
   spread = 0 (Prozent p. a.), beta = 1. Die Werte dienen auch als Startwerte der Optimierung.
 - `objective`: `"level"` (Standard; kumulierte Pfadabweichung der Log-Niveaus, wie im Skript '02 Funds Data';
@@ -730,24 +759,28 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
     grid = grid === nothing ? _default_grid() : Float64.(grid isa AbstractVector ? grid : grid isa Tuple ? collect(grid) : [grid])
     fit = unique(_as_chr_vec(fit))
     (!isempty(fit) && !all(f -> f in ("drag", "spread", "beta"), fit)) &&
-        error("'fit' darf nur 'drag', 'spread' und 'beta' enthalten.")
+        chk_stop("c.m_backcast_fit")
     bl = bounds === nothing ? RList() : _as_rlist(bounds)
     (bl === nothing || (length(bl) > 0 && !all(k -> k in ("drag", "spread", "beta"), keys(bl)))) &&
-        error("'bounds' muss eine benannte Liste mit Einträgen drag, spread und/oder beta sein, z. B. list(drag = c(-5, 5)).")
+        chk_stop("c.m_backcast_fit_2")
     bounds = _modify_list(_bounds0(), bl)
     for (k, b) in bounds
         ok = _isnumval(b) && length(b) == 2 && !(b isa SimLev.RFmt.RFactor)
         bb = ok ? DP._as_numeric(b) : Float64[]
         ok = ok && all(isfinite, bb) && bb[1] < bb[2] && isfinite(bb[2] - bb[1])   # Breite endlich (B-005)
-        ok || error("bounds\$$(k) muss c(unten, oben) mit unten < oben sein.")   # seit 1.6.4 ohne Wert, endlich
+        ok || chk_stop("c.m_backcast_fit_3", k)   # seit 1.6.4 ohne Wert, endlich
         bounds[k] = bb
     end
     if model != "structural" && "beta" in fit
-        @warn "'beta' wird bei Regressionsmodellen über die Regression geschätzt und hier ignoriert."
+        @warn chk_msg("c.m_backcast_fit_4")
         fit = [f for f in fit if f != "beta"]
     end
     if leverage == 1 && "spread" in fit
-        @warn "'spread' ist bei leverage = 1 nicht identifizierbar und wird ignoriert."
+        @warn chk_msg("c.m_backcast_fit_5")
+        fit = [f for f in fit if f != "spread"]
+    elseif "drag" in fit && "spread" in fit
+        # seit 1.6.5 (K10, CR2-A-4): gemeinsam nicht bestimmbar, nur drag (R backcast_fit)
+        @warn SimLev.chk_msg("c.bc_kollinear", fn)
         fit = [f for f in fit if f != "spread"]
     end
 
@@ -782,7 +815,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         e0 = DP._as_date_any(end_)[1]
         has = has .& (prep.dates .<= e0)
     end
-    count(has) < 20 && error("Zu wenige gemeinsame Beobachtungen von Produkt und Index (mindestens 20).")
+    count(has) < 20 && chk_stop("c.m_backcast_fit_6")
     hw = findall(has)
     w0, w1 = hw[1], hw[end]
     win = collect(w0:w1)
@@ -800,7 +833,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         y = Float64[prep.prod[i] / prep.prod[i-1] - 1 for i in o]
         xx = prep.x[o]
         ok = [isfinite(y[j]) && isfinite(xx[j]) && !isnan(prep.prod[o[j]-1]) for j in eachindex(o)]
-        count(ok) < 20 && error("Zu wenige aufeinanderfolgende Beobachtungen für das Regressionsmodell.")
+        count(ok) < 20 && chk_stop("c.m_fit_reg")
         if model == "linear"
             X = hcat(ones(count(ok)), xx[ok])
             f = SimLev.SLib.lsfit(X, y[ok])                         # kleinste Quadrate
@@ -840,7 +873,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
     function run_fit(rws, ob, rg; metrics::Bool = true)
         isempty(fit) && return (par = copy(par0), value = make_obj(rws, ob, rg)(Float64[]), grid = nothing, metrics = nothing)
         if method == "grid"
-            length(fit) != 1 && error("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
+            length(fit) != 1 && chk_stop("c.m_run_fit")
             # seit 1.6.3 je Gitterpunkt einmal gerechnet (bis 1.6.2 für Zielwert und Fehlermatrix getrennt; gleiche
             # Parameter, reine Funktionen ohne Meldungen); seit 1.6.4 nur auf rws mit der Basis vorab (B-068) und je
             # Punkt ein _bc_errors (B-069: "level" bei objective = "level", horizon bleibt dort unausgewertet, sonst
@@ -890,10 +923,24 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         for (k, t) in zip(fit, _getel(o, "par"))
             p[k] = Float64(t)
         end
-        return (par = p, value = Float64(_getel(o, "value")), grid = nothing, metrics = nothing)
+        return (par = p, value = Float64(_getel(o, "value")), grid = nothing, metrics = nothing,
+                convergence = Int(_getel(o, "convergence")))
     end
 
     res = run_fit(win, obs, reg)
+    # seit 1.6.5 (CR2-A-5, K22): Schätzwert an der Suchgrenze bzw. am Gitterrand und fehlende Konvergenz melden
+    for k in fit
+        v = Float64(res.par[k])
+        edge = if method == "grid"
+            v == minimum(grid) || v == maximum(grid)
+        else
+            b = bounds[k]
+            v <= b[1] + 1e-6 * (b[2] - b[1]) || v >= b[2] - 1e-6 * (b[2] - b[1])
+        end
+        edge && @warn SimLev.chk_msg("c.bc_rand", fn, k, SimLev.RFmt.format(v; digits = 6))
+    end
+    conv = haskey(res, :convergence) ? res.convergence : 0
+    conv != 0 && @warn SimLev.chk_msg("c.bc_konvergenz", fn, conv)
     r_all = _bc_model_returns(prep, res.par, model, reg)
     diag = _bc_diagnostics(r_all[win], 1:length(win), obs, prep.dates[win])
     diag_naive = _bc_diagnostics(_bc_model_returns(prep, par0, model, reg)[win], 1:length(win), obs, prep.dates[win])
@@ -940,6 +987,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
     out["grid"] = res.grid
     out["grid_metrics"] = res.metrics
     out["validation"] = oos
+    out["convergence"] = conv                                  # seit 1.6.5 (CR2-A-5)
     out["regression"] = reg
     out["inception"] = inception
     out["window"] = DP._as_dates([prep.dates[w0], prep.dates[w1]])
@@ -991,6 +1039,10 @@ Tabelle (RFrame) der Klasse `["SimLevBackcast", "data.frame"]` mit einer Zeile j
 `model` (reine Modellreihe auf gleichem Niveau), `product` (Rohdaten) und `source` ("backcast", "product" oder
 "filled"). Attribute `"fit"` (Fit-Objekt oder `nothing`), `"params"` (verwendete Parameter) und
 `"splice_date"` (Verkettungsdatum oder `NA`).
+Seit 1.6.5: an Produkttagen ist `value` genau der Produktkurs (bei `rebase` mal Faktor); beginnt der Index erst
+nach dem Verkettungstag, gelten die echten Kurse ab der Verkettung (`model` dann ab dem ersten Tag mit Index und
+Produkt); enden die Produktkurse vor dem Datenende, warnt die Funktion (die Zeilen danach sind fortgeschrieben,
+`source = "filled"`).
 
 # Beispiel
 ```julia
@@ -1012,7 +1064,7 @@ function backcast(fit_pos = nothing; fit = fit_pos, data = nothing, params = not
     fn = "backcast"                                            # seit 1.6.4 vor der Rechnung (K42 E4)
     SimLev.chk_dots([String(k) for (k, _) in kwargs], ["product", "index", "ter", "leverage", "rate", "fx", "rate_lag",
                     "ter_basis", "rate_basis", "accrual", "index_fill", "lag", "model"], fn)   # Entscheidung 21
-    fit === nothing || (fit isa RList && inherits(fit, "SimLevBackcastFit")) || error("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+    fit === nothing || (fit isa RList && inherits(fit, "SimLevBackcastFit")) || chk_stop("c.m_backcast")
     SimLev.chk_df(data, fn, "data"; null_ok = true)             # Entscheidung 6
     _bc_check_par(params, fn, "params"; null_ok = true)
     splice = SimLev.chk_scalar(splice)
@@ -1022,15 +1074,15 @@ function backcast(fit_pos = nothing; fit = fit_pos, data = nothing, params = not
     E = _libm()
     if fit === nothing
         dots = RList((String(k) => v for (k, v) in kwargs)...)
-        data === nothing && error("Ohne 'fit' muss 'data' angegeben werden.")
+        data === nothing && chk_stop("c.m_backcast_2")
         a = _modify_list(RList("ter" => 0, "leverage" => 1, "rate" => nothing, "fx" => nothing, "rate_lag" => 0,
                                "ter_basis" => 365, "rate_basis" => 360, "accrual" => "linear",
                                "index_fill" => "locf"), dots)
         (get(a, "product", nothing) === nothing || get(a, "index", nothing) === nothing) &&
-            error("'product' und 'index' müssen angegeben werden.")
+            chk_stop("c.m_backcast_3")
         a["data"] = data
         model = something(get(dots, "model", nothing), "structural")
-        (model isa AbstractString && model == "structural") || error("Ohne Fit ist nur model = 'structural' möglich.")
+        (model isa AbstractString && model == "structural") || chk_stop("c.m_backcast_4")
         _bc_check_args(fn, data, a["product"], a["index"], get(a, "ter", nothing), get(a, "leverage", nothing),
                        get(a, "rate", nothing), get(a, "fx", nothing), get(a, "rate_lag", nothing), get(a, "ter_basis", nothing),
                        get(a, "rate_basis", nothing))
@@ -1044,7 +1096,7 @@ function backcast(fit_pos = nothing; fit = fit_pos, data = nothing, params = not
         par = _modify_list(RList("drag" => 0.0, "spread" => 0.0, "beta" => 1.0), params)
         lag = Int(trunc(something(get(dots, "lag", nothing), 0)))
     else
-        (fit isa RList && inherits(fit, "SimLevBackcastFit")) || error("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+        (fit isa RList && inherits(fit, "SimLevBackcastFit")) || chk_stop("c.m_backcast")
         isempty(kwargs) || SimLev.chk_stop("e4.fit_angabe", fn, String(first(keys(kwargs))))   # Entscheidung 71
         a = copy(fit["call_args"])
         if data !== nothing
@@ -1071,7 +1123,7 @@ function backcast(fit_pos = nothing; fit = fit_pos, data = nothing, params = not
         obs[1]
     else
         sd0 = DP._days(DP._to_date(splice, "splice"))
-        (length(sd0) != 1 || isnan(sd0[1])) && error("splice: \"inception\", \"none\" oder ein Datum ('JJJJ-MM-TT').")
+        (length(sd0) != 1 || isnan(sd0[1])) && chk_stop("c.m_backcast_5")
         cand = [i for i in obs if prep.dates[i] >= sd0[1]]
         isempty(cand) && error("Kein Produktkurs ab dem Verkettungsdatum vorhanden (letzter Produktkurs am $(DP._date_str(prep.dates[maximum(obs)]))).")   # seit 1.6.4 ohne Eingabewert
         cand[1]
@@ -1102,27 +1154,43 @@ function backcast(fit_pos = nothing; fit = fit_pos, data = nothing, params = not
             _fill_na(pv, fill)
         end
         source[seg] .= [isnan(v) ? "filled" : "product" for v in pv]
-        last_obs < n && (source[last_obs+1:n] .= "filled")
+        if last_obs < n
+            source[last_obs+1:n] .= "filled"
+            # seit 1.6.5 (K23, CR2-B-4): Produktkurse enden vor dem Datenende -> Warnung (R backcast)
+            @warn SimLev.chk_msg("c.bc_ende", fn, DP._date_str(prep.dates[last_obs]), n - last_obs)
+        end
         r_seg = vcat(NA, Float64[pf[i] / pf[i-1] - 1 for i in 2:length(pf)])
         r_out[seg[2:end]] .= r_seg[2:end]
         r_out[k0] = r_mod[k0]
     end
     lr_all = Float64[lr1(v) for v in r_out]
     lr_mod = Float64[lr1(v) for v in r_mod]
-    lr_all[1:first_idx] .= 0.0; lr_mod[1:first_idx] .= 0.0
+    # seit 1.6.5 (CR2-B-1): Renditen nur bis min(first_idx, k0) genullt, value ab k0 nicht NA; model am ersten Tag
+    # mit Index und Produkt verankert (R backcast)
+    f0 = k0 > 0 ? min(first_idx, k0) : first_idx
+    lr_all[1:f0] .= 0.0; lr_mod[1:first_idx] .= 0.0
     cl = SimLev.r_cumsum(lr_all); cm = SimLev.r_cumsum(lr_mod)
     if k0 > 0
+        km = if k0 >= first_idx
+            k0
+        else
+            ik = findfirst(o -> o >= first_idx, obs)
+            ik === nothing ? 0 : obs[ik]
+        end
         value = Float64[prod[k0] * E.exp(c - cl[k0]) for c in cl]
-        model_v = Float64[prod[k0] * E.exp(c - cm[k0]) for c in cm]
+        model_v = km > 0 ? Float64[prod[km] * E.exp(c - cm[km]) for c in cm] : fill(NA, n)
     else
         value = Float64[100 * E.exp(c) for c in cl]
         model_v = Float64[100 * E.exp(c) for c in cm]
     end
-    if first_idx > 1
-        value[1:first_idx-1] .= NA; model_v[1:first_idx-1] .= NA
+    f0 > 1 && (value[1:f0-1] .= NA)
+    first_idx > 1 && (model_v[1:first_idx-1] .= NA)
+    # seit 1.6.5 (K11, CR2-B-2): an Produkttagen genau der Produktkurs
+    for i in 1:n
+        source[i] == "product" && (value[i] = prod[i])
     end
     if rebase !== nothing
-        s = rebase / value[first_idx]
+        s = rebase / value[f0]
         value = value .* s; model_v = model_v .* s
     end
     ret = vcat(NA, Float64[value[i] / value[i-1] - 1 for i in 2:n])

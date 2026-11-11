@@ -71,7 +71,7 @@ Abdeckung bei vielen Dimensionen).}
 \item{n}{Anzahl Punkte bei \code{"random"} und \code{"lhs"} (ganze Zahl,
 Standard 50); bei \code{"grid"} ignoriert. Doppelte Punkte werden
 entfernt und in hoechstens 20 Runden nachgezogen; es koennen weniger
-Punkte entstehen.
+Punkte entstehen (seit 1.6.5 mit Hinweis).
 Seit 1.6.4 hoechstens 10^8.}
 
 \item{constraint}{Optional \code{function(p)}, die \code{TRUE} fuer
@@ -89,7 +89,7 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 \item{burn_in}{Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
 Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
 ganze Zahl, Standard 0).
-Seit 1.6.4 eine ganze Zahl >= 0.}
+Seit 1.6.4 eine ganze Zahl >= 0; seit 1.6.5 kleiner als die Zahl der Datenzeilen (vorab geprueft).}
 
 \item{metrics}{Funktion \code{SimLevResult ->} benannter numerischer
 Vektor (Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}: u. a. \code{cagr},
@@ -99,7 +99,8 @@ Seit 1.6.4 muessen die Namen der Kennzahlen eindeutig und nicht leer sein und du
 Spalte des Ergebnisses gleichen (sonst Fehler nach dem Rechnen).}
 
 \item{objective}{Name der Zielgroesse (Element von \code{metrics}, Standard
-\code{"sharpe"}) fuer Ranking, Plateau und \code{\link[=param_bootstrap]{param_bootstrap()}}.}
+\code{"sharpe"}) fuer Ranking, Plateau und \code{\link[=param_bootstrap]{param_bootstrap()}}.
+Seit 1.6.5 nach dem ersten Punkt geprueft (vorher nach allen Punkten).}
 
 \item{maximize}{Logisch: Zielgroesse maximieren (Standard \code{TRUE};
 \code{FALSE} z. B. fuer \code{max_drawdown}).}
@@ -125,11 +126,10 @@ viele, wie der freie Speicher traegt, und
 nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
-Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
-rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl: SimLev misst und plant wie mit
+\code{"auto"}, nimmt aber hoechstens so viele Prozesse (bis 1.6.4 immer so viele Prozesse ohne Messung);
+unter Windows rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster; hoechstens Zahl der Prozessoren:
 mehr wird mit einem Hinweis begrenzt.
-Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
 In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
 \code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
 der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).

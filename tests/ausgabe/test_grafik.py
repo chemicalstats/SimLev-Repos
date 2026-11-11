@@ -567,10 +567,11 @@ def test_trigger_types_match_r_reference():
     df = rebalance_trigger(df, "combined", triggers=[{"type": "abs_leverage", "threshold": 10},
                                                          {"type": "vol_band", "threshold": 20}], out_col="c")
     T, F = True, False
-    assert df["a"].tolist() == [F, F, T, F, T, F, T, F, T, T]
+    # seit 1.6.5 (CR2-D-1, K15): der letzte Schritt 2.10 -> 2.00 liegt genau auf der Schwelle 0.10 und löst nicht aus
+    assert df["a"].tolist() == [F, F, T, F, T, F, T, F, T, F]
     assert df["r"].tolist() == [F, F, T, F, T, F, T, F, T, F]
     assert df["v"].tolist() == [F, F, T, F, T, F, T, F, T, F]
-    assert df["c"].tolist() == [F, F, T, F, T, F, T, F, T, T]
+    assert df["c"].tolist() == [F, F, T, F, T, F, T, F, T, F]
 
 
 def test_trigger_errors():
@@ -721,7 +722,7 @@ def test_backcast_values():
     assert simlev.backcast.plot_SimLevBackcast(b).svg == b.plot().svg         # öffentliche Funktion = Methode
 
 
-def test_bootstrap_study_values():
+def test_bootstrap_study_values(capsys):
     import simlev._lib as sl    # Kerndichte seit 1.0.0 aus der C-Bibliothek (.sl_kde), nicht mehr simlev._r.stats
     x = _obj("bootstrap/study_basic")
     p = x.plot(metric="max_drawdown", width=700)
@@ -737,9 +738,10 @@ def test_bootstrap_study_values():
         keep = (gx >= np.nanmin(allv)) & (gx <= np.nanmax(allv))             # gezeichneter Bereich
         assert _gleich(d.loc[d["strategy"] == s, "x"], gx[keep]) and _gleich(d.loc[d["strategy"] == s, "density"], gy[keep])
     assert "Verteilung max_drawdown" in p.svg and 'width="700"' in p.svg
-    y = _obj("bootstrap/study_print_paired")                                 # zu wenige Werte: Meldung wie R (.sl_kde)
-    with pytest.raises(ValueError, match="bw.nrd0: mindestens 2 Werte nötig"):
-        y.plot()
+    y = _obj("bootstrap/study_print_paired")   # seit 1.6.5 (CR2-X4-3): Strategie mit < 2 Werten fehlt mit Hinweis (bis 1.6.4 Fehler bw.nrd0)
+    capsys.readouterr()
+    assert "<svg" in y.plot().svg
+    assert "diese Strategien fehlen in der Grafik" in capsys.readouterr().err
 
 
 def test_deep_analysis_values():

@@ -16,7 +16,9 @@ local({
 test_that("rebalance_trigger mit fuehrendem NA", {
   df <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 6),
                    target_leverage = c(NA, 2, 2.3, 2.3, 1.9, 2), sigma_ewma = c(NA, NA, .1, .2, .1, .1))
-  expect_equal(rebalance_trigger(df, "abs_leverage")$rebal_trigger, c(FALSE, FALSE, TRUE, FALSE, TRUE, TRUE))
+  # seit 1.6.5 (CR2-D-1, K15): der letzte Schritt 1.9 -> 2 liegt genau auf der Schwelle 0.10 (als Gleitkommazahl
+  # 0.10000000000000009) und loest nicht mehr aus
+  expect_equal(rebalance_trigger(df, "abs_leverage")$rebal_trigger, c(FALSE, FALSE, TRUE, FALSE, TRUE, FALSE))
   expect_equal(rebalance_trigger(df, "vol_band")$rebal_trigger, c(FALSE, FALSE, FALSE, TRUE, TRUE, FALSE))
   expect_false(any(rebalance_trigger(transform(df, sigma_ewma = NA_real_), "vol_band")$rebal_trigger))
 })

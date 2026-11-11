@@ -39,7 +39,8 @@ from ._sim_phases import (
     _sim_check_inputs,
     _sim_prepare_data,
 )
-from ._sim_engine import _sim_engine_run
+from . import _ext
+from ._sim_engine import _REP_KEYS, _engine_reports, _sim_engine_finish, _sim_engine_input, _sim_engine_run  # noqa: F401
 from . import _sim_blocks as _blocks
 from ._pruefen import chk_scalar
 from ._sim_evaluate import (
@@ -108,7 +109,8 @@ def simulation(
             Optionale Spalten: Basiszins in Prozent (Spaltenname in ``tax_profile(base_rate = )``), Signalspalten
             (für ``trading = "signal"``; ``True``/``False`` oder ``0``/``1``, NA erlaubt, andere Zahlen sind ein
             Fehler), Risk-Free-Reihe in Prozent p.a. (Name in ``risk_free``), logische Trigger- und numerische Gewichtsspalten für ``rebalance_plan(event_col, event_weight)``.
-            Fehlende Kalendertage werden automatisch per LOCF aufgefüllt (logische Spalten mit ``False``);
+            Fehlende Kalendertage werden automatisch per LOCF aufgefüllt (logische Spalten mit ``False``;
+            seit 1.6.5 mit Hinweis nur, wenn eine Lücke länger als 5 Kalendertage ist);
             aufgefüllte Tage werden in ``filled`` markiert und aus Risikometriken ausgeschlossen. Trägt ``data``
             das Attribut ``filled`` aus ``series_align``, gelten Tage, an denen keines der Strategie-Assets einen
             echten Kurs hat, ebenso als aufgefüllt (kein Handel, nicht in den Risikometriken). Passt die
@@ -137,7 +139,7 @@ def simulation(
             Liegt ``start`` nach dem letzten Datentag, bricht die Funktion mit Fehler ab (das Asset wäre nie
             handelbar).
         start_value: Numerisch. Anfangskapital in EUR. Standard: ``10000``.
-        costs: Kosten: ``sim_costs(order_fee, dca_fee)`` (Ordergebühren, Gebühren der Sparplankäufe) oder ``None``
+        costs: Kosten: ``sim_costs(order_fee, dca_fee, custody_fee)`` (Ordergebühren, Gebühren der Sparplankäufe, seit 1.6.5 Depotgebühr) oder ``None``
             (keine Kosten). Standard: ``sim_costs()`` (keine Gebühren). Der Bid-Ask-Spread gilt je Asset
             (``spread`` in ``asset_config``).
         dca: Sparplan: ``dca_plan(value, span, days, unit, anchor, start, skip, fill_deficits)`` oder ``None``
@@ -155,6 +157,7 @@ def simulation(
         risk_free: Numerisch oder Character. Annualisierte risikolose Rendite **in Prozent** (z. B. ``3`` = 3 %
             p.a.) oder Name einer Spalte in ``data`` mit einer täglichen, annualisierten Zeitreihe in Prozent (z.
             B. SOFR als ``5.31``; nur Zahlenspalten, Text-, logische und Kategorie-Spalten sind ein Fehler).
+            Seit 1.6.5 sind fehlende Werte (NA) in der Spalte und Zinsen von -100 oder weniger ein Fehler.
             ``None`` und ``0`` sind äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent
             umgerechnet und von der jeweiligen Tagesrendite abgezogen; Sharpe und Sortino werden auf den
             Überschussrenditen berechnet. LOCF-aufgefüllte Tage werden konsistent ausgeschlossen. Standard: ``0``.
@@ -198,7 +201,10 @@ def simulation(
           Jahresrendite: interner Zinsfuß (XIRR) aus Startbetrag, datierten Einzahlungen und Endwert, S (1+r)^T +
           Σ_i F_i (1+r)^T - t_i = W_n mit Startbetrag S = ``start_value`` plus Rate am Starttag (brutto, wie die
           übrigen Einzahlungen) und t_i = Kalendertage seit Start / 365,25 (Nullstelle nach Brent; auch bei
-          Beinahe-Totalverlust mit Rendite nahe -100 %); ohne Einzahlungen nach dem Starttag (W_n / W_1)^1/T - 1.
+          Beinahe-Totalverlust mit Rendite nahe -100 %); ohne Einzahlungen nach dem Starttag (W_n / S)^1/T - 1.
+          Seit 1.6.5 ist der Bezug immer S, also vor den Kaufkosten am Starttag (bis 1.6.4 ohne spätere Einzahlungen
+          W_1 nach den Kaufkosten); Spread und Ordergebühr des Startkaufs mindern damit ``cagr``, ``ttwror``,
+          ``twr_index`` (erste Stufe W_1 / S), die Drawdowns und alle Renditekennzahlen.
           Gibt es keine Lösung, ist ``cagr = NA`` (mit Warnung). Ist der Endwert negativ (nicht gedeckte
           Steuerschuld, Verlust über 100 %), sind ``cagr`` und ``ttwror`` nicht definiert: ``NA`` mit Warnung
           (nicht -1, das den Verlust untertreiben würde); der Endwert bleibt unverändert (nicht auf 0 begrenzt).
@@ -227,16 +233,22 @@ def simulation(
           mittlere Risk-Free-Rate (annualisiert, in Prozent). - ``skewness``: Schiefe der Tagesrenditen. -
           ``kurtosis``: Überschuss-Kurtosis der Tagesrenditen. - ``lpm``, ``hpm``: Unteres bzw. oberes partielles
           Moment 1. Ordnung der Tagesrenditen (Schwelle 0). - ``sharpe``: Annualisierte Sharpe Ratio auf
-          Überschussrenditen. - ``sortino``: Annualisierte Sortino Ratio auf Überschussrenditen e_i: bar e · P /
+          Überschussrenditen; ``NA`` ohne Schwankung (seit 1.6.5 auch bei reinem Rundungsrauschen, sd höchstens
+          16 √N ε (1 + max|x|); ebenso ``cv``, ``skewness``, ``kurtosis``).
+          - ``sortino``: Annualisierte Sortino Ratio auf Überschussrenditen e_i: bar e · P /
           (D √(P)) mit P Beobachtungen je Jahr und Downside-Abweichung über alle Beobachtungen D = √(mean(min(e_i,
           0)^2)) (Sortino/Price, wie ``result_analysis``); ``NA`` ohne negative Überschussrendite. - ``calmar``:
           Calmar Ratio (CAGR / Max Drawdown; mit Einzahlungen TTWROR / Max Drawdown). - ``omega``: Omega Ratio
-          (Schwelle 0). - ``gain_to_pain``: Summe der Renditen / Summe der Verluste (Betrag). - ``serenity``: CAGR
-          / (Ulcer Index * Max Drawdown); mit Einzahlungen TTWROR im Zähler. - ``martin_ratio``: CAGR / Ulcer
-          Index; mit Einzahlungen TTWROR / Ulcer Index. - ``max_drawdown``: Maximaler Drawdown (positiver Anteil).
-          - ``average_drawdown``: Mittlerer Drawdown über alle Tage unter dem Höchststand. - ``ulcer_index``:
+          (Schwelle 0). - ``gain_to_pain``: Summe der Renditen / Summe der Verluste (Betrag). - ``serenity``:
+          Serenity Ratio nach KeyQuant (AlternativeSoft): (CAGR - risikoloser Zins) / (Ulcer Index · Pitfall), mit Einzahlungen TTWROR statt CAGR; Pitfall = CDaR / Volatilität. Eigene Festlegungen von SimLev (die Quelle nennt sie nicht): CDaR zum Niveau 95 % = Mittel der Tages-Drawdowns ab ihrem 95-%-Quantil, Volatilität jährlich wie bei ``sharpe`` (Standardabweichung der Überschussrenditen · Wurzel der Beobachtungen je Jahr), Rendite und Zins jährlich wie bei ``martin_ratio``. NA ohne Drawdown oder ohne Schwankung. Seit 1.6.5 (bis 1.6.4 CAGR / (Ulcer Index · Max Drawdown)). - ``martin_ratio``: Ulcer Performance Index
+          nach Martin: (CAGR - risikoloser Zins) / Ulcer Index, mit Einzahlungen (TTWROR - risikoloser Zins) /
+          Ulcer Index; risikoloser Zins = mittlere jährliche Rate wie ``risk_free`` (als Anteil; seit 1.6.5). - ``max_drawdown``: Maximaler Drawdown (positiver Anteil).
+          - ``average_drawdown``: Mittlere Tiefe an Tagen unter dem Höchststand (Mittel der Tageswerte von
+          ``drawdowns`` über alle Tage mit Drawdown größer 0; kein Mittel je Phase). - ``ulcer_index``:
           Ulcer Index (Wurzel des mittleren quadrierten Drawdowns). - ``longest_drawdown``: Längste Phase unter
-          dem Höchststand in Kalendertagen. - ``avg_recovery_time``: Mittlere Erholungsdauer in Kalendertagen
+          dem Höchststand in Kalendertagen. - ``avg_recovery_time``: Mittlere Dauer abgeschlossener
+          Phasen unter dem Höchststand: Zahl der Kalendertage unter dem Hoch je Phase, vom Tag nach dem Hoch bis
+          vor das neue Hoch (ganze Phase, nicht erst ab dem Tief); eine am Ende offene Phase zählt nicht mit
           (``NA``, wenn keine abgeschlossene Erholung).
         - ``report``: Benannte Liste je Asset mit täglichen Vektoren: ``worth`` (Kurswert in EUR), ``money`` (Cash
           in EUR), ``flows`` (DCA-Zufluss des Tages in EUR), ``total`` (``worth + money``), ``share`` (Ist-Gewicht
@@ -298,10 +310,11 @@ def simulation(
           ``no_irr_solution``: mit Einzahlungen kein interner Zinsfuß (z. B. Einzahlung am letzten Tag größer als
           der Endwert): ``cagr``. - ``too_short``: Einzeltag (Laufzeit 0 Jahre: ``cagr``, ``ttwror``, ``buys``,
           ``sells``, ``avg_recovery_time`` und alle Renditekennzahlen) bzw. zu wenige Tagesrenditen (Schiefe ab 3,
-          Kurtosis ab 4, Sharpe ab 2). - ``zero_start_value``: Depotwert am Starttag nicht positiv (``cagr``;
+          Kurtosis ab 4, Sharpe ab 2). - ``zero_start_value``: Startbetrag (``start_value`` plus Rate am Starttag) nicht positiv (``cagr``;
           wegen ``start_value > 0`` praktisch nicht erreichbar). - ``nonpositive_twr_index``: zeitgewichteter
           Wertindex fällt auf 0 oder darunter (Tagesrendite unter -100 %): ``ttwror``. - ``zero_volatility``:
-          Standardabweichung der Tagesrenditen 0: ``skewness``, ``kurtosis``, ``sharpe``. - ``zero_mean_return``:
+          Standardabweichung der Tagesrenditen 0 (seit 1.6.5 auch reines Rundungsrauschen): ``skewness``, ``kurtosis``, ``sharpe``,
+          ``serenity`` (seit 1.6.5). - ``zero_mean_return``:
           mittlere Tagesrendite 0: ``cv``. - ``no_negative_returns``: keine negativen (Überschuss-)Renditen:
           ``sortino``, ``omega``, ``gain_to_pain``. - ``no_drawdown``: kein Drawdown: ``calmar``, ``serenity``,
           ``martin_ratio``. Ist die Jahresrendite (``cagr``, mit Einzahlungen ``ttwror``) nicht definiert, erben
@@ -331,8 +344,8 @@ def simulation(
         - ``buys``: Benannter Vektor. Mittlere Anzahl Käufe je Jahr und Asset (Einzeltag, Laufzeit 0 Jahre:
           ``NA``, siehe ``undefined_metrics``).
         - ``sells``: Benannter Vektor. Mittlere Anzahl Verkäufe je Jahr und Asset (Einzeltag: ``NA``).
-        - ``fees_paid``: Nur wenn ``order_fee`` oder ``dca_fee`` eine Gebühr ungleich 0 festlegt: Summe der
-          gezahlten Ordergebühren in EUR.
+        - ``fees_paid``: Nur wenn ``order_fee`` oder ``dca_fee`` eine Gebühr ungleich 0 festlegt oder (seit 1.6.5)
+          ``custody_fee`` gesetzt ist: Summe der gezahlten Order- und Depotgebühren in EUR.
         - ``harvest_days``: Nur mit ``tax_profile(harvest = harvest_rule())``: Date-Vektor der Termine der
           Gewinnrealisierung.
         - ``wrappers``: Nur mit ``details = True`` und Fonds-Wrapper-Assets (``asset_config(wrapper = )``):
@@ -433,7 +446,8 @@ def simulation(
 
     print und summary:
         ``summary()`` liefert unter anderem ``total_return_twr`` (zeitgewichtete Gesamtrendite: mit Einzahlungen
-        letzter Wert von ``twr_index`` minus 1, sonst Endwert / Depotwert am Starttag - 1), ``return_on_invested``
+        letzter Wert von ``twr_index`` minus 1, sonst Endwert / (``start_value`` plus Rate am Starttag) - 1; seit
+        1.6.5 zählen die Kaufkosten am Starttag mit), ``return_on_invested``
         = (Endwert - Eingezahlt) / Eingezahlt mit Eingezahlt = letzter Wert von ``invested`` (brutto) und
         ``total_return`` als gleichwertigen Alias für ``total_return_twr`` (ältere Skripte). Mit Einzahlungen
         zeigt die Ausgabe beide Werte („Gesamtrendite (zeitgewichtet)“ und „Gewinn je eingezahltem EUR“ mit
@@ -578,6 +592,7 @@ def _simulation_flat(
     church_tax: float | None = 0,
     order_fee: Any = None,
     dca_fee: Any = None,
+    custody_fee: Any = None,
     harvest_mode: bool = False,
     harvest_day: str = "12-15",
     harvest_loss_pot: bool = True,
@@ -612,40 +627,56 @@ def _simulation_flat(
     ``tax_report``, ``undefined_metrics``, ``open_lots``, ggf. ``fees_paid`` und
     ``harvest_days``).
     """
-    cfg = _sim_check_inputs(
-        data=data, strategy=strategy, start_value=start_value, details=details,
-        dca_mode=dca_mode, dca_value=dca_value, dca_days=dca_days, balance_mode=balance_mode,
-        balance_days=balance_days, balance_thresh=balance_thresh, balance_thresh_type=balance_thresh_type,
-        tax_mode=tax_mode, tax_rate=tax_rate, marginal_tax_rate=marginal_tax_rate,
-        use_guenstigerpruefung=use_guenstigerpruefung, private_sale_threshold=private_sale_threshold,
-        sparer_pauschbetrag=sparer_pauschbetrag, use_sparer_pauschbetrag=use_sparer_pauschbetrag,
-        include_soli_on_income_tax=include_soli_on_income_tax, soli_rate_income_tax=soli_rate_income_tax,
-        base_rate=base_rate, fractions=fractions, risk_free=risk_free,
-        split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
-        order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode,
-        taxable_income=taxable_income, tariff=tax_tariff, liquidate=liquidate)
-    if split_thresh is not None:
-        split_thresh = _num_vec(split_thresh)
-    prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data)
-    sim = _sim_build_state(prep["data"], cfg["strategy"], prep["start_date"],
-                           prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
-                           cfg["base_rate"], base_rate_flex, base_rate_data)
-    cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
-                              cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
-                              dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
-                              cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
-                              event_mode, event_weight)
+    from ._sim_prepared import _cap_take, _capture, _probe
+
+    def phases():
+        # 1. Eingabeprüfung, 2. Daten, Zustand, Termine und Flags
+        cfg = _sim_check_inputs(
+            data=data, strategy=strategy, start_value=start_value, details=details,
+            dca_mode=dca_mode, dca_value=dca_value, dca_days=dca_days, balance_mode=balance_mode,
+            balance_days=balance_days, balance_thresh=balance_thresh, balance_thresh_type=balance_thresh_type,
+            tax_mode=tax_mode, tax_rate=tax_rate, marginal_tax_rate=marginal_tax_rate,
+            use_guenstigerpruefung=use_guenstigerpruefung, private_sale_threshold=private_sale_threshold,
+            sparer_pauschbetrag=sparer_pauschbetrag, use_sparer_pauschbetrag=use_sparer_pauschbetrag,
+            include_soli_on_income_tax=include_soli_on_income_tax, soli_rate_income_tax=soli_rate_income_tax,
+            base_rate=base_rate, fractions=fractions, risk_free=risk_free,
+            split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
+            order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode,
+            taxable_income=taxable_income, tariff=tax_tariff, liquidate=liquidate)
+        from ._sim_base import _fee_spec
+        cfg["fee_cust"] = _fee_spec(custody_fee, "simulation", "custody_fee")   # seit 1.6.5 (Entscheidung 150)
+        st = _num_vec(split_thresh) if split_thresh is not None else None
+        prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data)
+        sim = _sim_build_state(prep["data"], cfg["strategy"], prep["start_date"],
+                               prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
+                               cfg["base_rate"], base_rate_flex, base_rate_data)
+        cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
+                                  cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
+                                  dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
+                                  cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
+                                  event_mode, event_weight)
+        ew = cal["event_weight"] if cfg["event_col"] is not None else event_weight
+        return cfg, st, prep, sim, cal, ew
+
+    # seit 1.6.5 (Paket E, Studienkern _sim_prepared.py): in einer Studie rechnet ein Lauf, den _sim_call_study als
+    # Vorlage merken will, die Phasen 1 und 2 zuerst still (_probe); blieben sie ohne Meldung, gelten ihre Ergebnisse
+    # (sie hätten nichts ausgegeben), sonst laufen sie wie bisher noch einmal mit allen Meldungen
+    got = _probe(phases) if _cap_take() else None
+    cfg, split_thresh, prep, sim, cal, event_weight = got if got is not None else phases()
     fr = cal["data"]
     fl = cal["flags"]
-    if cfg["event_col"] is not None:
-        event_weight = cal["event_weight"]
     # 3.-5. Termine, Flags, Startgewichte, Tagesschleife und Abschluss des letzten Jahres im
     # C++-Kern (_sim_engine.py)
-    sim, tax_unpaid = _sim_engine_run(sim, fl, cfg, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot,
-                                      liquidate, prep["stopp_date"], bool(details), harvest_day)
+    ei = _sim_engine_input(sim, fl, cfg, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                           liquidate, prep["stopp_date"], bool(details), harvest_day)
+    es = _capture(data, cfg, prep, sim, fl, fr, ei, details, base_rate_flex, base_rate_data, event_weight) \
+        if got is not None else None
+    reports = _engine_reports(ei)
+    out = _ext.sim_engine_run(*ei["args"], [r[k] for r in reports for k in _REP_KEYS])
+    sim, tax_unpaid = _sim_engine_finish(out, sim, fl, ei, reports, cfg.get("tariff_env") if ei["person"] else None)
     trades = _sim_compact_trades(sim, fl["flag_assets"])
     # 6. Auswertung im C++-Kern (_sim_evaluate.py) und Ergebnisobjekt
-    ev = _sim_evaluate(sim, trades, fl, cfg, fr, prep["start_date"], prep["stopp_date"], tax_unpaid)
+    ev = _sim_evaluate(sim, trades, fl, cfg, fr, prep["start_date"], prep["stopp_date"], tax_unpaid, st=es)
     return _sim_result(sim, trades, fl, cfg, ev["r"], ev["rs"], ev["um"])
 
 

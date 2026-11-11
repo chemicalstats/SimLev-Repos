@@ -23,6 +23,8 @@
 //   .kendall_tau_core   Kendalls Tau-b
 //   .roll_cov_core      rollierende Kovarianz
 //   C_roll_max_core     rollierendes Maximum (seit 1.6.3; ohne R-Huelle, .Call direkt)
+//   .research_vec       Hilfskerne seit 1.6.5 (simlev::research_vec: erwartetes Maximum, harmonische Summe,
+//                       Risikozustand, expandierender Median, Drawdown-Polster)
 //
 // Alle Kerne ziehen keine Zufallszahlen.
 
@@ -255,5 +257,20 @@ extern "C" SEXP C_roll_cov_core(SEXP s_x, SEXP s_y, SEXP s_n) {
     int n = sl::as_int(s_n);
     need_len(y.size(), x.size(), "roll_cov_core", "y");   // seit 1.6.4 (B-029)
     return simlev::roll_cov_core(x, y, n);
+  });
+}
+
+// Hilfskerne seit 1.6.5 (simlev::research_vec): op, x, par (double), nout -> double-Vektor der Laenge nout
+extern "C" SEXP C_research_vec(SEXP s_op, SEXP s_x, SEXP s_par, SEXP s_nout) {
+  return sl::call([&]() -> SEXP {
+    sl::NumVec x = sl::num_vec(s_x), par = sl::num_vec(s_par);
+    const int op = sl::as_int(s_op);
+    const double nd = sl::as_double(s_nout);
+    if (!(nd >= 0) || nd > 4.5e15) sl::stop("research_vec: nout ungueltig");
+    const R_xlen_t nout = (R_xlen_t) nd;
+    sl::NumVec out = sl::new_num(nout);
+    if (!simlev::research_vec(op, (int64_t) x.size(), x.ptr, (int64_t) par.size(), par.ptr, (int64_t) nout, out.ptr))
+      sl::stop("research_vec: Abmessungen passen nicht (op %d)", op);
+    return out.sexp;
   });
 }

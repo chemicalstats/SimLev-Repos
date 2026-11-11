@@ -23,6 +23,7 @@ import numpy as np
 
 from . import _lib_models as _slm
 from ._r import fmt as _fmt
+from ._pruefen import chk_stop
 
 __all__: list[str] = []
 
@@ -36,8 +37,7 @@ def _ms_garch_check(K, model):
         mv = [m]
     ok_m = (len(mv) == 1 and isinstance(mv[0], str) and mv[0] in ("sGARCH", "gjrGARCH"))
     if not ok_m:
-        raise ValueError("MS-GARCH: Varianzmodell je Regime (params ms_garch_model, ms_ar_garch_model bzw. "
-                         "tvtp_garch_model) muss \"sGARCH\" oder \"gjrGARCH\" sein.")   # seit 1.6.4 ohne Wert
+        chk_stop("b1.m_ms_garch_check")   # seit 1.6.4 ohne Wert
     kv = K if isinstance(K, (list, tuple, np.ndarray)) else [K]
     kv = list(np.asarray(kv, dtype=object).ravel())
     ok_k = (len(kv) == 1 and isinstance(kv[0], (int, float, np.integer, np.floating))
@@ -46,75 +46,18 @@ def _ms_garch_check(K, model):
         k0 = float(kv[0])
         ok_k = math.isfinite(k0) and k0 == float(_fmt.r_round(k0)) and 2 <= k0 <= 64   # seit 1.6.4 bis 64 (B-097)
     if not ok_k:
-        raise ValueError("MS-GARCH: Anzahl Regime (params ms_n_regimes, ms_ar_n_regimes bzw. tvtp_n_regimes) "
-                         "muss eine ganze Zahl >= 2 und <= 64 sein.")   # seit 1.6.4 ohne Wert
+        chk_stop("b1.m_ms_garch_check_2")   # seit 1.6.4 ohne Wert
     return True
 
 
 def _ms_garch_stat(P):
     """Stationäre Verteilung einer Übergangsmatrix (``.ms_garch_stat``).
 
-    Potenziteration wie für ``pi_`` in ``.prepare_ms_info``: Start
-    gleichverteilt, höchstens 1000 Schritte, Abbruch bei maximaler Änderung
-    < 1e-12. ``pi_ %m% P`` in der Reihenfolge des slc-Matrixprodukts (je Element ab 0,0
-    aufsteigend summiert; bei nicht endlichen Werten ``_lib.matmul``).
+    Seit 1.6.5 (CR2-M-1, Entscheidung 189) direkt im Kern gelöst (``sl_msgarch_stat``:
+    LU von (I - P)' mit Einsenzeile; nur bei singulärem System die Potenziteration bis
+    1.6.4 mit höchstens 1000 Schritten), wie R ``.sl_msgarch_stat``.
     """
-    P = np.asarray(P, dtype=np.float64)
-    K = P.shape[0]
-    pi_ = [1 / K] * K
-    fin = bool(np.isfinite(P).all())
-    Pc = [[float(P[i, j]) for i in range(K)] for j in range(K)]   # Spalten
-    start = 0
-    if K == 2 and fin:
-        # dieselbe Rechnung für zwei Regime mit lokalen Variablen
-        # (s = 0.0 + P[0, j] * pi[0], dann s + P[1, j] * pi[1]); wird pi nicht
-        # endlich, geht es im allgemeinen Weg mit demselben Schritt weiter
-        (c00, c01), (c10, c11) = Pc
-        p0 = p1 = pi_[0]
-        isf = math.isfinite
-        for it in range(1000):
-            if not (isf(p0) and isf(p1)):
-                start = it
-                break
-            q0 = 0.0 + c00 * p0
-            q0 = q0 + c01 * p1
-            q1 = 0.0 + c10 * p0
-            q1 = q1 + c11 * p1
-            d0 = abs(q0 - p0)
-            if d0 != d0:
-                raise ValueError("missing value where TRUE/FALSE needed")
-            d1 = abs(q1 - p1)
-            if d1 != d1:
-                raise ValueError("missing value where TRUE/FALSE needed")
-            if (d1 if d1 > d0 else d0) < 1e-12:
-                return np.array([p0, p1], dtype=np.float64)
-            p0 = q0
-            p1 = q1
-        else:
-            return np.array([p0, p1], dtype=np.float64)
-        pi_ = [p0, p1]
-    for _ in range(start, 1000):
-        if fin and all(math.isfinite(v) for v in pi_):
-            p2 = []
-            for col in Pc:
-                s = 0.0
-                for i in range(K):
-                    s = s + col[i] * pi_[i]
-                p2.append(s)
-        else:
-            from . import _lib
-            p2 = [float(v) for v in np.asarray(_lib.matmul(np.asarray(pi_), P), dtype=np.float64).ravel()]
-        mx = None
-        for a, b in zip(p2, pi_):
-            dv = abs(a - b)
-            if dv != dv:
-                raise ValueError("missing value where TRUE/FALSE needed")
-            if mx is None or dv > mx:
-                mx = dv
-        if mx < 1e-12:
-            break
-        pi_ = p2
-    return np.array(pi_, dtype=np.float64)
+    return np.asarray(_slm.msgarch_stat(np.asarray(P, dtype=np.float64)), dtype=np.float64)
 
 
 def _ms_garch_fit(y, K, model, cores=1):

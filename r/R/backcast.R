@@ -45,8 +45,11 @@
 .resolve_series <- function(x, data, what, default = 0) {
   n <- nrow(data)
   if (is.null(x)) return(rep(default, n))
+  # seit 1.6.5 (CR2-P-5): Stufentabelle bzw. Vektor mit Datumsnamen braucht die Spalte date in data (bis 1.6.4 je
+  # Sprache eine andere Rohmeldung)
+  if ((is.data.frame(x) || (is.numeric(x) && !is.null(names(x)))) && !"date" %in% names(data)) chk_stop("spalten", what, "'date'")
   if (is.data.frame(x)) {
-    if (ncol(x) < 2) stop(sprintf("%s: data.frame braucht die Spalten date und Wert.", what))
+    if (ncol(x) < 2) stop(chk_msg("c.m_resolve_series", what))
     dcol <- if ("date" %in% names(x)) "date" else names(x)[1]
     vcol <- setdiff(names(x), dcol)[1]
     fd <- .to_date(x[[dcol]], sprintf("%s: Datum", what))
@@ -56,7 +59,7 @@
     return(.step_series(fd, as.numeric(x[[vcol]]), .to_date(data$date, what)))
   }
   if (is.character(x) && length(x) == 1L) {
-    if (!x %in% names(data)) stop(sprintf("%s: Spalte '%s' fehlt im Datensatz.", what, x))
+    if (!x %in% names(data)) stop(chk_msg("a.m_cpi_level", what, x))
     v <- as.numeric(data[[x]])
     if (anyNA(v)) v <- .fill_na(v, "locf")
     return(v)
@@ -83,7 +86,8 @@
       dcol <- if ("date" %in% names(x)) "date" else names(x)[1]; vcol <- setdiff(names(x), dcol)[1]
       if (is.factor(x[[dcol]])) chk_stop("spalte_faktor", fn, dcol)
       .e4_numcol(x, vcol, fn)
-      if (!all(is.finite(x[[vcol]]))) chk_stop("e3.werte", fn, arg)
+      # seit 1.6.5 (CR2-K-4): Tabelle ohne Zeile wie fehlende Werte abgelehnt (bis 1.6.4 still waagerecht)
+      if (!nrow(x) || !all(is.finite(x[[vcol]]))) chk_stop("e3.werte", fn, arg)
     }
     return(invisible(x))
   }
@@ -92,6 +96,11 @@
     if (x %in% names(data)) {
       .e4_numcol(data, x, fn)
       v <- data[[x]]; if (any(is.infinite(v))) chk_stop("e1.spalte_endlich", fn, x)
+      # seit 1.6.5 (CR2-H-4, Entscheidung 189): Spalte ohne Wert Fehler, spaeterer Beginn Hinweis (davor gilt der
+      # erste Wert)
+      ok <- which(!is.na(v))
+      if (length(v) && !length(ok)) chk_stop("c.bc_spalte_leer", fn, x, arg)
+      if (length(ok) && ok[1L] > 1L) message(chk_msg("c.bc_spalte_spaet", fn, x, arg, ok[1L] - 1L))
     }
     return(invisible(x))
   }
@@ -108,8 +117,10 @@
   if ("date" %in% names(data)) chk_col_nofactor(data, "date", fn) # Entscheidung 15
   for (col in c(product, index)) if (col %in% names(data)) .e4_numcol(data, col, fn)
   if (is.factor(leverage) || !is.numeric(leverage) || length(leverage) != 1L || !is.finite(leverage) || leverage == 0)
-    stop("'leverage' muss eine Zahl ungleich 0 sein.")            # seit 1.6.4 auch NA und Inf
+    stop(chk_msg("c.m_bc_check_args"))            # seit 1.6.4 auch NA und Inf
   .bc_check_series(ter, data, fn, "ter"); .bc_check_series(rate, data, fn, "rate"); .bc_check_series(fx, data, fn, "fx")
+  # seit 1.6.5 (CR2-V3-4 Punkt 4, Entscheidung 189): Stufentabelle beginnt nach dem ersten Datentag -> Warnung
+  .step_start_warn(ter, data, fn, "ter"); .step_start_warn(rate, data, fn, "rate"); .step_start_warn(fx, data, fn, "fx")
   chk_int1(rate_lag, fn, "rate_lag", lo = 0, hi = max(0, nrow(data) - 1))
   chk_num1(ter_basis, fn, "ter_basis", lo = 0, lo_open = TRUE); chk_num1(rate_basis, fn, "rate_basis", lo = 0, lo_open = TRUE)
   invisible(TRUE)
@@ -220,21 +231,21 @@
 #' @noRd
 .bc_prepare <- function(data, product, index, ter, leverage, rate, fx, rate_lag,
                         ter_basis, rate_basis, accrual, index_fill, lag) {
-  if (!is.data.frame(data)) stop("'data' muss ein data.frame sein.")
-  if (!"date" %in% names(data)) stop("'data' braucht eine Spalte 'date'.")
+  if (!is.data.frame(data)) stop(chk_msg("c.m_bc_prepare"))
+  if (!"date" %in% names(data)) stop(chk_msg("c.m_bc_prepare_2"))
   data$date <- .to_date(data$date, "'data$date'")
-  if (anyNA(data$date)) stop("'data$date' enth\u00e4lt fehlende Daten.")
+  if (anyNA(data$date)) stop(chk_msg("c.m_bc_prepare_3"))
   if (is.unsorted(data$date) || anyDuplicated(data$date))
-    stop("'data$date' muss streng aufsteigend und ohne Duplikate sein.")
+    stop(chk_msg("c.m_bc_prepare_4"))
   for (col in c(product, index)) if (!col %in% names(data))
-    stop(sprintf("Spalte '%s' fehlt im Datensatz.", col))
+    stop(chk_msg("c.m_bc_prepare_5", col))
   if (!is.numeric(leverage) || length(leverage) != 1L || leverage == 0)
-    stop("'leverage' muss eine Zahl ungleich 0 sein.")
+    stop(chk_msg("c.m_bc_check_args"))
 
   idx <- as.numeric(data[[index]])
   if (!is.null(fx)) idx <- idx * .resolve_series(fx, data, "fx")
   if (anyNA(idx)) idx <- .fill_na(idx, index_fill, keep_leading = TRUE)
-  if (any(idx <= 0, na.rm = TRUE)) stop("Indexwerte m\u00fcssen positiv sein.")
+  if (any(idx <= 0, na.rm = TRUE)) stop(chk_msg("c.m_bc_prepare_6"))
   prod <- as.numeric(data[[product]])
   prod[!is.na(prod) & prod <= 0] <- NA_real_
 
@@ -262,7 +273,8 @@
 .shift <- function(v, k) {
   n <- length(v)
   if (k == 0L) return(v)
-  if (k > 0L) c(rep(NA_real_, k), v[seq_len(n - k)]) else c(v[(1 - k):n], rep(NA_real_, -k))
+  # seit 1.6.5 (CR2-X35-1) wie Python/Julia: k > n ohne Rohfehler
+  if (k > 0L) c(rep(NA_real_, k), v[seq_len(max(n - k, 0L))]) else c(v[(1 - k):n], rep(NA_real_, -k))
 }
 
 #' Modellrenditen fuer einen Parametersatz
@@ -569,21 +581,25 @@ backcast_fit <- function(data, product, index,
   chk_bool1(validate, fn, "validate")                             # B-051
   fit <- unique(as.character(fit))
   if (length(fit) && !all(fit %in% c("drag", "spread", "beta")))
-    stop("'fit' darf nur 'drag', 'spread' und 'beta' enthalten.")
+    stop(chk_msg("c.m_backcast_fit"))
   # Eigene Suchintervalle ergaenzen die Standardliste (fehlende Parameter behalten ihr Intervall)
   if (!is.list(bounds) || (length(bounds) && (is.null(names(bounds)) || !all(names(bounds) %in% c("drag", "spread", "beta")))))
-    stop("'bounds' muss eine benannte Liste mit Eintr\u00e4gen drag, spread und/oder beta sein, z. B. list(drag = c(-5, 5)).")
+    stop(chk_msg("c.m_backcast_fit_2"))
   bounds <- utils::modifyList(list(drag = c(-10, 10), spread = c(-5, 10), beta = c(0.5, 1.5)), bounds)
   for (k in names(bounds)) { b <- bounds[[k]]
     if (is.factor(b) || !is.numeric(b) || length(b) != 2L || !all(is.finite(b)) || b[1] >= b[2] ||
         !is.finite(b[2] - b[1]))   # seit 1.6.4 ohne Wert, endlich; Breite endlich (B-005: sonst endlose Brent-Suche)
-      stop(sprintf("bounds$%s muss c(unten, oben) mit unten < oben sein.", k)) }
+      stop(chk_msg("c.m_backcast_fit_3", k)) }
   if (model != "structural" && "beta" %in% fit) {
-    warning("'beta' wird bei Regressionsmodellen \u00fcber die Regression gesch\u00e4tzt und hier ignoriert.")
+    warning(chk_msg("c.m_backcast_fit_4"))
     fit <- setdiff(fit, "beta")
   }
   if (leverage == 1 && "spread" %in% fit) {
-    warning("'spread' ist bei leverage = 1 nicht identifizierbar und wird ignoriert.")
+    warning(chk_msg("c.m_backcast_fit_5"))
+    fit <- setdiff(fit, "spread")
+  } else if (all(c("drag", "spread") %in% fit)) {
+    # seit 1.6.5 (K10, CR2-A-4): drag und spread wirken beide je Kalendertag und sind gemeinsam nicht bestimmbar
+    warning(chk_msg("c.bc_kollinear", fn), call. = FALSE)
     fit <- setdiff(fit, "spread")
   }
 
@@ -610,7 +626,7 @@ backcast_fit <- function(data, product, index,
   has <- !is.na(prep$prod) & !is.na(prep$idx)
   if (!is.null(start)) has <- has & prep$dates >= as.Date(start)
   if (!is.null(end))   has <- has & prep$dates <= as.Date(end)
-  if (sum(has) < 20) stop("Zu wenige gemeinsame Beobachtungen von Produkt und Index (mindestens 20).")
+  if (sum(has) < 20) stop(chk_msg("c.m_backcast_fit_6"))
   w0 <- min(which(has)); w1 <- max(which(has))
   win <- w0:w1
   inception <- prep$dates[min(which(!is.na(prep$prod)))]
@@ -631,7 +647,7 @@ backcast_fit <- function(data, product, index,
     y <- prep$prod[o] / prep$prod[o - 1L] - 1            # nur direkt aufeinanderfolgende Zeilen
     xx <- prep$x[o]
     ok <- is.finite(y) & is.finite(xx) & !is.na(prep$prod[o - 1L])
-    if (sum(ok) < 20) stop("Zu wenige aufeinanderfolgende Beobachtungen f\u00fcr das Regressionsmodell.")
+    if (sum(ok) < 20) stop(chk_msg("c.m_fit_reg"))
     if (model == "linear") list(coef = stats::setNames(.sl_lsfit(cbind(1, xx[ok]), y[ok])$coefficients, c("x1", "x2")))
     else list(fit = .sl_smspline_fit(xx[ok], y[ok]))   # Glaettungsspline (Reinsch 1967, GCV)
   }
@@ -657,7 +673,7 @@ backcast_fit <- function(data, product, index,
   run_fit <- function(rows, ob, rg, metrics = TRUE) {
     if (!length(fit)) return(list(par = par0, value = make_obj(rows, ob, rg)(numeric(0)), grid = NULL))
     if (method == "grid") {
-      if (length(fit) != 1L) stop("method = 'grid' unterst\u00fctzt genau einen Parameter in 'fit'.")
+      if (length(fit) != 1L) stop(chk_msg("c.m_run_fit"))
       # seit 1.6.3 je Gitterpunkt einmal und nur im Fenster rows (elementweise wie .bc_model_returns(...)[rows]);
       # die Basis einmal vorab, wenn sie nicht vom gesuchten Parameter abhaengt (sonst nur beta im Strukturmodell)
       sp_r <- prep$sp_unit[rows]; dr_r <- prep$dr_unit[rows]
@@ -713,6 +729,14 @@ backcast_fit <- function(data, product, index,
   }
 
   res <- run_fit(win, obs, reg)
+  # seit 1.6.5 (CR2-A-5, K22): Schaetzwert an der Suchgrenze bzw. am Gitterrand und fehlende Konvergenz melden
+  for (k in fit) {
+    v <- res$par[[k]]
+    edge <- if (method == "grid") v == min(grid) || v == max(grid) else {
+      b <- bounds[[k]]; v <= b[1] + 1e-6 * (b[2] - b[1]) || v >= b[2] - 1e-6 * (b[2] - b[1]) }
+    if (isTRUE(edge)) warning(chk_msg("c.bc_rand", fn, k, format(v, digits = 6)), call. = FALSE)
+  }
+  if (!is.null(res$convergence) && res$convergence != 0) warning(chk_msg("c.bc_konvergenz", fn, res$convergence), call. = FALSE)
   r_all <- .bc_model_returns(prep, res$par, model, reg)
   diag <- .bc_diagnostics(r_all[win], seq_along(win), obs, prep$dates[win])
   diag_naive <- .bc_diagnostics(.bc_model_returns(prep, par0, model, reg)[win], seq_along(win), obs, prep$dates[win])
@@ -744,6 +768,7 @@ backcast_fit <- function(data, product, index,
     loss_value = res$value, method = method, horizon = horizon, lag = as.integer(lag),
     diagnostics = diag, diagnostics_unfitted = diag_naive,
     grid = res$grid, grid_metrics = res$metrics, validation = oos,
+    convergence = if (is.null(res$convergence)) 0L else as.integer(res$convergence),   # seit 1.6.5 (CR2-A-5)
     regression = reg, inception = inception, window = c(prep$dates[w0], prep$dates[w1]),
     drag_per_day = res$par$drag / 100 / 365 * 100,   # Prozent je Kalendertag (Skript-Einheit)
     call_args = list(data = data, product = product, index = index, ter = ter,
@@ -829,7 +854,7 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
   if (length(dots) && (is.null(names(dots)) || any(!nzchar(names(dots))))) chk_stop("argument_unbekannt", fn, "")
   chk_dots(names(dots), c("product", "index", "ter", "leverage", "rate", "fx", "rate_lag", "ter_basis", "rate_basis",
                           "accrual", "index_fill", "lag", "model"), fn)   # Entscheidung 21
-  if (!is.null(fit) && !inherits(fit, "SimLevBackcastFit")) stop("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+  if (!is.null(fit) && !inherits(fit, "SimLevBackcastFit")) stop(chk_msg("c.m_backcast"))
   chk_df(data, fn, "data", null_ok = TRUE)                        # Entscheidung 6
   .bc_check_par(params, fn, "params", null_ok = TRUE)
   if (!(identical(splice, "inception") || identical(splice, "none") || inherits(splice, c("Date", "POSIXt")) ||
@@ -837,14 +862,15 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
     chk_stop("e4.splice", fn)                                     # Entscheidung 7 und 15 (keine Zahl, kein Faktor)
   if (!is.null(rebase)) chk_num1(rebase, fn, "rebase", lo = 0, lo_open = TRUE)   # B-017
   if (is.null(fit)) {
-    if (is.null(data)) stop("Ohne 'fit' muss 'data' angegeben werden.")
+    if (is.null(data)) stop(chk_msg("c.m_backcast_2"))
     a <- utils::modifyList(list(ter = 0, leverage = 1, rate = NULL, fx = NULL, rate_lag = 0L,
                                 ter_basis = 365, rate_basis = 360, accrual = "linear",
                                 index_fill = "locf"), dots)
-    if (is.null(a$product) || is.null(a$index)) stop("'product' und 'index' m\u00fcssen angegeben werden.")
+    # seit 1.6.5 (CR2-B-3): genaue Namen ([[ ]], $ fand per Teilnamen index_fill)
+    if (is.null(a[["product"]]) || is.null(a[["index"]])) stop(chk_msg("c.m_backcast_3"))
     a$data <- data
     model <- dots$model %||% "structural"
-    if (!identical(model, "structural")) stop("Ohne Fit ist nur model = 'structural' m\u00f6glich.")
+    if (!identical(model, "structural")) stop(chk_msg("c.m_backcast_4"))
     .bc_check_args(fn, data, a$product, a$index, a$ter, a$leverage, a$rate, a$fx, a$rate_lag, a$ter_basis, a$rate_basis)
     chk_choice(a$accrual, fn, "accrual", c("linear", "geometric"))     # bis 1.6.3 unbekannte Werte still "linear"
     chk_choice(a$index_fill, fn, "index_fill", c("locf", "linear", "stine"))
@@ -853,7 +879,7 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
     par <- utils::modifyList(list(drag = 0, spread = 0, beta = 1), params %||% list())
     lag <- as.integer(dots$lag %||% 0L)
   } else {
-    if (!inherits(fit, "SimLevBackcastFit")) stop("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+    if (!inherits(fit, "SimLevBackcastFit")) stop(chk_msg("c.m_backcast"))
     if (length(dots)) chk_stop("e4.fit_angabe", fn, names(dots)[1])   # Entscheidung 71 (bis 1.6.3 still ignoriert)
     a <- fit$call_args
     if (!is.null(data)) {
@@ -880,7 +906,7 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
     k0 <- obs[1]
   } else {
     sd0 <- .to_date(splice, "splice")
-    if (length(sd0) != 1L || is.na(sd0)) stop("splice: \"inception\", \"none\" oder ein Datum ('JJJJ-MM-TT').")
+    if (length(sd0) != 1L || is.na(sd0)) stop(chk_msg("c.m_backcast_5"))
     k0 <- obs[prep$dates[obs] >= sd0][1]
     if (is.na(k0)) stop(sprintf("Kein Produktkurs ab dem Verkettungsdatum vorhanden (letzter Produktkurs am %s).",   # seit 1.6.4 ohne Eingabewert
                                 format(prep$dates[max(obs)])))
@@ -912,7 +938,11 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
       pf <- .fill_na(pv, fill)
     }
     source[seg] <- ifelse(is.na(pv), "filled", "product")
-    if (last_obs < n) source[(last_obs + 1L):n] <- "filled"
+    if (last_obs < n) {
+      source[(last_obs + 1L):n] <- "filled"
+      # seit 1.6.5 (K23, CR2-B-4): Produktkurse enden vor dem Datenende -> Warnung
+      warning(chk_msg("c.bc_ende", fn, format(prep$dates[last_obs]), n - last_obs), call. = FALSE)
+    }
     r_seg <- c(NA_real_, pf[-1] / pf[-length(pf)] - 1)
     r_out[seg[-1]] <- r_seg[-1]
     r_out[k0] <- r_mod[k0]
@@ -921,17 +951,24 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
   # Niveau: Anker = erster echter Produktkurs (oder 100 am Indexbeginn)
   lr_all <- log1p(pmax(ifelse(is.finite(r_out), r_out, 0), -0.999999))
   lr_mod <- log1p(pmax(ifelse(is.finite(r_mod), r_mod, 0), -0.999999))
-  lr_all[seq_len(first_idx)] <- 0; lr_mod[seq_len(first_idx)] <- 0
+  # seit 1.6.5 (CR2-B-1): beginnt der Index nach der Verkettung, gelten die echten Produktrenditen ab k0 (Renditen nur
+  # bis min(first_idx, k0) genullt, value ab k0 nicht NA); model wird am ersten Tag mit Index und Produkt verankert
+  f0 <- if (is.na(k0)) first_idx else min(first_idx, k0)
+  lr_all[seq_len(f0)] <- 0; lr_mod[seq_len(first_idx)] <- 0
   cl <- cumsum(lr_all); cm <- cumsum(lr_mod)
   if (!is.na(k0)) {
+    km <- if (k0 >= first_idx) k0 else obs[obs >= first_idx][1]
     value <- prod[k0] * exp(cl - cl[k0])
-    model_v <- prod[k0] * exp(cm - cm[k0])
+    model_v <- if (is.na(km)) rep(NA_real_, n) else prod[km] * exp(cm - cm[km])
   } else {
     value <- 100 * exp(cl); model_v <- 100 * exp(cm)
   }
-  if (first_idx > 1L) { value[seq_len(first_idx - 1L)] <- NA_real_; model_v[seq_len(first_idx - 1L)] <- NA_real_ }
+  if (f0 > 1L) value[seq_len(f0 - 1L)] <- NA_real_
+  if (first_idx > 1L) model_v[seq_len(first_idx - 1L)] <- NA_real_
+  # seit 1.6.5 (K11, CR2-B-2): an Produkttagen genau der Produktkurs (bis 1.6.4 aus der Kette, bis 5e-15 daneben)
+  pt <- source == "product"; value[pt] <- prod[pt]
   if (!is.null(rebase)) {
-    s <- rebase / value[first_idx]
+    s <- rebase / value[f0]
     value <- value * s; model_v <- model_v * s
   }
   out <- data.frame(date = prep$dates, value = value,

@@ -30,7 +30,7 @@ from .backcast import _fill_locf
 from ._r.rlist import _PrintFormat
 from ._pruefen import (chk_bool1, chk_cols, chk_cores, chk_col_nofactor, chk_col_type, chk_df, chk_int1, chk_max, chk_msg, chk_name1, chk_num1,  # 1.6.4
                        chk_range_text, chk_scalar, chk_stop)
-from ._pruefen import SL_MAX_JAHRE, SL_MAX_MONATE, chk_kennzahlen  # seit 1.6.4 (Entscheidungen 43 und 46)
+from ._pruefen import SL_MAX_JAHRE, SL_MAX_MONATE, chk_fmt, chk_kennzahlen  # seit 1.6.4 (Entscheidungen 43 und 46)
 
 __all__ = ["sensitivity_grid", "sensitivity_rebalancing", "planning_lumpsum_vs_dca", "series_leverage",
            "sensitivity_leverage", "SimLevSensitivity", "SimLevLumpSum"]
@@ -46,8 +46,10 @@ _EPOCH = np.datetime64("1970-01-01", "D")
 
 
 def _simulation():
-    """``simulation(data, strategy, **args)`` mit aufgelösten sim_args (R: ``.sim_call``)."""
-    return _ext("engine", "simulation")
+    """``simulation(data, strategy, **args)`` mit aufgelösten sim_args (R: ``.sim_call``; seit 1.6.5 über den
+    Studienkern ``_sim_prepared.py``, Paket E)."""
+    from ._sim_blocks import _sim_call
+    return lambda data, strategy, **args: _sim_call(data, strategy, args)
 
 
 def _args_set(args, over, who):
@@ -59,8 +61,7 @@ def _sens_check_sim(data, strategy):
     """``data`` und ``strategy`` für ``simulation()`` früh mit dessen Meldungen prüfen (R: ``.sens_check_sim``)."""
     from ._sim_base import _Frame
     if not isinstance(data, (pd.DataFrame, _Frame)):
-        raise ValueError("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s)."
-                         % chk_msg("tabelle.formen"))
+        chk_stop("a.m_sim_check_inputs", chk_msg("tabelle.formen"))
     _e2_check_strategy(strategy)
 
 
@@ -71,10 +72,9 @@ def _e2_check_strategy(strategy):
     except TypeError:
         n = 1
     if n == 0:
-        raise ValueError("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein "
-                         "(z. B. aus create_strategy()).")
+        chk_stop("a.m_sim_check_inputs_2")
     if not isinstance(strategy, Mapping) or any(k is None or str(k) == "" for k in strategy.keys()):
-        raise ValueError("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
+        chk_stop("a.m_sim_check_inputs_3")
 
 
 def _e2_sim_args(sim_args, fn):
@@ -113,7 +113,33 @@ def _lev_check(fn, data, index, rate, expense, spread):
         chk_stop("faktor", fn, "rate")
     chk_num1(expense, fn, "expense")
     chk_num1(spread, fn, "spread")
+    # seit 1.6.5 (CR2-V2-1): Datum ohne NA und aufsteigend, Index nach dem Auffüllen endlich und > 0, Zinsreihe ohne
+    # Lücke (bis 1.6.4 still NaN, 0 bzw. negative Tagesabstände; Entscheidung 186 M8)
+    if len(data):
+        dt = np.asarray(_ext("data_prep", "_to_date")(data["date"], "data$date")).astype("datetime64[D]")
+        if np.isnat(dt).any() or (dt.size > 1 and bool((dt[1:] < dt[:-1]).any())):
+            chk_stop("e3.datum", fn)
+        idx = _fill_locf(np.asarray(data[index], dtype=np.float64))
+        with np.errstate(invalid="ignore"):
+            bad = np.flatnonzero(~(np.isfinite(idx) & (idx > 0)))
+        if bad.size:
+            chk_stop("b2b.index_positiv", fn, index, int(bad[0]) + 1)
+        rt = np.asarray(_ext("backcast", "_resolve_series")(chk_scalar(rate), data, "rate"), dtype=np.float64)
+        miss = np.flatnonzero(np.isnan(rt))
+        if miss.size:
+            from ._dates import fmt_date
+            chk_stop("a.mm_luecke", fn, "rate", fmt_date(int(_days(dt[miss[0]:miss[0] + 1])[0])))
     return index
+
+
+def _sens_failed(fn, err, n):
+    """Fehlgeschlagene Läufe der Studien (seit 1.6.5, CR2-C-10/CR2-H-6; R ``.sens_failed``): alle fehlgeschlagen =
+    Fehler, sonst Warnung mit Anzahl und Meldungen."""
+    txt = _table_msg(err)
+    if len(err) == n:
+        chk_stop("b2b.alle_fehl", fn, n, txt)
+    if err:
+        warnings.warn(chk_msg("b2b.teil_fehl", fn, len(err), n, txt), UserWarning, stacklevel=3)
 
 
 def _metrics_default(metrics):
@@ -236,10 +262,9 @@ def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             In Julia erscheinen Ausgaben, die
             eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
             Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
@@ -307,7 +332,7 @@ def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_
     out = list(_par_lapply(list(range(len(design))), run, cores))
     okm = [o["m"] for o in out if o["m"] is not None]
     if not okm:
-        raise ValueError("sensitivity_grid: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg([o["err"] for o in out])))
+        _sens_failed("sensitivity_grid", [o["err"] for o in out], len(out))   # Fehler (Tabelle seit 1.6.5)
     # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
     # Spalte des Rasters bzw. error; geprüft nach dem Rechnen, bei jedem cores gleich (R: gleiche Prüfung)
     for m in okm:
@@ -409,6 +434,12 @@ class SimLevSensitivity(_RFrame):
             o = np.asarray(opt, dtype=np.float64)
             oi = [float(o[i]) if i < o.size else _NA for i in (0, 1)]  # R: x[i] jenseits der Länge = NA
             out.append(_fmt.sprintf("Optimaler Hebel: CAGR %.2f, Sharpe %.2f\n", oi[0], oi[1]))
+            # seit 1.6.5 (CR2-X15-1): Gleichstand benennen
+            for k in [c for c in ("cagr", "sharpe") if c in x.columns]:
+                v = x[k].to_numpy(dtype=np.float64)
+                j = _which_max(v)
+                if j is not None and _lev_tie(v, j):
+                    out.append(chk_msg("b2b.lev_gleichauf_druck", k) + "\n")
         return "".join(out)[:-1]
 
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
@@ -456,17 +487,41 @@ def _num1(v):
     return _NA if v is None else float(v)
 
 
+def _near_eq(a, b, tol=1e-12):
+    """Vergleich mit Toleranz (seit 1.6.5, Entscheidung 189 W2-1/W3-1; R ``.near_eq``): gleich, wenn
+    |a - b| <= tol * max(1, |a|, |b|)."""
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    with np.errstate(invalid="ignore"):
+        return np.abs(a - b) <= tol * np.maximum(np.maximum(1.0, np.abs(a)), np.abs(b))
+
+
+def _ls_summary(adv):
+    """Kennzahlen von planning_lumpsum_vs_dca aus den Vorsprüngen (R ``.ls_summary``, seit 1.6.5 eigene Funktion)."""
+    adv = np.asarray(adv, dtype=np.float64)
+    tie = _near_eq(adv, 0.0)
+    win = (adv > 0) & ~tie
+    lose = (adv < 0) & ~tie
+    return pd.Series({"win_rate": r_mean_int(win.astype(np.int64)), "mean_advantage": r_mean(adv),
+                      "median_advantage": r_median(adv),
+                      "mlsa": r_mean(adv[win]) if win.any() else _NAN,
+                      "mlsd": r_mean(adv[lose]) if lose.any() else _NAN}, dtype=np.float64)
+
+
 class SimLevLumpSum(_RFrame):
     """Ergebnis von :func:`planning_lumpsum_vs_dca` (R-Klasse ``SimLevLumpSum``)."""
 
     r_class = ("SimLevLumpSum", "data.frame")
 
     def format(self):
-        s = self.attrs["summary"]
+        # seit 1.6.5 (CR2-W3-2): Kennzahlen aus den vorhandenen Zeilen (wie R und Julia)
+        s = _ls_summary(self["advantage"].to_numpy(dtype=np.float64))
         st = self.attrs["settings"]
+        # seit 1.6.5 (CR2-W3-3): Betrag unter 1 mit %.15g
+        amt = _fmt.sprintf("%.15g", float(st["amount"])) if float(st["amount"]) < 1 else \
+            str(_fmt.formatC(st["amount"], format="f", digits=0, big_mark=" "))
         out = [_fmt.sprintf("Lump Sum vs. DCA: %d Starttermine, %s in %d Monatsraten, Horizont %g Jahre\n",
-                            len(self), str(_fmt.formatC(st["amount"], format="f", digits=0, big_mark=" ")),
-                            st["months"], st["horizon"])]
+                            len(self), amt, st["months"], st["horizon"])]
         out.append(_fmt.sprintf("  Einmalanlage vorn:          %.1f %% der Starttermine\n", 100 * s["win_rate"]))
         out.append(_fmt.sprintf("  Vorsprung Mittel / Median:  %+.2f %% / %+.2f %%\n", 100 * s["mean_advantage"],
                                 100 * s["median_advantage"]))
@@ -510,7 +565,8 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
             = Anzahl Einheiten zwischen den Terminen (``unit`` und ``span`` von ``rebalance_plan()``). Standard:
             monatlich, zweimonatlich, quartalsweise, viermonatlich, halbjährlich, jährlich (Namen monthly,
             bimonthly, quarterly, four_monthly, semiannual, yearly).
-            Seit 1.6.4 geprüft: benannte Liste, je Eintrag Einheit und Abstand.
+            Seit 1.6.4 geprüft: benannte Liste, je Eintrag Einheit und Abstand; seit 1.6.5 auch die Werte (Einheit
+            aus den drei Namen, Abstand ganze Zahl ≥ 1 bis zur Obergrenze von ``rebalance_plan()``).
         offsets: Numerischer Vektor: Kalendertage vor dem Ende des Monats, Dreimonatsblocks bzw. Jahres, in dem
             der Termin liegt (0 = letzter Tag; ``rebalance_plan(anchor = "end", days = offset + 1)``). ``None``
             (Standard) rebalanciert am Periodenanfang.
@@ -546,10 +602,9 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             In Julia erscheinen Ausgaben, die
             eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
             Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
@@ -558,7 +613,8 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
 
     Returns:
         DataFrame der Klasse ``SimLevSensitivity`` mit den Spalten ``frequency``, ``offset``, ``band``,
-        ``band_type`` und den Kennzahlen aus ``metrics``; fehlgeschlagene Läufe fehlen. Attribut ``kind =
+        ``band_type`` und den Kennzahlen aus ``metrics``; fehlgeschlagene Läufe fehlen (seit 1.6.5 mit einer
+        Warnung mit Anzahl und Meldungen; schlagen alle fehl, ein Fehler). Attribut ``kind =
         "rebalancing"``. Ausgabe und Grafik über ``print()`` und ``plot()``. Mit Sparplan (``sim_args``) ist
         ``cagr`` geldgewichtet (XIRR); ``print()`` weist darauf hin.
 
@@ -585,6 +641,19 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
     for k, f in frequencies.items():
         if not isinstance(f, (list, tuple, np.ndarray, pd.Series)) or len(f) != 2:
             chk_stop("e2.frequenz", fn, k)
+    # seit 1.6.5 (CR2-C-10, Entscheidung 185 K26): Einheit und Abstand vorab (bis 1.6.4 fehlten solche Läufe still bzw.
+    # Rohfehler "could not convert string to float")
+    from ._sim_blocks import _blk_span_max
+    for k, f in frequencies.items():
+        u, sp = _py(list(f)[0]), _py(list(f)[1])
+        uok = isinstance(u, str) and u in ("month", "quarter", "year")
+        hi = _blk_span_max(u) if uok else 2147483647
+        try:
+            spv = float(sp) if not isinstance(sp, bool) else float("nan")
+        except (TypeError, ValueError):
+            spv = float("nan")
+        if not uok or not np.isfinite(spv) or spv != np.trunc(spv) or spv < 1 or spv > hi:
+            chk_stop("b2b.frequenz_wert", fn, k, chk_fmt(hi))
     if offsets is not None:
         ov = _vec(offsets)
         if not (ov and all(isinstance(z, (int, float)) and not isinstance(z, bool) and np.isfinite(z)
@@ -629,8 +698,8 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
         return _as_series(metrics(res))
     out = list(_par_lapply(list(range(len(rows))), run, cores))
     ok = [not isinstance(o, str) for o in out]
-    if not any(ok):
-        raise ValueError("sensitivity_rebalancing: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg(out)))
+    # seit 1.6.5 (CR2-C-10 b): einzelne fehlgeschlagene Läufe mit Warnung (bis 1.6.4 fehlten sie still)
+    _sens_failed("sensitivity_rebalancing", [o for o in out if isinstance(o, str)], len(out))
     good = [o for o, k in zip(out, ok) if k]
     # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte
     for m in good:
@@ -698,7 +767,7 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
             Seit 1.6.4 eine Zahl > 0.
         months: Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
             Seit 1.6.4 eine ganze Zahl ≥ 1.
-            Seit 1.6.4 höchstens 1200.
+            Seit 1.6.4 höchstens 1200; seit 1.6.5 höchstens 12 * ``horizon``.
         horizon: Vergleichshorizont in Jahren ab Start (Standard 10).
             Seit 1.6.4 eine ganze Zahl ≥ 1.
             Seit 1.6.4 höchstens 100.
@@ -720,10 +789,9 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             In Julia erscheinen Ausgaben, die
             eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
             Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
@@ -778,6 +846,9 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
     # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46): Laufzeiten bis 100 Jahre (months in Monaten)
     chk_max(months, SL_MAX_MONATE, fn, "months")
     chk_max(horizon, SL_MAX_JAHRE, fn, "horizon")
+    # seit 1.6.5 (CR2-F-6): Einstiegsphase höchstens so lang wie der Horizont (bis 1.6.4 Rohfehler IndexError)
+    if months > 12 * horizon:
+        chk_stop("b2b.months_horizont", fn, int(months), int(horizon))
     step = chk_int1(step, fn, "step")
     cores = _sens_check_common(fn, sim_args, cores, check_metrics=False)
     sim_args = _e2_sim_args(sim_args, fn)
@@ -795,11 +866,11 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
     d = data["date"].to_numpy().astype("datetime64[D]")
     dn = _days(d)
     if sim_args.get("tax") is not None:
-        warnings.warn("Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung "
-                      "(Index der Einmalanlage).", UserWarning, stacklevel=2)
+        warnings.warn(chk_msg("b2b.m_planning_lumpsum_vs_dca"), UserWarning, stacklevel=2)
     dd = np.array([_civil(z)[2] for z in dn])
     firsts = d[dd == 1]
-    last_ok = _seq_date_2nd(d.max(), "-" + _r_num_str(horizon) + " years")
+    # seit 1.6.5 (CR2-F-5, K12): ein Start zählt, wenn sein Fenster am letzten Datentag endet (ab max(d) + 1 gerechnet)
+    last_ok = _seq_date_2nd(d.max() + np.timedelta64(1, "D"), "-" + _r_num_str(horizon) + " years")
     starts = firsts[firsts <= last_ok]
     if not len(starts):   # seit 1.6.4 vor seq (vorher "wrong sign in 'by' argument")
         chk_stop("rs.horizont_kurz", fn)
@@ -876,11 +947,9 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
     exact = np.array([r[2] for r in res], dtype=bool)
     adv = lump / dcav - 1
     tab = SimLevLumpSum({"start": starts, "lump_sum": lump, "dca": dcav, "advantage": adv, "exact": exact})
-    win = adv > 0
-    tab.attrs["summary"] = pd.Series({"win_rate": r_mean_int(win.astype(np.int64)), "mean_advantage": r_mean(adv),
-                                      "median_advantage": r_median(adv),
-                                      "mlsa": r_mean(adv[win]) if win.any() else _NAN,
-                                      "mlsd": r_mean(adv[~win]) if (~win).any() else _NAN}, dtype=np.float64)
+    # seit 1.6.5 (CR2-W3-1, Entscheidung 189): Fast-Gleichstand |advantage| <= 1e-12 (Regel _near_eq) weder vorn noch
+    # hinten
+    tab.attrs["summary"] = _ls_summary(adv)
     tab.attrs["settings"] = {"amount": amount, "months": months, "horizon": horizon}
     return tab
 
@@ -901,11 +970,14 @@ def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, sta
     Args:
         data: DataFrame mit Spalte ``date`` und der Indexspalte.
             Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).
+            Seit 1.6.5 muss ``date`` aufsteigend und ohne NA sein.
         index: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
-            Seit 1.6.4 geprüft: Zahlenspalte in data (kein Faktor).
+            Seit 1.6.4 geprüft: Zahlenspalte in data (kein Faktor). Seit 1.6.5 nach dem Auffüllen endlich und > 0
+            (sonst Fehler mit Zeile).
         leverage: Hebel L als Zahl (Standard 2; negativ für Short).
         rate: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge
             ``nrow(data)``, ``data.frame(date, value)`` oder benannter Vektor mit Datumsnamen.
+            Seit 1.6.5 ohne fehlende Werte (Lücke ist ein Fehler).
         expense: TER in Prozent p. a. (Standard 0).
         spread: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
         start: Startwert der Reihe in der ersten Zeile (Standard 100).
@@ -958,10 +1030,12 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
     Erzeugt für jeden Hebel eine Reihe mit ``series_leverage()``, simuliert sie als Buy-and-Hold (oder mit einer
     eigenen Strategie für das Asset ``"LEV"``) und bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio, wie
     die LETF-Analyse von testfol.io. An ``simulation()`` wird ein DataFrame mit den Spalten ``date`` und ``LEV``
-    übergeben.
+    übergeben, seit 1.6.5 dazu alle übrigen Spalten von ``data`` (Signal- und Ereignisspalten einer eigenen
+    Strategie).
 
     Args:
         data: DataFrame mit Spalte ``date`` und der Indexspalte.
+            Seit 1.6.5 geprüft wie in ``series_leverage``; eine Spalte ``LEV`` ist ein Fehler.
         index: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
         leverages: Numerischer Vektor der zu prüfenden Hebel (Standard ``seq(0.5, 4, by = 0.25)``).
             Seit 1.6.4 endliche Zahlen.
@@ -971,6 +1045,7 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
         spread: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
         strategy: Optional Strategie mit dem Asset ``"LEV"``; ``None`` (Standard) = Buy-and-Hold-ETF mit 30
             Prozent Teilfreistellung (``asset_config("etf", "bnh", partial_exemption = 30)``).
+            Seit 1.6.5 muss eine eigene Strategie das Asset ``"LEV"`` enthalten (sonst Fehler).
         sim_args: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard ``{}``): Argumente von
             ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100,
             1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``, siehe
@@ -990,10 +1065,9 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
             (Windows, macOS) immer einer).
             Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit ``cores = 1``, in
             Einheitenreihenfolge.
-            Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse (ohne ``fork`` nacheinander);
-            Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit ``cores = 1``;
-            höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-            Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst ``"auto"`` (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
+            Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+            ``"auto"``, nimmt aber höchstens so viele Prozesse (bis 1.6.4 immer so viele ohne Messung; ohne ``fork``
+            nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
             In Julia erscheinen Ausgaben, die
             eigene Funktionen (etwa ``metrics``) direkt mit ``println`` schreiben, bei mehreren Aufgaben in der
             Reihenfolge, in der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge). Das Ergebnis
@@ -1002,8 +1076,11 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
 
     Returns:
         DataFrame der Klasse ``SimLevSensitivity`` mit ``leverage`` und den Kennzahlen aus ``metrics``
-        (fehlgeschlagene Läufe fehlen); Attribut ``optimal`` (benannter Vektor ``cagr``, ``sharpe``: Hebel mit
-        maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert) und ``kind = "leverage"``. Mit Sparplan (``sim_args``) ist ``cagr``
+        (fehlgeschlagene Läufe fehlen; seit 1.6.5 mit Warnung und Attribut ``failed``, DataFrame mit ``leverage``
+        und ``error``; schlagen alle fehl, ein Fehler); Attribut ``optimal`` (benannter Vektor ``cagr``, ``sharpe``:
+        Hebel mit maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert; seit 1.6.5 NA
+        mit Hinweis, wenn mehrere Hebel mit dem besten Wert gleichauf liegen, Abstand höchstens relativ 1e-12, z. B.
+        die Sharpe Ratio ohne Finanzierungskosten und ohne risikolosen Zins) und ``kind = "leverage"``. Mit Sparplan (``sim_args``) ist ``cagr``
         geldgewichtet (XIRR). Ausgabe und Grafik über ``print()`` und ``plot()``.
 
     Beispiel::
@@ -1024,6 +1101,12 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
             chk_stop("e2.zahlen_endlich", fn, "leverages")
     if strategy is not None:
         _sens_check_sim(data, strategy)
+        # seit 1.6.5 (CR2-H-6): die Strategie muss das Asset LEV enthalten
+        if "LEV" not in [str(k) for k in strategy.keys()]:
+            chk_stop("b2b.lev_asset", fn)
+    # seit 1.6.5 (CR2-H-6, Entscheidung 189): alle Spalten von data gehen mit an simulation(); Spalte LEV = Fehler
+    if "LEV" in [str(c) for c in data.columns]:
+        chk_stop("b2b.lev_spalte", fn)
     cores = _sens_check_common(fn, sim_args, cores, metrics)
     sim_args = _e2_sim_args(sim_args, fn)
     rate, expense, spread = chk_scalar(rate), chk_scalar(expense), chk_scalar(spread)
@@ -1035,19 +1118,24 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
         strategy = create_strategy(LEV=asset_config(asset_class="etf", trading="bnh", partial_exemption=30))
     simulation = _simulation()
     dts = _to_date(data["date"], "data$date")
+    extra = [c for c in data.columns if str(c) != "date"]
 
     def run(L):
         lev = series_leverage(data, index, leverage=L, rate=rate, expense=expense, spread=spread)
         lev = np.where(lev <= 0, 1e-8, lev)
         df = pd.DataFrame({"date": dts, "LEV": lev})
+        for c in extra:
+            df[c] = data[c].to_numpy()
         try:
             res = _quiet(lambda: simulation(df, strategy, **sim_args))
-        except Exception:  # noqa: BLE001
-            return None
+        except Exception as e:  # noqa: BLE001
+            return _cond_msg(e)
         return _as_series(metrics(res))
     out = list(_par_lapply(list(leverages), run, cores))
-    ok = np.array([o is not None for o in out], dtype=bool)
-    good = [o for o in out if o is not None]
+    ok = np.array([not isinstance(o, str) for o in out], dtype=bool)
+    # seit 1.6.5 (CR2-H-6): alle fehlgeschlagen = Fehler, einzelne = Warnung und Attribut failed (bis 1.6.4 still)
+    _sens_failed(fn, [o for o in out if isinstance(o, str)], len(out))
+    good = [o for o in out if not isinstance(o, str)]
     # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und nicht leverage
     for m in good:
         chk_kennzahlen(list(m.index), len(m), ["leverage"], fn)
@@ -1059,14 +1147,35 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
             cols[k] = M[:, j]
     tab = SimLevSensitivity(cols)
     tab.attrs["kind"] = "leverage"
-    jc = _which_max(tab["cagr"].to_numpy(dtype=np.float64)) if "cagr" in tab.columns else None
-    js = _which_max(tab["sharpe"].to_numpy(dtype=np.float64)) if "sharpe" in tab.columns else None
     lv = tab["leverage"].to_numpy(dtype=np.float64)
     # seit 1.6.4 (K43 T2-N3) immer cagr und sharpe, NA ohne Spalte bzw. ohne Wert (bis dahin fehlte cagr ohne Spalte
-    # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR)
-    opt = {"cagr": lv[jc] if jc is not None else _NA, "sharpe": lv[js] if js is not None else _NA}
+    # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR); seit 1.6.5 (CR2-X15-1, Entscheidung 189) NA mit
+    # Hinweis, wenn mehrere Hebel mit dem besten Wert gleichauf liegen (_near_eq)
+
+    def best(k):
+        if k not in tab.columns:
+            return _NA
+        v = tab[k].to_numpy(dtype=np.float64)
+        j = _which_max(v)
+        if j is None:
+            return _NA
+        if _lev_tie(v, j):
+            from ._util import _message
+            _message(chk_msg("b2b.lev_gleichauf", fn, k))
+            return _NA
+        return lv[j]
+    opt = {"cagr": best("cagr"), "sharpe": best("sharpe")}
     tab.attrs["optimal"] = pd.Series(opt, dtype=np.float64)
+    if not ok.all():
+        tab.attrs["failed"] = pd.DataFrame({"leverage": leverages[~ok],
+                                            "error": np.array([o for o in out if isinstance(o, str)], dtype=object)})
     return tab
+
+
+def _lev_tie(v, j):
+    """Mehrere Werte gleichauf mit dem besten ``v[j]`` (Regel ``_near_eq``; NA zählt nicht)."""
+    e = _near_eq(v, v[j])
+    return int(np.sum(e & ~np.isnan(v))) > 1
 
 
 # plot.SimLevSensitivity (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_sens, "SimLevSensitivity")``

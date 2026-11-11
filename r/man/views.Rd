@@ -5,6 +5,8 @@
 \alias{view_mean}
 \alias{view_prob}
 \alias{view_vol}
+\alias{view_cor}
+\alias{view_rank}
 \title{Annahmen fuer Entropy Pooling}
 \usage{
 view_mean(var, value, op = c("=", "<=", ">="))
@@ -12,6 +14,10 @@ view_mean(var, value, op = c("=", "<=", ">="))
 view_prob(expr, value, op = c("=", "<=", ">="))
 
 view_vol(var, value, op = c("=", "<=", ">="))
+
+view_cor(var1, var2, value, op = c("=", "<=", ">="))
+
+view_rank(vars)
 }
 \arguments{
 \item{var}{Spaltenname der Szenario-Tabelle (Zeichenkette, Anlage oder
@@ -24,7 +30,8 @@ endliche Zahl; bei \code{view_vol} >= 0, bei \code{view_prob} zwischen 0
 und 1 (sonst Fehler).}
 
 \item{op}{Art der Bedingung: \code{"="} (Standard), \code{"<="} oder
-\code{">="}.}
+\code{">="}. Seit 1.6.5 genau einer dieser Texte (bis 1.6.4 wurde z. B.
+\code{"<"} still als \code{"<="} genommen).}
 
 \item{expr}{Ereignis als Zeichenkette, ein R-Ausdruck ueber die
 Spaltennamen der Szenario-Tabelle, der einen logischen Wert je
@@ -32,10 +39,20 @@ Szenario liefert (z. B. \code{"aktien < -5 & inflation > 3"}).
 Seit 1.6.4 in R, Python und Julia gleich im gemeinsamen Ausdrucksumfang wie
 die Regeltexte von \code{\link[=tactical_rules]{tactical_rules()}}; auch eine Funktion der
 Szenario-Tabelle (Ergebnis ein Wert je Szenario).}
+
+\item{var1, var2}{\code{view_cor} (seit 1.6.5): zwei verschiedene
+Spaltennamen; \code{value} ist dort eine Korrelation zwischen -1 und 1.}
+
+\item{vars}{\code{view_rank} (seit 1.6.5): mindestens zwei Spaltennamen,
+absteigend nach Erwartungswert (\code{vars[1] >= vars[2] >= ...}).}
 }
 \value{
-Liste mit \code{type} (\code{"mean"}, \code{"prob"} oder
-\code{"vol"}), \code{var} bzw. \code{expr}, \code{value} und \code{op}.
+Liste mit \code{type} (\code{"mean"}, \code{"prob"}, \code{"vol"},
+\code{"cor"} oder \code{"rank"}), \code{var} bzw. \code{expr},
+\code{value} und \code{op}. \code{view_vol} mit \code{value = 0} gibt
+seit 1.6.5 einen Hinweis (die Gewichte fallen auf Szenarien mit genau dem
+Mittelwert); die Korrelation im Ergebnis ist fuer eine Spalte ohne
+Streuung \code{NA} (ohne englische Rohwarnung).
 }
 \description{
 Bausteine fuer die Annahmen ("Views") von \code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}}. Jede
@@ -55,6 +72,22 @@ unter der Ausgangsverteilung bzw. einer \code{view_mean}-Annahme mit
 an das zweite Moment um diesen festen Wert; verschiebt sich der
 Mittelwert durch andere Annahmen, kann die Standardabweichung nach
 der Umgewichtung davon abweichen.}
+\item{view_cor}{(seit 1.6.5, Meucci 2008) Korrelation zweier Spalten,
+umgesetzt als Bedingung an \eqn{E[(x_1 - m_1)(x_2 - m_2)] = \rho s_1 s_2}
+mit festen Mitteln \eqn{m} und Standardabweichungen \eqn{s} (aus
+Annahmen \code{view_mean}/\code{view_vol} mit \code{op = "="} fuer
+dieselbe Spalte, sonst aus der Ausgangsverteilung). Seit der
+Pruefrunde 1.6.5 (Entscheidung 199) haelt
+\code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}} dazu Mittel und Standardabweichung beider
+Spalten als Gleichungen fest (Mittel \eqn{m}, zweites Moment um
+\eqn{m} gleich \eqn{s^2}), damit die Korrelation nach der
+Umgewichtung die Annahme trifft. Eigene Annahmen gehen vor: kein
+festes Mittel fuer eine Spalte mit \code{view_mean} oder
+\code{view_rank}, keine feste Streuung fuer eine Spalte mit
+\code{view_vol}; verschieben diese Mittel oder Streuung, kann die
+Korrelation danach abweichen.}
+\item{view_rank}{(seit 1.6.5, Meucci 2008) Rangfolge der
+Erwartungswerte, je benachbartes Paar eine Ungleichung an die Mittel.}
 }
 }
 \examples{

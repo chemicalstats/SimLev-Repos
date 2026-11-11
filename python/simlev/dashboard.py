@@ -17,6 +17,7 @@ from typing import Any
 
 import numpy as np
 
+from ._pruefen import chk_msg   # seit 1.6.5 (Entscheidung 193)
 from ._r.rformat import r_round, r_sprintf
 from . import _ext
 from ._r.rnum import NA_REAL, r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_prod, r_sd
@@ -192,17 +193,24 @@ def _format_amount(x: Any, signif3: bool = False) -> list[str]:
     """``format_amount``: Beträge in Tsd. bzw. Mio. (Achsenwerte exakt, Endwert mit 3 Stellen)."""
     out = []
     for z in np.atleast_1d(np.asarray(x, dtype=float)):
-        u = 1e6 if abs(z) >= 1e6 else (1e3 if abs(z) >= 1e3 else 1.0)
-        v = z / u
-        if signif3:
-            d = max(0.0, 2 - math.floor(math.log10(max(abs(v), 1))))
-        else:
-            d = 3
-            for k in range(3):
-                if abs(v - r_round(v, k)) < 1e-8 * max(1, abs(v)):
-                    d = k
-                    break
-        out.append(r_sprintf("%.*f", int(d), v) + (" Mio." if u == 1e6 else (" Tsd." if u == 1e3 else "")))
+        def pick(u):
+            v = z / u
+            if signif3:
+                d = max(0.0, 2 - math.floor(math.log10(max(abs(v), 1))))
+            else:
+                d = 3
+                for k in range(3):
+                    if abs(v - r_round(v, k)) < 1e-8 * max(1, abs(v)):
+                        d = k
+                        break
+            return v, int(d), u
+        v, d, u = pick(1e6 if abs(z) >= 1e6 else (1e3 if abs(z) >= 1e3 else 1.0))
+        # seit 1.6.5 (CR2-X16-2): Rundung auf 1000 -> nächste Einheit; Endwert höchstens 3 gültige Stellen (R)
+        if u < 1e6 and abs(float(r_sprintf("%.*f", d, v))) >= 1000:
+            v, d, u = pick(u * 1000)
+        if signif3 and d > 0 and abs(float(r_sprintf("%.*f", d, v))) >= 10.0 ** (3 - d):
+            d -= 1
+        out.append(r_sprintf("%.*f", d, v) + (" Mio." if u == 1e6 else (" Tsd." if u == 1e3 else "")))
     return out
 
 
@@ -712,7 +720,11 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
     if file is not None:
         _check_svg_file(file, "plot_dashboard")
     from ._util import _match_arg, _pmatch
-    style = _match_arg(style, ("full", "compact", "custom"), "style")
+    try:                                                       # seit 1.6.5 (CR2-V1-3): Paketmeldung
+        style = _match_arg(style, ("full", "compact", "custom"), "style")
+    except ValueError:
+        from ._pruefen import chk_stop as _cs
+        _cs("auswahl", "plot.SimLevResult", "style", '"full", "compact", "custom"')
     panels_given = panels is not None
     if panels is None:
         panels = list(_DEFAULT_PANELS)
@@ -727,8 +739,7 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
                  ", ".join('"%s"' % p for p in _ALL_PANELS)))
     panels = list(dict.fromkeys(_ALL_PANELS[i] for i in pm))
     if panels_given and style != "custom":
-        warnings.warn("plot.SimLevResult: panels wirkt nur mit style = \"custom\" und wird bei style = \"%s\" ignoriert."
-                      % style, stacklevel=2)
+        warnings.warn(chk_msg("c.m_plot_simlevresult_3", style), stacklevel=2)
     col = _check_colors(colors)
 
     from .result import SimLevResult
@@ -742,9 +753,7 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
     skipped: list[str] = []
     if style == "custom" and compare is None and any(p in ("correlation", "comparison") for p in panels):
         skipped = [p for p in panels if p in ("correlation", "comparison")]
-        warnings.warn("plot.SimLevResult: Panel(s) %s nicht gezeichnet: %s ein Vergleichsergebnis (compare)."
-                      % (", ".join('"%s"' % p for p in skipped), "benötigen" if len(skipped) > 1 else "benötigt"),
-                      stacklevel=2)
+        warnings.warn(chk_msg("c.m_alpha_col", ", ".join('"%s"' % p for p in skipped), "benötigen" if len(skipped) > 1 else "benötigt"), stacklevel=2)
         panels = [p for p in panels if p not in skipped]
 
     if style == "full":
@@ -824,6 +833,10 @@ def export_dashboard(x, filename: str = "dashboard.svg", width: float = 14, heig
     width = chk_num1(width, fn, "width", lo=3, hi=100)
     height = chk_num1(height, fn, "height", lo=3, hi=100)
     chk_dots(list(kwargs), ("style", "panels", "compare", "colors"), fn)
+    import os as _os                                           # seit 1.6.5 (CR2-V1-3): Ordner vorab prüfen
+    dn = _os.path.dirname(filename)
+    if not _os.path.isdir(dn if dn else "."):
+        _chk_stop("c.dash_ordner", fn, dn if dn else ".")
     _check_svg_file(filename, "export_dashboard")
     d = plot_dashboard(x, width=width * 100, height=height * 100, **kwargs)
     _write_svg(filename, d, "export_dashboard")

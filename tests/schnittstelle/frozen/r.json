@@ -1,6 +1,6 @@
 {
  "language": "R",
- "stand": "2026-11-08 – 1.6.4: Standard cores auto (Planer)",
+ "stand": "2026-11-10 – 1.6.5 Paket B2b: sharpe_test nach Ledoit & Wolf, print(param_range)",
  "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -97,7 +97,8 @@
    {"name": "L", "kind": "arg", "default": "NULL"},
    {"name": "country_weights", "kind": "arg", "default": "NULL"},
    {"name": "target", "kind": "arg", "default": "NULL"},
-   {"name": "seed", "kind": "arg", "default": "NULL"}
+   {"name": "seed", "kind": "arg", "default": "NULL"},
+   {"name": "periods", "kind": "arg", "default": "NULL"}
   ],
   "bootstrap_probability": [
    {"name": "study", "kind": "arg", "default": null},
@@ -250,7 +251,9 @@
    {"name": "metric", "kind": "arg", "default": "c(\"sharpe\", \"sortino\", \"geometric\", \"mean\")", "match_arg": true},
    {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
    {"name": "dates", "kind": "arg", "default": "NULL"},
-   {"name": "risk_free", "kind": "arg", "default": "0"}
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "n_splits", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
   ],
   "overfit_reality_check": [
    {"name": "x", "kind": "arg", "default": null},
@@ -269,7 +272,8 @@
    {"name": "anchored", "kind": "arg", "default": "FALSE"},
    {"name": "metric", "kind": "arg", "default": "c(\"sharpe\", \"sortino\", \"geometric\", \"mean\")", "match_arg": true},
    {"name": "select", "kind": "arg", "default": "c(\"best\", \"plateau\")", "match_arg": true},
-   {"name": "risk_free", "kind": "arg", "default": "0"}
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "correlation", "kind": "arg", "default": "c(\"spearman\", \"kendall\", \"pearson\")", "match_arg": true}
   ],
   "param_bootstrap": [
    {"name": "x", "kind": "arg", "default": null},
@@ -371,7 +375,8 @@
    {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
    {"name": "resample", "kind": "arg", "default": "0L"},
    {"name": "block", "kind": "arg", "default": "NULL"},
-   {"name": "seed", "kind": "arg", "default": "NULL"}
+   {"name": "seed", "kind": "arg", "default": "NULL"},
+   {"name": "cvar_coarse", "kind": "arg", "default": "TRUE"}
   ],
   "portfolio_returns": [
    {"name": "data", "kind": "arg", "default": null},
@@ -428,7 +433,8 @@
    {"name": "lev_col", "kind": "arg", "default": "\"target_leverage\""},
    {"name": "vol_col", "kind": "arg", "default": "\"sigma_ewma\""},
    {"name": "triggers", "kind": "arg", "default": "NULL"},
-   {"name": "out_col", "kind": "arg", "default": "\"rebal_trigger\""}
+   {"name": "out_col", "kind": "arg", "default": "\"rebal_trigger\""},
+   {"name": "combine", "kind": "arg", "default": "\"or\""}
   ],
   "regime_hmm": [
    {"name": "data", "kind": "arg", "default": null},
@@ -599,7 +605,8 @@
    {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
    {"name": "dates", "kind": "arg", "default": "NULL"},
    {"name": "risk_free", "kind": "arg", "default": "0"},
-   {"name": "rho_method", "kind": "arg", "default": "c(\"cor\", \"linear\")", "match_arg": true}
+   {"name": "rho_method", "kind": "arg", "default": "c(\"cor\", \"linear\")", "match_arg": true},
+   {"name": "expected_max", "kind": "arg", "default": "c(\"exact\", \"bailey\")", "match_arg": true}
   ],
   "sharpe_haircut": [
    {"name": "x", "kind": "arg", "default": null},
@@ -608,7 +615,8 @@
    {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
    {"name": "dates", "kind": "arg", "default": "NULL"},
    {"name": "risk_free", "kind": "arg", "default": "0"},
-   {"name": "ppy", "kind": "arg", "default": "52"}
+   {"name": "ppy", "kind": "arg", "default": "52"},
+   {"name": "distribution", "kind": "arg", "default": "c(\"t\", \"normal\")", "match_arg": true}
   ],
   "sharpe_min_track_record": [
    {"name": "x", "kind": "arg", "default": null},
@@ -630,7 +638,10 @@
    {"name": "B", "kind": "arg", "default": "2000L"},
    {"name": "block", "kind": "arg", "default": "NULL"},
    {"name": "ppy", "kind": "arg", "default": "NULL"},
-   {"name": "seed", "kind": "arg", "default": "NULL"}
+   {"name": "seed", "kind": "arg", "default": "NULL"},
+   {"name": "studentize", "kind": "arg", "default": "TRUE"},
+   {"name": "kernel", "kind": "arg", "default": "NULL"},
+   {"name": "prewhiten", "kind": "arg", "default": "NULL"}
   ],
   "signal_analysis": [
    {"name": "data", "kind": "arg", "default": null},
@@ -697,7 +708,8 @@
   ],
   "sim_costs": [
    {"name": "order_fee", "kind": "arg", "default": "NULL"},
-   {"name": "dca_fee", "kind": "arg", "default": "NULL"}
+   {"name": "dca_fee", "kind": "arg", "default": "NULL"},
+   {"name": "custody_fee", "kind": "arg", "default": "NULL"}
   ],
   "simlev_seed": [
    {"name": "seed", "kind": "arg", "default": "NULL"}
@@ -782,7 +794,8 @@
    {"name": "lookbacks", "kind": "arg", "default": "c(1, 3, 6, 12)"},
    {"name": "type", "kind": "arg", "default": "c(\"average\", \"13612w\")", "match_arg": true},
    {"name": "every", "kind": "arg", "default": "c(\"month\", \"week\", \"quarter\")", "match_arg": true},
-   {"name": "weighting", "kind": "arg", "default": "c(\"equal\", \"inverse_vol\")", "match_arg": true}
+   {"name": "weighting", "kind": "arg", "default": "c(\"equal\", \"inverse_vol\")", "match_arg": true},
+   {"name": "vol_window", "kind": "arg", "default": "63L"}
   ],
   "tactical_rules": [
    {"name": "data", "kind": "arg", "default": null},
@@ -807,7 +820,18 @@
    {"name": "window", "kind": "arg", "default": "63L"},
    {"name": "max_exposure", "kind": "arg", "default": "1"},
    {"name": "every", "kind": "arg", "default": "c(\"month\", \"week\", \"day\", \"quarter\")", "match_arg": true},
-   {"name": "ppy", "kind": "arg", "default": "NULL"}
+   {"name": "ppy", "kind": "arg", "default": "NULL"},
+   {"name": "risk", "kind": "arg", "default": "c(\"sd\", \"downside\", \"es\", \"var\", \"lpm\")", "match_arg": true},
+   {"name": "estimator", "kind": "arg", "default": "c(\"window\", \"ewma\")", "match_arg": true},
+   {"name": "alpha", "kind": "arg", "default": "0.05"},
+   {"name": "lpm_order", "kind": "arg", "default": "1"},
+   {"name": "lambda", "kind": "arg", "default": "0.94"},
+   {"name": "exponent", "kind": "arg", "default": "1"},
+   {"name": "min_exposure", "kind": "arg", "default": "0"},
+   {"name": "risk_floor", "kind": "arg", "default": "NULL"},
+   {"name": "reference", "kind": "arg", "default": "c(\"fixed\", \"median\")", "match_arg": true},
+   {"name": "cushion", "kind": "arg", "default": "NULL"},
+   {"name": "cushion_window", "kind": "arg", "default": "252L"}
   ],
   "tail_covar": [
    {"name": "data", "kind": "arg", "default": null},
@@ -845,20 +869,29 @@
   "tax_tariff": [
    {"name": "file", "kind": "arg", "default": "NULL"}
   ],
+  "view_cor": [
+   {"name": "var1", "kind": "arg", "default": null},
+   {"name": "var2", "kind": "arg", "default": null},
+   {"name": "value", "kind": "arg", "default": null},
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")"}
+  ],
   "view_mean": [
    {"name": "var", "kind": "arg", "default": null},
    {"name": "value", "kind": "arg", "default": null},
-   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")", "match_arg": true}
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")"}
   ],
   "view_prob": [
    {"name": "expr", "kind": "arg", "default": null},
    {"name": "value", "kind": "arg", "default": null},
-   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")", "match_arg": true}
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")"}
+  ],
+  "view_rank": [
+   {"name": "vars", "kind": "arg", "default": null}
   ],
   "view_vol": [
    {"name": "var", "kind": "arg", "default": null},
    {"name": "value", "kind": "arg", "default": null},
-   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")", "match_arg": true}
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")"}
   ],
   "withdrawal_cohorts": [
    {"name": "data", "kind": "arg", "default": null},
@@ -870,7 +903,8 @@
    {"name": "wrap", "kind": "arg", "default": "FALSE"},
    {"name": "cape", "kind": "arg", "default": "NULL"},
    {"name": "base_rate", "kind": "arg", "default": "NULL"},
-   {"name": "inflation_type", "kind": "arg", "default": "c(\"level\", \"rate_pa\")", "match_arg": true}
+   {"name": "inflation_type", "kind": "arg", "default": "c(\"level\", \"rate_pa\")", "match_arg": true},
+   {"name": "periods", "kind": "arg", "default": "NULL"}
   ],
   "withdrawal_horizon": [
    {"name": "type", "kind": "arg", "default": "c(\"fixed\", \"uniform\", \"discrete\", \"normal\", \"triangular\", \"sample\")", "match_arg": true},
@@ -952,7 +986,8 @@
    {"name": "loss_carryforward", "kind": "arg", "default": "0"},
    {"name": "gamma", "kind": "arg", "default": "2"},
    {"name": "keep_paths", "kind": "arg", "default": "TRUE"},
-   {"name": "horizon", "kind": "arg", "default": "NULL"}
+   {"name": "horizon", "kind": "arg", "default": "NULL"},
+   {"name": "periods", "kind": "arg", "default": "NULL"}
   ],
   "wrapper_config": [
    {"name": "strategy", "kind": "arg", "default": null},
@@ -1157,6 +1192,10 @@
    {"name": "...", "kind": "dots", "default": null}
   ],
   "print.SimLevPBO": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevParamRange": [
    {"name": "x", "kind": "arg", "default": null},
    {"name": "...", "kind": "dots", "default": null}
   ],

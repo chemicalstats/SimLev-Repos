@@ -113,10 +113,11 @@ end
 function tcop_fit(u::Vector{Float64}, v::Vector{Float64})
     length(u) == length(v) && !isempty(u) || return nothing
     best = Vector{Float64}(undef, 3); flag = Ref{Cint}(0)
-    cx = _ctx()
+    cx = _ctx_intr()   # seit 1.6.5: Strg-C schon während der Schätzung (Entscheidung 188)
     s = ccall((:sl_tcop_fit, LIBSLC), Cint, (Ptr{Cvoid}, Int64, Ptr{Float64}, Ptr{Float64}, Cint, Ptr{Float64}, Ptr{Cint}),
               cx, length(u), u, v, Cint(nthreads()), best, flag)
     ccall((:sl_ctx_free, LIBSLC), Cvoid, (Ptr{Cvoid},), cx)
+    _throw_intr(s)
     return s == 0 && flag[] == 0 ? best : nothing
 end
 
@@ -125,11 +126,12 @@ function tcop_nu(U::Matrix{Float64}, Ri::Matrix{Float64}, ldR::Float64, lower::F
     k = size(U, 2)
     size(Ri) == (k, k) && k >= 1 || return nothing
     nu = Ref{Float64}(0.0); flag = Ref{Cint}(0)
-    cx = _ctx()
+    cx = _ctx_intr()   # seit 1.6.5: Strg-C schon während der Schätzung (Entscheidung 188)
     s = ccall((:sl_tcop_nu, LIBSLC), Cint,
               (Ptr{Cvoid}, Int64, Cint, Ptr{Float64}, Ptr{Float64}, Float64, Float64, Float64, Float64, Cint, Ptr{Float64}, Ptr{Cint}),
               cx, size(U, 1), Cint(k), U, Ri, ldR, lower, upper, tol, Cint(nthreads()), nu, flag)
     ccall((:sl_ctx_free, LIBSLC), Cvoid, (Ptr{Cvoid},), cx)
+    _throw_intr(s)
     return s == 0 && flag[] == 0 ? nu[] : nothing
 end
 

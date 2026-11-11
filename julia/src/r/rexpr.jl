@@ -265,9 +265,34 @@ function _ctx_lines(L::Lexer)
     return out, cl
 end
 
+# Kontext langer Syntaxfehler (seit 1.6.5, CR2-X10-1; gleiche Regel in R `.e5_parse_ctx` und Python): ist der ganze
+# Text länger als 256 Bytes (seit PR2-3; vorher der Text bis zur Fehlerstelle), nur die Fehlerzeile bis zur Fehlerstelle (Spalte wie der Zerleger),
+# gekürzt auf die letzten 80 Zeichen, Tabulator als ein Leerzeichen; sonst nothing (Kontext wie R)
+function _ctx_long(L::Lexer, line::Int, col::Int)
+    lines = split(String(L.cs), '\n')
+    (line < 1 || line > length(lines)) && return nothing
+    cur = collect(lines[line])
+    c = 0; k = 0
+    while c < col && k < length(cur)
+        c += 1
+        cur[k+1] == '\t' && (c = (c + 7) & ~7)
+        k += 1
+    end
+    pre = cur[1:k]
+    sum((ncodeunits(ch) for ch in L.cs); init = 0) <= 256 && return nothing
+    sh = [ch == '\t' ? ' ' : ch for ch in pre]
+    length(sh) > 80 && (sh = sh[end-79:end])
+    return String(sh)
+end
+
 function _parse_errmsg(L::Lexer, line::Int, col::Int, msg::String)
-    lines, cl = _ctx_lines(L)
     head = "<text>:$line:$col: $msg"
+    sh = _ctx_long(L, line, col)
+    if sh !== nothing
+        hd = "$line: "
+        return head * "\n" * hd * sh * "\n" * lpad("^", length(hd) + length(sh) + 1)
+    end
+    lines, cl = _ctx_lines(L)
     if isempty(lines)
         return head
     elseif length(lines) == 1
@@ -823,8 +848,9 @@ mutable struct Parser
     L::Lexer
     la::Union{Nothing,Tok}
     depth::Int   # Schachtelung von _expr! (seit 1.6.4, C-006)
+    cplx::Bool   # komplexe Konstante gesehen (seit 1.6.5, PR2-4: Ablehnung erst nach dem Zerlegen)
 end
-Parser(L::Lexer, la) = Parser(L, la, 0)
+Parser(L::Lexer, la) = Parser(L, la, 0, false)
 _peek!(P::Parser) = P.la === nothing ? (P.la = _yylex!(P.L)) : P.la
 _next!(P::Parser) = (t = _peek!(P); P.la = nothing; t)
 _synerr(P::Parser, t::Tok) = error(_parse_errmsg(P.L, t.line, t.col, "unexpected " * _TOKNAME[t.kind]))
@@ -966,8 +992,9 @@ end
 function _primary!(P::Parser, t::Tok)
     k = t.kind
     if k === :NUM
-        # 1i, NA_complex_: seit 1.6.4 in allen drei Sprachen abgelehnt (Entscheidung 64)
-        t.val === :complex && error("RExpr: komplexe Zahlen werden nicht unterstützt")
+        # 1i, NA_complex_: seit 1.6.4 in allen drei Sprachen abgelehnt (Entscheidung 64); seit 1.6.5 (PR2-4,
+        # Entscheidung 199) erst nach dem Zerlegen wie R
+        t.val === :complex && (P.cplx = true)
         return Node(:const, t.val, t.line, t.col)
     elseif k === :STR || k === :SYMBOL
         n = _peek!(P)
@@ -1146,6 +1173,9 @@ function _parse_all(s::String)
         end
         push!(exprs, e)
     end
+    # seit 1.6.5 (PR2-4, Entscheidung 199): komplexe Zahlen erst nach dem Zerlegen des ganzen Textes abgelehnt wie R
+    # (.e5_rexpr_parse: Syntaxfehler, dann Tiefe, dann komplexe Zahlen; bis dahin Ablehnung schon beim Zerlegen)
+    P.cplx && error(SimLev.chk_msg("b2b.m_e5_rexpr_parse"))
     return exprs, L.warns
 end
 
@@ -1218,11 +1248,15 @@ function from_julia(v)
     T <: Union{Missing,AbstractString} && return CHR(Union{Missing,String}[x === missing ? missing : String(x) for x in v])
     T <: Union{Missing,Date} && return DAT(Float64[_dayf(x) for x in v])
     T <: Union{Missing,Dates.DateTime} && return DAT(Float64[x === missing ? _NA : _dayf(Date(x)) for x in v])
+    # seit 1.6.5 (CR2-C-11): nothing wie missing (wie als Einzelwert), Wahrheitswerte neben Zahlen werden wie in R c()
+    # zu Zahlen (bis 1.6.4 „keine Daten“), Symbole wie Text
+    any(x -> x === nothing, v) && (v = Any[x === nothing ? missing : x for x in v])
     all(x -> x === missing || x isa Bool, v) && return LGL(v)
-    all(x -> x === missing || (x isa Integer && !(x isa Bool) && _int_ok(x)), v) &&
+    all(x -> x === missing || (x isa Integer && _int_ok(x)), v) &&
         return INT(Union{Missing,Int}[x === missing ? missing : Int(x) for x in v])
-    all(x -> x === missing || (x isa Real && !(x isa Bool)), v) && return NUM(Float64[x === missing ? _NA : Float64(x) for x in v])
-    all(x -> x === missing || x isa AbstractString, v) && return CHR(Union{Missing,String}[x === missing ? missing : String(x) for x in v])
+    all(x -> x === missing || x isa Real, v) && return NUM(Float64[x === missing ? _NA : Float64(x) for x in v])
+    all(x -> x === missing || x isa Union{AbstractString,Symbol}, v) &&
+        return CHR(Union{Missing,String}[x === missing ? missing : String(x) for x in v])
     all(x -> x === missing || x isa Date, v) && return DAT(Float64[_dayf(x) for x in v])
     return nothing
 end
@@ -2081,6 +2115,9 @@ function _arith0(op::String, a, b)
     A = _as_num(a); B = _as_num(b)
     n = _len2(A, B)
     out = NUM(undef, n)
+    # seit 1.6.5 (CR2-X38-1): + und * mit zwei double-Operanden, der erste von Länge 1, der zweite länger: der NaN des
+    # Vektors setzt sich durch wie in R (x86-64); sonst der des ersten Operanden
+    swap = (op == "+" || op == "*") && a isa NUM && b isa NUM && length(A) == 1 && length(B) > 1
     @inbounds for i in 1:n
         x = _rec(A, i); y = _rec(B, i)
         out[i] = if op == "%%"
@@ -2093,7 +2130,7 @@ function _arith0(op::String, a, b)
             (x == -Inf && 1.8446744073709552e19 < y < Inf) && _warn("probable complete loss of accuracy in modulus")
             (isnan(x) || isnan(y)) ? (y == 2.0 ? _nanop(x, x) : (x == 1.0 || y == 0.0) ? 1.0 : _nanop(y, x)) : SimLev.r_pow(x, y)
         elseif isnan(x) || isnan(y)
-            _nanop(x, y)
+            swap ? _nanop(y, x) : _nanop(x, y)
         else
             op == "+" ? x + y : op == "-" ? x - y : op == "*" ? x * y : x / y
         end
@@ -2242,6 +2279,7 @@ function _colon(a, b)
     (isnan(n1) || isnan(n2)) && error("NA/NaN argument")
     r = abs(n2 - n1)
     r >= 4.503599627370496e15 && error("result would be too long a vector")
+    isnan(r) && error("negative length vectors are not allowed")   # Inf:Inf (seit 1.6.5, CR2-L-3)
     floor(r + 1 + 1.1920928955078125e-07) > _MAX_LEN && _len_error()   # seit 1.6.4 (C-006, Entscheidung 79)
     inr(v) = -2147483648.0 < v <= 2147483647.0
     if n1 == trunc(n1) && n2 == trunc(n2)
@@ -2716,6 +2754,15 @@ function _f_ifelse(args, nms, ex)
         kind = max(kind, _rtype(no))
         for i in npos; ans[i] = (no, isempty(no) ? _na_of(no) : _rec(no, i)); end
     end
+    # seit 1.6.5 (CR2-A-8): Zahlen auf beiden benutzten Seiten typstabil ohne das Any-Zwischenfeld (gleiche Werte)
+    if kind == 3 && (isempty(ypos) || (yes isa NUM && !isempty(yes))) && (isempty(npos) || (no isa NUM && !isempty(no)))
+        out = Vector{Float64}(undef, length(t))
+        @inbounds for i in eachindex(t)
+            ti = t[i]
+            out[i] = ti === true ? (yes::NUM)[mod1(i, length(yes))] : ti === false ? (no::NUM)[mod1(i, length(no))] : _NA
+        end
+        return out
+    end
     el(a) = a === missing ? missing : _coerce(_undate(similar_one(a[1], a[2])), kind)[1]   # Datum als Zahl (seit 1.6.4)
     similar_one(src, x) = (o = similar(src, 1); o[1] = x; o)
     if kind == 4
@@ -3071,12 +3118,15 @@ function _f_mean(args, nms, ex)
         return NUM([_NA])
     end
     narm = _flag_istrue(v[3], false)
-    trim = v[2] === nothing ? 0.0 : (length(v[2]) == 1 && !(v[2] isa CHR) ? _as_num(v[2])[1] :
+    # seit 1.6.5 (CR2-Q-2) wie mean.default: trim nur als Zahl (double oder integer, kein Wahrheitswert und kein
+    # Datum) der Länge 1; NA mit Werten in x ist der Fehler von if (trim > 0 && n)
+    trim = v[2] === nothing ? 0.0 : (length(v[2]) == 1 && v[2] isa Union{NUM,INT} ? _as_num(v[2])[1] :
                                      error("'trim' must be numeric of length one"))
     if narm
         x = x[[!_isna_el(t) for t in x]]
     end
     n = length(x)
+    isnan(trim) && n > 0 && error("missing value where TRUE/FALSE needed")
     if trim > 0 && n > 0
         any(_isna_el, x) && return NUM([_NA])
         trim >= 0.5 && return _f_median(Any[x], Union{Nothing,String}[nothing], ex)
@@ -3387,6 +3437,137 @@ function _f_cumsum(args, nms, ex)
     return NUM(SimLev.r_cumsum(_as_num(x)))
 end
 
+# ── Reihenfunktionen (seit 1.6.5, E-T4-1): rev, which, seq_len, cumprod, cummax, cummin, diff, head, tail ─────────────
+# Wie R 4.3.3 und die Python-Fassung (rexpr.py): diff und head/tail aus den Grundoperationen zusammengesetzt wie der
+# R-Text dieser Funktionen.
+
+function _f_rev(args, nms, ex)
+    v, _, _ = _bind("rev", args, nms, ex, ["x"])
+    x = v[1]
+    x === nothing && _missing_arg("x")
+    return length(x) > 0 ? _index(x, INT(collect(length(x):-1:1))) : x
+end
+
+function _f_which(args, nms, ex)
+    v, _, _ = _bind("which", args, nms, ex, ["x", "arr.ind", "useNames"])
+    x = v[1]
+    x === nothing && _missing_arg("x")
+    (x isa LGL && x !== _NULLV) || error("argument to 'which' is not logical")
+    idx = Int[i for i in eachindex(x) if x[i] === true]
+    r = INT(idx)
+    xn = _nm(x)
+    return xn === nothing ? r : _setnm(r, xn[idx])   # arr.ind/useNames nur mit dim (isTRUE)
+end
+
+function _seq_len_n(v)
+    length(v) != 1 && _warn("first element used of 'length.out' argument")
+    d = length(v) > 0 ? _asreal1(v) : _NA
+    (isfinite(d) && d >= 0) || error("argument must be coercible to non-negative integer")
+    d >= 4.503599627370496e15 && error("result would be too long a vector")
+    trunc(d) > _MAX_LEN && _len_error()
+    return Int(trunc(d))
+end
+
+function _f_seq_len(args, nms, ex)
+    length(args) == 1 || error("$(length(args)) arguments passed to 'seq_len' which requires 1")
+    nm = nms[1]
+    (nm === nothing || startswith("length.out", nm)) ||
+        error("supplied argument name '$nm' does not match 'length.out'")
+    args[1] === nothing && _missing_arg("length.out")
+    return INT(collect(1:_seq_len_n(args[1])))
+end
+
+# cumprod (kind 1), cummax (2), cummin (3) wie do_cum
+function _f_cumx(fname::String, kind::Int)
+    return function (args, nms, ex)
+        x = _prim1(fname, args, nms)
+        x isa DAT && _date_math(fname)
+        x isa DIF && _dif_math(fname)
+        x === _NULLV && return NUM()
+        if x isa Union{LGL,INT} && kind != 1
+            out = INT([missing for _ in x])
+            m = 0
+            for i in eachindex(x)
+                x[i] === missing && break
+                xi = Int(x[i])
+                m = i == 1 ? xi : (kind == 2 ? max(m, xi) : min(m, xi))
+                out[i] = m
+            end
+            return out
+        end
+        xs = Vector{Float64}(_as_num(x))
+        isempty(xs) && return NUM()
+        return NUM(kind == 1 ? SimLev._rb_cumprod(xs) : kind == 2 ? SimLev._rb_cummax(xs) : SimLev._rb_cummin(xs))
+    end
+end
+
+# if (x || y()) für zwei logische Einzelwerte
+function _oror_cond(x, yfn)
+    xv = _scalar_lgl(x, "||")
+    xv === true && return true
+    yv = _scalar_lgl(yfn(), "||", "y")
+    yv === true && return true
+    (xv === missing || yv === missing) && error("missing value where TRUE/FALSE needed")
+    return false
+end
+
+function _f_diff(args, nms, ex)
+    v, _, _ = _bind("diff", args, nms, ex, ["x", "lag", "differences", "..."])
+    x = v[1]
+    x === nothing && _missing_arg("x")
+    lag = v[2] === nothing ? INT([1]) : v[2]
+    dif = v[3] === nothing ? INT([1]) : v[3]
+    isdate = x isa DAT
+    one = INT([1])
+    if length(lag) != 1 || (isdate ? length(dif) > 1 : length(dif) != 1) ||
+            _oror_cond(_compare("<", lag, one), () -> _compare("<", dif, one))
+        error("'lag' and 'differences' must be integers >= 1")
+    end
+    _cond1(_compare(">=", _arith("*", lag, dif), INT([length(x)]))) && return isdate ? DIF() : _index(x, INT([0]))
+    r = isdate ? x : _undate(x)
+    i1 = _unary("-", INT(collect(1:_seq_len_n(lag))))
+    for _ in 1:_seq_len_n(dif)
+        nr = INT([length(r)])
+        hi = _unary("-", _arith("+", _arith("-", nr, lag), one))
+        r = _arith("-", _index(r, i1), _index(r, _colon(_unary("-", nr), hi)))
+    end
+    x isa DIF && return _cp(DIF, r)   # diff.difftime
+    return r
+end
+
+const _HT_MSG = ("invalid 'n' - must contain at least one non-missing element, got none.",
+                 "invalid 'n' - must be numeric, possibly NA.",
+                 "invalid 'n' - must have length one when dim(x) is NULL, got ")
+
+function _ht_n(x, n, ex)
+    ln = length(n)
+    (ln == 0 || all(_isna_el, n)) && error(_HT_MSG[1])
+    n isa Union{NUM,INT,LGL} || error(_HT_MSG[2])
+    ln > 1 && error(_HT_MSG[3] * string(ln))
+    lx = INT([length(x)])
+    nms2 = Union{Nothing,String}[nothing, nothing]
+    _cond1(_compare("<", n, INT([0]))) && return _f_minmax(Any[_arith("+", lx, n), INT([0])], nms2, ex, true)
+    return _f_minmax(Any[n, lx], nms2, ex, false)
+end
+
+function _f_head(args, nms, ex)
+    v, _, _ = _bind("head", args, nms, ex, ["x", "n", "..."])
+    x = v[1]
+    x === nothing && _missing_arg("x")
+    n = _ht_n(x, v[2] === nothing ? INT([6]) : v[2], ex)
+    return _index(x, INT(collect(1:_seq_len_n(n))))
+end
+
+function _f_tail(args, nms, ex)
+    v, _, _ = _bind("tail", args, nms, ex, ["x", "n", "keepnums", "addrownums", "..."])
+    x = v[1]
+    x === nothing && _missing_arg("x")
+    n = _ht_n(x, v[2] === nothing ? INT([6]) : v[2], ex)
+    lout = Int(ceil(_asreal1(n)))   # seq.int(to = xlen, length.out = n)
+    xlen = length(x)
+    return _index(x, INT(collect((xlen - lout + 1):xlen)))
+end
+
 function _f_xor(args, nms, ex)
     v, _, _ = _bind("xor", args, nms, ex, ["x", "y"])
     (v[1] === nothing) && _missing_arg("x")
@@ -3649,6 +3830,10 @@ const _FUNS = Dict{String,Function}(
     "as.numeric" => _f_asnum, "as.double" => _f_asnum, "as.integer" => _f_asint,
     "as.logical" => _f_aslgl, "as.character" => _f_aschr, "as.Date" => _f_asdate,
     "cumsum" => _kn_x("cumsum")(_f_cumsum), "identity" => _f_identity,
+    # seit 1.6.5 (E-T4-1)
+    "rev" => _f_rev, "which" => _f_which, "seq_len" => _f_seq_len,
+    "cumprod" => _kn_x("cumprod")(_f_cumx("cumprod", 1)), "cummax" => _kn_x("cummax")(_f_cumx("cummax", 2)),
+    "cummin" => _kn_x("cummin")(_f_cumx("cummin", 3)), "diff" => _f_diff, "head" => _f_head, "tail" => _f_tail,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3751,14 +3936,26 @@ const _UNSUPPORTED = Set(["function", "for", "while", "repeat", "next", "break",
 const _PRIMS = Set(["c", "sum", "min", "max", "any", "all", "length", "abs", "sqrt", "exp", "expm1", "log1p",
                     "log2", "log10", "sin", "cos", "tan", "tanh", "atan", "floor", "ceiling", "trunc", "sign",
                     "is.na", "is.nan", "is.finite", "is.infinite", "as.numeric", "as.double", "as.integer",
-                    "as.logical", "as.character", "cumsum", "rep"])
+                    "as.logical", "as.character", "cumsum", "rep", "cumprod", "cummax", "cummin", "seq_len"])
+
+# Aufruf eines Ausdrucks als Funktion (seit 1.6.5, CR2-D-12): 'function'/'\\(' bzw. '::'/':::' im Funktionsteil (ohne
+# Klammern) mit derselben Meldung wie ohne Aufruf, sonst „attempt to apply non-function“
+function _callx_error(f::Node)
+    while f.head === :call && String(f.val) == "(" && !isempty(f.args)
+        f = f.args[1]
+    end
+    if f.head === :call && String(f.val) in ("function", "::", ":::")
+        error("RExpr: '$(String(f.val))' wird in Ausdrücken nicht unterstützt")
+    end
+    error("attempt to apply non-function")
+end
 
 function _ev(e::Node, c::Ctx)
     h = e.head
     h === :const && return e.val
     h === :sym && return _lookup(String(e.val), c)
     h === :empty && error("argument is missing, with no default")
-    h === :callx && error("attempt to apply non-function")
+    h === :callx && _callx_error(e.val::Node)
     f = String(e.val); a = e.args
     if f == "("
         return _ev(a[1], c)

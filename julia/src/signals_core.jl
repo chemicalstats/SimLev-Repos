@@ -6,7 +6,7 @@ import ..SimLev
 using ..SimLev: NA, CAbi, LIBSLC
 using Dates
 
-export roll_mean_core, roll_cov_core, roll_max_core
+export roll_mean_core, roll_cov_core, roll_max_core, research_vec
 
 # Fensterlänge wie R's as.integer für den Kern: außerhalb von Int32 bleibt sie außerhalb von
 # 1 … Länge (der Kern liefert dann nur NA), wie python/simlev/_signals_core.py
@@ -58,4 +58,20 @@ function roll_max_core(x::Vector{Float64}, w::Int)
     return out
 end
 
-end # module
+"""
+    research_vec(op, x, par, nout)
+
+Hilfskerne seit 1.6.5 (`core/research_core_impl.h`, `research_vec`): 1 erwartetes Maximum von N
+Standardnormalen, 2 harmonische Summe wie R, 3 Risikozustand der Zielvolatilität, 4 expandierender Median,
+5 Drawdown-Polster. Gegenstück zu R `.research_vec` und Python `_signals_core.research_vec`.
+"""
+function research_vec(op::Integer, x::AbstractVector, par::AbstractVector, nout::Integer)
+    xv = Vector{Float64}(x); pv = Vector{Float64}(par)
+    out = Vector{Float64}(undef, nout)
+    CAbi.check(ccall((:simlev_c_research_vec, LIBSLC), Cint,
+                     (Cint, Ptr{Float64}, Int64, Ptr{Float64}, Int64, Ptr{Float64}, Int64),
+                     Cint(op), xv, length(xv), pv, length(pv), out, nout))
+    return out
+end
+
+end

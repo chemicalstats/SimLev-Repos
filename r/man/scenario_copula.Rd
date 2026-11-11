@@ -30,7 +30,12 @@ Anteile \code{c(von, bis)} mit 0 <= von < bis <= 1, z. B.
 \code{list(aktien = c(0, 0.05))} (schlechteste 5 \% der Perioden).
 Unbenannte Eintraege, unbekannte Anlagen und ungueltige Baender sind ein
 Fehler.
-\code{NULL} (Standard) = unbedingte Simulation.}
+\code{NULL} (Standard) = unbedingte Simulation.
+Die Randverteilungen sind empirisch und enden am historischen Minimum
+bzw. Maximum: Stress-Szenarien werden nie schlechter als die schlechteste
+beobachtete Periode, und ein Band unter \eqn{1/T} haeuft sich auf diesem
+Wert. Reicht ein Band unter \eqn{1/T} bzw. ueber \eqn{1 - 1/T} (T =
+Anzahl Perioden), kommt seit 1.6.5 ein Hinweis.}
 
 \item{frequency}{Renditefrequenz bei Kursdaten: \code{"week"} (Standard,
 ISO-Woche), \code{"day"} oder \code{"month"}.}

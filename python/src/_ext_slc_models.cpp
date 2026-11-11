@@ -856,6 +856,44 @@ static PyObject *slc_rolling_vol(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+/* seit 1.6.5 (E-T2-6): Fenster in Kalendertagen */
+static PyObject *slc_rolling_vol_days(PyObject *self, PyObject *args)
+{
+    PyObject *x, *d, *o;
+    double days;
+    int st;
+    Py_ssize_t n;
+    bufs B = {};
+    const double *xp, *dp; double *op; sl_ctx cx;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OOdO", &x, &d, &days, &o)) return NULL;
+    xp = (const double *) buf(&B, x, 0, 'd', -1, &n, "x"); FAIL_IF(!xp);
+    dp = (const double *) buf(&B, d, 0, 'd', n, NULL, "day"); FAIL_IF(!dp);
+    op = DW(o, n, "Ausgabe"); FAIL_IF(!op);
+    ctx_init(&cx);
+    st = sl_rolling_vol_days(&cx, (int) n, xp, dp, days, op);
+    bufs_free(&B);
+    if (finish(&cx, st) < 0) return NULL;
+    Py_RETURN_NONE;
+}
+
+/* seit 1.6.5 (CR2-M-1): stationäre Verteilung (P spaltenweise, K x K) */
+static PyObject *slc_msgarch_stat(PyObject *self, PyObject *args)
+{
+    PyObject *p, *o;
+    Py_ssize_t n;
+    int K;
+    bufs B = {};
+    const double *pp; double *op;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OiO", &p, &K, &o)) return NULL;
+    pp = (const double *) buf(&B, p, 0, 'd', (Py_ssize_t) K * K, &n, "P"); FAIL_IF(!pp);
+    op = DW(o, K, "Ausgabe"); FAIL_IF(!op);
+    sl_msgarch_stat(K, pp, op);
+    bufs_free(&B);
+    Py_RETURN_NONE;
+}
+
 static PyObject *slc_assign_regimes(PyObject *self, PyObject *args)
 {
     PyObject *x, *t, *o;
@@ -929,6 +967,8 @@ PyMethodDef simlev_ext_slc_models_methods[] = {
     {"slc_boot_garch", slc_boot_garch, METH_VARARGS, "GARCH-Bootstrap"},
     {"slc_boot_ms_garch", slc_boot_ms_garch, METH_VARARGS, "MS-GARCH-Bootstrap"},
     {"slc_rolling_vol", slc_rolling_vol, METH_VARARGS, "rollierende Volatilität"},
+    {"slc_rolling_vol_days", slc_rolling_vol_days, METH_VARARGS, "rollierende Volatilität, Fenster in Kalendertagen"},
+    {"slc_msgarch_stat", slc_msgarch_stat, METH_VARARGS, "stationäre Verteilung einer Übergangsmatrix"},
     {"slc_assign_regimes", slc_assign_regimes, METH_VARARGS, "Regime über Schwellen"},
     {"slc_estimate_trans_mat", slc_estimate_trans_mat, METH_VARARGS, "Übergangsmatrix"},
     {NULL, NULL, 0, NULL}

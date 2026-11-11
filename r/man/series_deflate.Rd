@@ -29,6 +29,7 @@ erste Zeile mit bekanntem Preisindex.}
 \value{
 \code{data} mit zusaetzlichen realen Spalten
 \code{paste0(columns, suffix)}.
+Seit 1.6.5 muss der Preisindex endliche Werte > 0 haben und \code{suffix} darf nicht leer sein (sonst Fehler).
 }
 \description{
 Rechnet nominale Kurs- oder Wertspalten in reale Werte (Kaufkraft des

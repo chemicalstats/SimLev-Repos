@@ -30,6 +30,7 @@ using ..SimLev: _alloc_c, _alloc_ticks, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
 using ..SimLev: _sprintf, _fmt1, _ldsum, _colmeans, _rowsums, _mean_lgl, _unique, _setdiff, _isna, _strip_nl   # util.jl, r/rnum.jl
 using Dates
+using ..SimLev: chk_stop   # pruefen.jl (seit 1.6.5, Entscheidung 193)
 
 export portfolio_optimize, portfolio_frontier, portfolio_rolling, portfolio_risk_contributions, portfolio_cpcv,
        print_SimLevOptimization, print_SimLevFrontier, print_SimLevCPCV,
@@ -40,7 +41,7 @@ const _METHODS = ["min_variance", "max_sharpe", "mean_variance", "max_diversific
 const _COVS = ["sample", "ledoit_wolf", "ewma", "denoise", "gerber"]
 const _FREQS = ["week", "day", "month"]
 const _PO_FORMALS = ["x", "assets", "method", "lower", "upper", "cov", "mu", "risk_free", "risk_aversion", "budget",
-                     "alpha", "frequency", "resample", "block", "seed"]
+                     "alpha", "frequency", "resample", "block", "seed", "cvar_coarse"]   # cvar_coarse seit 1.6.5 (PRG2-3)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # kleine R-Hilfen
@@ -146,7 +147,7 @@ _has_date(x) = x isa RFrame && haskey(x, "date")
 "Seit 1.6.4 wie R (Entscheidung 6, B-057): `x` als NamedTuple, Dict oder Paar-Vektor ist keine Tabelle bzw. Matrix."
 function _opt_no_list(@nospecialize(x))
     (x isa NamedTuple || (x isa AbstractDict && !(x isa RList)) || (x isa AbstractVector && !isempty(x) && all(p -> p isa Pair, x))) &&
-        error("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
+        chk_stop("c.m_opt_returns")
     return x
 end
 
@@ -197,6 +198,13 @@ function _opt_returns(x, assets = nothing, frequency = "week")
         end
         assets = String[String(a) for a in assets]
         rd = SimLev.Dependence._dep_returns(x, assets, nothing, frequency)
+        # seit 1.6.5 (K13, CR2-F-8, Entscheidung 195 F1 Weg c): letzter Abstand < halber mittlerer Abstand → letzte
+        # (angebrochene) Periode fällt aus ppy, Mittelwert und Kovarianz (R .opt_returns)
+        if SimLev.nrow(rd) >= 3
+            d0 = SimLev.DataPrep._to_date(rd["date"], "date")
+            g = Float64[Dates.value(d0[i + 1] - d0[i]) for i in 1:(length(d0) - 1)]
+            _DROP_PARTIAL[] && g[end] < 0.5 * (sum(g) / length(g)) && (rd = SimLev.rows(rd, 1:(SimLev.nrow(rd) - 1)))
+        end
         nr = SimLev.nrow(rd)
         L = zeros(nr, length(assets))
         for (j, a) in enumerate(assets)
@@ -223,7 +231,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
     elseif x isa AbstractVector
         Araw = reshape(collect(x), :, 1)
     else
-        error("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
+        chk_stop("c.m_opt_returns")
     end
     if !(Araw isa AbstractMatrix{<:Real}) || eltype(Araw) <: Bool
         isnum = all(_isnum, Araw)                            # seit 1.6.4 ohne Wahrheitswerte (B-040, wie R)
@@ -236,7 +244,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
         Araw = Araw[:, [findfirst(==(a), cn) for a in assets]]
         cn = assets
     end
-    isnum || error("x muss Kursdaten mit Spalte 'date' oder eine numerische Renditematrix sein.")
+    isnum || chk_stop("c.m_opt_returns")
     A = Float64[v === missing ? NA : Float64(v) for v in Araw]
     A = reshape(A, size(Araw))
     _opt_check_finite(A, cn)
@@ -291,15 +299,14 @@ function _opt_check_alpha(alpha, fn)
             hint = " - gemeint ist der Tail-Anteil, nicht das Konfidenzniveau (alpha = 1 - Konfidenzniveau)"
         end
     end
-    error("$fn: alpha muss die Tail-Wahrscheinlichkeit als Anteil in (0, 0.5] sein, z. B. 0.05 = schlechteste " *
-          "5 %$hint.")
+    chk_stop("e.alpha_anteil", fn, hint)   # seit 1.6.5 aus der Tabelle (193, Paket E)
 end
 
 "`.opt_bounds`: Skalar, benannter oder positionsweiser Vektor → Wert je Anlage."
 function _opt_bounds(b, nm, default, what = "upper")
     names_, vals, isnum = _named_vec(b)
     if !isnum || isempty(vals) || any(_isna, vals) || b isa SimLev.RFmt.RFactor || b isa AbstractMatrix
-        error("$what: numerischer Wert bzw. Vektor ohne NA erwartet.")   # seit 1.6.4 ohne Wert
+        chk_stop("c.m_opt_bounds", what)   # seit 1.6.4 ohne Wert
     end
     v = Float64[Float64(x) for x in vals]
     N = length(nm)
@@ -329,7 +336,7 @@ function _opt_check_bounds(lower, upper, nm)
         _warn_bounds("upper: Obergrenze(n) > 1 (" * join(("$(nm[i]) = $s" for (i, s) in zip(big, fb)), ", ") *
                      "); Grenzen sind Anteile (0.26 = 26 %), Werte > 1 wirken wie 1. Prozentangabe? Dann durch 100 teilen.")
     end
-    any(<(0), lo) && error("lower: Untergrenzen müssen >= 0 sein (Long-only).")   # seit 1.6.4 ohne Wert
+    any(<(0), lo) && chk_stop("c.m_opt_check_bounds")   # seit 1.6.4 ohne Wert
     slo = _ldsum(lo)
     shi = _ldsum(hi)
     if slo > 1 + 1e-12 || shi < 1 - 1e-12 || any(lo .> hi)
@@ -341,6 +348,44 @@ end
 
 "`.opt_flat`: Anlagen ohne Schwankung."
 _opt_flat(S, nm) = String[nm[i] for i in eachindex(nm) if _sqrt(max(S[i, i], 0.0)) <= 1e-10]
+
+"`.opt_check_cov` (seit 1.6.5, CR2-X49-1): Kovarianz nicht darstellbar -> Meldung."
+function _opt_check_cov(S, nm)
+    all(isfinite, S) && return nothing
+    bad = String[nm[j] for j in eachindex(nm) if !all(isfinite, view(S, :, j))]
+    SimLev.chk_stop("c.cov_ueberlauf", "x", join(["'" * a * "'" for a in bad], ", "))
+end
+
+# Hinweis zu cov = "ledoit_wolf" (seit 1.6.5, CR2-M-2); in portfolio_rolling aus (R/Python: nur Gewichte je Fenster)
+const _LW_HINT = Ref(true)
+# angebrochene letzte Periode weglassen (seit 1.6.5, K13); in portfolio_rolling aus (R/Python: Fensterrenditen
+# .roll_returns ohne diese Regel)
+const _DROP_PARTIAL = Ref(true)
+function _opt_lw_hint(A, fn)
+    (size(A, 2) < 2 || size(A, 1) < 2) && return nothing
+    v = _diag(SimLev.RStats.cov(A))
+    if all(isfinite, v) && maximum(v) > 100 * minimum(v)
+        println(SimLev.RParallel.r_stderr(), SimLev.chk_msg("c.lw_hinweis", fn))
+    end
+    nothing
+end
+
+"`.front_best` (seit 1.6.5, CR2-X3-2): Punkt \"Max. Sharpe\" mit Gleichstandsregel (höchste Rendite)."
+function _front_best(f)
+    sh = _asvec(f["sharpe"])
+    ok = .!isnan.(sh)
+    any(ok) || return 0
+    mx = maximum(sh[ok])
+    cand = [i for i in eachindex(sh) if ok[i] && sh[i] >= mx - 1e-9 * abs(mx)]
+    er = _asvec(f["expected_return"])
+    cand[something(_which_max(er[cand]), 0)]
+end
+function _front_flat(f)
+    sh = filter(!isnan, _asvec(f["sharpe"]))
+    length(sh) <= 1 && return false
+    mx = maximum(sh)
+    all(>=(mx - 1e-9 * abs(mx)), sh)
+end
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Kovarianzschätzer
@@ -495,8 +540,8 @@ function _risk_parity(S, b)
     y ./ _ldsum(y)
 end
 
-function _hclust_order(Dm)
-    h = SimLev.RStats.hclust(SimLev.RStats.as_dist(Dm), "single")
+function _hclust_order(Dm; dist::Bool = false)
+    h = SimLev.RStats.hclust(dist ? SimLev.RStats.dist(Dm) : SimLev.RStats.as_dist(Dm), "single")
     Int[Int(v) for v in _getel(h, "order")]
 end
 
@@ -508,7 +553,8 @@ function _hrp(S)
     C = _cov2cor(S)
     Dm = (1 .- C) ./ 2
     Dm[Dm .< 0] .= 0.0
-    ordv = _hclust_order(sqrt.(Dm))
+    # seit 1.6.5 (CR2-X17-1): Baum auf dem euklidischen Abstand der Spalten von d (Lopez de Prado 2016, Stufe 1)
+    ordv = _hclust_order(sqrt.(Dm); dist = true)
     w = ones(N)
     clusters = [ordv]
     function cv(ix)
@@ -537,13 +583,16 @@ function _hrp(S)
 end
 
 "`.min_cvar`: minimaler CVaR (geglättet, FISTA)."
-function _min_cvar(R, alpha, lo, hi)
+function _min_cvar(R, alpha, lo, hi, coarse::Bool = true)
     R = _asmat(R)
     N = size(R, 2)
     sc = SimLev.r_sd(vec(R))
     w = _proj_capped_simplex(fill(1 / N, N), lo, hi)
     zeta = _quantile(.-_mat_vec(R, w), 1 - alpha)
-    SimLev.OptimizeCore.min_cvar_core(R, alpha, lo, hi, w, zeta, [sc * 0.05, sc * 0.005], 2000)
+    # seit 1.6.5 (K39, CR1-2): ohne grobe Vorstufe mit coarse = false; Warnung an der Schrittgrenze
+    x = SimLev.OptimizeCore.min_cvar_core(R, alpha, lo, hi, w, zeta, coarse ? [sc * 0.05, sc * 0.005] : [sc * 0.005], 2000)
+    x[N + 1] != 0 && _warn(SimLev.chk_msg("c.cvar_grenze", "min_cvar", 2000))
+    x[1:N]
 end
 
 "`.cdar_hist`: CDaR der kumulierten, nicht aufgezinsten Rendite."
@@ -570,9 +619,10 @@ end
 
 "`.opt_core`: ein Optimierungsschritt auf einer Renditematrix."
 function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy;
-                   scache = nothing)
+                   scache = nothing, cvar_coarse::Bool = true)
     N = size(A, 2)
     S = _opt_cov_m(A, cov_type) .* ppy
+    _opt_check_cov(S, nm)
     # seit 1.6.3: Kovarianz für _opt_summary auf derselben Matrix (B-jl-3; reine Funktion, eine Kopie)
     scache === nothing || (scache[] = (A, cov_type, ppy, copy(S)))
     m = mu === nothing ? _colmeans(A) .* ppy : mu ./ 100
@@ -592,6 +642,31 @@ function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_fr
         end
         sh = Float64[sharpe_of(w, mm) for w in ws]
         k = something(_which_max(sh), 0)
+        # seit 1.6.5 (K8, CR2-G-3 a): Raster am Rand je Faktor 10 verlängern (R best_sharpe)
+        if k == 1 || k == length(lg)
+            lg = Float64[v for v in lg]
+            md = maximum(_diag(S))
+            up = k == 1
+            while true
+                x = up ? lg[1] + SimLev.RLibm.log(10.0) : lg[end] - SimLev.RLibm.log(10.0)
+                ex = SimLev.RLibm.exp(x)
+                if !isfinite(md) || ex * md > 1e12 || ex * md < 1e-12
+                    _warn(SimLev.chk_msg("c.sharpe_rand", method))
+                    break
+                end
+                w0n = up ? ws[1] : ws[end]
+                wn = _qp_simplex(ex .* S, .-mm, lo, hi, w0n; tol = 1e-10)
+                sn = sharpe_of(wn, mm)
+                s0 = up ? sh[1] : sh[end]
+                if up
+                    pushfirst!(lg, x); pushfirst!(ws, wn); pushfirst!(sh, sn)
+                else
+                    push!(lg, x); push!(ws, wn); push!(sh, sn)
+                end
+                sn > s0 || break
+            end
+            k = something(_which_max(sh), 0)
+        end
         a = lg[min(length(lg), k + 1)]
         b = lg[max(1, k - 1)]
         w0 = ws[k]
@@ -622,8 +697,12 @@ function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_fr
         fill(1 / N, N)
     elseif method == "inverse_vol"
         default_bounds || _warn("inverse_vol: Grenzen werden ignoriert.")
-        v = 1 ./ sqrt.(_diag(S))
-        v ./ _ldsum(v)
+        if N == 1                                   # seit 1.6.5 eine Anlage: 1 (K38)
+            [1.0]
+        else
+            v = 1 ./ sqrt.(_diag(S))
+            v ./ _ldsum(v)
+        end
     elseif method == "min_variance"
         _qp_simplex(S, zeros(N), lo, hi)
     elseif method == "mean_variance"
@@ -641,15 +720,30 @@ function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_fr
             fill(1 / N, N)
         else
             v = _opt_bounds(budget, nm, 0.0, "budget")
-            (any(<(0), v) || _ldsum(v) <= 0) && error("budget: Risikobudgets müssen >= 0 sein, mit positiver Summe.")
+            (any(<(0), v) || _ldsum(v) <= 0) && chk_stop("c.m_fx_5")
             v ./ _ldsum(v)
         end
-        _risk_parity(S, bb)
+        # seit 1.6.5: eine Anlage 1 (K38); Budget 0 = Gewicht 0, Risikoparität über die übrigen (CR2-J-1)
+        if N == 1
+            [1.0]
+        elseif all(>(0), bb)
+            _risk_parity(S, bb)
+        else
+            pos = findall(>(0), bb)
+            wr = zeros(N)
+            if length(pos) == 1
+                wr[pos] .= 1.0
+            else
+                bp = bb[pos]
+                wr[pos] = _risk_parity(S[pos, pos], bp ./ _ldsum(bp))
+            end
+            wr
+        end
     elseif method == "hrp"
         default_bounds || _warn("hrp: Grenzen werden ignoriert.")
         _hrp(S)
     elseif method == "min_cvar"
-        _min_cvar(A, alpha, lo, hi)
+        _min_cvar(A, alpha, lo, hi, cvar_coarse)
     elseif method == "min_cdar"
         _min_cdar(A, alpha, lo, hi)
     else
@@ -667,7 +761,7 @@ end
     portfolio_optimize(x; assets = nothing, method = "min_variance", lower = 0, upper = 1,
                        cov = "sample", mu = nothing, risk_free = 0, risk_aversion = 4,
                        budget = nothing, alpha = 0.05, frequency = "week", resample = 0,
-                       block = nothing, seed = nothing)
+                       block = nothing, seed = nothing, cvar_coarse = true)
 
 Portfolio optimieren (Long-only, Summe 1, optionale Grenzen je Anlage).
 
@@ -685,7 +779,10 @@ Ergebnis sind Gewichte, Kennzahlen und Risikobeiträge.
   `"max_diversification"`, `"risk_parity"`, `"hrp"`, `"min_cvar"`, `"min_cdar"`, `"inverse_vol"` oder
   `"equal"`. `risk_parity`, `hrp`, `inverse_vol` und `equal` ignorieren `lower`/`upper` (mit Warnung, wenn
   andere als die Standardgrenzen angegeben sind). `risk_parity`, `hrp` und `inverse_vol` brechen bei Anlagen
-  ohne Schwankung (Volatilität 0, z. B. Geldmarkt mit festem Zins) mit Fehler ab.
+  ohne Schwankung (Volatilität 0, z. B. Geldmarkt mit festem Zins) mit Fehler ab; seit 1.6.5 erhält eine
+  einzige Anlage in allen Verfahren das Gewicht 1 (ohne Schwankung mit dem Hinweis "Portfolio ohne
+  Schwankung"). Bei `max_sharpe` und `max_diversification` wird der Suchbereich der Risikoaversion (0,05 bis
+  500) seit 1.6.5 verlängert, wenn das Optimum am Rand liegt (sehr ruhige Anlagen, sehr kleine Prämie).
 - `lower`, `upper`: Unter- und Obergrenzen der Gewichte als Anteil (0.6 = 60 %): Skalar für alle Anlagen,
   benannter Vektor (nicht genannte Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
   unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten; andere Längen sind ein
@@ -696,7 +793,16 @@ Ergebnis sind Gewichte, Kennzahlen und Risikobeiträge.
 - `cov`: Kovarianzschätzer: `"sample"` (Standard, Stichprobe), `"ledoit_wolf"` (Schrumpfung auf skalierte
   Einheitsmatrix, Ledoit & Wolf 2004), `"ewma"` (exponentiell gewichtet, Halbwertszeit ein Viertel der
   Stichprobe, 5 bis 52 Perioden), `"denoise"` (Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
-  `"gerber"` (Gerber-Statistik, Gerber et al. 2022).
+  `"gerber"` (Gerber-Statistik, Gerber et al. 2022). `"ledoit_wolf"` eignet sich für Anlagen ähnlicher
+  Schwankung: das Ziel (mittlere Varianz mal Einheitsmatrix) hebt die Varianz ruhiger Anlagen an (z. B.
+  Geldmarkt neben Aktien) und verschiebt die Gewichte; unterscheiden sich die Stichprobenvarianzen um mehr als
+  das 100-Fache, kommt ein Hinweis. `"gerber"` zählt gemeinsame Bewegungen über der Schwelle 0,5
+  Standardabweichungen; die Schwelle hängt an der gewöhnlichen Standardabweichung, ein einzelner großer
+  Ausreißer kann die Korrelation einer Anlage deshalb stark verzerren (robust nur gegen kleine Bewegungen).
+  `"denoise"` setzt alle Eigenwerte unter der Marchenko-Pastur-Grenze (1 + √(N/T))^2 gleich; die Grenze gilt
+  für viele Anlagen, bei wenigen Anlagen (z. B. 2 oder 3) löscht sie auch echte Korrelationen (bei N = 2 gilt
+  jede Korrelation mit |r| < 0,275 als Rauschen, wenn T = 120). `"ewma"`, `"denoise"` und `"gerber"` heben
+  Eigenwerte unter 1e-12 auf 1e-12 an (Renditen in sehr kleiner Einheit vorher skalieren).
 - `mu`: Optional erwartete Renditen in Prozent p. a. (5 = 5 %), endlich, ohne NA: benannter Vektor (unbekannte
   Namen sind ein Fehler), unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten)
   oder Skalar (für alle Anlagen gleich); nur für `max_sharpe` und `mean_variance` verwendet (fehlt dort eine
@@ -708,7 +814,9 @@ Ergebnis sind Gewichte, Kennzahlen und Risikobeiträge.
   Anteil p. a.
 - `budget`: Risikobudgets für `risk_parity`: Skalar (gleiche Budgets), benannter Vektor (nicht genannte
   Anlagen 0) oder unbenannter Vektor mit einem Wert je Anlage (Spaltenreihenfolge); Werte >= 0, wird auf Summe
-  1 normiert. `nothing` (Standard) = gleiche Risikobeiträge.
+  1 normiert. `nothing` (Standard) = gleiche Risikobeiträge. Anlagen mit Budget 0 erhalten seit 1.6.5 das
+  Gewicht 0, die Risikoparität gilt dann für die Anlagen mit Budget > 0 (bis 1.6.4 erfüllte das Ergebnis die
+  Budgets nicht).
 - `alpha`: Tail-Wahrscheinlichkeit als Anteil für CVaR und CDaR (Standard 0.05 = schlechteste 5 % der Perioden
   bzw. Drawdowns), im Bereich (0, 0.5]; nicht das Konfidenzniveau (0.95) und nicht in Prozent (5) - beides ist
   ein Fehler. Wirkt auf `min_cvar`, `min_cdar` und die ausgewiesenen Kennzahlen.
@@ -723,6 +831,9 @@ Ergebnis sind Gewichte, Kennzahlen und Risikobeiträge.
   reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein
   Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe liefern
   dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+- `cvar_coarse`: Nur `min_cvar`: `true` (Standard) glättet in zwei Stufen (0,05 und 0,005 Standardabweichungen
+  der Renditen), `false` nur in der feinen Stufe - je nach Daten bis rund 40 % schneller, die Gewichte ändern sich etwa in der 5.
+  Nachkommastelle (seit 1.6.5). Erreicht die letzte Stufe die Schrittgrenze (2000 Schritte), warnt die Funktion.
 
 # Rückgabe
 Objekt der Klasse `SimLevOptimization`, eine Liste mit
@@ -743,7 +854,11 @@ sowie `alpha`, `method`, `bounds` (Matrix der Grenzen), `resampled` (Gewichte je
 Renditen: Bei einem Tabelle (RFrame) mit Spalte `date` werden die Kurse wie in `dependence_analysis()`
 aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche bzw. Kalendermonat, bei `"day"` jede
 Zeile außer Tagen, an denen sich keine Anlage bewegt) und in einfache Renditen P_t / P_t-1 - 1 (Anteile)
-umgerechnet; die Perioden je Jahr werden aus den Daten ermittelt. Jede andere Eingabe wird als Matrix
+umgerechnet; die Perioden je Jahr werden aus den Daten ermittelt. Seit 1.6.5 entfällt eine angebrochene letzte
+Periode: ist der Abstand der letzten beiden Periodenenden kürzer als die Hälfte des mittleren Abstands (z. B. Daten
+bis Montag bei Wochenrenditen), zählt diese Periode weder in den Perioden je Jahr noch in Mittelwert und Kovarianz
+(Daten bis zum Periodenende unverändert; `portfolio_rolling()` rechnet seine Fenster wie bisher). Jede andere
+Eingabe wird als Matrix
 einfacher Periodenrenditen als Anteil (0.01 = 1 %) behandelt; Zeilen mit fehlenden Werten entfallen,
 unendliche Renditen (`Inf`) sind ein Fehler (mit Spalte und Zeile), die Perioden je Jahr sind dann fest 252
 (`"day"`), 52 (`"week"`) bzw. 12 (`"month"`). Erwartete Renditen und Kovarianz werden mit diesen Perioden je
@@ -754,7 +869,8 @@ Jahr annualisiert.
 - `max_sharpe` | maximale Sharpe Ratio (Suche entlang der Effizienzgrenze)
 - `max_diversification` | maximales Diversifikationsverhältnis w'σ / √(w'Σ w) (Choueifaty & Coignard 2008)
 - `risk_parity` | gleiche (oder vorgegebene, `budget`) Risikobeiträge (Spinu 2013)
-- `hrp` | Hierarchical Risk Parity (Lopez de Prado 2016)
+- `hrp` | Hierarchical Risk Parity (Lopez de Prado 2016; Clusterbaum seit 1.6.5 wie dort auf dem euklidischen
+  Abstand der Spalten von d = √((1 - ρ)/2))
 - `min_cvar` | minimaler historischer CVaR (Rockafellar & Uryasev 2000, geglättet)
 - `min_cdar` | minimaler Conditional Drawdown at Risk (Chekhlov, Uryasev & Zabarankin 2005)
 - `inverse_vol`, `equal` | einfache Heuristiken
@@ -779,13 +895,14 @@ println(portfolio_optimize(R; method = "risk_parity"))
 """
 function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, upper = 1, cov = nothing, mu = nothing,
                             risk_free = 0, risk_aversion = 4, budget = nothing, alpha = 0.05, frequency = nothing,
-                            resample = 0, block = nothing, seed = nothing)
+                            resample = 0, block = nothing, seed = nothing, cvar_coarse = true)
     _opt_no_list(x)
     x = SimLev.as_rframe(x)
     method = _match_arg(method, _METHODS)
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
     fn = "portfolio_optimize"                                  # seit 1.6.4 vor der Rechnung (K42 E4)
+    cvar_coarse = SimLev.chk_bool1(cvar_coarse, fn, "cvar_coarse")   # seit 1.6.5 (K39)
     assets = _opt_check_x(x, assets, fn)
     risk_free = SimLev.chk_num1(risk_free, fn, "risk_free")    # B-018
     risk_aversion = SimLev.chk_num1(risk_aversion, fn, "risk_aversion"; lo = 0)
@@ -796,19 +913,20 @@ function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, up
     nm = rr.cn
     N = length(nm)
     T = size(A, 1)
-    T < N + 5 && error("Zu wenige Beobachtungen für die Optimierung ($T Perioden für $N Anlagen, mindestens $(N + 5)).")
+    T < N + 5 && chk_stop("c.m_portfolio_optimize_2", T, N, N + 5)
     lo, hi = _opt_check_bounds(lower, upper, nm)
     _opt_check_alpha(alpha, "portfolio_optimize")
     muv = nothing
     if mu !== nothing
         muv = _opt_bounds(mu, nm, NA, "mu")
-        any(isinf, muv) && error("mu: endliche Werte in Prozent p. a. erwartet.")   # seit 1.6.4 ohne Wert
+        any(isinf, muv) && chk_stop("c.m_portfolio_optimize")   # seit 1.6.4 ohne Wert
     end
     ppy = rr.ppy
     alpha = Float64(alpha isa AbstractVector ? alpha[1] : alpha)
     scache = Ref{Any}(nothing)
     core(Rx; sc = nothing) = _opt_core(Rx, nm, method, lo, hi, cov, muv, Float64(risk_free), Float64(risk_aversion), budget,
-                                       alpha, ppy; scache = sc)
+                                       alpha, ppy; scache = sc, cvar_coarse = cvar_coarse)
+    cov == "ledoit_wolf" && _LW_HINT[] && _opt_lw_hint(A, fn)
     w = core(A; sc = scache)
     wb = nothing
     if resample > 0
@@ -962,8 +1080,10 @@ function portfolio_frontier(x; assets = nothing, n = 40, lower = 0, upper = 1, c
     A = rr.R
     nm = rr.cn
     lo, hi = _opt_check_bounds(lower, upper, nm)
+    cov == "ledoit_wolf" && _opt_lw_hint(A, fn)
     S = _opt_cov_m(A, cov) .* rr.ppy
     m = _colmeans(A) .* rr.ppy
+    _opt_check_cov(S, nm)
     gs = SimLev.RLibm.exp(_asvec(SimLev.RStats.seq_len_out(SimLev.RLibm.log(1e4), SimLev.RLibm.log(0.02), Int(n))))
     gs = gs isa Real ? [gs] : gs
     K = length(nm)
@@ -1002,13 +1122,14 @@ end
 function print_SimLevFrontier(io::IO, x)
     f = x["frontier"]
     sh = _asvec(f["sharpe"])
-    k = something(_which_max(sh), 0)
+    k = _front_best(f)
     j = something(_which_min(_asvec(f["volatility"])), 0)
     idx = _unique(k == 0 ? [j] : [j, k])
     labs = ["Minimum-Varianz", "Max. Sharpe"][1:length(idx)]
     cols = Pair{String,Any}[c => _asvec(SimLev.RFmt.r_round(_asvec(f[c])[idx], 4)) for c in names(f)]
     show = RFrame(cols...; rownames = labs)
     print(io, "Effizienzgrenze: $(SimLev.nrow(f)) Punkte\n", _print_df(show), "\n")
+    _front_flat(f) && print(io, SimLev.chk_msg("c.front_flach"), "\n")
     nothing
 end
 print_SimLevFrontier(x) = print_SimLevFrontier(stdout, x)
@@ -1043,8 +1164,10 @@ nutzt nur Daten bis einschließlich des Entscheidungstags (gehandelt wird in `ta
 # Rückgabe
 Objekt der Klasse `SimLevWeights` (Tabelle (RFrame) mit `date` und einer Gewichtsspalte je Anlage, Anteile mit
 Zeilensumme 1, eine Zeile je Zeile von `data`); vor dem ersten Entscheidungstermin gleich gewichtet. Attribute
-`source` (`"rolling <method>"`), `decision_rows` (Zeilennummern der Entscheidungstermine) und `failed_dates`
-(Date-Vektor der Termine mit fehlgeschlagener Optimierung, dort Gleichgewichtung; leer, wenn keine).
+`source` (`"rolling <method>"`), `decision_rows` (Zeilennummern der Entscheidungstermine), `failed_dates`
+(Date-Vektor der Termine mit fehlgeschlagener Optimierung, dort Gleichgewichtung; leer, wenn keine) und seit
+1.6.5 `turnover` (Umschlag je Entscheidungstermin, Summe der Beträge der Änderungen der Zielgewichte gegenüber
+dem vorigen Termin, am ersten Termin gegenüber der Gleichgewichtung; der einseitige Umschlag ist die Hälfte).
 
 # Details
 Entscheidungstermine sind die letzten Zeilen jedes Monats, Quartals bzw. Jahres, deren Datum mindestens
@@ -1082,7 +1205,7 @@ function portfolio_rolling(data, assets; method = "min_variance", window = 3, ev
     SimLev.chk_dots([String(k) for (k, _) in kwargs], allowed, fn; taken = ["x", "assets", "method", "frequency"])
     window = SimLev.chk_jahre(window, fn, "window")             # B-098, Entscheidung 70 (ganze Jahre 1 bis 100)
     assets = SimLev.Dependence._e4_names(assets, fn, "assets")
-    _has_date(data) || error("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
+    _has_date(data) || chk_stop("c.m_portfolio_rolling_2")
     miss = _setdiff(assets, names(data))
     isempty(miss) || error("Spalten fehlen: " * join(miss, ", "))
     SimLev.chk_col_nofactor(data, "date", fn)
@@ -1101,10 +1224,12 @@ function portfolio_rolling(data, assets; method = "min_variance", window = 3, ev
     dv = Float64[Dates.value(v) for v in d]
     first_ok = dv[1] + wd
     rows = rows[dv[rows] .>= first_ok]
-    isempty(rows) && error("Historie kürzer als das Fenster.")
+    isempty(rows) && chk_stop("c.m_portfolio_rolling_3")
     msg = fill("", length(rows))
     M = Matrix{Float64}(undef, length(rows), N)
     sub_cols = vcat("date", assets)
+    _LW_HINT[] = false; _DROP_PARTIAL[] = false
+    try
     for (k, i) in enumerate(rows)
         di = dv[i]
         sel = (dv .> di - wd) .& (dv .<= di)
@@ -1125,6 +1250,9 @@ function portfolio_rolling(data, assets; method = "min_variance", window = 3, ev
         end
         M[k, :] = w
     end
+    finally
+        _LW_HINT[] = true; _DROP_PARTIAL[] = true
+    end
     failed = findall(!=(""), msg)
     if !isempty(failed)
         f0 = failed[1]
@@ -1136,6 +1264,9 @@ function portfolio_rolling(data, assets; method = "min_variance", window = 3, ev
     out = SimLev.Tactical._as_weights_m(d, H, assets, "rolling " * method)
     SimLev.attrs(out)["decision_rows"] = rows
     SimLev.attrs(out)["failed_dates"] = d[rows[failed]]
+    # seit 1.6.5 (E-T3-4): Umschlag je Termin (Summe |w_neu - w_vorher|, vor dem ersten Termin gleich gewichtet)
+    P = vcat(fill(1 / N, 1, N), M[1:end-1, :])
+    SimLev.attrs(out)["turnover"] = Vector{Float64}(_rowsums(abs.(M .- P)))
     out
 end
 
@@ -1194,7 +1325,7 @@ function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.0
     # seit 1.6.4 auch ohne Inf, Faktor und Matrix
     if !isnum || wn === nothing || any(==(""), wn) || any(_isna, vals) || !all(v -> isfinite(Float64(v)), vals) ||
        weights isa SimLev.RFmt.RFactor
-        error("weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).")
+        chk_stop("c.m_portfolio_risk_contribut")
     end
     length(unique(wn)) < length(wn) && SimLev.chk_stop("e2.doppelt", fn, "weights")   # B-052
     "date" in wn && SimLev.chk_stop("e4.date", fn, "weights")
@@ -1356,7 +1487,7 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
     n_groups = D._e4_count(n_groups, fn, "n_groups"; lo = 2); test_groups = D._e4_count(test_groups, fn, "test_groups")
     purge = D._e4_count(purge, fn, "purge"; lo = 0); embargo = D._e4_count(embargo, fn, "embargo"; lo = 0)
     ng = Int(n_groups); tg = Int(test_groups); purge = Int(purge); embargo = Int(embargo)
-    tg >= ng && error("portfolio_cpcv: test_groups muss kleiner als n_groups sein, sonst bleibt keine Trainingsgruppe.")
+    tg >= ng && chk_stop("c.m_portfolio_cpcv")
     if methods isa AbstractString || (methods isa Union{AbstractVector,Tuple} && all(m -> m isa AbstractString, methods))
         methods = D._e4_names(methods, fn, "methods"; no_date = false)   # B-052
     end
@@ -1371,7 +1502,7 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
     else
         p = _as_pairs(methods)
         (p === nothing || isempty(p) || any(q -> q.first == "", p)) &&
-            error("portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
+            chk_stop("c.m_portfolio_cpcv_2")
         p
     end
     allowed_args = [a for a in _PO_FORMALS if !(a in ("x", "assets", "frequency"))]
@@ -1379,7 +1510,7 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
     for (nm, sp) in specs
         sp_p = (sp isa AbstractVector && isempty(sp)) || (sp isa NamedTuple && isempty(sp)) ? Pair{String,Any}[] : _as_pairs(sp)
         (sp_p === nothing || any(q -> q.first == "", sp_p)) &&
-            error("portfolio_cpcv: Eintrag '$nm' von methods muss eine benannte Argumentliste sein.")
+            chk_stop("c.m_portfolio_cpcv_3", nm)
         mi = findfirst(q -> q.first == "method", sp_p)
         mi !== nothing && sp_p[mi].second !== nothing && !(SimLev.chk_scalar(sp_p[mi].second) isa AbstractString) &&
             SimLev.chk_stop("text", fn, "methods\$$nm\$method")   # seit 1.6.4
@@ -1387,7 +1518,7 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
             error("portfolio_cpcv: unbekanntes Verfahren '$(sp_p[mi].second)'; erlaubt: $(join(_METHODS, ", ")).")
         end
         bad = _unique([q.first for q in sp_p if !(q.first in allowed_args)])
-        isempty(bad) || error("portfolio_cpcv: unbekannte Argumente für portfolio_optimize() in '$nm': $(_q(bad)).")
+        isempty(bad) || chk_stop("c.m_portfolio_cpcv_4", nm, _q(bad))
         push!(spec_pairs, sp_p)
     end
     grp = SimLev.RStats.cut(collect(1.0:Float64(Tn)), Float64(ng); labels = false)
@@ -1442,7 +1573,7 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
     end
     fl = isempty(f_method) ? nothing : RFrame("method" => f_method, "split" => f_split, "message" => f_msg)
     if isempty(r_method)
-        error("portfolio_cpcv: keine Optimierung erfolgreich (z. B. '$(f_method[1])' in Aufteilung $(f_split[1]): $(f_msg[1])).")
+        chk_stop("c.m_drop_rows", f_method[1], f_split[1], f_msg[1])
     end
     if fl !== nothing
         _warn("portfolio_cpcv: $(length(f_method)) von $(length(combos) * length(specs)) Optimierungen fehlgeschlagen " *
@@ -1603,7 +1734,7 @@ function plot_SimLevFrontier(x; file = nothing, width = 700, height = 480)
         println(io, "<circle cx=\"$(_alloc_c(px(av[k])))\" cy=\"$(_alloc_c(py(ar[k])))\" r=\"4\" fill=\"#B5562B\"/>")
         println(io, "<text x=\"$(_alloc_c(px(av[k])))\" y=\"$(_alloc_c(py(ar[k]) - 8))\" text-anchor=\"middle\" font-size=\"10\">$(_esc(nm))</text>")
     end
-    k = something(_which_max(_asvec(f["sharpe"])), 0)
+    k = _front_best(f)
     if k > 0
         cx = px(fv[k]); cy = py(fr[k])
         println(io, "<polygon points=\"$(_alloc_c(cx)),$(_alloc_c(cy-6)) $(_alloc_c(cx-5)),$(_alloc_c(cy+4)) $(_alloc_c(cx+5)),$(_alloc_c(cy+4))\" fill=\"#3E8E5A\"/>")

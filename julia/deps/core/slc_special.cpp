@@ -272,6 +272,53 @@ static double ibeta_cf(double a, double b, double x, double y, int *conv)
     }
 }
 
+/* ── kleiner Formparameter (seit 1.6.5, CR1-Y3-1, Entscheidung 116) ──
+ * Ist ein Parameter s klein, liegt I_z(s, o) für fast alle z nahe 1, und das kleine Ende 1 - I_z(s, o) entstand bis
+ * 1.6.4 als Komplement (Auslöschung: relativ eps/(1 - I), bei s ≈ 1e-16 bis 50 % daneben, bei s = 2e-8 noch 3e-4)
+ * oder über einen nicht konvergierenden Kettenbruch. Es wird nun direkt aus der Potenzreihe (DLMF 8.17.7) gebildet:
+ *   I_z(s, o) = z^s G (1 + S),  G = Gamma(s + o)/(Gamma(1 + s) Gamma(o)),  S = s sum_{n>=1} (1 - o)_n z^n/((s + n) n!),
+ *   1 - I_z(s, o) = -expm1(s ln z + ln G + log1p(S))
+ * (dieselbe Reihe wie apser in TOMS 708, Didonato & Morris 1992, dort nur in erster Ordnung in s). ln G, dessen Betrag
+ * von der Größe s ist, entsteht ohne Auslöschung aus lgamma_shift. Bereich: s <= 1e-3, s <= o, z <= 1/2, o z <= 1
+ * (die Reihe fällt dann geometrisch; sonst liefert der Kettenbruch das kleine Ende direkt). */
+#define IBETA_SMALL 1e-3
+
+/* ln Gamma(b + s) - ln Gamma(b) für 0 < s <= b, genau im Betrag: Verschiebung b -> b' = b + k >= 10 über
+ * log1p(s/(b + k)), dann die Stirling-Differenz (b' - 1/2) log1pmx(u) - u/2 + s ln(b' + s) + omega(b' + s) - omega(b'),
+ * u = s/b', die omega-Differenz gliedweise über expm1. Mit bs != NULL ohne das Glied s ln(b' + s); *bs = b' + s
+ * (der Aufrufer fasst s ln(b' + s) mit s ln z zu s ln(z (b' + s)) zusammen: keine Auslöschung bei großem b) */
+static double lgamma_shift(double b, double s, double *bs)
+{
+    double acc = 0.0, u, dom = 0.0, zk;
+    int k;
+    while (b < BIG) { acc -= log1p(s / b); b += 1.0; }
+    u = s / b;
+    zk = 1.0 / b;                                       /* b^-(2k+1) */
+    for (k = 0; k < SLC_STIRLING_N; k++) {
+        dom += slc_stirling[k] * zk * expm1(-(double) (2 * k + 1) * log1p(u));
+        zk /= b * b;
+    }
+    acc += (b - 0.5) * log1pmx(u) - 0.5 * u + dom;
+    if (bs != NULL) { *bs = b + s; return acc; }
+    return acc + s * log(b + s);
+}
+
+/* 1 - I_z(s, o) für 0 < s <= IBETA_SMALL, s <= o, 0 < z <= 1/2, o z <= 1; ln z wird hier aus z gebildet */
+static double ibeta_small(double s, double o, double z)
+{
+    double bs, Do = lgamma_shift(o, s, &bs), lnG1 = lgamma_shift(1.0, s, NULL), t = 1.0, S = 0.0;
+    long n;
+    for (n = 1; n <= 100000; n++) {
+        double dn = (double) n, term;
+        t *= (dn - o) * z / dn;
+        term = t / (dn + s);
+        S += term;
+        if (t == 0.0 || fabs(term) <= 1e-17 * fabs(S)) break;
+    }
+    /* s ln z + ln G = s ln(z (b' + s)) + (Do - lnG1) */
+    return -expm1(s * log(z * bs) + (Do - lnG1) + log1p(s * S));
+}
+
 /* w = I_x(a, b), w1 = 1 - w; *direct = 0: w direkt (genau), 1: w1 direkt; *conv wie oben.
  * lx = ln x, ly = ln y vom Aufrufer (genau). */
 static void ibeta_eval(const ibeta_par *P, double x, double y, double lx, double ly,
@@ -279,6 +326,21 @@ static void ibeta_eval(const ibeta_par *P, double x, double y, double lx, double
 {
     int swap;
     double a, b, xs, ys, lxs, lys, v;
+    /* kleiner Parameter: kleines Ende direkt aus der Reihe (seit 1.6.5, CR1-Y3-1; Bereich siehe ibeta_small) */
+    if (P->a <= IBETA_SMALL && P->a <= P->b && x <= 0.5 && P->b * x <= 1.0) {
+        *w1 = ibeta_small(P->a, P->b, x);
+        *w = 1.0 - *w1;
+        *direct = 1;
+        *conv = 1;
+        return;
+    }
+    if (P->b <= IBETA_SMALL && P->b < P->a && y <= 0.5 && P->a * y <= 1.0) {
+        *w = ibeta_small(P->b, P->a, y);
+        *w1 = 1.0 - *w;
+        *direct = 0;
+        *conv = 1;
+        return;
+    }
     if (P->kind == 1) {
         /* genau ein großer Parameter L, ein kleiner S: L vorn (umgeformte Teilnenner ohne
          * Auslöschung), außer die Variable v von S liegt klar unter der Schwelle ihres
@@ -353,7 +415,9 @@ int sl_pbeta(sl_ctx *cx, int64_t n, const double *x, double a, double b, int low
         lx = (xi <= 0.5) ? log(xi) : log1p(-yi);
         ly = (xi >= 0.5) ? log(yi) : log1p(-xi);
         ibeta_eval(&P, xi, yi, lx, ly, &w, &w1, &direct, &conv);
-        if (!conv) noconv = 1;
+        /* seit 1.6.5 (CR1-Y3-1): die Meldung nur, wenn das gelieferte Ende betroffen ist – nicht beim Komplement eines
+         * direkt berechneten Werts unter 2^-60 (dann ist es auf alle Stellen 1) */
+        if (!conv && ((direct == 0) == (lower != 0) || (direct ? w1 : w) >= 0x1p-60)) noconv = 1;
         out[i] = lower ? w : w1;
         SL_POLL(cx, i);
     }
@@ -447,7 +511,8 @@ static int pt1(const t_par *T, double ti, double df, int bad, int normal, int lo
     if (normal) { *out = sl_pnorm1(ti, lower); return 0; }
     if (isinf(ti)) { *out = ((ti < 0) == (lower != 0)) ? 0.0 : 1.0; return 0; }
     t_tails(T, ti, &sm, &lg, &h, &direct, &conv);
-    if (!conv) *noconv = 1;
+    /* seit 1.6.5 (CR1-Y3-1): Meldung nur, wenn das gelieferte Ende betroffen ist (wie in sl_pbeta) */
+    if (!conv && ((!direct && (ti < 0) == (lower != 0)) || h >= 0x1p-60)) *noconv = 1;
     *out = ((ti < 0) == (lower != 0)) ? sm : lg;
     return 1;
 }

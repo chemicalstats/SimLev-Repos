@@ -286,11 +286,12 @@ static PyObject *slc_tcop_fit(PyObject *self, PyObject *args)
     if (buf(v, &bv, 0, 8, "d", "v (float64)", 0) < 0) { rel(&bu); return NULL; }
     if (N(bu) != N(bv) || N(bu) < 1) { rel(&bu); rel(&bv); Py_RETURN_NONE; }
     ctx_init(&cx);
-    cx.interrupted = NULL;
+    cx.interrupted = py_interrupted_nogil;   /* seit 1.6.5 (CR1-Y6-1): Strg-C schon während der Schätzung */
     Py_BEGIN_ALLOW_THREADS
     st = sl_tcop_fit(&cx, N(bu), (const double *) bu.buf, (const double *) bv.buf, nt, best, &flag);
     Py_END_ALLOW_THREADS
     rel(&bu); rel(&bv);
+    if (st == SL_EINTR) { if (!PyErr_Occurred()) PyErr_SetNone(PyExc_KeyboardInterrupt); return NULL; }
     if (st != SL_OK || flag) Py_RETURN_NONE;
     return Py_BuildValue("(ddd)", best[0], best[1], best[2]);
 }
@@ -309,11 +310,12 @@ static PyObject *slc_tcop_nu(PyObject *self, PyObject *args)
     if (buf(Ri, &bR, 0, 8, "d", "Ri (float64)", 0) < 0) { rel(&bU); return NULL; }
     if (k < 1 || N(bR) != (int64_t) k * k || N(bU) % k != 0) { rel(&bU); rel(&bR); Py_RETURN_NONE; }
     ctx_init(&cx);
-    cx.interrupted = NULL;
+    cx.interrupted = py_interrupted_nogil;   /* seit 1.6.5 (CR1-Y6-1): Strg-C schon während der Schätzung */
     Py_BEGIN_ALLOW_THREADS
     st = sl_tcop_nu(&cx, N(bU) / k, k, (const double *) bU.buf, (const double *) bR.buf, ldR, lo, hi, tol, nt, &nu, &flag);
     Py_END_ALLOW_THREADS
     rel(&bU); rel(&bR);
+    if (st == SL_EINTR) { if (!PyErr_Occurred()) PyErr_SetNone(PyExc_KeyboardInterrupt); return NULL; }
     if (st != SL_OK || flag) Py_RETURN_NONE;
     return PyFloat_FromDouble(nu);
 }

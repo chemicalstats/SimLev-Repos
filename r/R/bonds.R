@@ -30,7 +30,35 @@
   chk_cols(data, "date", fn)
   chk_col_nofactor(data, "date", fn)   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
   if (!nrow(data)) chk_stop("zeilen_keine", fn, "data")   # seit 1.6.4 Fehler (Entscheidung 25; bis 1.6.3 R 100)
+  # seit 1.6.5 (CR2-V1-4, CR2-V3-4): Datum aufsteigend und ohne NA (bis 1.6.4 gingen negative Tageszahlen still in
+  # Kupon- und Zinsanteil ein)
+  d <- .to_date(data$date, "data$date")
+  if (anyNA(d) || is.unsorted(d)) chk_stop("e3.datum", fn)
   invisible(data)
+}
+
+#' Stufentabelle (data.frame(date, Wert) oder benannter Vektor mit Datumsnamen), die erst nach dem ersten Datentag
+#' beginnt: Warnung (seit 1.6.5, CR2-V3-4 Punkt 4, Entscheidung 189); davor gilt still ihr erster Wert. Ungueltige
+#' Tabellen meldet danach .resolve_series wie bisher.
+#' @keywords internal
+#' @noRd
+.step_start_warn <- function(x, data, fn, arg) {
+  first <- tryCatch({
+    if (is.data.frame(x) && ncol(x) >= 2L) {
+      dcol <- if ("date" %in% names(x)) "date" else names(x)[1]
+      fd <- .to_date(x[[dcol]], "x")
+      if (length(fd) && !anyNA(fd)) min(fd) else NULL
+    } else if (is.numeric(x) && !is.null(names(x)) && length(x) >= 1L) {
+      nd <- suppressWarnings(as.Date(names(x), optional = TRUE))
+      if (!anyNA(nd)) min(nd) else NULL
+    } else NULL
+  }, error = function(e) NULL)
+  if (is.null(first)) return(invisible(NULL))
+  d <- tryCatch(.to_date(data$date, "x"), error = function(e) NULL)
+  if (is.null(d) || all(is.na(d))) return(invisible(NULL))
+  d0 <- min(d, na.rm = TRUE)
+  if (first > d0) warning(chk_msg("a.stufe_spaet", fn, arg, format(first), format(d0)), call. = FALSE)
+  invisible(NULL)
 }
 .idx_rate <- function(x, data, fn, arg) {
   if (is.null(x)) chk_stop("fehlt", fn, arg)   # bis 1.6.3: NULL still als 0
@@ -55,8 +83,13 @@
 #' @noRd
 .bond_price <- function(y, coupon, maturity, m) {
   i <- y / m; n <- maturity * m
-  dis <- (1 + i)^(-n)   # seit 1.6.4 (A-057) einmal statt zweimal (gleicher Wert)
-  ann <- ifelse(abs(i) < 1e-10, n, (1 - dis) / i)
+  # seit 1.6.5 (CR2-X44-1) ueber L = log1p(i) wie .bond_dur: Abzinsung exp(-n L), Rentenbarwert -expm1(-n L) / i
+  # (bei i = 0: n), ohne Ausloeschung bei sehr kleinen Renditen (bis 1.6.4 (1 + i)^(-n) und (1 - dis) / i mit
+  # Schwelle 1e-10; relativer Fehler bis 3e-8 bei Renditen um 1e-7 %)
+  L <- log1p(i)
+  dis <- exp(-n * L)
+  ann <- -expm1(-n * L) / i
+  ann[!is.na(i) & i == 0] <- n
   coupon / m * ann + dis
 }
 
@@ -124,7 +157,14 @@
 #'   \code{NULL} fehlt.
 #' @return Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}) mit
 #'   Attribut \code{duration} (modifizierte Duration der Par-Anleihe zur
-#'   Rendite des jeweiligen Tages, in Jahren).
+#'   Rendite des jeweiligen Tages, in Jahren) und seit 1.6.5 \code{convexity}
+#'   (Konvexitaet der Par-Anleihe zur Rendite des jeweiligen Tages, in
+#'   Jahren^2, geschlossen wie beim Verfahren "duration"). Seit 1.6.5 muss
+#'   \code{date} aufsteigend und ohne NA sein; der Kurs wird ueber
+#'   \code{log1p} ohne Ausloeschung bei sehr kleinen Renditen gerechnet
+#'   (Aenderung in den letzten Stellen); eine Stufentabelle als \code{yield},
+#'   die erst nach dem ersten Datentag beginnt, ergibt eine Warnung (davor gilt
+#'   ihr erster Wert).
 #' @references Swinkels, L. (2019), Treasury Bond Return Data Starting in
 #'   1962, Data 4(3), 91.
 #' @examples
@@ -148,6 +188,7 @@ index_bond <- function(data, yield, maturity = 10, coupon_frequency = 1, method 
   chk_num1(coupon_frequency, fn, "coupon_frequency", lo = 0, lo_open = TRUE)
   chk_num1(start, fn, "start", lo = 0, lo_open = TRUE)
   method <- match.arg(method)
+  .step_start_warn(yield, data, fn, "yield")
   y <- .resolve_series(yield, data, "yield") / 100
   m <- coupon_frequency
   # seit 1.6.4 (K43 T1-R8): Renditen von -100 % je Kuponperiode oder weniger ergaben Inf/NaN bzw. Indexwerte mit
@@ -172,6 +213,7 @@ index_bond <- function(data, yield, maturity = 10, coupon_frequency = 1, method 
   r[1] <- 0
   out <- start * cumprod(1 + r)
   attr(out, "duration") <- .bond_dur(y / m, nm, maturity, m)   # seit 1.6.4 geschlossen (K43 T1-R3)
+  attr(out, "convexity") <- .bond_cvx(y / m, nm, m)              # seit 1.6.5 (Entscheidung 151): Konvexitaet je Tag
   out
 }
 
@@ -215,10 +257,18 @@ index_money_market <- function(data, rate, spread = 0, basis = 360, start = 100)
   chk_num1(spread, fn, "spread")
   chk_num1(basis, fn, "basis", lo = 0, lo_open = TRUE)
   chk_num1(start, fn, "start", lo = 0, lo_open = TRUE)
+  .step_start_warn(rate, data, fn, "rate")
   i <- .resolve_series(rate, data, "rate")
   d <- .to_date(data$date, "data$date"); n <- length(i)
+  # seit 1.6.5 (CR2-V3-4 Punkt 3, wie Entscheidung 186 M8): Zinsreihe ohne Luecken (als Spalte bis 1.6.4 still mit dem
+  # Vorwert gefuellt, als Vektor NA bis zum Ende), Tagesfaktor > 0 (bis 1.6.4 negativer Index)
+  raw <- if (is.character(rate) && length(rate) == 1L && rate %in% names(data)) data[[rate]] else i
+  k <- which(is.na(raw))
+  if (length(k)) chk_stop("a.mm_luecke", fn, "rate", format(d[k[1L]]))
   days <- c(0, diff(as.numeric(d)))
   r <- c(0, (i[-n] - spread) / 100 * days[-1] / basis)
+  k <- which(!(1 + r > 0))
+  if (length(k)) chk_stop("a.mm_faktor", fn, format(d[k[1L]]))
   start * cumprod(1 + r)
 }
 
@@ -278,6 +328,10 @@ index_currency_hedged <- function(data, local, domestic_rate, foreign_rate, cost
   chk_num1(start, fn, "start", lo = 0, lo_open = TRUE, null_ok = TRUE)
   x <- if (is.character(local)) as.numeric(data[[local]]) else as.numeric(local)
   x <- .fill_na(x, "locf")
+  # seit 1.6.5 (CR2-V1-4): Kurse endlich und > 0 (bis 1.6.4 still -Inf bzw. sinnlose Werte)
+  bad <- which(!is.na(x) & (is.infinite(x) | x <= 0))
+  if (length(bad)) chk_stop("a.werte_positiv", fn, "local", bad[1])
+  .step_start_warn(domestic_rate, data, fn, "domestic_rate"); .step_start_warn(foreign_rate, data, fn, "foreign_rate")
   id <- .resolve_series(domestic_rate, data, "domestic_rate"); ifr <- .resolve_series(foreign_rate, data, "foreign_rate")
   d <- .to_date(data$date, "data$date"); n <- length(x); days <- c(0, diff(as.numeric(d)))
   r <- c(0, x[-1] / x[-n] - 1 + (id[-n] - ifr[-n]) / 100 * days[-1] / basis - cost / 100 * days[-1] / 365)

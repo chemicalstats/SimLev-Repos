@@ -110,7 +110,7 @@ function _to_frame(data)
     nms, vals, fa = _raw_columns(data)
     for (i, nm) in enumerate(nms)
         if nm in nms[1:i-1]
-            error("simulation: Spaltenname '$nm' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein.")
+            chk_stop("a.m_sim_check_inputs_5", nm)
         end
     end
     cols = Dict{String,AbstractVector}(); kinds = Dict{String,Symbol}()
@@ -119,7 +119,7 @@ function _to_frame(data)
         cols[nm] = a; kinds[nm] = k
     end
     lens = unique([length(a) for a in values(cols)])
-    length(lens) > 1 && error("simulation: alle Spalten von 'data' müssen gleich lang sein.")
+    length(lens) > 1 && chk_stop("a.m_to_frame")
     return _Frame(collect(String, nms), cols, kinds, fa)
 end
 

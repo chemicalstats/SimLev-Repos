@@ -31,10 +31,12 @@ Median-Regression).}
 
 \item{tol}{Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich
 kein Koeffizient um mehr als \code{tol * (1 + max|beta|)} aendert (in
-den ersten drei Stufen wird hoechstens 1e-7 verlangt). Standard 1e-10. Seit 1.6.4 eine Zahl > 0.}
+den ersten drei Stufen wird hoechstens 1e-7 verlangt). Standard 1e-10.
+Seit 1.6.4 eine Zahl > 0.}
 
 \item{maxit}{Hoechstzahl der Iterationen je MM-Stufe (ganze Zahl,
-Standard 2000). Seit 1.6.4 hoechstens 10^8.}
+Standard 2000).
+Seit 1.6.4 hoechstens 10^8.}
 }
 \value{
 Benannter numerischer Koeffizientenvektor in der Einheit von
@@ -49,7 +51,12 @@ Schaetzt die Koeffizienten des bedingten \eqn{\tau}-Quantils von \code{y}
 \eqn{\rho_\tau(r) = r(\tau - 1\{r < 0\})}. Geliefert wird die exakte
 Loesung dieses linearen Programms mit Optimalitaetsnachweis (Ausnahme:
 entartete Faelle, siehe unten), berechnet in zwei Schritten (Kern in
-C++):
+C++). Seit 1.6.5 werden die Regressoren vorher zentriert (mit Konstante)
+und auf Standardabweichung 1 skaliert, die Koeffizienten danach
+zurueckgerechnet; so haengt das Ergebnis nicht von Einheit oder Niveau
+der Regressoren ab (bis 1.6.4 bei Indexstaenden oder Jahreszahlen
+Steigungen bis 85 \% daneben, mit der Warnung "Optimalitaet nicht
+nachgewiesen"):
 \enumerate{
 \item MM-Algorithmus von Hunter & Lange (2000), ausgehend von der
 KQ-Loesung: iterativ gewichtete kleinste Quadrate mit

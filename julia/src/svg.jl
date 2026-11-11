@@ -67,7 +67,7 @@ Base.write(io::IO, d::SimLevPlot) = write(io, d.svg)
 
 "Prüft, dass `file` auf `.svg` endet (Grafiken entstehen nur als SVG); liefert den Pfad."
 function _check_svg_file(file, who::AbstractString)
-    file isa AbstractString || error("$who: file muss ein Dateiname (Zeichenkette) sein, nicht $(typeof(file)).")
+    file isa AbstractString || chk_stop("c.m_check_svg_file", who, typeof(file))
     f = String(file)
     ext = splitext(f)[2]
     lowercase(ext) == ".svg" ||
@@ -105,7 +105,7 @@ end
 "`data` einer Zeichenfunktion vereinheitlichen: `RList` mit `RFrame`-Einträgen (seit 1.6.4 ohne den Übergang `nothing`)."
 function _as_plotdata(d, who)
     (d isa AbstractDict || d isa AbstractVector{<:Pair} || d isa Tuple) ||
-        error("$who: die Grafikmethode lieferte keine Daten als RList (sondern $(typeof(d))).")
+        chk_stop("c.m_as_plotdata", who, typeof(d))
     out = RList()
     for (k, v) in (d isa AbstractDict ? pairs(d) : d)
         out[String(k)] = v isa RFrame ? v : as_rframe(v)
@@ -116,7 +116,7 @@ end
 "Ergebnis einer Zeichenfunktion → `SimLevPlot(svg, data, x, cls)` (seit 1.6.4 ohne den Übergang „nur String“)."
 _as_plot(d::SimLevPlot, who, x, cls) = SimLevPlot(d.svg, d.data, x, String(cls))
 _as_plot(t::Tuple{AbstractString,Any}, who, x, cls) = SimLevPlot(String(t[1]), _as_plotdata(t[2], who), x, String(cls))
-_as_plot(r, who, x, cls) = error("$who: die Grafikmethode lieferte kein SVG (sondern $(typeof(r))).")
+_as_plot(r, who, x, cls) = chk_stop("c.m_as_plot", who, typeof(r))
 
 """
     _plot_method(f, cls) -> Funktion `(x, args...; file = nothing, kw...)`
@@ -137,7 +137,7 @@ function _plot_method(f, cls::AbstractString, strict::Bool = false)
     known = _kwnames(f)
     takes_file = :file in known
     return function (x, args...; file = nothing, kw...)
-        isempty(args) || @warn "$who: $(length(args)) zusätzliche(s) Positionsargument(e) wird/werden ignoriert; Optionen bitte als Schlüsselwort angeben."
+        isempty(args) || @warn chk_msg("c.m_plot_method", who, length(args))
         strict && SimLev.chk_dots([k for k in keys(kw) if !(k in known)], String[], who)
         _warn_unknown_kw(who, [k for k in keys(kw) if !(k in known)])
         file === nothing || _check_svg_file(file, who)
@@ -278,6 +278,8 @@ function _col2rgba(v)
     v isa AbstractString || error("invalid color specification")
     if startswith(v, "#")
         length(v) in (7, 9) || error("invalid RGB specification")
+        # seit 1.6.5 (CR2-N-3) nur Hexziffern wie Python (parse nahm Vorzeichen und Leerzeichen an)
+        all(ch -> ch in "0123456789abcdefABCDEF", v[2:end]) || error("invalid hex digit in 'color' or 'lty'")
         vals = try
             [parse(Int, v[i:i+1]; base = 16) for i in 2:2:length(v)]
         catch
@@ -410,6 +412,18 @@ function _date_ticks(z0::Float64, z1::Float64)
             z > z1 && break
             ((m - 1) % step == 0 && z >= z0) && push!(ticks, (z, string(_MONATE_KURZ[m], " ", y)))
             m += 1; m > 12 && (m = 1; y += 1)
+        end
+    end
+    # seit 1.6.5 (CR2-X2-2): weniger als zwei Marken: Tagesmarken im Abstand 1, 2 oder 7 Tage ("5. Jan")
+    if length(ticks) < 2 && z1 > z0
+        span = z1 - z0
+        st = span <= 10 ? 1 : span <= 20 ? 2 : 7
+        ticks = Tuple{Float64,String}[]
+        z = Float64(ceil(z0))
+        while z <= z1
+            dz = from_days(Int(z))
+            push!(ticks, (z, string(Dates.day(dz), ". ", _MONATE_KURZ[Dates.month(dz)])))
+            z += st
         end
     end
     return ticks
@@ -653,9 +667,23 @@ function _grid_axes!(io, b::_GridBox, xlo, xhi, ylo, yhi; title = "", xlabel = "
     xt = if xticks !== nothing
         xticks
     elseif dates
-        y0 = Dates.year(from_days(Int(floor(xlo)))); y1 = Dates.year(from_days(Int(floor(xhi))))
-        st = max(1, cld(y1 - y0 + 1, 8))
-        [(Float64(days_from_civil(y, 1, 1)), string(y)) for y in y0:st:(y1+1) if xlo <= days_from_civil(y, 1, 1) <= xhi]
+        xt0 = if xhi - xlo < 548              # seit 1.6.5 (CR2-X9-3): unter rund 18 Monaten Monatsmarken "2020-03"
+            da = from_days(Int(floor(xlo))); de = from_days(Int(floor(xhi)))
+            y, m = Dates.year(da), Dates.month(da); ye, me = Dates.year(de), Dates.month(de)
+            cand = Tuple{Float64,String}[]
+            while (y, m) <= (ye, me)
+                z = days_from_civil(y, m, 1)
+                xlo <= z <= xhi && push!(cand, (Float64(z), string(lpad(y, 4, '0'), "-", lpad(m, 2, '0'))))
+                m += 1; m > 12 && (m = 1; y += 1)
+            end
+            cand[1:max(1, cld(length(cand), 8)):end]
+        else
+            y0 = Dates.year(from_days(Int(floor(xlo)))); y1 = Dates.year(from_days(Int(floor(xhi))))
+            st = max(1, cld(y1 - y0 + 1, 8))
+            [(Float64(days_from_civil(y, 1, 1)), string(y)) for y in y0:st:(y1+1) if xlo <= days_from_civil(y, 1, 1) <= xhi]
+        end
+        # seit 1.6.5 (CR2-X9-3): mindestens Anfang und Ende beschriften
+        (isempty(xt0) && xhi > xlo) ? [(Float64(xlo), _fmt_day(floor(xlo))), (Float64(xhi), _fmt_day(floor(xhi)))] : xt0
     else
         [(t, _grid_tick_lab(t)) for t in _grid_ticks(xlo, xhi)]
     end

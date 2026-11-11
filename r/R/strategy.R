@@ -29,12 +29,13 @@ create_strategy <- function(..., assets = NULL) {
   dots <- list(...)
   
   if (!is.null(assets) && length(dots) > 0) {
-    stop("create_strategy: Assets entweder \u00fcber ... oder \u00fcber assets angeben, nicht beides.")
+    stop(chk_msg("a.m_create_strategy"))
   }
   
   if (!is.null(assets)) {
-    if (!is.list(assets) || is.null(names(assets))) {
-      stop("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data).")   # seit 1.6.4 ohne Klasse
+    # seit 1.6.5 (CR2-G-5): eine leere Liste meldet wie Python und Julia "mindestens eine Asset-Konfiguration"
+    if (!is.list(assets) || (length(assets) && is.null(names(assets)))) {
+      stop(chk_msg("a.m_create_strategy_2"))   # seit 1.6.4 ohne Klasse
     }
     dots <- assets
   }
@@ -44,11 +45,10 @@ create_strategy <- function(..., assets = NULL) {
   }
   
   if (is.null(names(dots)) || any(is.na(names(dots)) | names(dots) == "")) {   # seit 1.6.4 auch NA (bis 1.6.3 Rohfehler)
-    stop("create_strategy: alle Assets m\u00fcssen benannt sein (Name = Kursspalte in data), z. B. create_strategy(ETF = asset_config(\"etf\")).")
+    stop(chk_msg("a.m_create_strategy_3"))
   }
   if (anyDuplicated(names(dots))) {
-    stop(sprintf("create_strategy: Asset-Name '%s' kommt mehrfach vor; jeder Name darf nur einmal vorkommen.",
-                 names(dots)[anyDuplicated(names(dots))]))
+    stop(chk_msg("a.m_create_strategy_4", names(dots)[anyDuplicated(names(dots))]))
   }
   
   # Einfache Listen in asset_config umwandeln
@@ -58,7 +58,7 @@ create_strategy <- function(..., assets = NULL) {
         .asset_list_fields(dots[[name]], name, "create_strategy")   # seit 1.6.4 (K43 T1-N1, Entscheidung 11)
         dots[[name]] <- do.call(asset_config, dots[[name]])
       } else {
-        stop(sprintf("create_strategy: Asset '%s' muss ein asset_config()-Objekt oder eine Liste sein.", name))
+        stop(chk_msg("a.m_create_strategy_5", name))
       }
     }
   }
@@ -107,12 +107,12 @@ create_strategy <- function(..., assets = NULL) {
 #' @noRd
 strategy_validate <- function(strategy, data = NULL) {
   if (!inherits(strategy, "strategy")) {
-    stop("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    stop(chk_msg("a.m_strategy_validate"))
   }
   
   for (i in seq_along(strategy)) {
     if (!inherits(strategy[[i]], "asset_config")) {
-      stop(sprintf("strategy_validate: Asset '%s' ist kein asset_config()-Objekt.", names(strategy)[i]))
+      stop(chk_msg("a.m_strategy_validate_2", names(strategy)[i]))
     }
   }
   
@@ -124,14 +124,12 @@ strategy_validate <- function(strategy, data = NULL) {
     wraps <- .strategy_wrappers(strategy)
     coll <- intersect(wraps, data_cols)
     if (length(coll))
-      stop(sprintf("strategy_validate: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); data darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet).",
-                   coll[1]))
+      stop(chk_msg("a.m_strategy_validate_3", coll[1]))
     asset_names <- .strategy_columns(strategy)
     
     missing_assets <- setdiff(asset_names, data_cols)
     if (length(missing_assets) > 0) {
-      stop(sprintf("strategy_validate: Kursspalte(n) %s fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: %s).",
-                   paste0("'", missing_assets, "'", collapse = ", "), paste(data_cols, collapse = ", ")))
+      stop(chk_msg("a.m_strategy_validate_4", paste0("'", missing_assets, "'", collapse = ", "), paste(data_cols, collapse = ", ")))
     }
     
     for (name in names(strategy)) {
@@ -142,12 +140,10 @@ strategy_validate <- function(strategy, data = NULL) {
       }
       if (asset$trading == "signal") {
         if (!asset$signal_buy %in% data_cols) {
-          stop(sprintf("strategy_validate: signal_buy-Spalte '%s' fehlt in data (Asset '%s').",
-                       asset$signal_buy, name))
+          stop(chk_msg("a.m_strategy_validate_5", asset$signal_buy, name))
         }
         if (!asset$signal_sell %in% data_cols) {
-          stop(sprintf("strategy_validate: signal_sell-Spalte '%s' fehlt in data (Asset '%s').",
-                       asset$signal_sell, name))
+          stop(chk_msg("a.m_strategy_validate_6", asset$signal_sell, name))
         }
       }
     }
@@ -168,15 +164,15 @@ strategy_validate <- function(strategy, data = NULL) {
 #' @noRd
 strategy_add_asset <- function(strategy, name, asset) {
   if (!inherits(strategy, "strategy")) {
-    stop("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    stop(chk_msg("a.m_strategy_add_asset"))
   }
   if (!inherits(asset, "asset_config")) {
-    stop("strategy_add_asset: asset muss ein asset_config()-Objekt sein.")
+    stop(chk_msg("a.m_strategy_add_asset_2"))
   }
   chk_name1(name, "strategy_add_asset", "name")   # seit 1.6.4 (bis 1.6.3: Zahl, NA, Vektor still oder Rohfehler)
   # seit 1.6.4 kein stilles Ueberschreiben (Entscheidung 5): Aendern geht ueber strategy_update_asset()
   if (name %in% names(strategy))
-    stop("strategy_add_asset: Ein Asset mit diesem Namen ist schon in der Strategie; zum \u00c4ndern strategy_update_asset() verwenden.")
+    stop(chk_msg("a.m_strategy_add_asset_3"))
 
   strategy[[name]] <- asset
   return(strategy)
@@ -198,12 +194,12 @@ strategy_add_asset <- function(strategy, name, asset) {
 #' @noRd
 strategy_update_asset <- function(strategy, name, ...) {
   if (!inherits(strategy, "strategy")) {
-    stop("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    stop(chk_msg("a.m_strategy_update_asset"))
   }
   chk_name1(name, "strategy_update_asset", "name")   # seit 1.6.4 (bis 1.6.3: Vektor Rohfehler, NA als 'NA')
   
   if (!name %in% names(strategy)) {
-    stop(sprintf("strategy_update_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
+    stop(chk_msg("a.m_strategy_update_asset_2", name, paste(names(strategy), collapse = ", ")))
   }
   
   updates <- list(...)
@@ -239,18 +235,18 @@ strategy_update_asset <- function(strategy, name, ...) {
 #' @noRd
 strategy_remove_asset <- function(strategy, name) {
   if (!inherits(strategy, "strategy")) {
-    stop("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()).")
+    stop(chk_msg("a.m_strategy_remove_asset"))
   }
   chk_name1(name, "strategy_remove_asset", "name")   # seit 1.6.4 (bis 1.6.3: Vektor Rohfehler, NA als 'NA')
   
   if (!name %in% names(strategy)) {
-    stop(sprintf("strategy_remove_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
+    stop(chk_msg("a.m_strategy_remove_asset_2", name, paste(names(strategy), collapse = ", ")))
   }
   
   strategy[[name]] <- NULL
   
   if (length(strategy) == 0) {
-    warning(sprintf("strategy_remove_asset: Nach dem Entfernen von '%s' enth\u00e4lt die Strategie keine Assets mehr.", name))
+    warning(chk_msg("a.m_strategy_remove_asset_3", name))
   }
   
   return(strategy)

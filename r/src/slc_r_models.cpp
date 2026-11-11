@@ -692,6 +692,33 @@ SEXP C_sl_rolling_vol(SEXP x, SEXP window)
     return out;
 }
 
+/* seit 1.6.5 (E-T2-6): rollierende Volatilität mit Fenster in Kalendertagen */
+SEXP C_sl_rolling_vol_days(SEXP x, SEXP day, SEXP days)
+{
+    sl_ctx cx;
+    int n = len_int(x), st;
+    SEXP out = PROTECT(Rf_allocVector(REALSXP, n));
+    ctx_init(&cx);
+    st = sl_rolling_vol_days(&cx, n, dvec(x, -1, "x"), dvec(day, n, "day"), d1(days, "days"), REAL(out));
+    finish(&cx, st, 1);
+    UNPROTECT(1);
+    return out;
+}
+
+/* seit 1.6.5 (CR2-M-1): stationäre Verteilung einer Übergangsmatrix (K x K, spaltenweise) wie im Kern */
+SEXP C_sl_msgarch_stat(SEXP P)
+{
+    int K;
+    SEXP out;
+    if (!Rf_isReal(P) || !Rf_isMatrix(P) || Rf_nrows(P) != Rf_ncols(P) || Rf_nrows(P) < 1)
+        Rf_errorcall(R_NilValue, "interner Fehler: msgarch_stat erwartet eine quadratische Zahlenmatrix.");
+    K = Rf_nrows(P);
+    out = PROTECT(Rf_allocVector(REALSXP, K));
+    sl_msgarch_stat(K, REAL(P), REAL(out));
+    UNPROTECT(1);
+    return out;
+}
+
 SEXP C_sl_assign_regimes(SEXP vol, SEXP thresh)
 {
     sl_ctx cx;

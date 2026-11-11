@@ -59,6 +59,12 @@ Modellreihe auf gleichem Niveau), \code{product} (Rohdaten) und
 \code{source} ("backcast", "product" oder "filled"). Attribute
 \code{"fit"} (Fit-Objekt oder \code{NULL}), \code{"params"} (verwendete
 Parameter) und \code{"splice_date"} (Verkettungsdatum oder \code{NA}).
+Seit 1.6.5: an Produkttagen ist \code{value} genau der Produktkurs (bei
+\code{rebase} mal Faktor); beginnt der Index erst nach dem
+Verkettungstag, gelten die echten Kurse ab der Verkettung (\code{model}
+dann ab dem ersten Tag mit Index und Produkt); enden die Produktkurse vor
+dem Datenende, warnt die Funktion (die Zeilen danach sind
+fortgeschrieben, \code{source = "filled"}).
 }
 \description{
 Rechnet ein Produkt mit den Parametern aus \code{\link[=backcast_fit]{backcast_fit()}} (oder fest

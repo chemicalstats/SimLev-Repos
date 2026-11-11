@@ -41,8 +41,9 @@ from ._util import _ext
 from ._util import _fmt_vec
 from ._util import _colmeans, _rank_avg
 from collections.abc import Mapping
-from ._pruefen import (chk_bool1, chk_dots, chk_fmt, chk_int1, chk_max, chk_nofactor, chk_num1,
+from ._pruefen import (chk_bool1, chk_dots, chk_fmt, chk_int1, chk_max, chk_msg, chk_nofactor, chk_num1,
                        chk_scalar, chk_stop)
+from ._signals_core import research_vec as _research_vec
 
 __all__ = ["overfit_pbo", "sharpe_probabilistic", "sharpe_deflated", "overfit_walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
@@ -221,6 +222,10 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0, fn="overfit_reality_ch
     keep = np.isfinite(R).sum(axis=0) > 0
     R = R[:, keep]
     cn = [c for c, k in zip(cn, keep) if k]
+    # seit 1.6.5 (CR2-G-7): Renditen unter -1 vor der Aggregation ablehnen
+    with np.errstate(invalid="ignore"):
+        if (R < -1).any():
+            chk_stop("b2.rendite_unter", fn)
     if dates is not None:
         dates = _to_date(dates, "dates")
         dd = np.asarray(_days(dates), dtype=np.float64)
@@ -252,6 +257,8 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0, fn="overfit_reality_ch
         chk_stop("e5.renditen_inf", fn)   # seit 1.6.4 (B-012)
     if R.shape[0] < 2:
         chk_stop("e5.perioden", fn)       # seit 1.6.4 Mindestlänge (B-016)
+    if dates is not None and _days(dates[-1:])[0] == _days(dates[:1])[0]:
+        chk_stop("b2.datum_spanne", fn)   # seit 1.6.5 (CR2-G-7): mindestens zwei verschiedene Tage
     if dates is not None and len(dates) > 1:
         span = float(_days(dates[-1:])[0] - _days(dates[:1])[0])
         ppy = (len(dates) - 1) / (span / 365.25)
@@ -301,16 +308,22 @@ def _of_metric(n, s1, s2, sdn, sl, metric, c1=None):
         return v() if callable(v) else v
     s1 = ev(s1)
     m = s1 / n
+
+    def flat_na(v):                       # seit 1.6.5 (CR2-D-4, K6, 187): ohne Schwankung (<= 1e-10) NA
+        v = np.asarray(v, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            s = np.sqrt(np.maximum(v, 0.0))
+            return np.where(np.isnan(v), v, np.where(s > 1e-10, m / np.where(s > 0, s, 1.0), _NA))
     if metric == "sharpe":
         c1 = s1 if c1 is None else ev(c1)
-        return m / np.sqrt(np.maximum((ev(s2) - c1 * c1 / n) / (n - 1), 1e-300))
+        return flat_na((ev(s2) - c1 * c1 / n) / (n - 1))
     if metric == "sortino":
-        return m / np.sqrt(np.maximum(ev(sdn) / n, 1e-300))
+        return flat_na(ev(sdn) / n)
     if metric == "geometric":
         return _libm.expm1(ev(sl) / n)
     if metric == "mean":
         return m
-    raise ValueError("metric: 'sharpe', 'sortino', 'geometric' oder 'mean'.")
+    chk_stop("b2b.m_flat_na")
 
 
 def _of_col_metric(R, metric):
@@ -337,7 +350,7 @@ def _of_drop_flat(rr, what):
     if not flat.size:
         return rr
     if flat.size == R.shape[1]:
-        raise ValueError("%s: alle Spalten ohne Schwankung (Standardabweichung <= 1e-10); Sharpe Ratio nicht definiert." % what)
+        chk_stop("b2b.m_of_drop_flat", what)
     warnings.warn("%s: %d Spalte(n) ohne Schwankung (Standardabweichung <= 1e-10 je Periode, z. B. Geldmarkt mit festem Zins; "
                   "Punkt(e) %s) ausgeschlossen - Sharpe Ratio dort nicht definiert."
                   % (what, flat.size, ", ".join(str(int(rr.cols[j])) for j in flat)), UserWarning, stacklevel=3)
@@ -369,13 +382,19 @@ class SimLevPBO(RList, _PrintFormat):
         out = ["Probability of Backtest Overfitting (PBO, CSCV)\n"]
         out.append(_sprintf("  %d Punkte, %d Beobachtungen (%s), S = %d Blöcke, %d Aufteilungen, Kennzahl %s\n",
                             x["n_points"], x["n_obs"], x["frequency"], x["S"], x["n_combos"], x["metric"]))
+        if x.get("n_combos_all") is not None:
+            pb = float(x["pbo"])
+            out.append(_sprintf("  Zufallsauswahl: %d von %d Aufteilungen (Standardfehler der PBO etwa %.3f)\n",
+                                x["n_combos"], x["n_combos_all"], math.sqrt(pb * (1 - pb) / x["n_combos"])))
         out.append(_sprintf("  PBO:                              %.1f %%\n", 100 * x["pbo"]))
-        out.append(_sprintf("  Median-Logit lambda:              %.2f\n", r_median(x["lambda"])))
+        lam = np.asarray(x["lambda"], float)
+        out.append(_sprintf("  Median-Logit lambda:              %.2f\n", r_median(lam[~np.isnan(lam)]) if (~np.isnan(lam)).any() else _NA))
         out.append(_sprintf("  Leistungsabfall (Steigung OOS~IS): %.2f\n", x["slope"]))
         out.append(_sprintf("  OOS-Verlustwahrscheinlichkeit:    %.1f %%\n", 100 * x["prob_loss"]))
         ob = np.asarray(x["oos_best"], float)
         om = np.asarray(x["oos_median"], float)
-        out.append(_sprintf("  Gewählter Punkt OOS vor Median:   %.1f %%\n", 100 * _mean_lgl(ob > om, np.isnan(ob) | np.isnan(om))))
+        okm = ~(np.isnan(ob) | np.isnan(om))
+        out.append(_sprintf("  Gewählter Punkt OOS vor Median:   %.1f %%\n", 100 * _mean_lgl(ob[okm] > om[okm])))
         N = int(x["n_points"])
         out.append(_sprintf("  Lesart: PBO nahe 0 = Auswahl trägt, um %.0f %% = Zufall%s, darüber = Auswahl schadet.\n",
                             100 * (N + N % 2) / (2 * N), " (ungerade Punktezahl: (N + 1) / (2N))" if N % 2 else ""))
@@ -395,7 +414,7 @@ def _mean_lgl(v, na=None):
 
 
 def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
-        frequency=("week", "day", "month"), dates=None, risk_free=0):
+        frequency=("week", "day", "month"), dates=None, risk_free=0, n_splits=None, seed=None):
     """Probability of Backtest Overfitting (CSCV).
 
     Teilt die Renditehistorie aller Punkte einer Parametersuche in ``S`` gleich lange Blöcke und bildet alle
@@ -443,6 +462,10 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
             Perioden - 1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (``"day"``), 52 (``"week"``) bzw. 12
             (``"month"``).
 
+        n_splits: Seit 1.6.5 (E-T2-2, Entscheidung 196): Anzahl zufällig gewählter Aufteilungen; ``None``
+            (Standard) = alle. Ziehen ohne Zurücklegen aus dem SimLev-Zufallsstrom; Näherung ohne Literaturquelle,
+            Standardfehler etwa sqrt(p (1 - p) / n_splits).
+        seed: Startwert der Zufallsauswahl (nur mit ``n_splits``).
     Returns:
         Objekt der Klasse ``SimLevPBO``, eine Liste mit ``pbo`` (Anteil der Aufteilungen mit λ ≤ 0), ``lambda``
         (Logit je Aufteilung), ``is_best`` (In-Sample-Kennzahl des gewählten Punkts je Aufteilung), ``oos_best``
@@ -479,6 +502,10 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
     if S < 2 or S % 2:
         chk_stop("ut2.pbo_S", fn)
     risk_free = chk_num1(risk_free, fn, "risk_free")
+    n_splits = chk_int1(n_splits, fn, "n_splits", lo=1, null_ok=True)   # seit 1.6.5 (E-T2-2, Entscheidung 196)
+    if seed is not None:
+        from ._lib import check_seed
+        check_seed(seed, fn)
     rr = _rr(x, frequency, dates, risk_free, fn)
     if metric == "sharpe":
         rr = _of_drop_flat(rr, "overfit_pbo")
@@ -493,23 +520,41 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
     R = R[Tn - bl * S:Tn]
     blk = np.repeat(np.arange(S), bl)
     Rc = R - _colmeans(R)[None, :]
+    # seit 1.6.5 (CR2-P-2): Totalverluste (<= -1) je Block gezählt, log1p ohne sie; bei "geometric" Zähler im 5. Block
+    tl = R <= -1
     B1 = _rowsum(R, blk, S)
     B2 = _rowsum(Rc * Rc, blk, S)
     Pm = np.minimum(R, 0.0)
     Bd = _rowsum(Pm * Pm, blk, S)
-    Bl = _rowsum(_log1p(R), blk, S)
-    Bc = _rowsum(Rc, blk, S)
+    Bl = _rowsum(_log1p(np.where(tl, 0.0, R)) if tl.any() else _log1p(R), blk, S)
+    Bc = _rowsum(tl.astype(np.float64), blk, S) if metric == "geometric" else _rowsum(Rc, blk, S)
     T1, T2, Td, Tl, Tc = (_colsums(B) for B in (B1, B2, Bd, Bl, Bc))
     combos = _combn(S, S // 2)                                                          # C x S/2, 1-basiert
+    C_all = combos.shape[0]
+    # seit 1.6.5 (E-T2-2, Entscheidung 196): Zufallsauswahl von n_splits Aufteilungen ohne Zurücklegen
+    if n_splits is not None and n_splits < C_all:
+        from ._lib import main_stream, sample
+        st = main_stream(seed, fn)
+        pick = np.sort(np.asarray(sample(C_all, int(n_splits), stream=st), dtype=np.int64)) - 1
+        combos = np.ascontiguousarray(combos[pick])
     C = combos.shape[0]
     half = bl * S / 2
     # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in Python)
     lam, isb, oosb, oosm = _dcore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
-    intercept, slope = _lm_coef(isb, oosb)
-    return SimLevPBO(pbo=_mean_lgl(lam <= 0, np.isnan(lam)), **{"lambda": lam}, is_best=isb, oos_best=oosb,
-                     oos_median=oosm, slope=slope, intercept=intercept,
-                     prob_loss=_mean_lgl(oosb < 0, np.isnan(oosb)), S=S, n_combos=C, n_points=N, n_obs=bl * S,
-                     metric=metric, frequency=frequency, ppy=rr.ppy)
+    ok = ~(np.isnan(isb) | np.isnan(oosb))
+    # seit 1.6.5 (CR2-P-3): ohne zwei gültige Paare keine Regression
+    intercept, slope = _lm_coef(isb, oosb) if ok.sum() >= 2 else (_NA, _NA)
+    # seit 1.6.5 (CR2-P-1): PBO und Verlustanteil über die Aufteilungen mit Kennzahl, Warnung mit deren Zahl
+    bad = np.isnan(lam)
+    if bad.any():
+        warnings.warn(chk_msg("b2.pbo_ohne", fn, int(bad.sum()), int(C)), UserWarning, stacklevel=2)
+    good = ~bad
+    return SimLevPBO(pbo=_mean_lgl(lam[good] <= 0) if good.any() else _NA, **{"lambda": lam}, is_best=isb,
+                     oos_best=oosb, oos_median=oosm, slope=slope, intercept=intercept,
+                     prob_loss=_mean_lgl(oosb[good] < 0) if good.any() else _NA, S=S, n_combos=C, n_points=N,
+                     n_obs=bl * S,
+                     metric=metric, frequency=frequency, ppy=rr.ppy,
+                     **({"n_combos_all": C_all} if C < C_all else {}))
 
 
 def _plot_pbo(x):
@@ -555,7 +600,7 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     """Probabilistic Sharpe Ratio.
 
     Wahrscheinlichkeit, dass die wahre Sharpe Ratio über ``benchmark`` liegt, unter Berücksichtigung von
-    Stichprobenlänge, Schiefe und Wölbung: PSR = Φ(frac(SR - SR^*)√(T-1) √(1 - γ_3 SR + (γ_4 - 1)/(4)SR^2)) Dabei
+    Stichprobenlänge, Schiefe und Wölbung: PSR = Φ(((SR - SR^*)√(T-1))/(√(1 - γ_3 SR + (γ_4 - 1)/(4)SR^2))) Dabei
     sind SR (Mittelwert / Standardabweichung) und SR^* Sharpe Ratios je Periode, T die Anzahl Renditen, γ_3 die
     Schiefe und γ_4 die Wölbung (nicht Exzess). Eingabe ist ein Renditevektor; für ein Ergebnis von
     ``simulation()`` z. B. ``v <- result_index(res)$value; r <- v[-1] / v[-length(v)] - 1``.
@@ -584,6 +629,8 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     fn = "sharpe_probabilistic"
     chk_nofactor(r, fn, "r")
     r = _ext("data_prep", "_e5_numvec")(r, fn, "r")
+    if isinstance(r, pd.DataFrame) or np.ndim(r) > 1:   # seit 1.6.5 (CR2-V2-4): Matrix wie in Julia abgelehnt
+        chk_stop("zahlen", fn, "r")
     benchmark = chk_num1(benchmark, fn, "benchmark")
     ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True)
     rf = np.asarray(r, dtype=np.float64).ravel()
@@ -631,7 +678,8 @@ class SimLevDSR(RList, _PrintFormat):
 
 
 def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 - R-Argumentname
-                    frequency=("week", "day", "month"), dates=None, risk_free=0, rho_method=("cor", "linear")):
+                    frequency=("week", "day", "month"), dates=None, risk_free=0, rho_method=("cor", "linear"),
+                    expected_max=("exact", "bailey")):
     """Deflated Sharpe Ratio.
 
     Korrigiert die Sharpe Ratio des besten Punkts einer Suche um die Zahl der Versuche: Die Nullhypothese ist
@@ -674,6 +722,10 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
             Python und Julia gleich). Mit nicht endlichen Renditen rechnet auch ``"linear"`` über die
             Korrelationsmatrix. Seit 1.6.4.
 
+        expected_max: Seit 1.6.5 (CR2-K-2): ``"exact"`` (Standard) = exaktes erwartetes Maximum von N
+            Standardnormalen (Gauß-Quadratur im Kern, für N = 1 genau 0); ``"bailey"`` = Näherung nach Bailey &
+            López de Prado (2014) wie bis 1.6.4. N_eff ist eine Heuristik ohne Literaturquelle.
+
     Returns:
         Objekt der Klasse ``SimLevDSR``, eine Liste mit ``id`` (geprüfter Punkt), ``sharpe`` (seine Sharpe Ratio
         p. a.), ``sr0`` (erwartetes Maximum ohne Können, p. a.), ``psr`` (Wahrscheinlichkeit SR > 0, Anteil),
@@ -694,6 +746,7 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
         print(simlev.sharpe_deflated(R, frequency="day"))
     """
     fn = "sharpe_deflated"
+    expected_max = _e5_choice(expected_max, ("exact", "bailey"), fn, "expected_max")   # seit 1.6.5 (CR2-K-2)
     frequency = _e5_choice(frequency, ("week", "day", "month"), fn, "frequency")
     rho_method = _e5_choice(rho_method, ("cor", "linear"), fn, "rho_method")   # seit 1.6.4 (B-075, Entscheidung 92)
     id = chk_int1(id, fn, "id", lo=1, null_ok=True)   # noqa: A001 - seit 1.6.4 (B-007)
@@ -727,8 +780,14 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
     Nt = n_trials if n_trials is not None else (n_eff if effective else N)
     v = r_var(sr) if N > 1 else 0.0
     g = 0.5772156649
+    # seit 1.6.5 (CR2-K-2, Entscheidung 189): exaktes erwartetes Maximum (Kern), Näherung nach Bailey & López de
+    # Prado (2014) mit expected_max = "bailey"
     if Nt > 1 and v > 0:
-        sr0 = math.sqrt(v) * ((1 - g) * _lib.qnorm(1 - 1 / Nt) + g * _lib.qnorm(1 - 1 / (Nt * _libm.exp(1.0))))
+        if expected_max == "exact":
+            e_max = float(_research_vec(1, [float(Nt)], [], 1)[0])
+        else:
+            e_max = (1 - g) * _lib.qnorm(1 - 1 / Nt) + g * _lib.qnorm(1 - 1 / (Nt * _libm.exp(1.0)))
+        sr0 = math.sqrt(v) * e_max
     else:
         sr0 = 0.0
     r = R[:, j]
@@ -736,7 +795,7 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
     return SimLevDSR(id=int(rr.cols[j]), sharpe=float(sr[j]) * sq, sr0=sr0 * sq,
                      psr=_of_psr(r, 0, rr.ppy), dsr=_of_psr(r, sr0 * sq, rr.ppy),
                      n_trials=Nt, n_points=N, n_eff=n_eff, rho=rho, var_sr=v * rr.ppy, n_obs=R.shape[0],
-                     frequency=frequency)
+                     frequency=frequency, expected_max=expected_max)
 
 
 def _of_rho_linear(R):
@@ -783,6 +842,9 @@ class SimLevWalkForward(RList, _PrintFormat):
                             100 * s["cagr_walk_forward"], x["hindsight_id"], 100 * s["cagr_hindsight"], 100 * s["cagr_average"]))
         out.append(_sprintf("Mittlerer OOS-Rang %.0f %% (50 %% = Zufall), Effizienz OOS/IS %.2f, %d Wechsel\n",
                             100 * s["mean_oos_rank"], s["efficiency"], s["switches"]))
+        if x.get("correlation") is not None:   # seit 1.6.5 (lit1 W1, Entscheidung 192)
+            out.append(_sprintf("Walk-Forward-Korrelation IS/OOS (%s) Mittel %.2f, Median %.2f\n", x["correlation"],
+                                s["mean_wfc"], s["median_wfc"]))
         return "".join(out)[:-1]
 
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
@@ -825,7 +887,7 @@ def _r_round(x):
 
 def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
                  metric=("sharpe", "sortino", "geometric", "mean"),
-                 select=("best", "plateau"), risk_free=0):
+                 select=("best", "plateau"), risk_free=0, correlation=("spearman", "kendall", "pearson")):
     """Walk-Forward-Auswahl.
 
     Wählt in rollierenden Trainingsfenstern den besten Punkt einer Parametersuche (oder das beste Plateau) und
@@ -857,6 +919,11 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
         risk_free: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als ``risk_free / 100 / ppy`` von
             jeder Tagesrendite abgezogen, ``ppy`` = (Anzahl Tage - 1) / (Zeitspanne in Tagen / 365.25). Wirkt auch
             auf ``series`` und die CAGR in ``summary`` (dann Ueberrenditen).
+
+        correlation: Seit 1.6.5 (lit1 W1): Walk-Forward-Korrelation je Fenster zwischen IS- und OOS-Kennzahl aller
+            Punkte: ``"spearman"`` (Standard), ``"kendall"`` oder ``"pearson"``; Spalten ``wfc``, ``oos_positive``,
+            ``is_pos_oos_neg``, in ``summary`` ``mean_wfc`` und ``median_wfc``. Kennzahlen ohne Schwankung sind NA
+            (Warnung); Gleichstände bis 1e-12 relativ zählen als Gleichstand.
 
     Returns:
         Objekt der Klasse ``SimLevWalkForward``, eine Liste mit
@@ -902,6 +969,7 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
     fn = "overfit_walk_forward"
     metric = _e5_choice(metric, ("sharpe", "sortino", "geometric", "mean"), fn, "metric")
     select = _e5_choice(select, ("best", "plateau"), fn, "select")
+    correlation = _e5_choice(correlation, ("spearman", "kendall", "pearson"), fn, "correlation")   # seit 1.6.5 (W1)
     if not _is_param_search(x) or x.get("returns") is None:
         chk_stop("ut2.ps_renditen", "overfit_walk_forward")
     # seit 1.6.4: Jahre, die gerundet mindestens einen Monat ergeben, höchstens 100 Jahre (B-006: step = 0 lief endlos)
@@ -934,6 +1002,19 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
     win = []
     k = 0
     n_res = len(x["results"])
+    n_flat = 0
+    n_val = 0
+    tl_pts = set()
+
+    # seit 1.6.5 (CR2-D-7, K16): Überrendite unter -1 bei "geometric" mit eigener Warnung statt "NaNs produced"
+    def cm(rows):
+        Rw = R[rows]
+        if metric == "geometric" and (Rw < -1).any():
+            tl_pts.update(int(c) for c in rr.cols[(Rw < -1).any(axis=0)])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                return _of_col_metric(Rw, metric)
+        return _of_col_metric(Rw, metric)
     while True:
         ts = add_m(t0, 12 * (train + k * step))
         if ts >= last:
@@ -944,23 +1025,38 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
         oos_rows = np.nonzero((d >= ts) & (d < te))[0]
         if is_rows.size < 20 or oos_rows.size < 5:
             break
-        m_is = _of_col_metric(R[is_rows], metric)
+        m_is = cm(is_rows)
         score = m_is
         if select == "plateau":
             full = np.full(n_res, _NA)
             full[rr.cols - 1] = m_is
             score = np.array([r_mean(full[np.asarray(nb[int(cid) - 1]) - 1], na_rm=True) for cid in rr.cols])
-        j = _which_max(score)
-        m_oos = _of_col_metric(R[oos_rows], metric)
+        # seit 1.6.5 (CR2-W2-1): Auswahl und Rang mit Toleranz
+        j = _of_which_max_tol(score)
+        if j is None:
+            chk_stop("b2.wf_keine_kennzahl", fn, str(d[is_rows[0]]))
+        m_oos = cm(oos_rows)
+        if metric in ("sharpe", "sortino"):
+            n_flat += int(np.isnan(m_is).sum() + np.isnan(m_oos).sum())
+            n_val += 2 * m_is.size
         Ro = R[oos_rows]
+        okp = ~(np.isnan(m_is) | np.isnan(m_oos))
+        oo = m_oos[~np.isnan(m_oos)]
         win.append({"train_start": d[is_rows[0]], "test_start": d[oos_rows[0]], "test_end": d[oos_rows[-1]],
                     "id": int(rr.cols[j]), "is_metric": float(m_is[j]), "oos_metric": float(m_oos[j]),
-                    "oos_rank": (_rank_avg(m_oos)[j] - 0.5) / m_oos.size,
+                    "oos_rank": _of_rank_tol(m_oos, j),
                     "oos_return": _geo_ret(Ro[:, j]),
-                    "oos_average": r_mean(np.array([_geo_ret(Ro[:, c]) for c in range(Ro.shape[1])]))})
+                    "oos_average": r_mean(np.array([_geo_ret(Ro[:, c]) for c in range(Ro.shape[1])])),
+                    "wfc": _of_wfc(m_is, m_oos, correlation),
+                    "oos_positive": _mean_lgl(oo > 0),
+                    "is_pos_oos_neg": _mean_lgl((m_is[okp] > 0) & (m_oos[okp] < 0))})
         k += 1
     if not win:
         chk_stop("rs.wf_kurz", fn)
+    if n_flat > 0:
+        warnings.warn(chk_msg("b2.wf_flach", fn, n_flat, n_val), UserWarning, stacklevel=2)
+    if tl_pts:
+        warnings.warn(chk_msg("b2.wf_totalverlust", fn, sorted(tl_pts)), UserWarning, stacklevel=2)
     params = list(x["params"])
     res = x["results"]
     ids = np.array([w["id"] for w in win], dtype=np.int64)
@@ -970,7 +1066,8 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
           "id": ids}
     for p in params:
         Wd[p] = res[p].to_numpy()[ids - 1]
-    for nm in ("is_metric", "oos_metric", "oos_rank", "oos_return", "oos_average"):
+    for nm in ("is_metric", "oos_metric", "oos_rank", "oos_return", "oos_average", "wfc", "oos_positive",
+               "is_pos_oos_neg"):
         Wd[nm] = np.array([w[nm] for w in win], dtype=np.float64)
     W = pd.DataFrame(Wd)
     nW = len(W)
@@ -994,12 +1091,60 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
     avg = _rowmeans(span)
     series = pd.DataFrame({"date": d[rows], "walk_forward": r_cumprod(1 + wf), "hindsight": r_cumprod(1 + span[:, hind]),
                            "average": r_cumprod(1 + avg)})
+    def mna(v):                            # mean(v, na.rm = TRUE)
+        v = np.asarray(v, dtype=np.float64)
+        return r_mean(v[~np.isnan(v)])
+    wfc = Wd["wfc"]
+    wv = wfc[~np.isnan(wfc)]
     smry = pd.Series({"cagr_walk_forward": ann(wf), "cagr_hindsight": ann(span[:, hind]), "cagr_average": ann(avg),
-                      "mean_oos_rank": r_mean(Wd["oos_rank"]),
-                      "efficiency": r_mean(Wd["oos_metric"]) / r_mean(Wd["is_metric"]),
-                      "switches": float(np.sum(ids[1:] != ids[:-1]))}, dtype=np.float64)
+                      "mean_oos_rank": mna(Wd["oos_rank"]),
+                      "efficiency": mna(Wd["oos_metric"]) / mna(Wd["is_metric"]),
+                      "switches": float(np.sum(ids[1:] != ids[:-1])),
+                      "mean_wfc": r_mean(wv) if wv.size else _NA,
+                      "median_wfc": r_median(wv) if wv.size else _NA}, dtype=np.float64)
     return SimLevWalkForward(windows=W, series=series, summary=smry, hindsight_id=int(rr.cols[hind]), metric=metric,
-                             select=select, train=train, test=test, anchored=anchored, params=params)
+                             select=select, train=train, test=test, anchored=anchored, params=params,
+                             correlation=correlation)
+
+
+def _of_near_eq(a, b):
+    """Vergleich mit Toleranz (seit 1.6.5, CR2-W2-1): dieselbe Funktion wie ``_near_eq`` in sensitivity.py (Paket B1)."""
+    from .sensitivity import _near_eq
+    return _near_eq(a, b)
+
+
+def _of_which_max_tol(v):
+    """Erster Punkt, dessen Wert dem Höchstwert bis auf 1e-12 relativ gleicht (NA/NaN übergangen); None ohne Wert."""
+    v = np.asarray(v, dtype=np.float64)
+    ok = np.flatnonzero(~np.isnan(v))
+    if not ok.size:
+        return None
+    mx = float(np.max(v[ok]))
+    return int(ok[np.flatnonzero(_of_near_eq(v[ok], mx))[0]])
+
+
+def _of_rank_tol(v, j):
+    """Rang des Punkts j unter den Werten ohne NA als Anteil (Rang - 0.5) / Anzahl, Gleichstand mit Toleranz."""
+    v = np.asarray(v, dtype=np.float64)
+    if np.isnan(v[j]):
+        return _NA
+    u = v[~np.isnan(v)]
+    e = _of_near_eq(u, float(v[j]))
+    return (float(np.sum(~e & (u < v[j]))) + (float(np.sum(e)) + 1) / 2 - 0.5) / u.size
+
+
+def _of_wfc(a, b, method):
+    """Walk-Forward-Korrelation der IS- und OOS-Kennzahlen (Tinsley 2026, Gl. 5); NA bei weniger als drei Paaren
+    oder ohne Streuung."""
+    from ._r.stats_cor import cor
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    ok = ~(np.isnan(a) | np.isnan(b))
+    a = a[ok]
+    b = b[ok]
+    if a.size < 3 or np.unique(a).size < 2 or np.unique(b).size < 2:
+        return _NA
+    return float(np.asarray(cor(a, b, method=method), dtype=np.float64).ravel()[0])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1093,6 +1238,11 @@ def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plate
         o = _order(v, decreasing=x.get("maximize") is True, na_last=None)
         ids = res["id"].to_numpy()[o[:int(top)]]
     ids = [int(i) for i in np.atleast_1d(ids)]
+    # seit 1.6.5 (CR2-F-4, K35): ein Name aus include, der für einen Suchpunkt vergeben ist, ist ein Fehler (bis
+    # 1.6.4 ersetzte er den Suchpunkt still)
+    dup = [k for k in ("p%d" % i for i in ids) if k in include]
+    if dup:
+        chk_stop("b2.pb_include", fn, dup[0])
     specs = {}
     for i in ids:
         sp = dict(_as_spec(x["builder"](_row_params(res, i - 1, x["params"]))))
@@ -1136,7 +1286,7 @@ def _sign(v):
 
 
 def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "month"), dates=None,
-                   risk_free=0, ppy=52):
+                   risk_free=0, ppy=52, distribution=("t", "normal")):
     """Sharpe-Ratio-Abschlag für Mehrfachtests (Harvey & Liu 2015).
 
     Wandelt die Sharpe Ratio jedes Punkts einer Suche (oder gegebene Sharpe Ratios) in einen t-Wert und p-Wert,
@@ -1161,6 +1311,9 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
         ppy: Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 = Wochen). Bei Suche oder Matrix wird es wie
             bei ``overfit_pbo()`` bestimmt (aus dem Datum geschätzt, sonst 252/52/12 je ``frequency``).
 
+        distribution: Seit 1.6.5 (Entscheidung 190): ``"t"`` (Standard, t-Verteilung mit T - 1 Freiheitsgraden,
+            Harvey & Liu 2015, Gl. 3) oder ``"normal"`` (wie bis 1.6.4). Unterlaufende p-Werte im Log-Maßstab.
+
     Returns:
         DataFrame je Punkt, absteigend nach ``sharpe`` sortiert, mit ``id`` (Punkt bzw. Spaltennummer; bei
         Vektoren die Position), ``sharpe`` (p. a.), ``t``, ``p`` und für jedes Verfahren ``bonferroni``, ``holm``
@@ -1184,6 +1337,7 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
     """
     fn = "sharpe_haircut"
     frequency = _e5_choice(frequency, ("week", "day", "month"), fn, "frequency")
+    distribution = _e5_choice(distribution, ("t", "normal"), fn, "distribution")   # seit 1.6.5 (Entscheidung 190)
     # seit 1.6.4: n_tests ganze Zahl von 1 bis 10^8 (Entscheidung 16; C-017), Sharpe Ratios endlich, n_obs ganze Zahl
     if n_tests is not None:
         n_tests = chk_int1(n_tests, fn, "n_tests", lo=1)
@@ -1220,21 +1374,35 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
     if n_tests is not None and n_tests < sr.size:
         chk_stop("ut2.n_tests", fn)
     M = n_tests if n_tests is not None else sr.size
+    # seit 1.6.5 (Entscheidung 190): Standard t-Verteilung mit T - 1 Freiheitsgraden in beiden Richtungen
+    if distribution == "t" and Tn < 2:
+        chk_stop("b2.haircut_t", fn)
+    nu = float(Tn - 1) if distribution == "t" else math.inf
     tstat = sr * math.sqrt(Tn)
-    p = 2 * np.asarray(_lib.pnorm(-np.abs(tstat)), dtype=np.float64)
-
-    def padj(method):
-        pp = np.concatenate([p, np.ones(int(max(0, M - p.size)))])
-        return _p_adjust(pp, method, max(M, p.size))[:p.size]
+    if distribution == "t":
+        p = 2 * np.asarray(_lib.pt(-np.abs(tstat), nu), dtype=np.float64)
+    else:
+        p = 2 * np.asarray(_lib.pnorm(-np.abs(tstat)), dtype=np.float64)
 
     def back(pa):
-        return _sign(sr) * np.asarray(_lib.qnorm(np.minimum(pa, 1) / 2, lower_tail=False), dtype=np.float64) / math.sqrt(Tn) * math.sqrt(ppy)   # oberes Ende
+        q = np.minimum(pa, 1) / 2
+        q = _lib.qt(q, nu, lower_tail=False) if distribution == "t" else _lib.qnorm(q, lower_tail=False)
+        return _sign(sr) * np.asarray(q, dtype=np.float64) / math.sqrt(Tn) * math.sqrt(ppy)   # oberes Ende
+    # seit 1.6.5 (CR2-I-2): wo p unterläuft (p < 1e-290), im Log-Maßstab über die Kerne tail_logp/tail_logp_inv
+    low = p < 1e-290
+    with np.errstate(divide="ignore"):
+        lp = np.asarray(_libm.log(p), dtype=np.float64)
+    if low.any():
+        lp[low] = _libm.log(2.0) + _research_vec(6, np.abs(tstat[low]), [nu], int(low.sum()))
     out = pd.DataFrame({"id": ids, "sharpe": sr * math.sqrt(ppy), "t": tstat, "p": p})
     if names is not None:
         out.index = names
     for nm, m in (("bonferroni", "bonferroni"), ("holm", "holm"), ("bhy", "BY")):
-        pa = padj(m)
+        pa = _of_p_adjust(p, m, M)
         sa = back(pa)
+        if low.any():
+            lpa = _of_p_adjust_log(lp, m, M)
+            sa[low] = _sign(sr[low]) * _research_vec(7, lpa[low] - _libm.log(2.0), [nu], int(low.sum())) / math.sqrt(Tn) * math.sqrt(ppy)
         out["p_" + nm] = pa
         out["sharpe_" + nm] = sa
         sh = out["sharpe"].to_numpy()
@@ -1246,7 +1414,53 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
         res.index = (np.asarray(o) + 1)
     res.attrs["n_tests"] = M
     res.attrs["n_obs"] = Tn
+    res.attrs["distribution"] = distribution
     return res
+
+
+def _of_p_adjust(p, method, M):
+    """``p.adjust(p, method, n = M)`` ohne die bis 1.6.4 aufgefüllten Tests (CR2-I-1); BY-Faktor q = sum(1 / (1:M))
+    aus dem Kern (wie R ``.of_p_adjust``, Bit für Bit wie ``stats::p.adjust`` über die aufgefüllten Werte)."""
+    p = np.asarray(p, dtype=np.float64)
+    lp = p.size
+    if M <= 1:
+        return p.copy()
+    if method == "bonferroni":
+        return np.minimum(1.0, M * p)
+    if method == "holm":
+        i = np.arange(1, lp + 1, dtype=np.float64)
+        o = np.asarray(_order(p), dtype=np.int64)
+        v = np.minimum(1.0, np.maximum.accumulate((M - i + 1) * p[o]))
+    else:
+        i = np.arange(lp, 0, -1, dtype=np.float64)
+        o = np.asarray(_order(p, decreasing=True), dtype=np.int64)
+        q = float(_research_vec(2, [float(M)], [], 1)[0])
+        v = np.minimum(1.0, np.minimum.accumulate(q * M / i * p[o]))
+    out = np.empty(lp)
+    out[o] = v
+    return out
+
+
+def _of_p_adjust_log(lp, method, M):
+    """Dasselbe im Log-Maßstab (für unterlaufende p, CR2-I-2): log der angepassten p-Werte, höchstens 0."""
+    lp = np.asarray(lp, dtype=np.float64)
+    n = lp.size
+    if M <= 1:
+        return lp.copy()
+    if method == "bonferroni":
+        return np.minimum(0.0, _libm.log(float(M)) + lp)
+    if method == "holm":
+        i = np.arange(1, n + 1, dtype=np.float64)
+        o = np.asarray(_order(lp), dtype=np.int64)
+        v = np.minimum(0.0, np.maximum.accumulate(np.asarray(_libm.log(M - i + 1), dtype=np.float64) + lp[o]))
+    else:
+        i = np.arange(n, 0, -1, dtype=np.float64)
+        o = np.asarray(_order(lp, decreasing=True), dtype=np.int64)
+        q = float(_research_vec(2, [float(M)], [], 1)[0])
+        v = np.minimum(0.0, np.minimum.accumulate(np.asarray(_libm.log(q * M / i), dtype=np.float64) + lp[o]))
+    out = np.empty(n)
+    out[o] = v
+    return out
 
 
 def _order(v, decreasing=False, na_last=True):

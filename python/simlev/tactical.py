@@ -32,7 +32,7 @@ from . import _ext
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
-from ._r.rnum import r_cumsum, r_mean_int, r_rowmeans, r_rowsums as _rowsums, r_sum
+from ._r.rnum import r_cumsum, r_mean_int, r_pow_vec, r_rowmeans, r_rowsums as _rowsums, r_sum
 from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str
 from ._util import _dates, _days
 from .data_prep import _civil_to_days, _find_interval_int as _find_interval, _to_date
@@ -267,7 +267,7 @@ def _as_weights_m(dates, M, cols, source=""):
 def _period_last(dates, every):
     """``.period_last``: 1-basierte Zeilen am Ende jeder Periode."""
     if every not in ("day", "week", "month", "quarter", "year"):
-        raise ValueError("every: 'day', 'week', 'month', 'quarter' oder 'year'.")
+        chk_stop("b2b.m_period_last")
     z = _days(_to_date(dates, "date")) if not (isinstance(dates, np.ndarray) and dates.dtype.kind == "f") else dates
     n = len(z)
     if every == "day":
@@ -545,6 +545,32 @@ def _eval_when(expr, data, env):
     return _rexpr.eval_r(expr, cols, env=env)
 
 
+def _when_ok(v):
+    """Ergebnis einer Bedingung: logisch oder Zahlen 0/1 (NA erlaubt), ohne Dimension (seit 1.6.5, CR2-E-12)."""
+    if isinstance(v, (bool, np.bool_)):
+        return True
+    if isinstance(v, pd.DataFrame) or (isinstance(v, np.ndarray) and v.ndim > 1):
+        return False
+    if isinstance(v, (int, float, np.integer, np.floating)):
+        v = [v]
+    try:
+        a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v)
+    except Exception:
+        return False
+    if a.ndim > 1 or a.size == 0 and a.dtype == object:
+        return False
+    if a.dtype == np.bool_:
+        return True
+    if a.dtype.kind in "iuf":
+        f = a.astype(np.float64)
+        return bool(np.all(np.isnan(f) | (f == 0) | (f == 1)))
+    if a.dtype == object:
+        return all(x is None or x is pd.NA or (isinstance(x, (bool, np.bool_))) or
+                   (isinstance(x, (int, float, np.integer, np.floating)) and (math.isnan(float(x)) or float(x) in (0.0, 1.0)))
+                   for x in a.ravel())
+    return False
+
+
 def _as_logical(v):
     if isinstance(v, (bool, np.bool_)) or (np.ndim(v) == 0 and not isinstance(v, str)):
         v = [v]
@@ -652,26 +678,35 @@ def tactical_rules(data, rules, default, *, env=None):
     dn, _ = _named(default)
     assets = _unique(names + (dn or []))
     cond = np.zeros((n, len(rules)), dtype=bool)
+    # seit 1.6.5 (CR2-E-12, K33): je Regel genau ein Ausdruck; Ergebnis eines Ausdrucks oder einer Funktion wie ein
+    # Vektor geprüft (logisch oder 0/1, NA erlaubt); Längenmeldung mit Regel und beiden Längen
     for j, r in enumerate(rules):
         w = when(r)
-        if isinstance(w, str):
-            v = _eval_when(w, data, env)
+        checked = False
+        if isinstance(w, str) or (not isinstance(w, Mapping) and not callable(w) and _is_chr(w)):
+            if isinstance(w, str):
+                txt = w
+            else:
+                a = np.asarray(w.to_numpy() if isinstance(w, (pd.Series, pd.Index)) else w, dtype=object).ravel()
+                txt = "\n".join(z if isinstance(z, str) else "NA" for z in a)
+            from ._r import rexpr as _rexpr
+            ex = _rexpr.parse_r(txt)
+            if len(ex) != 1:
+                chk_stop("b2.when_mehrere", fn, j + 1)
+            v = _eval_when(ex, data, env)
+            checked = True
         elif isinstance(w, Mapping) and w.get("buy") is not None:
             v = signal_state(w)
         elif callable(w):
             v = w(data)
-        elif _is_chr(w):
-            # R: eval(parse(text = w)) – jedes Element ein Ausdruck (NA als "NA"), Ergebnis der letzte (seit 1.6.3;
-            # bis 1.6.2 wurde ein Textvektor als logischer Vektor gelesen)
-            a = np.asarray(w.to_numpy() if isinstance(w, (pd.Series, pd.Index)) else w, dtype=object).ravel()
-            v = []
-            for z in a:
-                v = _eval_when(z if isinstance(z, str) else "NA", data, env)
+            checked = True
         else:
             v = w
+        if checked and not _when_ok(v):
+            chk_stop("e5.when", fn, j + 1)
         v = _as_logical(v)
         if len(v) != n:
-            raise ValueError("Bedingung hat nicht die Länge nrow(data).")
+            chk_stop("b2.when_laenge", fn, j + 1, len(v), n)
         cond[:, j] = v
     regime = np.zeros(n, dtype=np.int64)
     if len(rules):
@@ -698,7 +733,7 @@ def tactical_rules(data, rules, default, *, env=None):
 
 def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=None, breadth=None,
                       lookbacks=(1, 3, 6, 12), type=("average", "13612w"),  # noqa: A002
-                      every=("month", "week", "quarter"), weighting=("equal", "inverse_vol")):
+                      every=("month", "week", "quarter"), weighting=("equal", "inverse_vol"), vol_window=63):
     """Momentum-Rotation, Dual Momentum und Canary-Schutz.
 
     An jedem Entscheidungstermin (Periodenende) werden die Anlagen nach ihrem Momentum-Score sortiert und die
@@ -727,6 +762,8 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
             proportional zur Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
             Seit 1.6.4 liegen die Termine dann erst ab Zeile 63 (volles Fenster; bis 1.6.3 brach jeder frühere
             Termin ab, mit Wochen- und Monatskursen auch mit den Standardrückblicken).
+
+        vol_window: Seit 1.6.5: Fenster der Schwankung für ``weighting = "inverse_vol"`` (Standard 63).
 
     Returns:
         ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten je Anlage aus ``assets`` und ``safe``,
@@ -773,6 +810,7 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
         raise ValueError("top muss zwischen 1 und der Anzahl der Anlagen in assets (%d) liegen." % len(assets))
     if breadth is not None:
         breadth = chk_int1(breadth, fn, "breadth", lo=1)
+    vol_window = int(chk_int1(vol_window, fn, "vol_window", lo=2, hi=2147483647))   # seit 1.6.5 (Entscheidung 144)
     allc = _unique(assets + safe + canary)
     Sdf = momentum_score(data, allc, lookbacks=lookbacks, type=type)
     S = Sdf.to_numpy(dtype=np.float64)
@@ -787,9 +825,9 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
     if weighting == "inverse_vol":
         # Termine erst ab Zeile 63, wenn das Fenster der Schwankung voll ist (seit 1.6.4, Entscheidung 144; bis
         # 1.6.3 Abbruch "Zeilen ohne positive Gewichte" bei jedem früheren Termin)
-        rows = rows[rows >= 63]
+        rows = rows[rows >= vol_window]
     if not len(rows):
-        raise ValueError("Zu kurze Historie für den Rückblick.")
+        chk_stop("b2b.m_tactical_rotation_2")
     out_assets = _unique(assets + safe)
     oi = {a: j for j, a in enumerate(out_assets)}
     vol = None
@@ -801,7 +839,7 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
             lx = _libm.log(x)
             r = np.concatenate(([_NA], np.diff(lx)))
             r0 = np.where(np.isnan(r), 0.0, r)
-            rm = np.asarray(_roll_mean(r0 * r0, 63), dtype=np.float64)
+            rm = np.asarray(_roll_mean(r0 * r0, vol_window), dtype=np.float64)
             with np.errstate(invalid="ignore"):
                 vol[:, j] = np.sqrt(np.where(np.isnan(rm), rm, np.maximum(rm, 1e-12)))   # pmax: NA/NaN bleibt
     vi = {a: j for j, a in enumerate(assets)}
@@ -864,10 +902,10 @@ def _e5_risk_check(fn, data, weights, safe, window, ppy):
     _e5_data_dates(data, fn, "data$date")
     if not _is_weights(weights):
         if not _is_numeric_named(weights):
-            raise ValueError("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+            chk_stop("b2b.m_e5_risk_check")
         _e5_weights(weights, fn, "weights")
     safe = chk_name1(safe, fn, "safe")
-    window = chk_int1(window, fn, "window", lo=2)
+    window = chk_int1(window, fn, "window", lo=2, hi=2147483647)   # seit 1.6.5 mit Obergrenze (CR2-X2-1)
     ppy = chk_num1(ppy, fn, "ppy", lo=0, lo_open=True, null_ok=True)
     wn = [str(c) for c in weights.columns[1:]] if _is_weights(weights) else _named(weights)[0]
     nms = _df_names(data)
@@ -875,24 +913,25 @@ def _e5_risk_check(fn, data, weights, safe, window, ppy):
     return safe, window, ppy
 
 
-def _risk_vol(data, weights, safe, window, ppy):
-    """``.risk_vol``: Volatilität des Risikoportfolios."""
+def _risk_vol(data, weights, safe, window, ppy, measure=0, q=2.0, alpha=0.05, est=0, lam=0.94):
+    """``.risk_vol``: Risiko des Portfolios je Zeile mit den Gewichten der Zeile (seit 1.6.5: CR2-V1-1, CR2-R-2, lit1
+    S2/S3; Kern ``research_vec`` op 3). ``ppy = "rolling"``: gleitende Annualisierung."""
     d = _days(_to_date(_col(data, "date"), "data$date"))
     n = len(d)
     if not _is_weights(weights):
         if not _is_numeric_named(weights):
-            raise ValueError("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
+            chk_stop("b2b.m_e5_risk_check")
         nm, vals = _named(weights)
         weights = _as_weights_m(_dates(d), np.tile(vals, (n, 1)), nm, "static")
     if safe not in _df_names(data):
-        raise ValueError("Sichere Anlage '%s' fehlt in data." % safe)
+        chk_stop("b2b.m_risk_vol", safe)
     risky = _setdiff([str(c) for c in weights.columns[1:]], [safe])
     miss = _setdiff(risky, _df_names(data))
     if miss:
         raise ValueError("Kursspalte(n) aus weights fehlen in data: %s" % ", ".join(miss))
     wd = _days(np.asarray(weights["date"]))
     if len(weights) != n or not np.array_equal(wd, d, equal_nan=True):
-        raise ValueError("weights passt nicht zu data (andere Daten); Gewichte aus demselben Datensatz erzeugen.")
+        chk_stop("b2b.m_risk_vol_2")
     Wr = _wmat(weights, risky)
     R = np.empty((n, len(risky)))
     for j, a in enumerate(risky):
@@ -904,19 +943,17 @@ def _risk_vol(data, weights, safe, window, ppy):
     Wn = Wr / np.where(rs > 0, rs, 1.0)[:, None]
     pr = np.concatenate(([0.0], _rowsums(Wn[:-1, :] * R[1:, :]))) if n > 0 else np.zeros(0)
     move = np.abs(pr) > 0
-    if ppy is None:
+    rolling = isinstance(ppy, str) and ppy == "rolling"
+    if ppy is None or rolling:
         span = (d[n - 1] - d[0]) / 365.25
         ppy = int(move.sum()) / (span if span > 1e-9 else 1e-9)
-    vol = np.full(n, _NA)
-    idx = np.flatnonzero(move)
-    window = int(window)
-    if len(idx) > window:
-        from .signals import _roll_var
-        v = np.asarray(_roll_var(pr[idx], window), dtype=np.float64)
-        with np.errstate(invalid="ignore"):
-            vol[idx] = np.sqrt(np.where(np.isnan(v), v, np.maximum(v, 0.0)) * ppy)   # pmax: NA/NaN bleibt
-    return {"d": d, "n": n, "risky": risky, "Wr": Wr, "rs": rs, "move": move, "ppy": ppy,
-            "vol_move": vol, "vol": _fill_na(vol, "locf", keep_leading=True)}
+    from ._signals_core import research_vec
+    x = np.concatenate([R.ravel(order="F"), Wn.ravel(order="F"), np.asarray(d, dtype=np.float64)])
+    vol = research_vec(3, x, [n, len(risky), int(window), measure, q, alpha, est, lam, 0.0 if rolling else ppy], n)
+    vm = vol.copy()
+    vm[~move] = _NA
+    return {"d": d, "n": n, "risky": risky, "Wr": Wr, "rs": rs, "move": move, "ppy": ppy, "pr": pr,
+            "vol_move": vm, "vol": vol}
 
 
 def _risk_weights(rv, expo, safe, source):
@@ -931,7 +968,10 @@ def _g(x):
 
 
 def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max_exposure=1,
-                      every=("month", "week", "day", "quarter"), ppy=None):
+                      every=("month", "week", "day", "quarter"), ppy=None,
+                      risk=("sd", "downside", "es", "var", "lpm"), estimator=("window", "ewma"), alpha=0.05,
+                      lpm_order=1, lambda_=0.94, exponent=1, min_exposure=0, risk_floor=None,
+                      reference=("fixed", "median"), cushion=None, cushion_window=252, **kwargs):
     """Zielvolatilität: Risikoanteil ``min(max_exposure, (target / 100) / vol)``.
 
     Skaliert den Risikoteil einer Gewichtsreihe so, dass die geschätzte Volatilität des Risikoportfolios dem Ziel
@@ -957,6 +997,13 @@ def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max
         ppy: Tage mit Kursbewegung je Jahr für die Annualisierung. Standard ``None`` = aus den Daten ermittelt
             (Zahl der Tage mit Bewegung geteilt durch die Länge des Zeitraums in Jahren, z. B. rund 252 bei
             Börsentagen, 365 bei einem Index, der auch am Wochenende notiert).
+
+        risk, estimator, alpha, lpm_order, lambda_, exponent, min_exposure, risk_floor, reference, cushion,
+            cushion_window: Seit 1.6.5 (lit1 S1–S5, S7) wie in R: Risikomaß ``"sd"`` (Standard), ``"downside"``,
+            ``"es"`` (EWMA-gefiltert), ``"var"``, ``"lpm"``; Schätzer ``"window"``/``"ewma"``; Potenzregel; Böden;
+            Referenz ``"fixed"``/``"median"``; Drawdown-Polster. ``lambda`` als ``lambda_`` (oder ``**{"lambda": …}``).
+            ``ppy = "rolling"``: gleitende Annualisierung. Die Schätzung nutzt die Gewichte der jeweiligen Zeile
+            (CR2-V1-1), Teiler n - 1 (CR2-R-2).
 
     Returns:
         ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten der Risikoanlagen und von ``safe``, Anteile)
@@ -987,28 +1034,67 @@ def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max
         print(tv)
     """
     fn = "tactical_target_volatility"
+    # R-Argumentname lambda (in Python Schlüsselwort lambda_ oder über **{"lambda": ...})
+    if "lambda" in kwargs:
+        lambda_ = kwargs.pop("lambda")
+    if kwargs:
+        raise TypeError("tactical_target_volatility() got an unexpected keyword argument '%s'" % next(iter(kwargs)))
     every = _e5_choice(every, ("month", "week", "day", "quarter"), fn, "every")
-    safe, window, ppy = _e5_risk_check(fn, data, weights, safe, window, ppy)   # seit 1.6.4 (K42 E5)
+    # seit 1.6.5 (lit1 S1-S5, S7, Entscheidungen 175, 192)
+    risk = _e5_choice(risk, ("sd", "downside", "es", "var", "lpm"), fn, "risk")
+    estimator = _e5_choice(estimator, ("window", "ewma"), fn, "estimator")
+    reference = _e5_choice(reference, ("fixed", "median"), fn, "reference")
+    rolling = isinstance(ppy, str) and ppy == "rolling"
+    safe, window, ppy0 = _e5_risk_check(fn, data, weights, safe, window, None if rolling else ppy)   # seit 1.6.4
     target = chk_num1(target, fn, "target", lo=0, lo_open=True)
     max_exposure = chk_num1(max_exposure, fn, "max_exposure", lo=0)
     if max_exposure > 1:
-        raise ValueError("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über "
-                         "Hebelprodukte abbilden).")
-    if target < 1:
+        chk_stop("b2b.m_tactical_target_volatili")
+    alpha = chk_num1(alpha, fn, "alpha", lo=0, hi=0.5, lo_open=True)
+    lpm_order = chk_num1(lpm_order, fn, "lpm_order", lo=1, hi=4)
+    lambda_ = chk_num1(lambda_, fn, "lambda", lo=0, hi=1, lo_open=True, hi_open=True)
+    exponent = chk_num1(exponent, fn, "exponent", lo=0)
+    min_exposure = chk_num1(min_exposure, fn, "min_exposure", lo=0, hi=max_exposure)
+    risk_floor = chk_num1(risk_floor, fn, "risk_floor", lo=0, lo_open=True, null_ok=True)
+    cushion = chk_num1(cushion, fn, "cushion", lo=0, hi=100, lo_open=True, hi_open=True, null_ok=True)
+    cushion_window = chk_int1(cushion_window, fn, "cushion_window", lo=1)
+    chk_max(cushion_window, 2147483647, fn, "cushion_window")
+    if reference == "fixed" and target < 1:
         _warn("target = %s ist sehr klein; target ist in Prozent p. a. (10 = 10 %%), nicht als Anteil." % _g(target))
-    rv = _risk_vol(data, weights, safe, window, ppy)
+    meas = {"sd": 0, "downside": 2, "lpm": 2, "var": 3, "es": 4}[risk]
+    q = 2.0 if risk == "downside" else float(lpm_order)
+    rv = _risk_vol(data, weights, safe, window, "rolling" if rolling else ppy0, meas, q, float(alpha),
+                   1 if estimator == "ewma" else 0, float(lambda_))
     n = rv["n"]
     vol = rv["vol"]
+    from ._signals_core import research_vec
+    ref = np.full(n, target / 100) if reference == "fixed" else research_vec(4, vol, [63.0], n)
     rows = _period_last(rv["d"], every)
-    rows = rows[np.isfinite(vol[rows - 1])]
+    rows = rows[np.isfinite(vol[rows - 1]) & np.isfinite(ref[rows - 1])]
     if not len(rows):
-        raise ValueError("Zu kurze Historie für das Volatilitätsfenster.")
-    expo_r = np.minimum(max_exposure, target / 100 / np.maximum(vol[rows - 1], 1e-6))
+        chk_stop("b2b.m_tactical_target_volatili_2")
+    den = np.maximum(vol[rows - 1], 1e-6)
+    if risk_floor is not None:
+        den = np.maximum(den, risk_floor * ref[rows - 1])
+    kr = ref[rows - 1] / den
+    if exponent != 1:
+        kr = np.asarray(r_pow_vec(kr, float(exponent)), dtype=np.float64)
+    expo_r = np.minimum(max_exposure, kr)
+    if min_exposure > 0:
+        expo_r = np.maximum(min_exposure, expo_r)
+    cm = None
+    if cushion is not None:                    # Drawdown-Polster am Index des Risikoportfolios (lit1 S7)
+        cm = research_vec(5, rv["pr"], [float(cushion_window), cushion / 100], n)
+        expo_r = expo_r * cm[rows - 1]
     k = _find_interval(np.arange(1, n + 1), rows)
     expo = np.where(k > 0, expo_r[np.maximum(k, 1) - 1], 0.0).astype(np.float64)
     out = _risk_weights(rv, expo, safe, "target_volatility")
     out.attrs["exposure"] = expo
     out.attrs["volatility"] = vol
+    if reference == "median":
+        out.attrs["reference"] = ref
+    if cm is not None:
+        out.attrs["cushion"] = cm
     return out
 
 
@@ -1122,23 +1208,22 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
     min_history = chk_num1(min_history, fn, "min_history", lo=0)
     chk_max(min_history, 100, fn, "min_history")             # Entscheidung 46
     if max_exposure > 1:
-        raise ValueError("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über "
-                         "Hebelprodukte abbilden).")
+        chk_stop("b2b.m_tactical_target_volatili")
     if base < 0 or base > max_exposure:
-        raise ValueError("base muss zwischen 0 und max_exposure liegen.")
+        chk_stop("b2b.m_tactical_conditional_vol")
     if min_exposure < 0 or min_exposure > base:
-        raise ValueError("min_exposure muss zwischen 0 und base liegen.")
+        chk_stop("b2b.m_tactical_conditional_vol_2")
     if not (upper > 0 and upper < 1):
-        raise ValueError("upper muss zwischen 0 und 1 liegen.")
+        chk_stop("b2b.m_tactical_conditional_vol_3")
     if lower is not None and not (lower > 0 and lower < upper):
-        raise ValueError("lower muss zwischen 0 und upper liegen.")
+        chk_stop("b2b.m_tactical_conditional_vol_4")
     if scaling == "fixed":
         if high_exposure is None or (lower is not None and low_exposure is None):
-            raise ValueError("scaling = 'fixed' braucht high_exposure (und low_exposure, wenn lower gesetzt ist).")
+            chk_stop("b2b.m_tactical_conditional_vol_5")
         if high_exposure > base:
-            raise ValueError("high_exposure darf nicht über base liegen.")
+            chk_stop("b2b.m_tactical_conditional_vol_6")
         if lower is not None and (low_exposure < base or low_exposure > max_exposure):
-            raise ValueError("low_exposure muss zwischen base und max_exposure liegen.")
+            chk_stop("b2b.m_tactical_conditional_vol_7")
     if target is not None and target < 1:
         _warn("target = %s ist sehr klein; target ist in Prozent p. a. (10 = 10 %%), nicht als Anteil." % _g(target))
     if lower is not None and base >= max_exposure:
@@ -1190,7 +1275,7 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
     rows = _period_last(d, every)
     rows = rows[np.isfinite(vol[rows - 1])]
     if not len(rows):
-        raise ValueError("Zu kurze Historie für das Volatilitätsfenster.")
+        chk_stop("b2b.m_tactical_target_volatili_2")
     e_r = np.repeat(float(base), len(rows))
     s_r = state[rows - 1]
     if scaling == "inverse":
@@ -1289,7 +1374,7 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
     s = _days(_to_date(_dates([d[0]]) if start is None else start, "start"))[0]
     e = _days(_to_date(_dates([d[-1]]) if end is None else end, "end"))[0]
     if e < s:   # seit 1.6.4 ohne die Daten (Entscheidung 8)
-        raise ValueError("tactical_glidepath: end liegt vor start; für den umgekehrten Weg from und to tauschen.")
+        chk_stop("b2b.m_tactical_glidepath")
     pl = _period_last(d, every)
     rows = np.array(_unique([1] + [int(r) for r in pl]), dtype=np.int64)
     if e > s:
@@ -1336,7 +1421,7 @@ def tactical_blend(*args, shares=None, **kwargs):
     """
     ws = list(args) + list(kwargs.values())
     if not ws or not all(_is_weights(w) for w in ws):
-        raise ValueError("tactical_blend: ... muss aus SimLevWeights bestehen.")
+        chk_stop("b2b.m_tactical_blend")
     if shares is None:
         shares = np.repeat(1 / len(ws), len(ws))
     sv = list(np.atleast_1d(np.asarray(shares.to_numpy() if isinstance(shares, pd.Series) else shares, dtype=object)).ravel())
@@ -1561,7 +1646,7 @@ def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter
     tolerance_type = _e5_choice(tolerance_type, ("absolute", "relative"), fn, "tolerance_type")
     _e5_data_dates(data, fn, "data$date")                 # seit 1.6.4 (K42 E5)
     if not _is_weights(weights):
-        raise ValueError("weights muss ein SimLevWeights sein.")
+        chk_stop("b2b.m_tactical_simulation")
     lag = chk_int1(lag, fn, "lag", lo=0)                  # seit 1.6.4 ohne Abschneiden (Entscheidung 19)
     if asset_args is not None and not isinstance(asset_args, Mapping):
         chk_stop("liste", fn, "asset_args")

@@ -176,7 +176,7 @@ function _metric_pairs(m)
         kv = _kv(m)
         return String[p.first for p in kv], Float64[_f64(p.second) for p in kv]
     end
-    error("metrics() muss einen benannten numerischen Vektor liefern")
+    SL.chk_stop("b2b.m_metric_pairs")
 end
 
 "Datumswerte über `SimLev.DataPrep._to_date` → Vector{Date}."
@@ -264,6 +264,8 @@ function _rr(x, frequency, dates = nothing, risk_free = 0, fn = "overfit_reality
     R = R[:, keep]
     cols = findall(keep)
     cn = cn[keep]
+    # seit 1.6.5 (CR2-G-7): Renditen unter -1 vor der Aggregation ablehnen
+    any(v -> v < -1, R) && chk_stop("b2.rendite_unter", fn)
     dts = dates === nothing ? nothing : _dates(dates, "dates")
     if dts !== nothing
         dd = Float64[v === missing ? NaN : Float64(_days(v)) for v in dts]
@@ -292,6 +294,8 @@ function _rr(x, frequency, dates = nothing, risk_free = 0, fn = "overfit_reality
     dts === nothing || (dts = dts[ok])
     any(isinf, R) && chk_stop("e5.renditen_inf", fn)   # seit 1.6.4 (B-012)
     size(R, 1) < 2 && chk_stop("e5.perioden", fn)       # seit 1.6.4 Mindestlänge (B-016)
+    # seit 1.6.5 (CR2-G-7): mindestens zwei verschiedene Tage (bis 1.6.4 ppy = Inf)
+    dts !== nothing && _days(dts[end]) == _days(dts[1]) && chk_stop("b2.datum_spanne", fn)
     ppy = if dts !== nothing && length(dts) > 1
         (length(dts) - 1) / (Float64(_days(dts[end]) - _days(dts[1])) / 365.25)
     else
@@ -315,13 +319,19 @@ function _of_returns(x, frequency, dates = nothing, risk_free = 0)
 end
 
 "Kennzahl aus Summen-Statistiken (elementweise, auch Matrizen; `.of_metric`)."
+# seit 1.6.5 (CR2-D-4, Entscheidungen 185 K6, 187): Sharpe bzw. Sortino ohne Schwankung (<= 1e-10 je Periode) NA
+function _of_flat_na(m, v)
+    isnan(v) && return v
+    s = sqrt(v > 0 ? v : 0.0)
+    return s > 1e-10 ? m / s : NA
+end
 function _of_metric(n, s1, s2, sdn, sl, metric; c1 = s1)
     m = s1 ./ n
-    metric == "sharpe" && return m ./ sqrt.(_pmax.((s2 .- c1 .* c1 ./ n) ./ (n - 1), 1e-300))
-    metric == "sortino" && return m ./ sqrt.(_pmax.(sdn ./ n, 1e-300))
+    metric == "sharpe" && return _of_flat_na.(m, (s2 .- c1 .* c1 ./ n) ./ (n - 1))
+    metric == "sortino" && return _of_flat_na.(m, sdn ./ n)
     metric == "geometric" && return SL.RLibm.expm1.(sl ./ n)
     metric == "mean" && return m
-    error("metric: 'sharpe', 'sortino', 'geometric' oder 'mean'.")
+    SL.chk_stop("b2b.m_flat_na")
 end
 _of_metric(n, s1::Real, s2::Real, sdn::Real, sl::Real, metric; c1 = s1) =
     _of_metric(n, Float64[s1], Float64[s2], Float64[sdn], Float64[sl], metric; c1 = Float64[c1])[1]
@@ -341,7 +351,7 @@ function _of_col_metric(R::AbstractMatrix{Float64}, metric)
     elseif metric == "geometric"
         return _of_metric(n, s1, nothing, nothing, _colsums(_log1p_w(R)), metric)
     end
-    error("metric: 'sharpe', 'sortino', 'geometric' oder 'mean'.")
+    SL.chk_stop("b2b.m_flat_na")
 end
 function _of_col_metric(R::SL.NamedMat, metric)
     v = _of_col_metric(Float64[_f64(e) for e in R.data], metric)
@@ -356,8 +366,8 @@ function _of_drop_flat(rr::_RR, what)
     flat = findall(s -> !(s > 1e-10) && !isnan(s), sdv)    # which(!(sdv > 1e-10)): NaN (z. B. bei Inf) zählt nicht
     isempty(flat) && return rr
     length(flat) == size(rr.R, 2) &&
-        error("$what: alle Spalten ohne Schwankung (Standardabweichung <= 1e-10); Sharpe Ratio nicht definiert.")
-    @warn "$what: $(length(flat)) Spalte(n) ohne Schwankung (Standardabweichung <= 1e-10 je Periode, z. B. Geldmarkt mit festem Zins; Punkt(e) $(join(rr.cols[flat], ", "))) ausgeschlossen - Sharpe Ratio dort nicht definiert."
+        SL.chk_stop("b2b.m_of_drop_flat", what)
+    @warn SL.chk_msg("b2b.m_of_drop_flat_2", what, length(flat), join(rr.cols[flat], ", "))
     keep = setdiff(1:size(rr.R, 2), flat)
     rr.R = rr.R[:, keep]; rr.cn = rr.cn[keep]; rr.cols = rr.cols[keep]
     rr
@@ -481,7 +491,8 @@ R = 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 2000, 30)   # 30 Zufallsstrategien
 println(overfit_pbo(R; S = 10, frequency = "day")["pbo"])  # etwa 0.5
 ```
 """
-function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = nothing, risk_free = 0)
+function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = nothing, risk_free = 0, n_splits = nothing,
+                     seed = nothing)
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
     fn = "overfit_pbo"
@@ -492,6 +503,8 @@ function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = n
     S = Int(S)
     (S < 2 || isodd(S)) && chk_stop("ut2.pbo_S", fn)
     risk_free = chk_num1(risk_free, fn, "risk_free")
+    n_splits = chk_int1(n_splits, fn, "n_splits"; lo = 1, null_ok = true)   # seit 1.6.5 (E-T2-2, Entscheidung 196)
+    seed === nothing || SL.SLib.check_seed(seed, fn)
     rr = _rr(x, frequency, dates, risk_free, fn)
     metric == "sharpe" && (rr = _of_drop_flat(rr, "overfit_pbo"))
     R = rr.R
@@ -504,30 +517,55 @@ function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = n
     Rc = R .- _colmeans(R)'
     B1 = _rowsum(R, blk, S); B2 = _rowsum(Rc .* Rc, blk, S)
     Pm = _pmin.(R, 0.0)
-    Bd = _rowsum(Pm .* Pm, blk, S); Bl = _rowsum(_log1p_w(R), blk, S); Bc = _rowsum(Rc, blk, S)
+    # seit 1.6.5 (CR2-P-2): Totalverluste (<= -1) je Block gezählt, log1p ohne sie; bei "geometric" Zähler im 5. Block
+    tl = R .<= -1
+    Bd = _rowsum(Pm .* Pm, blk, S)
+    Bl = _rowsum(any(tl) ? _log1p_w(ifelse.(tl, 0.0, R)) : _log1p_w(R), blk, S)
+    Bc = metric == "geometric" ? _rowsum(Float64.(tl), blk, S) : _rowsum(Rc, blk, S)
     T1, T2, Td, Tl, Tc = _colsums(B1), _colsums(B2), _colsums(Bd), _colsums(Bl), _colsums(Bc)
     combos = _combn(S, S ÷ 2)
+    C_all = size(combos, 2)
+    # seit 1.6.5 (E-T2-2, Entscheidung 196): Zufallsauswahl von n_splits Aufteilungen ohne Zurücklegen
+    if n_splits !== nothing && n_splits < C_all
+        st = SL.SLib.main_stream(seed, fn)
+        pick = sort(Int.(SL.SLib.sample(C_all, Int(n_splits); stream = st)))
+        combos = combos[:, pick]
+    end
     C = size(combos, 2); half = bl * S / 2
     # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in Julia)
     lam, isb, oosb, oosm = SL.DependenceCore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
-    intercept, slope = _lm_coef(isb, oosb)
-    return SL.RList("pbo" => _mean_lgl([_lgl(<=, v, 0.0) for v in lam]), "lambda" => lam, "is_best" => isb,
+    nok = count(i -> !isnan(isb[i]) && !isnan(oosb[i]), eachindex(isb))
+    # seit 1.6.5 (CR2-P-3): ohne zwei gültige Paare keine Regression
+    intercept, slope = nok >= 2 ? _lm_coef(isb, oosb) : (NA, NA)
+    # seit 1.6.5 (CR2-P-1): PBO und Verlustanteil über die Aufteilungen mit Kennzahl, Warnung mit deren Zahl
+    good = .!isnan.(lam)
+    nbad = count(!, good)
+    nbad > 0 && @warn SimLev.chk_msg("b2.pbo_ohne", fn, nbad, C)
+    out = SL.RList("pbo" => any(good) ? _mean_lgl([v <= 0 for v in lam[good]]) : NA, "lambda" => lam, "is_best" => isb,
                     "oos_best" => oosb, "oos_median" => oosm, "slope" => slope, "intercept" => intercept,
-                    "prob_loss" => _mean_lgl([_lgl(<, v, 0.0) for v in oosb]), "S" => S, "n_combos" => C,
+                    "prob_loss" => any(good) ? _mean_lgl([v < 0 for v in oosb[good]]) : NA, "S" => S, "n_combos" => C,
                     "n_points" => N, "n_obs" => bl * S, "metric" => metric, "frequency" => frequency,
                     "ppy" => rr.ppy; class = "SimLevPBO")
+    C < C_all && (out["n_combos_all"] = C_all)
+    return out
 end
 
 function _print_pbo(io::IO, x)
     print(io, "Probability of Backtest Overfitting (PBO, CSCV)\n")
     print(io, _spf("  %d Punkte, %d Beobachtungen (%s), S = %d Blöcke, %d Aufteilungen, Kennzahl %s\n",
                    x["n_points"], x["n_obs"], x["frequency"], x["S"], x["n_combos"], x["metric"]))
+    if haskey(x, "n_combos_all")
+        pb = Float64(x["pbo"])
+        print(io, _spf("  Zufallsauswahl: %d von %d Aufteilungen (Standardfehler der PBO etwa %.3f)\n", x["n_combos"],
+                       x["n_combos_all"], sqrt(pb * (1 - pb) / x["n_combos"])))
+    end
     print(io, _spf("  PBO:                              %.1f %%\n", 100 * x["pbo"]))
-    print(io, _spf("  Median-Logit lambda:              %.2f\n", _median(x["lambda"])))
+    print(io, _spf("  Median-Logit lambda:              %.2f\n", _median(x["lambda"]; na_rm = true)))
     print(io, _spf("  Leistungsabfall (Steigung OOS~IS): %.2f\n", x["slope"]))
     print(io, _spf("  OOS-Verlustwahrscheinlichkeit:    %.1f %%\n", 100 * x["prob_loss"]))
     ob = Float64.(collect(x["oos_best"])); om = Float64.(collect(x["oos_median"]))
-    print(io, _spf("  Gewählter Punkt OOS vor Median:   %.1f %%\n", 100 * _mean_lgl([_lgl(>, a, b) for (a, b) in zip(ob, om)])))
+    print(io, _spf("  Gewählter Punkt OOS vor Median:   %.1f %%\n",
+                   100 * _mean_lgl(Bool[a > b for (a, b) in zip(ob, om) if !(isnan(a) || isnan(b))])))
     N = Int(x["n_points"])
     print(io, _spf("  Lesart: PBO nahe 0 = Auswahl trägt, um %.0f %% = Zufall%s, darüber = Auswahl schadet.\n",
                    100 * (N + N % 2) / (2 * N), isodd(N) ? " (ungerade Punktezahl: (N + 1) / (2N))" : ""))
@@ -570,7 +608,7 @@ end
 Probabilistic Sharpe Ratio.
 
 Wahrscheinlichkeit, dass die wahre Sharpe Ratio über `benchmark` liegt, unter Berücksichtigung von
-Stichprobenlänge, Schiefe und Wölbung: PSR = Φ(frac(SR - SR^*)√(T-1) √(1 - γ_3 SR + (γ_4 - 1)/(4)SR^2)) Dabei
+Stichprobenlänge, Schiefe und Wölbung: PSR = Φ(((SR - SR^*)√(T-1))/(√(1 - γ_3 SR + (γ_4 - 1)/(4)SR^2))) Dabei
 sind SR (Mittelwert / Standardabweichung) und SR^* Sharpe Ratios je Periode, T die Anzahl Renditen, γ_3 die
 Schiefe und γ_4 die Wölbung (nicht Exzess). Eingabe ist ein Renditevektor; für ein Ergebnis von `simulation()`
 z. B. `v <- result_index(res)\$value; r <- v[-1] / v[-length(v)] - 1`.
@@ -687,9 +725,10 @@ println(sharpe_deflated(R; frequency = "day"))
 ```
 """
 function sharpe_deflated(x; id = nothing, n_trials = nothing, effective = true, frequency = nothing,
-                         dates = nothing, risk_free = 0, rho_method = nothing)
+                         dates = nothing, risk_free = 0, rho_method = nothing, expected_max = nothing)
     x = SimLev.as_rframe(x)
     fn = "sharpe_deflated"
+    expected_max = _e5_match_arg(expected_max, ("exact", "bailey"), fn, "expected_max")   # seit 1.6.5 (CR2-K-2)
     frequency = _e5_match_arg(frequency, ("week", "day", "month"), fn, "frequency")
     rho_method = _e5_match_arg(rho_method, ("cor", "linear"), fn, "rho_method")   # seit 1.6.4 (B-075, Entscheidung 92)
     id = chk_int1(id, fn, "id"; lo = 1, null_ok = true)   # seit 1.6.4 (B-007)
@@ -722,15 +761,18 @@ function sharpe_deflated(x; id = nothing, n_trials = nothing, effective = true, 
     Nt = n_trials !== nothing ? n_trials : (effective ? n_eff : N)
     v = N > 1 ? SL.r_var(sr) : 0.0
     g = 0.5772156649
-    sr0 = (Nt > 1 && v > 0) ? sqrt(v) * ((1 - g) * SL.SLib.qnorm(1 - 1 / Nt) +
-                                         g * SL.SLib.qnorm(1 - 1 / (Nt * SL.RLibm.exp(1.0)))) : 0.0
+    # seit 1.6.5 (CR2-K-2, Entscheidung 189): exaktes erwartetes Maximum (Kern), Näherung nach Bailey & López de
+    # Prado (2014) mit expected_max = "bailey"
+    e_max() = expected_max == "exact" ? SL.SignalsCore.research_vec(1, [Float64(Nt)], Float64[], 1)[1] :
+              ((1 - g) * SL.SLib.qnorm(1 - 1 / Nt) + g * SL.SLib.qnorm(1 - 1 / (Nt * SL.RLibm.exp(1.0))))
+    sr0 = (Nt > 1 && v > 0) ? sqrt(v) * e_max() : 0.0
     r = R[:, j]
     sq = sqrt(rr.ppy)
     return SL.RList("id" => rr.cols[j], "sharpe" => sr[j] * sq, "sr0" => sr0 * sq,
                     "psr" => _of_psr(r, 0, rr.ppy),
                     "dsr" => _of_psr(r, sr0 * sq, rr.ppy),
                     "n_trials" => Nt, "n_points" => N, "n_eff" => n_eff, "rho" => rho, "var_sr" => v * rr.ppy,
-                    "n_obs" => size(R, 1), "frequency" => frequency; class = "SimLevDSR")
+                    "n_obs" => size(R, 1), "frequency" => frequency, "expected_max" => expected_max; class = "SimLevDSR")
 end
 
 # Mittlere paarweise Pearson-Korrelation der Spalten von R (endlich, N >= 2) in O(T N) (seit 1.6.4, B-075; R
@@ -843,12 +885,13 @@ println(wf["summary"])
 ```
 """
 function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored = false, metric = nothing,
-                      select = nothing, risk_free = 0)
+                      select = nothing, risk_free = 0, correlation = nothing)
     x = SimLev.as_rframe(x)
     step === nothing && (step = test)
     fn = "overfit_walk_forward"
     metric = _e5_match_arg(metric, ("sharpe", "sortino", "geometric", "mean"), fn, "metric")
     select = _e5_match_arg(select, ("best", "plateau"), fn, "select")
+    correlation = _e5_match_arg(correlation, ("spearman", "kendall", "pearson"), fn, "correlation")   # seit 1.6.5 (W1)
     (_is_ps(x) && get(x, "returns", nothing) !== nothing) || chk_stop("ut2.ps_renditen", "overfit_walk_forward")
     # seit 1.6.4: Jahre, die gerundet mindestens einen Monat ergeben, höchstens 100 Jahre (B-006: step = 0 lief endlos)
     vals = Dict{String,Any}()
@@ -872,6 +915,19 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored =
     k = 0
     res = x["results"]
     n_res = SL.nrow(res)
+    n_flat = 0; n_val = 0
+    tl_pts = Set{Int}()
+    # seit 1.6.5 (CR2-D-7, K16): Überrendite unter -1 bei "geometric" mit eigener Warnung statt "NaNs produced"
+    function cm(rows)
+        Rw = R[rows, :]
+        if metric == "geometric" && any(v -> v < -1, Rw)
+            for c in 1:size(Rw, 2)
+                any(v -> v < -1, view(Rw, :, c)) && push!(tl_pts, rr.cols[c])
+            end
+            return _quiet(() -> _of_col_metric(Rw, metric))
+        end
+        return _of_col_metric(Rw, metric)
+    end
     while true
         ts = _add_m(t0, 12 * (train + k * step))
         ts >= last && break
@@ -880,24 +936,35 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored =
         is_rows = findall(v -> v >= tr && v < ts, d)
         oos_rows = findall(v -> v >= ts && v < te, d)
         (length(is_rows) < 20 || length(oos_rows) < 5) && break
-        m_is = _of_col_metric(R[is_rows, :], metric)
+        m_is = cm(is_rows)
         score = m_is
         if select == "plateau"
             full = fill(NA, n_res)
             full[rr.cols] = m_is
             score = Float64[SL.r_mean(full[nb[cid]]; na_rm = true) for cid in rr.cols]
         end
-        j = _which_max(score)
-        m_oos = _of_col_metric(R[oos_rows, :], metric)
+        # seit 1.6.5 (CR2-W2-1): Auswahl und Rang mit Toleranz
+        j = _of_which_max_tol(score)
+        j === nothing && chk_stop("b2.wf_keine_kennzahl", fn, string(d[is_rows[1]]))
+        m_oos = cm(oos_rows)
+        if metric in ("sharpe", "sortino")
+            n_flat += count(isnan, m_is) + count(isnan, m_oos); n_val += 2 * length(m_is)
+        end
         Ro = R[oos_rows, :]
+        okp = .!(isnan.(m_is) .| isnan.(m_oos))
         push!(win, (train_start = d[is_rows[1]], test_start = d[oos_rows[1]], test_end = d[oos_rows[end]],
                     id = rr.cols[j], is_metric = m_is[j], oos_metric = m_oos[j],
-                    oos_rank = (_rank_avg(m_oos)[j] - 0.5) / length(m_oos),
+                    oos_rank = _of_rank_tol(m_oos, j),
                     oos_return = SL._geo_ret(Ro[:, j]),
-                    oos_average = SL.r_mean(Float64[SL._geo_ret(Ro[:, c]) for c in 1:size(Ro, 2)])))
+                    oos_average = SL.r_mean(Float64[SL._geo_ret(Ro[:, c]) for c in 1:size(Ro, 2)]),
+                    wfc = _of_wfc(m_is, m_oos, correlation),
+                    oos_positive = _mean_lgl(Bool[v > 0 for v in m_oos if !isnan(v)]),
+                    is_pos_oos_neg = _mean_lgl(Bool[m_is[i] > 0 && m_oos[i] < 0 for i in eachindex(m_is) if okp[i]])))
         k += 1
     end
     isempty(win) && SimLev.chk_stop("rs.wf_kurz", fn)
+    n_flat > 0 && @warn SimLev.chk_msg("b2.wf_flach", fn, n_flat, n_val)
+    isempty(tl_pts) || @warn SimLev.chk_msg("b2.wf_totalverlust", fn, sort!(collect(tl_pts)))
     params = _strs(x["params"])
     ids = Int[w.id for w in win]
     W = SL.RFrame("train_start" => Date[w.train_start for w in win], "test_start" => Date[w.test_start for w in win],
@@ -905,7 +972,7 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored =
     for p in params
         W[p] = res[p][ids]
     end
-    for nm in (:is_metric, :oos_metric, :oos_rank, :oos_return, :oos_average)
+    for nm in (:is_metric, :oos_metric, :oos_rank, :oos_return, :oos_average, :wfc, :oos_positive, :is_pos_oos_neg)
         W[String(nm)] = Float64[getfield(w, nm) for w in win]
     end
     nW = length(win)
@@ -927,12 +994,41 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored =
     avg = _rowmeans(span)
     series = SL.RFrame("date" => d[rows], "walk_forward" => _cumprod(1 .+ wf), "hindsight" => _cumprod(1 .+ span[:, hind]),
                        "average" => _cumprod(1 .+ avg))
-    smry = SL.RVector([ann(wf), ann(span[:, hind]), ann(avg), SL.r_mean(W["oos_rank"]),
-                       SL.r_mean(W["oos_metric"]) / SL.r_mean(W["is_metric"]), Float64(count(ids[2:end] .!= ids[1:end-1]))];
-                      names = ["cagr_walk_forward", "cagr_hindsight", "cagr_average", "mean_oos_rank", "efficiency", "switches"])
+    mna(v) = SL.r_mean(Float64[z for z in v if !isnan(z)])          # mean(v, na.rm = TRUE)
+    wv = Float64[z for z in W["wfc"] if !isnan(z)]
+    smry = SL.RVector([ann(wf), ann(span[:, hind]), ann(avg), mna(W["oos_rank"]),
+                       mna(W["oos_metric"]) / mna(W["is_metric"]), Float64(count(ids[2:end] .!= ids[1:end-1])),
+                       isempty(wv) ? NA : SL.r_mean(wv), isempty(wv) ? NA : _median(wv)];
+                      names = ["cagr_walk_forward", "cagr_hindsight", "cagr_average", "mean_oos_rank", "efficiency", "switches",
+                               "mean_wfc", "median_wfc"])
     return SL.RList("windows" => W, "series" => series, "summary" => smry, "hindsight_id" => rr.cols[hind],
                     "metric" => metric, "select" => select, "train" => train, "test" => test, "anchored" => anchored,
-                    "params" => params; class = "SimLevWalkForward")
+                    "params" => params, "correlation" => correlation; class = "SimLevWalkForward")
+end
+
+# Hilfen seit 1.6.5 (CR2-W2-1, lit1 W1): Vergleich mit Toleranz (_near_eq aus sensitivity.jl, Paket B1:
+# |a - b| <= 1e-12 * max(1, |a|, |b|); seit Paket B2b dieselbe Funktion wie in R und Python, das Modul Sensitivity
+# wird erst nach Overfitting geladen, der Zugriff geschieht beim Aufruf), Auswahl des ersten Punkts am Höchstwert,
+# Rang mit Toleranz, WFC
+_of_near_eq(a::Float64, b::Float64) = SimLev.Sensitivity._near_eq(a, b)
+function _of_which_max_tol(v)
+    ok = findall(z -> !isnan(z), v)
+    isempty(ok) && return nothing
+    mx = maximum(v[ok])
+    return ok[findfirst(z -> _of_near_eq(z, mx), v[ok])]
+end
+function _of_rank_tol(v, j)
+    isnan(v[j]) && return NA
+    u = Float64[z for z in v if !isnan(z)]
+    e = Bool[_of_near_eq(z, v[j]) for z in u]
+    return (count(i -> !e[i] && u[i] < v[j], eachindex(u)) + (count(e) + 1) / 2 - 0.5) / length(u)
+end
+function _of_wfc(a, b, method)
+    ok = .!(isnan.(a) .| isnan.(b))
+    a = Float64.(a[ok]); b = Float64.(b[ok])
+    (length(a) < 3 || length(unique(a .+ 0.0)) < 2 || length(unique(b .+ 0.0)) < 2) && return NA
+    c = SL.RStats.cor(a, b; method = method)
+    return Float64(c isa AbstractArray ? first(c) : c)
 end
 
 function _print_wf(io::IO, x)
@@ -955,6 +1051,10 @@ function _print_wf(io::IO, x)
                    100 * s["cagr_walk_forward"], x["hindsight_id"], 100 * s["cagr_hindsight"], 100 * s["cagr_average"]))
     print(io, _spf("Mittlerer OOS-Rang %.0f %% (50 %% = Zufall), Effizienz OOS/IS %.2f, %d Wechsel\n",
                    100 * s["mean_oos_rank"], s["efficiency"], Int(s["switches"])))
+    if haskey(x, "correlation")   # seit 1.6.5 (lit1 W1, Entscheidung 192)
+        print(io, _spf("Walk-Forward-Korrelation IS/OOS (%s) Mittel %.2f, Median %.2f\n", x["correlation"],
+                       s["mean_wfc"], s["median_wfc"]))
+    end
     nothing
 end
 
@@ -1072,15 +1172,24 @@ function param_bootstrap(x, data, config; ids = nothing, top = 5, by = nothing, 
     end
     ids = Int[Int(i) for i in (ids isa AbstractVector ? ids : [ids])]
     params = _strs(x["params"])
+    # seit 1.6.5 (CR2-F-4, K35): ein Name aus include, der für einen Suchpunkt vergeben ist, ist ein Fehler
+    incl_names = String[p.first for p in _kv(include)]
+    for i in ids
+        "p$i" in incl_names && chk_stop("b2.pb_include", fn, "p$i")
+    end
     specs = Pair{String,Any}[]
     for i in ids
         p = SL.RList((pn => res[pn][i] for pn in params)...)
         sp = _as_rlist(SL.ParamSearch._as_spec(x["builder"](p)))
         sp = copy(sp)
         if map !== nothing
-            old = _kv(get(sp, "map", nothing))
-            sp["map"] = SL.RVector(String[string(p.second) for p in vcat(old, _kv(map))];
-                                   names = String[p.first for p in vcat(old, _kv(map))])
+            # seit 1.6.5 (CR2-F-3, K18): map ersetzt gleiche Aliase der Suche (ohne doppelte Namen)
+            mk = Pair{String,Any}[p for p in _kv(get(sp, "map", nothing))]
+            for p in _kv(map)
+                k = findfirst(q -> q.first == p.first, mk)
+                k === nothing ? push!(mk, p) : (mk[k] = p)
+            end
+            sp["map"] = SL.RVector(String[string(p.second) for p in mk]; names = String[p.first for p in mk])
         end
         push!(specs, "p$i" => sp)
     end
@@ -1176,10 +1285,11 @@ println(sharpe_haircut([1, 0.5]; n_obs = 520, n_tests = 50, ppy = 52))
 ```
 """
 function sharpe_haircut(x; n_obs = nothing, n_tests = nothing, frequency = nothing, dates = nothing,
-                        risk_free = 0, ppy = 52)
+                        risk_free = 0, ppy = 52, distribution = nothing)
     x = SimLev.as_rframe(x)
     fn = "sharpe_haircut"
     frequency = _e5_match_arg(frequency, ("week", "day", "month"), fn, "frequency")
+    distribution = _e5_match_arg(distribution, ("t", "normal"), fn, "distribution")   # seit 1.6.5 (Entscheidung 190)
     # seit 1.6.4: n_tests ganze Zahl von 1 bis 10^8 (Entscheidung 16; C-017), Sharpe Ratios endlich, n_obs ganze Zahl
     if n_tests !== nothing
         n_tests = chk_int1(n_tests, fn, "n_tests"; lo = 1)
@@ -1208,18 +1318,30 @@ function sharpe_haircut(x; n_obs = nothing, n_tests = nothing, frequency = nothi
     # Attribut n_tests nannte den angegebenen Wert)
     n_tests !== nothing && n_tests < length(sr) && chk_stop("ut2.n_tests", fn)
     M = n_tests !== nothing ? n_tests : length(sr)
+    # seit 1.6.5 (Entscheidung 190): Standard t-Verteilung mit T - 1 Freiheitsgraden in beiden Richtungen
+    distribution == "t" && Tn < 2 && chk_stop("b2.haircut_t", fn)
+    nu = distribution == "t" ? Float64(Tn - 1) : Inf
     tstat = sr .* sqrt(Float64(Tn))
-    p = 2 .* SL.SLib.pnorm(Float64[-abs(t) for t in tstat])
-    function padj(method)
-        pp = vcat(p, ones(Int(max(0, M - length(p)))))
-        pv = SL.RStats.p_adjust(pp, method; n = max(M, length(p)))
-        return Float64[_f64(v) for v in pv][1:length(p)]
+    p = distribution == "t" ? 2 .* SL.SLib.pt(Float64[-abs(t) for t in tstat], nu) :
+                              2 .* SL.SLib.pnorm(Float64[-abs(t) for t in tstat])
+    function back(pa)                                   # oberes Ende
+        q = Float64[min(a, 1) / 2 for a in pa]
+        q = distribution == "t" ? SL.SLib.qt(q, nu; lower_tail = false) : SL.SLib.qnorm(q; lower_tail = false)
+        return _sign.(sr) .* q ./ sqrt(Float64(Tn)) .* sqrt(ppy)
     end
-    back(pa) = _sign.(sr) .* SL.SLib.qnorm(Float64[min(a, 1) / 2 for a in pa]; lower_tail = false) ./ sqrt(Float64(Tn)) .* sqrt(ppy)   # oberes Ende
+    # seit 1.6.5 (CR2-I-2): wo p unterläuft (p < 1e-290), im Log-Maßstab über die Kerne tail_logp/tail_logp_inv
+    low = p .< 1e-290
+    lp = SL.RLibm.log.(p)
+    any(low) && (lp[low] = SL.RLibm.log(2.0) .+ SL.SignalsCore.research_vec(6, abs.(tstat[low]), [nu], count(low)))
     sh = sr .* sqrt(ppy)
     out = SL.RFrame("id" => ids, "sharpe" => sh, "t" => tstat, "p" => p)
     for (nm, m) in (("bonferroni", "bonferroni"), ("holm", "holm"), ("bhy", "BY"))
-        pa = padj(m); sa = back(pa)
+        pa = _of_p_adjust(p, m, M); sa = back(pa)
+        if any(low)
+            lpa = _of_p_adjust_log(lp, m, M)
+            sa[low] = _sign.(sr[low]) .* SL.SignalsCore.research_vec(7, lpa[low] .- SL.RLibm.log(2.0), [nu], count(low)) ./
+                      sqrt(Float64(Tn)) .* sqrt(ppy)
+        end
         out["p_" * nm] = pa
         out["sharpe_" * nm] = sa
         out["haircut_" * nm] = Float64[isnan(s) ? NA : s != 0 ? 1 - a / s : NA for (a, s) in zip(sa, sh)]
@@ -1228,7 +1350,44 @@ function sharpe_haircut(x; n_obs = nothing, n_tests = nothing, frequency = nothi
     res = SL.rows(out, o)
     SL.attrs(res)["n_tests"] = M
     SL.attrs(res)["n_obs"] = Tn
+    SL.attrs(res)["distribution"] = distribution
     return res
+end
+
+# p.adjust(p, method, n = M) ohne die bis 1.6.4 aufgefüllten Tests (CR2-I-1; R .of_p_adjust): BY-Faktor
+# q = sum(1 / (1:M)) aus dem Kern; Bit für Bit wie stats::p.adjust über die aufgefüllten Werte
+function _of_p_adjust(p::Vector{Float64}, method, M)
+    lp = length(p)
+    M <= 1 && return copy(p)
+    method == "bonferroni" && return Float64[min(1.0, M * v) for v in p]
+    out = Vector{Float64}(undef, lp)
+    if method == "holm"
+        o = _order(p)
+        v = accumulate(max, Float64[(M - i + 1) * p[o[i]] for i in 1:lp])
+    else
+        o = _order(p; decreasing = true)
+        q = SL.SignalsCore.research_vec(2, [Float64(M)], Float64[], 1)[1]
+        v = accumulate(min, Float64[q * M / (lp - k + 1) * p[o[k]] for k in 1:lp])
+    end
+    out[o] = min.(1.0, v)
+    return out
+end
+# dasselbe im Log-Maßstab (für unterlaufende p, CR2-I-2): log der angepassten p-Werte, höchstens 0
+function _of_p_adjust_log(lp::Vector{Float64}, method, M)
+    n = length(lp)
+    M <= 1 && return copy(lp)
+    method == "bonferroni" && return Float64[min(0.0, SL.RLibm.log(Float64(M)) + v) for v in lp]
+    out = Vector{Float64}(undef, n)
+    if method == "holm"
+        o = _order(lp)
+        v = accumulate(max, Float64[SL.RLibm.log(Float64(M - i + 1)) + lp[o[i]] for i in 1:n])
+    else
+        o = _order(lp; decreasing = true)
+        q = SL.SignalsCore.research_vec(2, [Float64(M)], Float64[], 1)[1]
+        v = accumulate(min, Float64[SL.RLibm.log(q * M / (n - k + 1)) + lp[o[k]] for k in 1:n])
+    end
+    out[o] = min.(0.0, v)
+    return out
 end
 
 function __init__()

@@ -44,11 +44,20 @@ y8 <- sim_msgjr(2000, c(2e-6, 2e-5), c(0.02, 0.05), c(0.04, 0.10), c(0.92, 0.85)
                 matrix(c(0.99, 0.01, 0.03, 0.97), 2, byrow = TRUE), 7)
 fp <- function(x) sprintf("%.17g", sum(x))
 cat(sprintf("Daten: S30 %s, T %s, W %s, T8 %s\n", fp(d30$A), fp(d$em), fp(W), fp(y8)))
+# seit 1.6.5 (Messung gegen 1.6.4): T10 drei Signale aus einer Kursreihe mit 10^6 Zeilen (Seed 3)
+simlev_seed(3); x10 <- 100 * cumprod(1 + .sl_rnorm(1e6, 2e-4, 0.01))
+s10 <- list(signal_sma(x10, n = 200), signal_volatility(x10, n = 20, threshold = 25), signal_momentum(x10, n = 60))
+cat(sprintf("Daten2: T10 %s, Signale %s\n", fp(x10), paste(vapply(s10, function(z) sum(z$buy) + 2 * sum(z$sell), 0), collapse = " ")))
 
 st30 <- create_strategy(A = asset_config("etf", "bnh", share = 0.7), B = asset_config("etf", "bnh", share = 0.3))
 cfg <- bootstrap_config(c(akt = "aktien"), input = "prices")
 st <- create_strategy(akt = asset_config("etf", "bnh"))
 A4 <- c("aktien", "bonds", "gold", "em")
+# seit 1.6.5: T3s Studie mit zwei Anlagen, Steuer und Rebalancing (Blocklänge fest 20, in 1.6.4 und 1.6.5 gleich);
+# T9 bootstrap_pooled aus zwei Ländern (aktien, em als Spalte A)
+cfg2 <- bootstrap_config(c(akt = "aktien", bo = "bonds"), input = "prices")
+st2 <- create_strategy(akt = asset_config("etf", "bnh", share = 0.6), bo = asset_config("etf", "bnh", share = 0.4))
+ds9 <- list(x = data.frame(date = d$date, A = d$aktien), y = data.frame(date = d$date, A = d$em))
 
 tasks <- list(
   S30 = function() simulation(d30, st30, start_value = 1e4, dca = dca_plan(value = 200, span = 1), rebalance = rebalance_plan(unit = "quarter"), tax = tax_profile(base_rate = 2)),
@@ -66,6 +75,12 @@ tasks <- list(
   T6 = function() portfolio_optimize(d, A4, method = "min_cvar"),
   T7 = function() portfolio_optimize(d, A4, method = "hrp"),
   T8 = function() SimLev:::.ms_garch_fit(y8, 2, "gjrGARCH"),
+  T3s = function() bootstrap_study(d, cfg2, "stationary", n = 200, path_length = 2520, seed = 1, progress = FALSE, params = list(L = 20),
+                                   strategies = list(a = st2), sim_args = list(rebalance = rebalance_plan(unit = "quarter"),
+                                                                               tax = tax_profile(base_rate = 2)), cores = 1),
+  T4m = function() withdrawal_max_rate(W, withdrawal_rule("constant"), success = 0.9),
+  T9 = function() bootstrap_pooled(ds9, "A", n = 2000, years = 15, frequency = "month", seed = 1),
+  T10 = function() signal_combine(s10[[1]], s10[[2]], s10[[3]]),
   P1c1 = function() bootstrap(d, cfg, "stationary", n = 400, seed = 1, progress = FALSE, path_length = 2520, cores = 1),
   P1c2 = function() bootstrap(d, cfg, "stationary", n = 400, seed = 1, progress = FALSE, path_length = 2520, cores = 2),
   T3c2 = function() bootstrap_study(d, cfg, "stationary", n = 50, path_length = 2520, seed = 1, progress = FALSE,

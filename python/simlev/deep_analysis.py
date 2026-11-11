@@ -35,7 +35,7 @@ from ._util import _is_num_scalar, _match_days, _pow_rec
 from ._util import _fp_quiet
 from .backcast import _fill_na
 from .data_prep import _duplicated
-from ._pruefen import chk_fmt, chk_is_factor, chk_num1, chk_scalar, chk_stop
+from ._pruefen import chk_fmt, chk_is_factor, chk_msg, chk_num1, chk_scalar, chk_stop
 
 __all__ = ["result_analysis", "SimLevAnalysis"]
 
@@ -201,10 +201,9 @@ def _da_series(x, name):
     if isinstance(x, pd.DataFrame):
         names = [str(c) for c in x.columns]
         if "date" not in names:
-            raise ValueError("'%s': data.frame braucht eine Spalte 'date' (vorhanden: %s)%s." % (
-                name, ", ".join(names),
-                "; nur eine Spalte: Trennzeichen prüfen, Semikolon-Dateien mit read.csv2() einlesen"
-                if len(names) == 1 else ""))
+            chk_stop("c.m_da_series", name, ", ".join(names), "; nur eine Spalte: Trennzeichen prüfen (Semikolon-Dateien mit Semikolon als Trennzeichen und "
+                "Dezimalkomma einlesen)"   # seit 1.6.5 sprachneutral (K29, CR2-D-9)
+                if len(names) == 1 else "")
         if "value" in names:
             vc = "value"
         else:
@@ -213,7 +212,7 @@ def _da_series(x, name):
                 _ext("data_prep", "_num_text_stop")(x, txt, name)
             num = [k for k in names if _col_is_numeric(x[k]) and k != "date"]
             if not num:
-                raise ValueError("'%s': keine numerische Wertspalte gefunden." % name)
+                chk_stop("c.m_da_series_2", name)
             if len(num) > 1:
                 _message("Hinweis: '%s': Wertspalte '%s' verwendet (weitere numerische Spalten: %s)." % (
                     name, num[0], ", ".join(num[1:])))
@@ -224,7 +223,7 @@ def _da_series(x, name):
         if not _col_is_numeric(col):
             if len(_ext("data_prep", "_num_text_cols")(x[[vc]])):
                 _ext("data_prep", "_num_text_stop")(x, vc, name)
-            raise ValueError("'%s': Wertspalte '%s' ist nicht numerisch." % (name, vc))   # seit 1.6.4 ohne Klasse
+            chk_stop("c.m_da_series_3", name, vc)   # seit 1.6.4 ohne Klasse
         v = _as_numeric_col(col)
         if chk_is_factor(x["date"]):   # seit 1.6.4 (Entscheidung 15; bis 1.6.3 still in Text umgewandelt)
             chk_stop("spalte_faktor", "result_analysis", "date")
@@ -250,14 +249,27 @@ def _da_series(x, name):
                                   dtype=bool)
         idx = np.flatnonzero(~np.isnan(d))
         idx = idx[np.argsort(d[idx], kind="stable")]
+        if idx.size < d.size:                  # seit 1.6.5 (CR2-D-10): Hinweis auf Zeilen ohne Datum
+            _message(chk_msg("c.da_ohne_datum", name, int(d.size - idx.size)))
         d, v, fl = d[idx], v[idx], fl[idx]
         dup = _duplicated(d, from_last=True)   # duplicated(d, fromLast = TRUE) (data_prep; seit 1.6.4 ohne Liste, B-078)
         if dup.any():
             _message("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet." % (name, int(dup.sum())))
-            d, v, fl = d[~dup], v[~dup], fl[~dup]
+            # seit 1.6.5 (CR2-D-10): je Datum der letzte vorhandene Wert (R .da_series)
+            sel = []
+            i = 0
+            while i < d.size:
+                j = i
+                while j + 1 < d.size and d[j + 1] == d[i]:
+                    j += 1
+                okj = [k for k in range(i, j + 1) if not np.isnan(v[k])]
+                sel.append(okj[-1] if okj else j)
+                i = j + 1
+            sel = np.asarray(sel, dtype=np.int64)
+            d, v, fl = d[sel], v[sel], fl[sel]
         has = np.flatnonzero(~np.isnan(v))
         if not has.size:
-            raise ValueError("'%s': Wertspalte '%s' hat keine Werte." % (name, vc))
+            chk_stop("c.m_da_series_4", name, vc)
         r = slice(int(has[0]), int(has[-1]) + 1)
         d, v, fl = d[r], v[r], fl[r]
         if np.isnan(v).any():
@@ -266,12 +278,12 @@ def _da_series(x, name):
         bad = np.flatnonzero(~np.isfinite(v) | (v <= 0))
         if bad.size:
             raise ValueError("'%s': Wertspalte '%s' muss positive Niveaus enthalten (Kurse oder Indexstände, keine "
-                             "Renditen); %d Werte <= 0, z. B. am %s." % (
+                             "Renditen); %d Werte nicht endlich oder <= 0, z. B. am %s." % (
                                  name, vc, bad.size, _fmt_date1(d[bad[0]])))   # seit 1.6.4 ohne den Wert
         if len(v) < 2:
-            raise ValueError("'%s': mindestens zwei Daten mit Wert nötig." % name)
+            chk_stop("c.m_da_series_5", name)
         return {"name": name, "date": d, "value": v, "filled": fl, "worth": None, "flows": None, "result": None}
-    raise ValueError("'%s' muss ein SimLevResult oder ein data.frame(date, value) sein." % name)
+    chk_stop("c.m_da_series_6", name)
 
 
 def _da_rf(date, rate, kk, defl=None):
@@ -299,7 +311,8 @@ def _da_deflate(s, inflation):
     scalar = _is_num_scalar(inflation)
     if not scalar and isinstance(inflation, (np.ndarray, list, tuple, pd.Series)) and not isinstance(inflation, pd.DataFrame):
         a = np.asarray(inflation.to_numpy() if isinstance(inflation, pd.Series) else inflation)
-        if a.size == 1 and a.dtype.kind in "iuf":
+        # seit 1.6.5 (CR2-X5-2): eine Series ist ein benannter Vektor (Preisindex), auch mit Länge 1
+        if a.size == 1 and a.dtype.kind in "iuf" and not isinstance(inflation, pd.Series):
             inflation = float(a.ravel()[0])
             scalar = True
     if scalar:
@@ -360,12 +373,13 @@ def _da_mwrr(s):
         fl = np.zeros(n)
     fl = np.where(np.isnan(fl), 0.0, fl)
     fi = np.flatnonzero((np.arange(n) > 0) & (fl != 0))
-    if not fi.size:
-        if w[0] > 0 and horizon > 0 and w[-1] >= 0:
-            return _cagr_q(w[-1] / w[0], horizon)
-        return _NA
     sg = s.get("start_gross")
-    start = sg if sg is not None else float(w[0])
+    start = sg if sg is not None else float(w[0])   # Start brutto wie cagr der Engine
+    if not fi.size:
+        # seit 1.6.5 (Entscheidung 200): Startbetrag brutto (Kaufkosten am Starttag zählen), bis dahin w[0]
+        if start > 0 and horizon > 0 and w[-1] >= 0:
+            return _cagr_q(w[-1] / start, horizon)
+        return _NA
     xirr = _ext("engine", "_xirr_rate")
     return float(xirr(np.concatenate([[0.0], t[fi]]), np.concatenate([[start], fl[fi]]), float(w[-1]), horizon))
 
@@ -439,7 +453,11 @@ def _da_metrics(s, rate, ppy, var_levels, dd_memo=None):
     rfl = _da_rf(s["date"], rate, kk, s.get("defl"))
     rf = rfl["r"]
     yrs = float(s["date"][-1] - s["date"][0]) / 365.25
-    cagr = _cagr_q(val[-1] / val[0], yrs)
+    # seit 1.6.5 (Entscheidung 200, M4): bei einem Ergebnis von simulation() Bezug auf den Indexstand vor den
+    # Kaufkosten des Starttags (Basis 100 von result_index(), wie ttwror bzw. cagr der Engine); bis dahin val[0]
+    b0 = 100.0 if s.get("result") is not None else val[0]
+    tot = val[-1] / b0 - 1
+    cagr = _cagr_q(val[-1] / b0, yrs)
     vol = r_sd(r) * math.sqrt(ppy)
     ex = r - rf
     down = ex[ex < 0]
@@ -466,11 +484,14 @@ def _da_metrics(s, rate, ppy, var_levels, dd_memo=None):
             dd_memo.append((s, ddt))
     rf_ann = rfl["ann"]
     sdex = r_sd(ex)
+    # seit 1.6.5 (CR2-I-6): Streuung im Rundungsrauschen gilt als 0 (R .da_metrics, Kern sd_eff)
+    zero_vol = not (sdex > 16 * math.sqrt(len(ex)) * 2.220446049250313e-16 *
+                    (1 + (float(np.max(np.abs(ex))) if len(ex) else 0.0)))
     out = {
         "start_value": float(val[0]), "end_value": float(val[-1]),
-        "years": yrs, "total_return": val[-1] / val[0] - 1,
+        "years": yrs, "total_return": tot,
         "cagr": cagr, "mwrr": _da_mwrr(s), "volatility": vol,
-        "sharpe": r_mean(ex) * ppy / (sdex * math.sqrt(ppy)) if sdex > 0 else _NA,
+        "sharpe": r_mean(ex) * ppy / (sdex * math.sqrt(ppy)) if not zero_vol else _NA,
         "sortino": (_rdiv(r_mean(ex) * ppy, math.sqrt(r_mean(np.minimum(ex, 0) * np.minimum(ex, 0))) * math.sqrt(ppy))
                     if down.size else _NA),
         "calmar": cagr / mdd if mdd > 0 else _NA,
@@ -478,7 +499,7 @@ def _da_metrics(s, rate, ppy, var_levels, dd_memo=None):
         "avg_drawdown": r_mean(-ddt["depth"].to_numpy()) if len(ddt) else 0.0,
         "ulcer_index": ulcer, "upi": (cagr - rf_ann) / ulcer if ulcer > 0 else _NA,
         "longest_drawdown_days": float(np.max(ddt["days_total"].to_numpy())) if len(ddt) else 0.0,
-        "recovery_factor": (val[-1] / val[0] - 1) / mdd if mdd > 0 else _NA,
+        "recovery_factor": tot / mdd if mdd > 0 else _NA,
         "required_to_recover": 1 / (1 - dd[-1]) - 1 if dd[-1] > 0 else 0.0,
         "skewness": _calc_skew(r), "excess_kurtosis": _calc_kurt(r),
         "best_day": float(np.max(r)), "worst_day": float(np.min(r)),
@@ -737,6 +758,12 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
         schlechteste Tage, Monate und Jahre, Anteil positiver Monate, Gewinn/Verlust-Verhältnis, historischer VaR
         und CVaR (täglich und monatlich), bei SimLev-Ergebnissen auch Steuern und Transaktionen.
 
+        Bei einem ``SimLevResult`` zählen die Kaufkosten am Starttag (Spread, Ordergebühr) in Gesamtrendite, CAGR,
+        MWRR, Calmar, UPI und Recovery Factor mit, wie in :func:`simulation` (seit 1.6.5): Bezug ist der Startbetrag
+        brutto (``invested[0]``) bzw. der Indexstand 100 vor den Kosten, nicht der Depotwert am Starttag
+        (``start_value`` der Kennzahlen). Ohne Einzahlungen ist ``mwrr`` dann gleich ``simulation()["cagr"]``, die
+        CAGR gleich ``ttwror``.
+
         Gegen einen Benchmark: Alpha (annualisiert, CAPM auf Überschussrenditen), Beta, Korrelation gesamt sowie
         in Auf- und Abwärtsphasen, R², Up-/Down-Capture (Monatsbasis), Capture Spread, aktive Rendite, Tracking
         Error, Information Ratio, M² (Modigliani) und Treynor.
@@ -759,7 +786,7 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
     if _is_result(x) or isinstance(x, pd.DataFrame):
         x = {"Strategie": x}
     if not _is_list_like(x) or not len(x):
-        raise ValueError("x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.")
+        chk_stop("c.m_result_analysis")
     if isinstance(x, Mapping):
         keys = [str(k) for k in x.keys()]
         vals = list(x.values())
@@ -773,13 +800,13 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
     ry_arr = np.atleast_1d(np.asarray(ry.to_numpy() if isinstance(ry, pd.Series) else ry, dtype=object))
     ry_num = all(_is_num_scalar(e) for e in ry_arr)
     if not ry_num or ry_arr.size != 1 or math.isnan(float(ry_arr[0])) or _fmt.r_round(12 * float(ry_arr[0])) < 2:
-        raise ValueError("rolling_years muss mindestens 2/12 (zwei Monate) betragen.")   # seit 1.6.4 ohne Eingabewert
+        chk_stop("c.m_result_analysis_2")   # seit 1.6.4 ohne Eingabewert
     rolling_years = float(ry_arr[0]) if not isinstance(ry_arr[0], (int, np.integer)) else ry_arr[0]
     chk_num1(rolling_years, fn, "rolling_years")   # seit 1.6.4 endlich
     vl = np.atleast_1d(np.asarray(var_levels, dtype=object))
     if (not vl.size or not all(_is_num_scalar(e) for e in vl)
             or any(math.isnan(float(e)) for e in vl) or any(float(e) <= 0 or float(e) >= 1 for e in vl)):
-        raise ValueError("var_levels: Wahrscheinlichkeiten als Anteile zwischen 0 und 1, z. B. c(0.01, 0.05).")
+        chk_stop("c.m_result_analysis_3")
     var_levels = np.asarray(vl, dtype=np.float64)
     # seit 1.6.4 (B-052, B-045, B-012): var_levels ohne doppelte Werte, top_drawdowns eine ganze Zahl >= 0 oder Inf,
     # risk_free und inflation als einzelne Zahl endlich (inflation > -100)
@@ -820,8 +847,7 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
         else:
             bname = "Benchmark"
             if bname in ser:
-                raise ValueError("x enthält bereits eine Reihe 'Benchmark'; benchmark = \"Benchmark\" wählen oder "
-                                 "die Reihe in x umbenennen.")
+                chk_stop("c.m_result_analysis_5")
             bser = _da_series(benchmark, bname)
             ser[bname] = bser
             order.append(bname)
@@ -858,6 +884,9 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
 
     dd_memo = []
     mets = {k: _da_metrics(ser[k], rf_of(ser[k]), ppy_of(ser[k]), var_levels, dd_memo) for k in order}
+    for k in order:                            # seit 1.6.5 (CR2-I-6): Hinweis bei Sharpe ohne Schwankung
+        if np.isnan(mets[k]["sharpe"]) and not np.isnan(mets[k]["volatility"]):
+            _message(chk_msg("c.da_sharpe", k))
     met = pd.DataFrame({k: mets[k].to_numpy() for k in order}, index=list(mets[order[0]].index))
     bm = None
     if bser is not None:
@@ -1042,6 +1071,9 @@ class SimLevAnalysis(RList):
         sys.stdout.write(_fmt.print_matrix(Ar) + "\n")
         for nm, d in self["drawdowns"].items():
             sys.stdout.write("\n  Größte Drawdowns: %s\n" % nm)
+            if len(d) == 0:                    # seit 1.6.5 (CR2-X10-2) statt der leeren Tabelle
+                sys.stdout.write("  (keine Drawdowns)\n")
+                continue
             d = d.copy()
             d["depth"] = np.array([_sp("%.2f %%", 100 * v) for v in d["depth"].to_numpy(dtype=np.float64)], dtype=object)
             sys.stdout.write(_fmt.print_data_frame(d.iloc[:5], row_names=False) + "\n")
@@ -1082,17 +1114,22 @@ def _plot_analysis(x, type=("overview", "growth", "drawdown", "rolling", "annual
     type = _match_arg(type, ("overview", "growth", "drawdown", "rolling", "annual", "monthly"))  # noqa: A001
     nms = list(x["monthly"].keys())
     if type == "monthly":
-        bad = False
-        if isinstance(series, (list, tuple, np.ndarray)) and len(series) != 1:
+        # seit 1.6.5 (CR2-C-4): genau ein Name oder eine ganze Zahl 1..k (R plot.SimLevAnalysis)
+        sv = series
+        if isinstance(sv, (list, tuple, np.ndarray)):
+            sv = list(np.ravel(np.asarray(sv, dtype=object)))
+            sv = sv[0] if len(sv) == 1 else None
+        if isinstance(sv, str):
+            bad = sv not in nms
+        elif _is_num_scalar(sv) and not isinstance(sv, (bool, np.bool_)):
+            fv = float(sv)
+            bad = not (math.isfinite(fv) and fv == math.floor(fv) and 1 <= fv <= len(nms))
+        else:
             bad = True
-        elif isinstance(series, str):
-            bad = series not in nms
-        elif _is_num_scalar(series):
-            bad = not (series >= 1 and series <= len(nms))
         if bad:
             raise ValueError("series: Name oder Nummer einer Reihe (%s)." % ", ".join(nms))
     if type in ("overview", "rolling") and metric not in _ROLL_COLS:
-        raise ValueError("metric: 'cagr', 'volatility', 'sharpe', 'max_drawdown', 'beta' oder 'excess_cagr'.")
+        chk_stop("c.m_plot_simlevanalysis_2")
     sers = x["series"]
     snames = list(sers.keys())
     cols = [_COLS[i % 6] for i in range(len(snames))]
@@ -1186,12 +1223,15 @@ def _plot_analysis(x, type=("overview", "growth", "drawdown", "rolling", "annual
         data["annual"] = pd.DataFrame(d)
 
     def p_monthly(s, x0, y0, w, h):
-        nm = series if isinstance(series, str) else nms[int(np.ravel(series)[0]) - 1]
+        sv = list(np.ravel(np.asarray(series, dtype=object)))[0] if isinstance(series, (list, tuple, np.ndarray)) else series
+        nm = sv if isinstance(sv, str) else nms[int(float(sv)) - 1]
         Mf = x["monthly"][nm]
         raw = Mf.to_numpy(dtype=np.float64)[:, :12]
         M = 100 * raw
         fin = M[np.isfinite(M)]
         lim = 1.0 if fin.size == 0 else _jl_maximum(np.abs(fin))
+        if lim == 0:                           # seit 1.6.5 (CR2-C-4): ohne Monatsänderung wie ohne Werte
+            lim = 1.0
         pal = _ana_ramp(["#B5562B", "#F7F3EE", "#2C6E9B"], 41)
         ny = M.shape[0]
         p = _ana_panel(s, x0, y0, w, h, (0.5, 12.5), (0.5, ny + 0.5), title="Monatsrenditen: %s" % nm,

@@ -33,6 +33,7 @@ oder \code{"multiply"} (Wechselkurs als Zielwaehrung je Fremdwaehrung).}
 }
 \value{
 \code{data} mit umgerechneten (bzw. zusaetzlichen) Spalten.
+Seit 1.6.5 ergibt eine Stufentabelle als \code{fx}, die erst nach dem ersten Datentag beginnt, eine Warnung (davor gilt ihr erster Wert).
 }
 \description{
 Rechnet Kursspalten eines data.frames tageweise mit einem Wechselkurs in

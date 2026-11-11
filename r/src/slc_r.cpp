@@ -9,7 +9,7 @@
  * gesammelten Warnungen in Reihenfolge mit Rf_warningcall(R_NilValue, ...) aus (wie
  * warning(call. = FALSE)) und einen Fehler mit Rf_errorcall(R_NilValue, ...) (wie
  * stop(call. = FALSE)); das longjmp entsteht also nur hier. Benutzerabbruch: Rueckruf ueber
- * R_ToplevelExec (kein longjmp im Kern); bei SL_EINTR danach R_CheckUserInterrupt().
+ * R_ToplevelExec (kein longjmp im Kern); bei SL_EINTR danach Rf_onintr() (seit 1.6.5, huelle_r.h).
  *
  * Zufallszustand: raw(32) (Host-Bytereihenfolge von uint64_t[4]). Ziehende Huellen geben
  * list(Ergebnis, neuer Zustand) zurueck; R ersetzt den Zustand (kein Aendern an Ort und Stelle).
@@ -193,6 +193,40 @@ SEXP C_sl_sample(SEXP state, SEXP n, SEXP size, SEXP replace, SEXP prob)
     finish(&cx, st, 1);
     res = pair(out, &r);
     UNPROTECT(1);
+    return res;
+}
+
+/* Länderblöcke von bootstrap_pooled (seit 1.6.5, Paket E, K40/CR2-6; R/planning.R): nr Zeilen je Land (double),
+ * cw Ländergewichte, L, nper, n -> list(list(c, r) als ganzzahlige nper x n-Matrizen, Zustand) */
+SEXP C_sl_pooled_draw(SEXP state, SEXP nr, SEXP cw, SEXP L, SEXP nper, SEXP n)
+{
+    sl_rng r;
+    sl_ctx cx;
+    int64_t np = count1(nper, "nper"), nn = count1(n, "n"), nc, i;
+    int64_t *rows;
+    int st;
+    SEXP ctry, row, val, nms, res;
+    get_state(state, &r);
+    need_real(nr, "nr");
+    need_real(cw, "cw");
+    nc = (int64_t) XLENGTH(nr);
+    if (XLENGTH(cw) != nc) Rf_errorcall(R_NilValue, "pooled_draw: Länge von cw passt nicht zu nr");
+    rows = (int64_t *) R_alloc((size_t) (nc > 0 ? nc : 1), sizeof(int64_t));
+    for (i = 0; i < nc; i++) rows[i] = (int64_t) REAL(nr)[i];
+    ctry = PROTECT(Rf_allocMatrix(INTSXP, (int) np, (int) nn));
+    row = PROTECT(Rf_allocMatrix(INTSXP, (int) np, (int) nn));
+    ctx_init(&cx);
+    st = sl_pooled_draw(&cx, &r, nc, rows, REAL(cw), num1(L, "L"), np, nn, INTEGER(ctry), INTEGER(row));
+    finish(&cx, st, 1);
+    val = PROTECT(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(val, 0, ctry);
+    SET_VECTOR_ELT(val, 1, row);
+    nms = PROTECT(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(nms, 0, Rf_mkChar("c"));
+    SET_STRING_ELT(nms, 1, Rf_mkChar("r"));
+    Rf_setAttrib(val, R_NamesSymbol, nms);
+    res = pair(val, &r);
+    UNPROTECT(4);
     return res;
 }
 

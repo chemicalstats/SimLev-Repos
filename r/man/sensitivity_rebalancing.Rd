@@ -30,7 +30,8 @@ Einheiten zwischen den Terminen (\code{unit} und
 \code{span} von \code{\link{rebalance_plan}()}). Standard: monatlich,
 zweimonatlich, quartalsweise, viermonatlich, halbjaehrlich, jaehrlich
 (Namen monthly, bimonthly, quarterly, four_monthly, semiannual, yearly).
-Seit 1.6.4 geprueft: benannte Liste, je Eintrag Einheit und Abstand.}
+Seit 1.6.4 geprueft: benannte Liste, je Eintrag Einheit und Abstand; seit 1.6.5 auch die Werte (Einheit
+aus den drei Namen, Abstand ganze Zahl >= 1 bis zur Obergrenze von \code{rebalance_plan()}).}
 
 \item{offsets}{Numerischer Vektor: Kalendertage vor dem Ende des Monats,
 Dreimonatsblocks bzw. Jahres, in dem der Termin liegt (0 = letzter Tag;
@@ -77,11 +78,10 @@ viele, wie der freie Speicher traegt, und
 nur, wenn die Startkosten der Prozesse kleiner sind als der Gewinn (kleine Rechnungen bleiben bei
 einem Prozess; unter Windows immer einer). Ausgaben, Meldungen, Warnungen und Fehler der Einheiten
 erscheinen dabei wie mit \code{cores = 1}, in Einheitenreihenfolge.
-Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Prozesse; Ausgaben, Meldungen,
-Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit \code{cores = 1} (unter Windows
-rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster); hoechstens Zahl der Prozessoren:
+Eine feste Zahl ist seit 1.6.5 der Hoechstwert der automatischen Wahl: SimLev misst und plant wie mit
+\code{"auto"}, nimmt aber hoechstens so viele Prozesse (bis 1.6.4 immer so viele Prozesse ohne Messung);
+unter Windows rechnet eine feste Zahl wie bis 1.6.3 ueber einen PSOCK-Cluster; hoechstens Zahl der Prozessoren:
 mehr wird mit einem Hinweis begrenzt.
-Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst \code{"auto"} (bei leichten Einheiten kann sie langsamer sein als ein Prozess).
 In Julia erscheinen Ausgaben, die eigene Funktionen (etwa
 \code{metrics}) direkt mit \code{println} schreiben, bei mehreren Aufgaben in der Reihenfolge, in
 der die Einheiten fertig werden (in R und Python in Einheitenreihenfolge).
@@ -91,7 +91,8 @@ Je paralleler Einheit rechnen die Kerne mit hoechstens Zahl der Prozessoren / Pr
 \value{
 data.frame der Klasse \code{SimLevSensitivity} mit den Spalten
 \code{frequency}, \code{offset}, \code{band}, \code{band_type} und den
-Kennzahlen aus \code{metrics}; fehlgeschlagene Laeufe fehlen. Attribut
+Kennzahlen aus \code{metrics}; fehlgeschlagene Laeufe fehlen (seit 1.6.5 mit einer Warnung mit Anzahl
+und Meldungen; schlagen alle fehl, ein Fehler). Attribut
 \code{kind = "rebalancing"}. Ausgabe und Grafik ueber \code{print()} und
 \code{plot()}. Mit Sparplan (\code{sim_args}) ist \code{cagr}
 geldgewichtet (XIRR); \code{print()} weist darauf hin.

@@ -137,6 +137,8 @@ static double cop_prof_(double nu, void *p)
     double mn, ob;
     int64_t i;
     if (C->st != SL_OK) return 0.0;
+    /* seit 1.6.5 (Entscheidungen 171, 188): Benutzerabbruch je Profilpunkt, nur aus dem aufrufenden Thread */
+    if (sl_interrupted(C->cx)) { C->st = SL_EINTR; return 0.0; }
     C->nu = nu;
     C->gauss = isinf(nu);
     if (C->gauss) {
@@ -212,6 +214,8 @@ static double nu_f_(double nu, void *p)
     double c0, E, F, s;
     int64_t i;
     if (N->st != SL_OK) return 0.0;
+    /* seit 1.6.5 (Entscheidungen 171, 188): Benutzerabbruch je Auswertung, nur aus dem aufrufenden Thread */
+    if (sl_interrupted(N->cx)) { N->st = SL_EINTR; return 0.0; }
     N->st = sl_qt_mt(N->cx, m, N->U, nu, 1, N->Z, N->nthreads);
     if (N->st != SL_OK) return 0.0;
     sl_matmul((int) Tn, k, k, N->Z, N->Ri, N->M);

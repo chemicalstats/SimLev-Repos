@@ -134,7 +134,7 @@ template <class... A> [[noreturn]] inline void badcall(const char* fmt, A... a) 
 #pragma GCC diagnostic pop
 #endif
 
-/* Ergebnisfelder der Kerne: Speicher je Thread, vor jedem Kern geleert */
+/* Ergebnisfelder der Kerne: Speicher je Thread, vor jedem Kern und (seit 1.6.5, CR1-5) nach ihm geleert */
 struct Alloc {
     std::deque<std::vector<double>> store;
     bool flag = false, has_flag = false;
@@ -168,8 +168,19 @@ inline Alloc& alloc() {
 }
 
 /* Kern ausfuehren; Ausnahmen in Rueckgabecodes umsetzen (Text in last_error(), nur bei Fehler gesetzt) */
+/* Leert den Speicher beim Verlassen von run, auch im Fehlerweg (seit 1.6.5, CR1-5: bis 1.6.4 blieben die
+ * Ergebnisfelder bis zum nächsten Kernaufruf desselben Threads belegt, z. B. 93 MB nach wd_simulate mit 60 000
+ * Pfaden); die Exporte kopieren die Felder schon innerhalb von f */
+struct AllocRelease {
+    ~AllocRelease() {
+        Alloc& al = alloc();
+        if (!al.store.empty() || al.has_flag) al.reset();
+    }
+};
+
 template <class F> int run(F f) {
     try {
+        AllocRelease rel;
         Alloc& al = alloc();
         if (!al.store.empty() || al.has_flag) al.reset();   /* meist schon leer */
         f();
@@ -255,7 +266,7 @@ SIMLEV_C_EXPORT int simlev_c_min_cvar_core(const double* R, int64_t T, int64_t N
         cabi::Vec x = simlev::min_cvar_core(cabi::mat(R, (int) T, (int) N), alpha, cabi::vec(lo, nlo),
                                             cabi::vec(hi, nhi), cabi::vec(w0, nw0), zeta0, cabi::vec(sc, nsc),
                                             (int) maxit);
-        cabi::put(out, N, x.ptr, x.len, "min_cvar_core", "x");
+        cabi::put(out, N + 1, x.ptr, x.len, "min_cvar_core", "x");   // seit 1.6.5: N Gewichte + Grenzmerker (K39)
     });
 }
 
@@ -296,6 +307,17 @@ SIMLEV_C_EXPORT int simlev_c_roll_cov_core(const double* x, int64_t mx, const do
     return cabi::run([&] {
         cabi::Vec r = simlev::roll_cov_core(cabi::vec(x, mx), cabi::vec(y, my), n);
         cabi::put(out, mx, r.ptr, r.len, "roll_cov_core", "out");
+    });
+}
+
+/* Hilfskerne seit 1.6.5 (research_core_impl.h, research_vec): op, x (nx), par (np) -> out (nout, gehoert dem
+ * Aufrufer). Unpassende Abmessungen: Code 5 (BADCALL). */
+SIMLEV_C_EXPORT int simlev_c_research_vec(int op, const double* x, int64_t nx, const double* par, int64_t np,
+                                          double* out, int64_t nout) {
+    return cabi::run([&] {
+        if (nx < 0 || np < 0 || nout < 0) cabi::badcall("research_vec: Laenge negativ");
+        if (!simlev::research_vec(op, nx, x, np, par, nout, out))
+            cabi::badcall("research_vec: Abmessungen passen nicht (op %d)", op);
     });
 }
 
@@ -449,6 +471,7 @@ SIMLEV_C_EXPORT int64_t simlev_c_wd_tariff_count(const double* M, int64_t N) {
 
 SIMLEV_C_EXPORT int simlev_c_wd_tariff_compact(const double* M, int64_t N, int64_t ny, int64_t nkeep, double* out) {
     return cabi::run([&] {
+        if (ny < 0) cabi::badcall("wd_tariff_compact: Abmessungen passen nicht");   // seit 1.6.5 (CR1-Y9-1)
         if (N < 0 || simlev::wd_tariff_count(N, M) != nkeep) cabi::badcall("wd_tariff_compact: Zahl der Zeilen passt nicht");
         simlev::wd_tariff_compact(N, M, ny, nkeep, out);
     });
@@ -460,7 +483,8 @@ SIMLEV_C_EXPORT int simlev_c_wd_tariff_compact(const double* M, int64_t N, int64
  * simlev_c_engine_counts und _lots/_sells/_taxes/_prices/_events/_rows holen die uebrigen Ergebnisse;
  * simlev_c_engine_free(h). Das Engine-Objekt gehoert dem Aufrufer (kein globaler Zustand; je Thread eigene
  * Objekte). Eingaben wie python/src/_ext_engine.cpp (sim_engine_run): ai[AI_N na], ad[AD_N na], ci[CI_N],
- * cd[CD_N], fees[10], tot0[TT_N], tariff_par[n_tariff_par], zve[2 n_zve] (Jahr, zvE); event_w und base_rates:
+ * cd[CD_N], fees[15] (seit 1.6.5 mit Depotgebuehr), tot0[TT_N], tariff_par[n_tariff_par], zve[2 n_zve] (Jahr, zvE);
+ * event_w und base_rates:
  * nullptr oder je Asset ein Zeiger (nullptr ohne Spalte). Der Kern rechnet vorher die
  * Vorbereitung (prepare_core_impl.h): pi[PI_N], pd[PD_N], start[na], filled[n] bzw. nullptr, event[n] bzw.
  * nullptr, Tage der Plaene (d_*, b_*); flags_out[n] erhaelt die Tagesflags (Freibetragstage fuer das Ergebnis).
@@ -498,6 +522,54 @@ SIMLEV_C_EXPORT int simlev_c_engine_run(void* h, int64_t n, int64_t na, const do
     });
     if (rc != SIMLEV_C_OK) return rc;
     return rcode != 0 ? 6 : SIMLEV_C_OK;
+}
+
+/* Vorbereiteter Kernlauf (seit 1.6.5, Paket E, Entscheidung 176; evaluate_core_impl.h simlev_run::run_prepared):
+ * Tagesengine und Auswertung in einem Aufruf (Julia: src/sim_prepared.jl). h aus simlev_c_engine_new, he aus
+ * simlev_c_eval_new; Eingaben der Engine wie simlev_c_engine_run, dazu die Teile der Auswertung ohne den Lauf: day (n),
+ * filled nullptr oder n Werte 0/1, sc[3] start_date, stopp_date, start_value; rf nullptr oder n_rf Werte, rf_ok.
+ * Die Ergebnisse holen simlev_c_engine_* (h) und simlev_c_eval_get (he); cnt[2] wie simlev_c_eval_run. Rueckgabe wie
+ * simlev_c_engine_run: 0 in Ordnung (Engine und Auswertung gerechnet), 6 Abbruch der Engine (Auswertung nicht
+ * gerechnet), sonst wie die uebrigen Exporte. */
+SIMLEV_C_EXPORT int simlev_c_run_prepared(void* h, void* he, int64_t n, int64_t na, const double* day,
+                                          const double* const* prices, const double* const* sig_buy,
+                                          const double* const* sig_sell, const double* const* event_w,
+                                          const double* const* base_rates, const int32_t* ai, const double* ad,
+                                          const int32_t* ci, const double* cd, const double* fees,
+                                          const double* tot0, const double* tariff_par, int64_t n_tariff_par,
+                                          const double* zve, int64_t n_zve, double* const* reports,
+                                          const int32_t* pi, const double* pd, const double* start,
+                                          const int32_t* filled, const int32_t* event, int64_t d_nd,
+                                          const double* d_days, const int32_t* d_dcode, int64_t b_nd,
+                                          const double* b_days, const int32_t* b_dcode, int32_t* flags_out,
+                                          const double* ev_day, const int32_t* ev_filled, const double* sc,
+                                          const double* rf, int64_t n_rf, int32_t rf_ok, int64_t* cnt) {
+    int rcode = 0;
+    const int rc = cabi::run([&] {
+        simlev_engine::Engine& E = *static_cast<simlev_engine::Engine*>(h);
+        simlev_eval::Result& R = *static_cast<simlev_eval::Result*>(he);
+        R = simlev_eval::Result();
+        simlev_engine::Input I;
+        I.n = n; I.na = na; I.day = day;
+        I.price = prices; I.sig_buy = sig_buy; I.sig_sell = sig_sell; I.event_w = event_w; I.base_rates = base_rates;
+        I.ai = ai; I.ad = ad; I.ci = ci; I.cd = cd; I.fees = fees; I.tot0 = tot0;
+        I.tariff_par = tariff_par; I.n_tariff_par = n_tariff_par; I.zve = zve; I.n_zve = n_zve; I.reports = reports;
+        simlev_prepare::PrepFlat F;
+        F.pi = pi; F.pd = pd; F.start = start; F.filled = filled; F.event = event;
+        F.d_nd = d_nd; F.d_days = d_days; F.d_dcode = d_dcode; F.b_nd = b_nd; F.b_days = b_days; F.b_dcode = b_dcode;
+        simlev_run::EvalStatic S;
+        S.day = ev_day; S.filled = ev_filled; S.start_date = sc[0]; S.stopp_date = sc[1]; S.start_value = sc[2];
+        S.rf = rf; S.n_rf = n_rf; S.rf_ok = rf_ok;
+        int bad = 0;
+        rcode = simlev_run::run_prepared(E, I, F, S, R, &bad);
+        if (rcode == 1) cabi::badcall("simlev_c_run_prepared: Eingabe passt nicht (%d).", bad);
+        if (rcode == 3) cabi::badcall("simlev_c_run_prepared: Eingabe der Auswertung passt nicht.");
+        for (int64_t i = 0; i < n; i++) flags_out[i] = E.prep_flags[(std::size_t) i];
+        cnt[0] = (int64_t) R.um.size();
+        cnt[1] = (int64_t) R.msgs.size();
+    });
+    if (rc != SIMLEV_C_OK) return rc;
+    return rcode == 2 ? 6 : SIMLEV_C_OK;
 }
 
 /* calculate_dates_flags() ueber den Kern (prepare_core_impl.h, dates_flags): si[SI_N] (on, years,

@@ -87,6 +87,11 @@ ps <- c(NA, NaN, -0.1, 0, 4.9e-324, 1e-300, 1e-20, 2.8e-7, 0.01, 0.075, 0.3, 0.5
 pos <- c(NA, NaN, -1, 0, 1e-300, 1e-10, 0.3, 0.5, 1, 1.5, 2, 2.5, 3.7, 9.99, 10, 10.01, 171.5, 1e6, 1e300, Inf)
 ts <- c(NA, NaN, -Inf, -1e200, -1e10, -50, -5, -2, -0.3, 0, 0.3, 2, 5, 50, 1e10, Inf)
 bx <- c(NA, NaN, -0.5, 0, 1e-300, 1e-10, 0.01, 0.3, 0.5, 0.88, 0.97, 0.999999, 1, 1.5)
+# seit 1.6.5 (PR1-1): grosse |x| fuer dnorm(log = TRUE) um die Schwelle 2 sqrt(DBL_MAX) und dort, wo bis zur
+# Pruefrunde NaN kam (1e160, 3e170, 1e199 u. a. als Bitmuster)
+xg <- c(2^512, 2 * sqrt(.Machine$double.xmax) * (1 - 2^-53), 2 * sqrt(.Machine$double.xmax), 0x1.4fa015d133d53p+525,
+        0x1.6c2d4256ffcc3p+531, -0x1.6c2d4256ffcc3p+531, 0x1.3df7db46c3a1bp+566, 0x1.0b8e0acac4eafp+661,
+        0x1.4e718d7d7625ap+664, 2^1000)
 dist <- list(
   pnorm = c("sl$.sl_pnorm(x)", "L.pnorm(x)", "L.pnorm(x)", "xs"),
   pnorm_oben = c("sl$.sl_pnorm(x, lower.tail = FALSE)", "L.pnorm(x, lower_tail=False)", "L.pnorm(x; lower_tail = false)", "xs"),
@@ -98,6 +103,7 @@ dist <- list(
   qnorm_sd0 = c("sl$.sl_qnorm(x, 1, 0)", "L.qnorm(x, 1.0, 0.0)", "L.qnorm(x, 1.0, 0.0)", "ps"),
   dnorm = c("sl$.sl_dnorm(x)", "L.dnorm(x)", "L.dnorm(x)", "xs"),
   dnorm_log = c("sl$.sl_dnorm(x, 1, 2, log = TRUE)", "L.dnorm(x, 1.0, 2.0, log=True)", "L.dnorm(x, 1.0, 2.0; log = true)", "xs"),
+  dnorm_log_gross = c("sl$.sl_dnorm(x, log = TRUE)", "L.dnorm(x, log=True)", "L.dnorm(x; log = true)", "xg"),
   erfc = c("sl$.sl_erfc(x)", "L.erfc(x)", "L.erfc(x)", "xs"),
   lgamma = c("sl$.sl_lgamma(x)", "L.lgamma(x)", "L.lgamma(x)", "pos"),
   pt_3 = c("sl$.sl_pt(x, 3)", "L.pt(x, 3.0)", "L.pt(x, 3.0)", "ts"),
@@ -118,7 +124,7 @@ dist <- list(
   plogis = c("sl$.sl_plogis(x)", "L.plogis(x)", "L.plogis(x)", "xs"),
   qlogis = c("sl$.sl_qlogis(x)", "L.qlogis(x)", "L.qlogis(x)", "ps")
 )
-grids <- list(xs = xs, ps = ps, pos = pos, ts = ts, bx = bx)
+grids <- list(xs = xs, ps = ps, pos = pos, ts = ts, bx = bx, xg = xg)
 for (nm in names(dist)) {
   d <- dist[[nm]]
   cs(paste0("vert_", nm), r = d[1], py = paste0("result = ", d[2]), jl = paste0("result = ", d[3]),

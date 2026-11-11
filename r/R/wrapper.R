@@ -69,30 +69,27 @@
 #' @noRd
 wrapper_config <- function(strategy, rebalance = NULL, costs = funds_costs(), order_fee = NULL, volume = NULL) {
   if (missing(strategy) || is.null(strategy))
-    stop("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die create_strategy() annimmt).",
-         call. = FALSE)
+    chk_stop("a.m_wrapper_config")
   if (!inherits(strategy, "strategy")) {
     if (!is.list(strategy))   # seit 1.6.4 ohne Klasse (Entscheidung 8)
-      stop("wrapper_config: strategy muss ein Objekt aus create_strategy() oder eine benannte Liste von Asset-Konfigurationen sein.",
-           call. = FALSE)
+      chk_stop("a.m_wrapper_config_2")
     strategy <- create_strategy(assets = strategy)
   }
   strategy_validate(strategy)
   nested <- .strategy_wrappers(strategy)
   if (length(nested))
-    stop(sprintf("wrapper_config: Asset '%s' der inneren Strategie hat selbst einen Wrapper; verschachtelte Wrapper sind nicht m\u00f6glich.",
-                 nested[1]), call. = FALSE)
+    chk_stop("a.m_wrapper_config_3", nested[1])
   total <- sum(vapply(strategy, function(a) a$share, numeric(1)))
   if (abs(total - 1) > 1e-6)
-    stop(sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.4f, m\u00fcssen aber 1 ergeben.", total),
+    stop(sprintf("wrapper_config: Gewichte (share) der inneren Strategie summieren sich auf %.8g, m\u00fcssen aber 1 ergeben.", total),
          call. = FALSE)
   if (!is.null(rebalance) && !inherits(rebalance, "SimLevRebalancePlan"))
-    stop("wrapper_config: rebalance muss NULL oder ein Objekt aus rebalance_plan() sein.", call. = FALSE)
+    chk_stop("a.m_wrapper_config_4")
   if (!inherits(costs, "SimLevFundsCosts"))
-    stop("wrapper_config: costs muss ein Objekt aus funds_costs() sein.", call. = FALSE)
+    chk_stop("a.m_wrapper_config_5")
   fs <- .fee_spec(order_fee, "wrapper_config", "order_fee")
   if (!is.null(volume) && (!is.numeric(volume) || length(volume) != 1L || !is.finite(volume) || volume <= 0))
-    stop("wrapper_config: 'volume' muss NULL oder eine einzelne endliche Zahl > 0 sein (Fondsvolumen in EUR).", call. = FALSE)
+    chk_stop("a.m_wrapper_config_6")
   if (!is.null(fs) && is.null(volume) && (fs$fixed > 0 || fs$min > 0 || is.finite(fs$max)))
     stop(paste0("wrapper_config: order_fee enth\u00e4lt feste Betr\u00e4ge in EUR (fixed, min oder max); daf\u00fcr ist das Fondsvolumen ",
                 "'volume' in EUR n\u00f6tig (die innere Rechnung startet dann mit diesem Volumen). Ohne volume gehen nur ",
@@ -183,7 +180,7 @@ print.SimLevWrapperConfig <- function(x, ...) {
   idx <- .date_match(d$date, res$dates)          # seit 1.5.1 ueber die Tageszahl statt Texte je Tag
   idx <- idx[!res$filled[idx]]
   if (!length(idx))
-    stop(sprintf("%s: keine Handelstage in der inneren Rechnung (alle Tage aufgef\u00fcllt).", who), call. = FALSE)
+    chk_stop("a.m_wrapper_nav_calc", who)
   dates <- res$dates[idx]; G <- res$worth[idx]
   ym <- .date_ym(dates)                            # seit 1.5.1 ganzzahlig statt format(dates, "%Y")
   yr <- if (is.null(ym)) as.integer(format(dates, "%Y")) else as.integer(ym$y)
@@ -194,8 +191,7 @@ print.SimLevWrapperConfig <- function(x, ...) {
                           as.numeric(res$dates[1L]))
   if (cr$bad > 0) {
     t <- cr$bad
-    stop(sprintf("%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert.", who,
-                 format(dates[t]), format(G[t]), format(if (t > 1L) G[t - 1L] else S)), call. = FALSE)
+    chk_stop("a.m_wrapper_nav_calc_2", who, format(dates[t]), format(G[t]), format(if (t > 1L) G[t - 1L] else S))
   }
   nav <- cr$nav; gross <- cr$gross; fee_t <- cr$fee; acc_t <- cr$perf_fee; paid_t <- cr$perf_paid; hwm <- cr$hwm
   out <- data.frame(date = dates, nav = nav, gross = gross, fee = fee_t, perf_fee = acc_t, perf_paid = paid_t, hwm = hwm)
@@ -212,9 +208,9 @@ wrapper_nav <- function(data, wrapper, splits = NULL) {
   # seit 1.6.4 Meldungen ohne Klasse (Entscheidung 8); data nur als Tabelle, die Meldung nennt die Umwandlung
   # (Entscheidung 6, wie simulation())
   if (missing(wrapper) || !inherits(wrapper, "SimLevWrapperConfig"))
-    stop("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein.", call. = FALSE)
+    chk_stop("a.m_wrapper_nav")
   if (!is.null(splits) && !inherits(splits, "SimLevSplitRule"))
-    stop("wrapper_nav: splits muss NULL oder ein Objekt aus split_rule() sein.", call. = FALSE)
+    chk_stop("a.m_wrapper_nav_2")
   if (missing(data) || !is.data.frame(data) || !"date" %in% names(data))
     chk_stop("e1.tabelle_spalten", "wrapper_nav", chk_msg("tabelle.formen"))
   fa <- attr(data, "filled")

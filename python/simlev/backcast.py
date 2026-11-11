@@ -24,6 +24,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from ._pruefen import chk_msg, chk_stop   # seit 1.6.5 (Entscheidung 193)
 from . import _lib
 from ._r import libm as _libm
 from ._r.base import quiet_fp
@@ -87,22 +88,24 @@ def _resolve_series(x, data, what, default=0):
     n = _nrow(data)
     if x is None:
         return np.full(n, float(default))
+    # seit 1.6.5 (CR2-P-5): Stufentabelle bzw. benannter Vektor braucht die Spalte date in data (R .resolve_series)
+    if (isinstance(x, pd.DataFrame) or _is_named_numeric(x)) and "date" not in _names(data):
+        chk_stop("spalten", what, "'date'")
     xf = _as_frame(x)
     if isinstance(xf, pd.DataFrame):
         if xf.shape[1] < 2:
-            raise ValueError("%s: data.frame braucht die Spalten date und Wert." % what)
+            chk_stop("c.m_resolve_series", what)
         nm = _names(xf)
         dcol = "date" if "date" in nm else nm[0]
         vcol = [k for k in nm if k != dcol][0]
         fd = _days(_to_date(_col(xf, dcol), "%s: Datum" % what))
         if np.isnan(fd).any():   # seit 1.6.4 abgelehnt wie in R und Julia (Entscheidung 147, T3-N5)
-            from ._pruefen import chk_stop
             chk_stop("ut3.datum_fehlt", what, int(np.flatnonzero(np.isnan(fd))[0]) + 1)
         return _step_series(fd, _as_numeric(_col(xf, vcol)), _days(_to_date(_col(data, "date"), what)))
     if isinstance(x, str) or (isinstance(x, (list, tuple, np.ndarray)) and len(x) == 1 and isinstance(list(np.ravel(x))[0], str)):
         x = x if isinstance(x, str) else str(list(np.ravel(x))[0])
         if x not in _names(data):
-            raise ValueError("%s: Spalte '%s' fehlt im Datensatz." % (what, x))
+            chk_stop("a.m_cpi_level", what, x)
         v = _as_numeric(_col(data, x))
         if np.isnan(v).any():
             v = _fill_na(v, "locf")
@@ -275,22 +278,22 @@ def _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
     """Überlappung, Komponenten und Hilfsgrößen vorbereiten (R: ``.bc_prepare``)."""
     data = _as_frame(data)
     if not isinstance(data, pd.DataFrame):
-        raise ValueError("'data' muss ein data.frame sein.")
+        chk_stop("c.m_bc_prepare")
     if "date" not in _names(data):
-        raise ValueError("'data' braucht eine Spalte 'date'.")
+        chk_stop("c.m_bc_prepare_2")
     data = data.copy()
     dts = _to_date(_col(data, "date"), "'data$date'")
     data["date"] = dts
     dd0 = _days(dts)
     if np.isnan(dd0).any():
-        raise ValueError("'data$date' enthält fehlende Daten.")
+        chk_stop("c.m_bc_prepare_3")
     if (np.diff(dd0) <= 0).any():
-        raise ValueError("'data$date' muss streng aufsteigend und ohne Duplikate sein.")
+        chk_stop("c.m_bc_prepare_4")
     for col in [product, index]:
         if col not in _names(data):
-            raise ValueError("Spalte '%s' fehlt im Datensatz." % col)
+            chk_stop("c.m_bc_prepare_5", col)
     if not _is_numeric_value(leverage) or np.size(leverage) != 1 or float(np.ravel(leverage)[0]) == 0:
-        raise ValueError("'leverage' muss eine Zahl ungleich 0 sein.")
+        chk_stop("c.m_bc_check_args")
     L = float(np.ravel(leverage)[0])
     idx = _as_numeric(_col(data, index))
     if fx is not None:
@@ -299,7 +302,7 @@ def _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
         idx = _fill_na(idx, index_fill, keep_leading=True)
     with np.errstate(invalid="ignore"):
         if (idx[~np.isnan(idx)] <= 0).any():
-            raise ValueError("Indexwerte müssen positiv sein.")
+            chk_stop("c.m_bc_prepare_6")
     prod = _as_numeric(_col(data, product)).copy()
     with np.errstate(invalid="ignore"):
         prod[~np.isnan(prod) & (prod <= 0)] = _NAN
@@ -498,7 +501,7 @@ def _bc_check_series(x, data, fn, arg):
     """Angabe einer Reihe (ter, rate, fx) vor ``_resolve_series`` (R ``.bc_check_series``): Zahl(en) endlich,
     Spaltenname einer Zahlenspalte mit endlichen Werten oder NA, Tabelle (date, Wert) mit endlichen Zahlen; Kategorie,
     Wahrheitswerte, Listen aus Text und Matrizen sind ein Fehler."""
-    from ._pruefen import chk_is_factor, chk_stop
+    from ._pruefen import chk_is_factor
     from .dependence import _e4_numcol, _e4_numscalar, _e4_isna
     if x is None:
         return x
@@ -512,7 +515,8 @@ def _bc_check_series(x, data, fn, arg):
             if chk_is_factor(x[dcol]):
                 chk_stop("spalte_faktor", fn, dcol)
             _e4_numcol(x, vcol, fn)
-            if not np.isfinite(np.asarray(x[vcol], dtype=np.float64)).all():
+            # seit 1.6.5 (CR2-K-4): Tabelle ohne Zeile wie fehlende Werte abgelehnt
+            if len(x) == 0 or not np.isfinite(np.asarray(x[vcol], dtype=np.float64)).all():
                 chk_stop("e3.werte", fn, arg)
         return x
     if isinstance(x, (list, tuple, np.ndarray)) and len(x) == 1 and isinstance(list(np.ravel(np.asarray(x, dtype=object)))[0], str):
@@ -522,8 +526,16 @@ def _bc_check_series(x, data, fn, arg):
             chk_stop("e4.reihe", fn, arg)
         if x in _names(data):
             _e4_numcol(data, x, fn)
-            if np.isinf(np.asarray(_as_numeric(_col(data, x)), dtype=np.float64)).any():
+            v = np.asarray(_as_numeric(_col(data, x)), dtype=np.float64)
+            if np.isinf(v).any():
                 chk_stop("e1.spalte_endlich", fn, x)
+            # seit 1.6.5 (CR2-H-4): Spalte ohne Wert Fehler, späterer Beginn Hinweis (R .bc_check_series)
+            ok = np.flatnonzero(~np.isnan(v))
+            if v.size and not ok.size:
+                chk_stop("c.bc_spalte_leer", fn, x, arg)
+            if ok.size and ok[0] > 0:
+                from ._util import _message
+                _message(chk_msg("c.bc_spalte_spaet", fn, x, arg, int(ok[0])))
         return x
     if isinstance(x, Mapping):
         vals = list(x.values())
@@ -562,10 +574,14 @@ def _bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_lag, 
     lv = leverage
     if (chk_is_factor(lv) or not _is_numeric_value(lv) or np.size(lv) != 1
             or not math.isfinite(float(np.ravel(lv)[0])) or float(np.ravel(lv)[0]) == 0):
-        raise ValueError("'leverage' muss eine Zahl ungleich 0 sein.")   # seit 1.6.4 auch NA und Inf
+        chk_stop("c.m_bc_check_args")   # seit 1.6.4 auch NA und Inf
     _bc_check_series(ter, data, fn, "ter")
     _bc_check_series(rate, data, fn, "rate")
     _bc_check_series(fx, data, fn, "fx")
+    from .bonds import _step_start_warn                        # seit 1.6.5 (CR2-V3-4 Punkt 4)
+    _step_start_warn(ter, data, fn, "ter")
+    _step_start_warn(rate, data, fn, "rate")
+    _step_start_warn(fx, data, fn, "fx")
     chk_int1(rate_lag, fn, "rate_lag", lo=0, hi=max(0, len(data) - 1))
     chk_num1(ter_basis, fn, "ter_basis", lo=0, lo_open=True)
     chk_num1(rate_basis, fn, "rate_basis", lo=0, lo_open=True)
@@ -574,7 +590,7 @@ def _bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_lag, 
 
 def _bc_check_lag(lag, data, fn, auto_ok=True):
     """lag: ``"auto"`` (nur mit ``auto_ok``) oder ganze Zahl mit ``|lag| < nrow(data)`` (R ``.bc_check_lag``)."""
-    from ._pruefen import chk_scalar, chk_stop
+    from ._pruefen import chk_scalar
     from .dependence import _e4_numscalar
     key = "e4.lag" if auto_ok else "e4.lag_ohne_fit"
     lag = chk_scalar(lag)
@@ -588,7 +604,7 @@ def _bc_check_lag(lag, data, fn, auto_ok=True):
 
 def _bc_check_par(p, fn, arg, null_ok=False):
     """drag, spread, beta als benannte Liste (dict) einzelner endlicher Zahlen (fixed, params; R ``.bc_check_par``)."""
-    from ._pruefen import chk_is_factor, chk_scalar, chk_stop
+    from ._pruefen import chk_is_factor, chk_scalar
     from .dependence import _e4_numscalar
     if p is None and null_ok:
         return p
@@ -640,7 +656,10 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             gefüllt).
         ter: Laufende Kosten in Prozent p. a. (0.5 = 0,5 Prozent; Standard 0): Skalar, Vektor der Länge
             ``nrow(data)``, Spaltenname, DataFrame(date, ter) (Stufenfunktion, gültig ab Datum) oder benannter
-            Vektor mit Datumsnamen, z. B. ``["2010-02-24" = 0.35, "2023-10-10" = 0.50]``.
+            Vektor mit Datumsnamen, z. B. ``{"2010-02-24": 0.35, "2023-10-10": 0.50}``.
+            Seit 1.6.5 (für ``ter``, ``rate``, ``fx`` gleich): eine Spalte ohne einen Wert ist ein Fehler, führende fehlende
+            Werte erhalten den ersten Wert der Spalte (mit Hinweis), eine Tabelle ohne Zeile ist ein Fehler, eine
+            Stufentabelle, die nach dem ersten Datentag beginnt, gibt eine Warnung (davor gilt ihr erster Wert).
         leverage: Hebel L des Produkts relativ zum Index als Zahl ungleich 0 (Standard 1; z. B. 2, -1, -2). Ist
             der Index bereits ein Hebelindex (z. B. MSCI USA Leveraged 2x Daily), ist ``leverage = 1`` zu setzen.
         rate: Finanzierungszins in Prozent p. a. (Tagesgeld, z. B. ESTR, EONIA, SOFR, EFFR) in denselben Formen
@@ -657,6 +676,10 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             (Restabweichung in Prozent p. a.), ``"spread"`` (Spread auf den finanzierten Anteil in Prozent p. a.,
             nur für L != 1, sonst mit Warnung ignoriert) und ``"beta"`` (effektiver Hebel-Multiplikator, Faktor;
             nur Strukturmodell). ``character(0)`` schätzt nichts (reine Kostenrechnung).
+            ``drag`` und ``spread`` wirken beide je Kalendertag und sind gemeinsam nicht bestimmbar: stehen beide in ``fit``,
+            wird seit 1.6.5 mit Warnung nur ``drag`` geschätzt (``spread`` bleibt beim festen Wert aus ``fixed``). Liegt ein
+            Schätzwert an der Grenze von ``bounds`` bzw. auf dem ersten oder letzten Gitterpunkt, warnt die Funktion seit
+            1.6.5; das Ergebnis enthält seit 1.6.5 ``convergence`` (0 = konvergiert).
         fixed: Benannte Liste fester Parameterwerte, z. B. ``{"spread": 0.4}``; nicht genannte Parameter: drag =
             0, spread = 0 (Prozent p. a.), beta = 1. Die Werte dienen auch als Startwerte der Optimierung.
         objective: ``"level"`` (Standard; kumulierte Pfadabweichung der Log-Niveaus, wie im Skript '02 Funds
@@ -754,7 +777,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
     method = _match_arg(method, ("optimize", "grid"))
     accrual = _match_arg(accrual, ("linear", "geometric"))
     index_fill = _match_arg(index_fill, ("locf", "linear", "stine"))
-    from ._pruefen import chk_bool1, chk_date1, chk_is_factor, chk_prob, chk_stop
+    from ._pruefen import chk_bool1, chk_date1, chk_is_factor, chk_prob
     from .dependence import _e4_count, _e4_vec
     fn = "backcast_fit"                                        # seit 1.6.4 vor der Rechnung (K42 E4, B-017)
     _bc_check_args(fn, data, product, index, ter, leverage, rate, fx, rate_lag, ter_basis, rate_basis)
@@ -785,12 +808,11 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
     grid = _default_grid() if grid is None else np.atleast_1d(np.asarray(grid, dtype=np.float64))
     fit = _r_unique(_as_char_vec(fit))
     if len(fit) and not all(f in ("drag", "spread", "beta") for f in fit):
-        raise ValueError("'fit' darf nur 'drag', 'spread' und 'beta' enthalten.")
+        chk_stop("c.m_backcast_fit")
     if bounds is None:
         bounds = dict(_BOUNDS0)
     if not isinstance(bounds, Mapping) or (len(bounds) and not all(k in ("drag", "spread", "beta") for k in bounds)):
-        raise ValueError("'bounds' muss eine benannte Liste mit Einträgen drag, spread und/oder beta sein, "
-                         "z. B. list(drag = c(-5, 5)).")
+        chk_stop("c.m_backcast_fit_2")
     bounds = _modify_list(_BOUNDS0, bounds)
     for k, b in bounds.items():
         ok = _is_numeric_value(b) and np.size(b) == 2 and not chk_is_factor(b)
@@ -799,13 +821,17 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             # seit 1.6.4 auch die Breite endlich (B-005: c(-1e308, 1e308) ergab eine endlose Brent-Suche)
             ok = bool(np.isfinite(bb).all()) and bb[0] < bb[1] and math.isfinite(float(bb[1]) - float(bb[0]))
         if not ok:                                             # seit 1.6.4 ohne Wert, endlich
-            raise ValueError("bounds$%s muss c(unten, oben) mit unten < oben sein." % k)
+            chk_stop("c.m_backcast_fit_3", k)
         bounds[k] = [float(bb[0]), float(bb[1])]
     if model != "structural" and "beta" in fit:
-        warnings.warn("'beta' wird bei Regressionsmodellen über die Regression geschätzt und hier ignoriert.")
+        warnings.warn(chk_msg("c.m_backcast_fit_4"))
         fit = [f for f in fit if f != "beta"]
     if leverage == 1 and "spread" in fit:
-        warnings.warn("'spread' ist bei leverage = 1 nicht identifizierbar und wird ignoriert.")
+        warnings.warn(chk_msg("c.m_backcast_fit_5"))
+        fit = [f for f in fit if f != "spread"]
+    elif "drag" in fit and "spread" in fit:
+        # seit 1.6.5 (K10, CR2-A-4): gemeinsam nicht bestimmbar, nur drag (R backcast_fit)
+        warnings.warn(chk_msg("c.bc_kollinear", fn))
         fit = [f for f in fit if f != "spread"]
 
     lag_auto = isinstance(lag, str) and lag == "auto"
@@ -823,7 +849,6 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
         sg = 1.0 if prep.leverage > 0 else -1.0
         j = _which_max([sg * c for c in cors])
         if j is None:   # keine Korrelation bestimmbar: seit 1.6.4 Meldung wie R und Julia (Entscheidung 145)
-            from ._pruefen import chk_stop
             chk_stop("ut3.lag_auto", "backcast_fit")
         lag = cand[j]
         prep = _bc_prepare(data, product, index, ter, leverage, rate, fx, int(rate_lag), ter_basis, rate_basis,
@@ -835,7 +860,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
     if end is not None:
         has = has & (prep.dates <= _as_date_any(end)[0])
     if has.sum() < 20:
-        raise ValueError("Zu wenige gemeinsame Beobachtungen von Produkt und Index (mindestens 20).")
+        chk_stop("c.m_backcast_fit_6")
     hw = np.flatnonzero(has)
     w0, w1 = int(hw.min()), int(hw.max())
     win = np.arange(w0, w1 + 1)
@@ -860,7 +885,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
         xx = prep.x[o]
         ok = np.isfinite(y) & np.isfinite(xx) & ~np.isnan(prep.prod[o - 1])
         if ok.sum() < 20:
-            raise ValueError("Zu wenige aufeinanderfolgende Beobachtungen für das Regressionsmodell.")
+            chk_stop("c.m_fit_reg")
         if model == "linear":
             X = np.column_stack([np.ones(int(ok.sum())), xx[ok]])
             return RList(coef=_lm_fit_coef(X, y[ok]))
@@ -904,7 +929,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             return {"par": dict(par0), "value": make_obj(rows, ob, rg)(np.empty(0)), "grid": None}
         if method == "grid":
             if len(fit) != 1:
-                raise ValueError("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
+                chk_stop("c.m_run_fit")
             # Modellrenditen je Gitterpunkt einmal für Zielwert und Fehlermatrix (seit 1.6.3; bis 1.6.2 zweimal),
             # nur im Fenster rows (elementweise dieselben Ausdrücke wie auf allen Zeilen); seit 1.6.4 die Basis vorab
             # in allen Modellen (B-068) und je Punkt ein _bc_errors (B-069: "level" bei objective = "level",
@@ -962,6 +987,21 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
         return {"par": p, "value": oval, "grid": None, "convergence": conv}
 
     res = run_fit(win, obs, reg)
+    # seit 1.6.5 (CR2-A-5, K22): Schätzwert an der Suchgrenze bzw. am Gitterrand und fehlende Konvergenz melden
+    from ._pruefen import chk_msg as _cm
+    for k in fit:
+        v = float(res["par"][k])
+        if method == "grid":
+            ga = np.asarray(grid, dtype=np.float64)
+            edge = v == float(np.min(ga)) or v == float(np.max(ga))
+        else:
+            b = bounds[k]
+            edge = v <= b[0] + 1e-6 * (b[1] - b[0]) or v >= b[1] - 1e-6 * (b[1] - b[0])
+        if edge:
+            from ._r import fmt as _fmtm
+            warnings.warn(_cm("c.bc_rand", fn, k, _fmtm.format(v, digits=6)))
+    if res.get("convergence") is not None and res["convergence"] != 0:
+        warnings.warn(_cm("c.bc_konvergenz", fn, int(res["convergence"])))
     r_all = _bc_model_returns(prep, res["par"], model, reg)
     diag = _bc_diagnostics(r_all[win], np.arange(len(win)), obs, prep.dates[win])
     diag_naive = _bc_diagnostics(_bc_model_returns(prep, par0, model, reg)[win], np.arange(len(win)), obs,
@@ -1007,6 +1047,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
     out["grid"] = res.get("grid")
     out["grid_metrics"] = res.get("metrics")
     out["validation"] = oos
+    out["convergence"] = int(res["convergence"]) if res.get("convergence") is not None else 0   # seit 1.6.5 (CR2-A-5)
     out["regression"] = reg
     out["inception"] = inception
     out["window"] = _as_dates([prep.dates[w0], prep.dates[w1]])
@@ -1076,6 +1117,10 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
         als Anteil), ``model`` (reine Modellreihe auf gleichem Niveau), ``product`` (Rohdaten) und ``source``
         ("backcast", "product" oder "filled"). Attribute ``"fit"`` (Fit-Objekt oder ``None``), ``"params"``
         (verwendete Parameter) und ``"splice_date"`` (Verkettungsdatum oder ``NA``).
+        Seit 1.6.5: an Produkttagen ist ``value`` genau der Produktkurs (bei ``rebase`` mal Faktor); beginnt der Index erst
+        nach dem Verkettungstag, gelten die echten Kurse ab der Verkettung (``model`` dann ab dem ersten Tag mit Index und
+        Produkt); enden die Produktkurse vor dem Datenende, warnt die Funktion (die Zeilen danach sind fortgeschrieben,
+        ``source = "filled"``).
 
     Beispiel::
 
@@ -1091,12 +1136,12 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
     """
     fill = _match_arg(fill, ("locf", "linear", "stine", "model"))
     import datetime as _dtm
-    from ._pruefen import chk_choice, chk_df, chk_dots, chk_num1, chk_scalar, chk_stop
+    from ._pruefen import chk_choice, chk_df, chk_dots, chk_num1, chk_scalar
     fn = "backcast"                                            # seit 1.6.4 vor der Rechnung (K42 E4)
     chk_dots(list(kwargs), ("product", "index", "ter", "leverage", "rate", "fx", "rate_lag", "ter_basis", "rate_basis",
                             "accrual", "index_fill", "lag", "model"), fn)   # Entscheidung 21
     if fit is not None and not isinstance(fit, SimLevBackcastFit):
-        raise ValueError("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+        chk_stop("c.m_backcast")
     chk_df(data, fn, "data", null_ok=True)                     # Entscheidung 6
     _bc_check_par(params, fn, "params", null_ok=True)
     if params is not None:
@@ -1108,15 +1153,15 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
     if fit is None:
         dots = dict(kwargs)
         if data is None:
-            raise ValueError("Ohne 'fit' muss 'data' angegeben werden.")
+            chk_stop("c.m_backcast_2")
         a = _modify_list({"ter": 0, "leverage": 1, "rate": None, "fx": None, "rate_lag": 0, "ter_basis": 365,
                           "rate_basis": 360, "accrual": "linear", "index_fill": "locf"}, dots)
         if a.get("product") is None or a.get("index") is None:
-            raise ValueError("'product' und 'index' müssen angegeben werden.")
+            chk_stop("c.m_backcast_3")
         a["data"] = data
         model = dots.get("model") if dots.get("model") is not None else "structural"
         if not (isinstance(model, str) and model == "structural"):
-            raise ValueError("Ohne Fit ist nur model = 'structural' möglich.")
+            chk_stop("c.m_backcast_4")
         _bc_check_args(fn, data, a["product"], a["index"], a.get("ter"), a.get("leverage"), a.get("rate"), a.get("fx"),
                        a.get("rate_lag"), a.get("ter_basis"), a.get("rate_basis"))
         for k in ("leverage", "rate_lag", "ter_basis", "rate_basis", "accrual", "index_fill"):
@@ -1129,7 +1174,7 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
         lag = int(chk_scalar(dots.get("lag")) if dots.get("lag") is not None else 0)
     else:
         if not isinstance(fit, SimLevBackcastFit):
-            raise ValueError("'fit' muss ein SimLevBackcastFit-Objekt sein.")
+            chk_stop("c.m_backcast")
         if kwargs:
             chk_stop("e4.fit_angabe", fn, str(next(iter(kwargs))))   # Entscheidung 71 (bis 1.6.3 still ignoriert)
         a = dict(fit["call_args"])
@@ -1154,7 +1199,7 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
     else:
         sd0 = _days(_to_date(splice, "splice"))
         if len(sd0) != 1 or math.isnan(sd0[0]):
-            raise ValueError("splice: \"inception\", \"none\" oder ein Datum ('JJJJ-MM-TT').")
+            chk_stop("c.m_backcast_5")
         cand = obs[prep.dates[obs] >= sd0[0]]
         if not len(cand):
             raise ValueError("Kein Produktkurs ab dem Verkettungsdatum vorhanden (letzter Produktkurs am %s)."
@@ -1186,33 +1231,49 @@ def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("loc
         source[seg] = np.where(np.isnan(pv), "filled", "product")
         if last_obs < n - 1:
             source[last_obs + 1:] = "filled"
+            # seit 1.6.5 (K23, CR2-B-4): Produktkurse enden vor dem Datenende -> Warnung (R backcast)
+            warnings.warn(chk_msg("c.bc_ende", "backcast", _date_str(prep.dates[last_obs]), n - 1 - last_obs))
         with np.errstate(invalid="ignore", divide="ignore"):
             r_seg = np.concatenate([[_NAN], pf[1:] / pf[:-1] - 1])
         r_out[seg[1:]] = r_seg[1:]
         r_out[k0] = r_mod[k0]
     lr_all = _libm.log1p(np.maximum(np.where(np.isfinite(r_out), r_out, 0.0), -0.999999))
     lr_mod = _libm.log1p(np.maximum(np.where(np.isfinite(r_mod), r_mod, 0.0), -0.999999))
-    lr_all[: first_idx + 1] = 0
+    # seit 1.6.5 (CR2-B-1): Renditen nur bis min(first_idx, k0) genullt, value ab k0 nicht NA; model am ersten Tag
+    # mit Index und Produkt verankert (R backcast)
+    f0 = first_idx if k0 is None else min(first_idx, k0)
+    lr_all[: f0 + 1] = 0
     lr_mod[: first_idx + 1] = 0
     cl = r_cumsum(lr_all)
     cm = r_cumsum(lr_mod)
     if k0 is not None:
+        if k0 >= first_idx:
+            km = k0
+        else:
+            ko = obs[obs >= first_idx]
+            km = int(ko[0]) if ko.size else None
         value = prod[k0] * _libm.exp(cl - cl[k0])
-        model_v = prod[k0] * _libm.exp(cm - cm[k0])
+        model_v = prod[km] * _libm.exp(cm - cm[km]) if km is not None else np.full(n, _NAN)
     else:
         value = 100 * _libm.exp(cl)
         model_v = 100 * _libm.exp(cm)
+    if f0 > 0:
+        value[:f0] = _NAN
     if first_idx > 0:
-        value[:first_idx] = _NAN
         model_v[:first_idx] = _NAN
+    # seit 1.6.5 (K11, CR2-B-2): an Produkttagen genau der Produktkurs
+    ptd = source == "product"
+    value[ptd] = prod[ptd]
     if rebase is not None:
-        s = rebase / value[first_idx]
+        s = rebase / value[f0]
         value = value * s
         model_v = model_v * s
     with np.errstate(invalid="ignore", divide="ignore"):
         ret = np.concatenate([[_NAN], value[1:] / value[:-1] - 1])
+    # seit 1.6.5 (CR2-W4-3): fehlende Produktkurse als NA wie in R und Julia (bis 1.6.4 schlichtes NaN, Druck "NaN")
+    prod_o = np.where(np.isnan(prod), _NAN, prod)
     out = SimLevBackcast({"date": _as_dates(prep.dates), "value": value, "return": ret, "model": model_v,
-                          "product": prod, "source": source})
+                          "product": prod_o, "source": source})
     out.attrs["fit"] = fit
     out.attrs["params"] = RList(par)
     out.attrs["splice_date"] = _as_dates([prep.dates[k0]])[0] if k0 is not None else _NAN   # NA wie in R
@@ -1380,7 +1441,7 @@ def summary(object, *args, **kwargs):  # noqa: A002
     """Generisches ``summary()`` für Objekte dieses Moduls."""
     if isinstance(object, SimLevBackcastFit):
         return summary_SimLevBackcastFit(object)
-    raise TypeError("kein summary() für %s" % type(object).__name__)
+    chk_stop("e5.methode", "summary")   # seit 1.6.5 (CR2-O-7) wie simlev.summary: ohne Typ (Entscheidung 8)
 
 
 from .svg import _bc_doc, _bc_panel, _plot_method  # noqa: E402

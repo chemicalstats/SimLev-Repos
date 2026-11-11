@@ -25,16 +25,16 @@ _metrics(m) = m === nothing ? SL.Bootstrap.bootstrap_study_metrics : m
 # umgewandelt); sim_args als Liste, metrics als Funktion (nothing = Standard), cores ganze Zahl >= 1.
 function _sens_check_sim(data, strategy)
     (data isa SL.RFrame || data isa SL._Frame) ||
-        error("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein ($(SL.chk_msg("tabelle.formen"))).")
+        SL.chk_stop("a.m_sim_check_inputs", SL.chk_msg("tabelle.formen"))
     _e2_check_strategy(strategy)
     return nothing
 end
 "strategy wie simulation(): nicht leer, alle Assets benannt; gleiche Meldungen (R: .e2_check_strategy)."
 function _e2_check_strategy(strategy)
     (strategy === nothing || (applicable(length, strategy) && length(strategy) == 0)) &&
-        error("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()).")
+        SL.chk_stop("a.m_sim_check_inputs_2")
     (!SL._is_mapping(strategy) || any(p -> isempty(p.first), SL._kvpairs(strategy))) &&
-        error("simulation: Alle Assets in 'strategy' müssen benannt sein (Name = Kursspalte in 'data').")
+        SL.chk_stop("a.m_sim_check_inputs_3")
     return nothing
 end
 function _sens_check_common(fn, sim_args, cores; metrics = nothing, check_metrics::Bool = true)
@@ -59,7 +59,28 @@ function _lev_check(fn, data, index, rate, expense, spread)
     end
     SL.chk_num1(expense, fn, "expense")
     SL.chk_num1(spread, fn, "spread")
+    # seit 1.6.5 (CR2-V2-1): Datum ohne NA und aufsteigend, Index nach dem Auffüllen endlich und > 0, Zinsreihe ohne
+    # Lücke (bis 1.6.4 Rohfehler bzw. still NaN, 0 oder negative Tagesabstände; Entscheidung 186 M8)
+    if SL.nrow(data) > 0
+        dt = OF._dates(_col(data, "date"), "data\$date")
+        (any(ismissing, dt) || any(i -> dt[i] < dt[i-1], 2:length(dt))) && SL.chk_stop("e3.datum", fn)
+        idx = OF._tofloat(SL.Backcast._fill_na(OF._tofloat(_col(data, String(index))), "locf"))
+        bad = findfirst(z -> !(isfinite(z) && z > 0), idx)
+        bad === nothing || SL.chk_stop("b2b.index_positiv", fn, String(index), bad)
+        rt = OF._tofloat(PS._vec(SL.Backcast._resolve_series(SL.chk_scalar(rate), data, "rate")))
+        miss = findfirst(isnan, rt)
+        miss === nothing || SL.chk_stop("a.mm_luecke", fn, "rate", SimLev.fmt_date(Int(OF._days(dt[miss]))))
+    end
     return index
+end
+
+# Fehlgeschlagene Läufe der Studien (seit 1.6.5, CR2-C-10/CR2-H-6; R `.sens_failed`): alle fehlgeschlagen = Fehler,
+# sonst Warnung mit Anzahl und Meldungen
+function _sens_failed(fn, err, n)
+    txt = _table_msg(err)
+    length(err) == n && SL.chk_stop("b2b.alle_fehl", fn, n, txt)
+    isempty(err) || @warn SL.chk_msg("b2b.teil_fehl", fn, length(err), n, txt)
+    nothing
 end
 # simulation() mit aufgelösten sim_args (Bausteine, Pfade; R: .sim_call)
 _sim(data, strategy, args) = OF._quiet(() -> SL._sim_call(data, strategy, args))
@@ -137,10 +158,9 @@ diesem Abschnitt (`sensitivity_rebalancing()`, `sensitivity_leverage()`).
   bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
   Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
   Einheitenreihenfolge.
-  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
-  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
-  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+  `"auto"`, nimmt aber höchstens so viele Aufgaben (bis 1.6.4 immer so viele ohne Messung; höchstens Zahl der
+  Julia-Threads, mit einem Thread nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
   Ausgaben, die eigene Funktionen
   (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
   in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
@@ -171,6 +191,10 @@ SimLev.@study function sensitivity_grid(data, strategy, grid; sim_args = nothing
     @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     _sens_check_sim(data, strategy)
     # grid: RFrame oder benannte Liste (R nannte unbenannte Elemente "Var1"); seit 1.6.4
+    # seit 1.6.5 (CR2-C-9, Entscheidung 185 K28): Tupel von Paaren wie im Beispiel wieder erlaubt (seit 1.6.4 abgelehnt)
+    grid isa Tuple && !isempty(grid) && all(p -> p isa Pair, grid) && (grid = collect(Pair, grid))
+    # seit 1.6.5 (CR2-7, K19): ein Dict mit mehreren Einträgen gibt eine Warnung (Reihenfolge der Hash-Tabelle)
+    grid isa Base.Dict && SL.DeepAnalysis._list_items(grid; fn = "sensitivity_grid")
     gn = grid isa SL.RFrame ? names(grid) : grid isa Union{SL.RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}} ?
          SL.Bootstrap._names(grid) : nothing
     (gn !== nothing && (grid isa SL.RFrame || (!isempty(gn) && all(k -> k isa AbstractString && !isempty(k), gn)))) ||
@@ -207,7 +231,7 @@ SimLev.@study function sensitivity_grid(data, strategy, grid; sim_args = nothing
     end
     out = SL.RParallel.par_lapply(1:SL.nrow(design), run, cores)
     okm = [o.m for o in out if o.m !== nothing]
-    isempty(okm) && error("sensitivity_grid: Alle $(length(out)) Läufe fehlgeschlagen: $(_table_msg([o.err for o in out]))")
+    isempty(okm) && _sens_failed("sensitivity_grid", Any[o.err for o in out], length(out))   # Fehler (Tabelle seit 1.6.5)
     # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
     # Spalte des Rasters bzw. error; geprüft nach dem Rechnen, bei jedem cores gleich (R: gleiche Prüfung)
     for m in okm
@@ -263,7 +287,8 @@ Handelstagsdaten z. B. Wochenenden), entfallen.
   Anzahl Einheiten zwischen den Terminen (`unit` und `span` von `rebalance_plan()`). Standard: monatlich,
   zweimonatlich, quartalsweise, viermonatlich, halbjährlich, jährlich (Namen monthly, bimonthly, quarterly,
   four_monthly, semiannual, yearly).
-  Seit 1.6.4 geprüft: benannte Liste, je Eintrag Einheit und Abstand.
+  Seit 1.6.4 geprüft: benannte Liste, je Eintrag Einheit und Abstand; seit 1.6.5 auch die Werte (Einheit aus
+  den drei Namen, Abstand ganze Zahl ≥ 1 bis zur Obergrenze von `rebalance_plan()`).
 - `offsets`: Numerischer Vektor: Kalendertage vor dem Ende des Monats, Dreimonatsblocks bzw. Jahres, in dem
   der Termin liegt (0 = letzter Tag; `rebalance_plan(anchor = "end", days = offset + 1)`). `nothing`
   (Standard) rebalanciert am Periodenanfang.
@@ -297,10 +322,9 @@ Handelstagsdaten z. B. Wochenenden), entfallen.
   bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
   Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
   Einheitenreihenfolge.
-  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
-  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
-  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+  `"auto"`, nimmt aber höchstens so viele Aufgaben (bis 1.6.4 immer so viele ohne Messung; höchstens Zahl der
+  Julia-Threads, mit einem Thread nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
   Ausgaben, die eigene Funktionen
   (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
   in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
@@ -309,7 +333,8 @@ Handelstagsdaten z. B. Wochenenden), entfallen.
 
 # Rückgabe
 Tabelle (RFrame) der Klasse `SimLevSensitivity` mit den Spalten `frequency`, `offset`, `band`, `band_type` und
-den Kennzahlen aus `metrics`; fehlgeschlagene Läufe fehlen. Attribut `kind = "rebalancing"`. Ausgabe und
+den Kennzahlen aus `metrics`; fehlgeschlagene Läufe fehlen (seit 1.6.5 mit einer Warnung mit Anzahl und
+Meldungen; schlagen alle fehl, ein Fehler). Attribut `kind = "rebalancing"`. Ausgabe und
 Grafik über `print()` und `plot()`. Mit Sparplan (`sim_args`) ist `cagr` geldgewichtet (XIRR); `print()` weist
 darauf hin.
 
@@ -334,10 +359,23 @@ SimLev.@study function sensitivity_rebalancing(data, strategy; frequencies = not
     fn = "sensitivity_rebalancing"
     _sens_check_sim(data, strategy)
     if frequencies !== nothing
+        frequencies isa Tuple && !isempty(frequencies) && all(p -> p isa Pair, frequencies) &&
+            (frequencies = collect(Pair, frequencies))   # seit 1.6.5 wie grid (K28)
+        frequencies isa Base.Dict && SL.DeepAnalysis._list_items(frequencies; fn = fn)   # seit 1.6.5 (CR2-7, K19)
         fnm = frequencies isa Union{SL.RList,NamedTuple,AbstractDict,AbstractVector{<:Pair}} ? SL.Bootstrap._names(frequencies) : nothing
         (fnm !== nothing && !isempty(fnm) && all(k -> k isa AbstractString && !isempty(k), fnm)) || SL.chk_stop("e2.benannt", fn, "frequencies")
         for (k, f) in zip(fnm, SL.Bootstrap._values(frequencies))
             (f isa Union{AbstractVector,Tuple} && length(f) == 2) || SL.chk_stop("e2.frequenz", fn, k)
+        end
+        # seit 1.6.5 (CR2-C-10, Entscheidung 185 K26): Einheit und Abstand vorab (bis 1.6.4 fehlten solche Läufe still
+        # bzw. Rohfehler "cannot parse")
+        for (k, f) in zip(fnm, SL.Bootstrap._values(frequencies))
+            u = collect(f)[1]; spv = collect(f)[2]
+            uok = u isa AbstractString && u in ("month", "quarter", "year")
+            hi = uok ? SL._blk_span_max(u) : 2147483647
+            sp = spv isa Real && !(spv isa Bool) ? Float64(spv) :
+                 spv isa AbstractString ? something(tryparse(Float64, strip(spv)), NaN) : NaN
+            (uok && isfinite(sp) && sp == trunc(sp) && sp >= 1 && sp <= hi) || SL.chk_stop("b2b.frequenz_wert", fn, k, SL.chk_fmt(hi))
         end
     end
     if offsets !== nothing
@@ -382,7 +420,8 @@ SimLev.@study function sensitivity_rebalancing(data, strategy; frequencies = not
     end
     out = SL.RParallel.par_lapply(1:length(rows), run, cores)
     ok = [!(o isa AbstractString) for o in out]
-    any(ok) || error("sensitivity_rebalancing: Alle $(length(out)) Läufe fehlgeschlagen: $(_table_msg(out))")
+    # seit 1.6.5 (CR2-C-10 b): einzelne fehlgeschlagene Läufe mit Warnung (bis 1.6.4 fehlten sie still)
+    _sens_failed("sensitivity_rebalancing", Any[o for o in out if o isa AbstractString], length(out))
     good = out[ok]; lab = [r.label for r in rows[ok]]
     # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte
     for g in good
@@ -423,7 +462,13 @@ function _seq_date_2nd(s::Date, by::AbstractString)
     return Date(y2, m2, 1) + Day(d - 1)
 end
 
-_rep_get(rep, a, key) = (r = rep[a]; v = r isa AbstractDict || r isa SL.RList ? r[key] : getproperty(r, Symbol(key)); Float64[Float64(e) for e in v])
+# seit 1.6.5 (CR2-F-7): eine Spalte vom Typ Vector{Float64} ohne Kopie (bis 1.6.4 elementweise umgewandelt, rund 40 %
+# der Laufzeit); Leser verändern sie nicht
+function _rep_get(rep, a, key)
+    r = rep[a]
+    v = r isa AbstractDict || r isa SL.RList ? r[key] : getproperty(r, Symbol(key))
+    return v isa Vector{Float64} ? v : Float64[Float64(e) for e in v]
+end
 
 """
     planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1,
@@ -442,7 +487,7 @@ Einstieg in `months` gleichen Monatsraten. Verglichen wird das Vermögen nach `h
   Seit 1.6.4 eine Zahl > 0.
 - `months`: Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
   Seit 1.6.4 eine ganze Zahl ≥ 1.
-  Seit 1.6.4 höchstens 1200.
+  Seit 1.6.4 höchstens 1200; seit 1.6.5 höchstens 12 * `horizon`.
 - `horizon`: Vergleichshorizont in Jahren ab Start (Standard 10).
   Seit 1.6.4 eine ganze Zahl ≥ 1.
   Seit 1.6.4 höchstens 100.
@@ -464,10 +509,9 @@ Einstieg in `months` gleichen Monatsraten. Verglichen wird das Vermögen nach `h
   bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
   Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
   Einheitenreihenfolge.
-  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
-  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
-  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+  `"auto"`, nimmt aber höchstens so viele Aufgaben (bis 1.6.4 immer so viele ohne Messung; höchstens Zahl der
+  Julia-Threads, mit einem Thread nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
   Ausgaben, die eigene Funktionen
   (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
   in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
@@ -523,6 +567,8 @@ SimLev.@study function planning_lumpsum_vs_dca(data, strategy; amount = 10000, m
     # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46): Laufzeiten bis 100 Jahre (months in Monaten)
     SL.chk_max(months, SL.SL_MAX_MONATE, fn, "months")
     SL.chk_max(horizon, SL.SL_MAX_JAHRE, fn, "horizon")
+    # seit 1.6.5 (CR2-F-6): Einstiegsphase höchstens so lang wie der Horizont (bis 1.6.4 Rohfehler MethodError)
+    months > 12 * horizon && SL.chk_stop("b2b.months_horizont", fn, Int(months), Int(horizon))
     step = SL.chk_int1(step, fn, "step")
     cores = _sens_check_common(fn, sim_args, cores; check_metrics = false)
     sim_args = SL.Bootstrap._e2_sim_args(sim_args)
@@ -538,9 +584,10 @@ SimLev.@study function planning_lumpsum_vs_dca(data, strategy; amount = 10000, m
     d = collect(Date, data["date"])
     dn = Float64[OF._days(v) for v in d]
     get(sim_args, "tax", nothing) !== nothing &&
-        @warn "Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung (Index der Einmalanlage)."
+        @warn SL.chk_msg("b2b.m_planning_lumpsum_vs_dca")
     firsts = d[Dates.day.(d) .== 1]
-    last_ok = _seq_date_2nd(maximum(d), "-" * _num_str(horizon) * " years")
+    # seit 1.6.5 (CR2-F-5, K12): ein Start zählt, wenn sein Fenster am letzten Datentag endet (ab max(d) + 1 gerechnet)
+    last_ok = _seq_date_2nd(maximum(d) + Day(1), "-" * _num_str(horizon) * " years")
     starts = firsts[firsts .<= last_ok]
     isempty(starts) && SL.chk_stop("rs.horizont_kurz", fn)   # seit 1.6.4 vor seq (vorher "wrong sign in 'by' argument")
     sel = PS._seq_by(1, length(starts), step)
@@ -603,17 +650,34 @@ SimLev.@study function planning_lumpsum_vs_dca(data, strategy; amount = 10000, m
     adv = lump ./ dcav .- 1
     tab = SL.RFrame("start" => starts, "lump_sum" => lump, "dca" => dcav, "advantage" => adv,
                     "exact" => Bool[r[3] for r in res]; class = ["SimLevLumpSum", "data.frame"])
-    win = adv .> 0
-    SL.attrs(tab)["summary"] = SL.RVector([OF._mean_lgl(collect(win)), SL.r_mean(adv), OF._median(adv),
-                                           any(win) ? SL.r_mean(adv[win]) : NA, any(.!win) ? SL.r_mean(adv[.!win]) : NA];
-                                          names = ["win_rate", "mean_advantage", "median_advantage", "mlsa", "mlsd"])
+    # seit 1.6.5 (CR2-W3-1, Entscheidung 189): Fast-Gleichstand |advantage| <= 1e-12 (Regel _near_eq) weder vorn noch
+    # hinten
+    SL.attrs(tab)["summary"] = _ls_summary(adv)
     SL.attrs(tab)["settings"] = SL.RList("amount" => amount, "months" => months, "horizon" => horizon)
     return tab
 end
 
+"Vergleich mit Toleranz (seit 1.6.5, Entscheidung 189 W2-1/W3-1; R `.near_eq`): gleich, wenn |a - b| <= tol max(1, |a|, |b|)."
+_near_eq(a::Real, b::Real, tol = 1e-12) = abs(a - b) <= tol * max(1.0, abs(a), abs(b))
+
+"Kennzahlen von planning_lumpsum_vs_dca aus den Vorsprüngen (R `.ls_summary`; seit 1.6.5 eigene Funktion, CR2-W3-2)."
+function _ls_summary(adv)
+    adv = Float64[Float64(z) for z in adv]
+    tie = _near_eq.(adv, 0.0)
+    win = (adv .> 0) .& .!tie
+    lose = (adv .< 0) .& .!tie
+    return SL.RVector([OF._mean_lgl(collect(win)), SL.r_mean(adv), OF._median(adv),
+                       any(win) ? SL.r_mean(adv[win]) : NA, any(lose) ? SL.r_mean(adv[lose]) : NA];
+                      names = ["win_rate", "mean_advantage", "median_advantage", "mlsa", "mlsd"])
+end
+
 function _print_lumpsum(io::IO, x)
-    s = SL.attrs(x)["summary"]; st = SL.attrs(x)["settings"]
-    amt = SL.RFmt.formatC(st["amount"]; format = "f", digits = 0, big_mark = " ")
+    # seit 1.6.5 (CR2-W3-2): Kennzahlen aus den vorhandenen Zeilen (bis 1.6.4 aus dem Attribut der ganzen Tabelle, auch
+    # für rows(x, 1:3)); für das ungeteilte Ergebnis dieselben Werte
+    s = _ls_summary(x["advantage"]); st = SL.attrs(x)["settings"]
+    # seit 1.6.5 (CR2-W3-3): Betrag unter 1 mit %.15g
+    amt = Float64(st["amount"]) < 1 ? OF._spf("%.15g", Float64(st["amount"])) :
+          SL.RFmt.formatC(st["amount"]; format = "f", digits = 0, big_mark = " ")
     amt = amt isa AbstractString ? String(amt) : String(first(amt))
     print(io, OF._spf("Lump Sum vs. DCA: %d Starttermine, %s in %d Monatsraten, Horizont %g Jahre\n",
                       SL.nrow(x), amt, st["months"], Float64(st["horizon"])))
@@ -644,11 +708,14 @@ Indexrendite x, Kalendertagen T seit der Vorzeile, m(L) = max(L-1, 0) + max(-L, 
 # Argumente
 - `data`: Tabelle (RFrame) mit Spalte `date` und der Indexspalte.
   Seit 1.6.4 mindestens eine Datenzeile (vorher ergab R bei 0 Zeilen still 100).
+  Seit 1.6.5 muss `date` aufsteigend und ohne NA sein.
 - `index`: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
-  Seit 1.6.4 geprüft: Zahlenspalte in data (kein Faktor).
+  Seit 1.6.4 geprüft: Zahlenspalte in data (kein Faktor). Seit 1.6.5 nach dem Auffüllen endlich und > 0 (sonst
+  Fehler mit Zeile).
 - `leverage`: Hebel L als Zahl (Standard 2; negativ für Short).
 - `rate`: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge `nrow(data)`,
   `data.frame(date, value)` oder benannter Vektor mit Datumsnamen.
+  Seit 1.6.5 ohne fehlende Werte (Lücke ist ein Fehler).
 - `expense`: TER in Prozent p. a. (Standard 0).
 - `spread`: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
 - `start`: Startwert der Reihe in der ersten Zeile (Standard 100).
@@ -702,10 +769,11 @@ Kennzahlen über den Hebel.
 Erzeugt für jeden Hebel eine Reihe mit `series_leverage()`, simuliert sie als Buy-and-Hold (oder mit einer
 eigenen Strategie für das Asset `"LEV"`) und bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio, wie
 die LETF-Analyse von testfol.io. An `simulation()` wird ein Tabelle (RFrame) mit den Spalten `date` und `LEV`
-übergeben.
+übergeben, seit 1.6.5 dazu alle übrigen Spalten von `data` (Signal- und Ereignisspalten einer eigenen Strategie).
 
 # Argumente
 - `data`: Tabelle (RFrame) mit Spalte `date` und der Indexspalte.
+  Seit 1.6.5 geprüft wie in `series_leverage`; eine Spalte `LEV` ist ein Fehler.
 - `index`: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
 - `leverages`: Numerischer Vektor der zu prüfenden Hebel (Standard `seq(0.5, 4, by = 0.25)`).
   Seit 1.6.4 endliche Zahlen.
@@ -715,6 +783,7 @@ die LETF-Analyse von testfol.io. An `simulation()` wird ein Tabelle (RFrame) mit
 - `spread`: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
 - `strategy`: Optional Strategie mit dem Asset `"LEV"`; `nothing` (Standard) = Buy-and-Hold-ETF mit 30 Prozent
   Teilfreistellung (`asset_config("etf", "bnh", partial_exemption = 30)`).
+  Seit 1.6.5 muss eine eigene Strategie das Asset `"LEV"` enthalten (sonst Fehler).
 - `sim_args`: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard `()`): Argumente von
   `simulation()` außer `data` und `strategy`, also auch Bausteine (z. B. `dca = dca_plan(100, 1)`, `tax =
   tax_profile()`) und Pfade zu Parametern der Bausteine (`"dca.value"`, siehe `sensitivity_grid`). Alte
@@ -733,10 +802,9 @@ die LETF-Analyse von testfol.io. An `simulation()` wird ein Tabelle (RFrame) mit
   bleiben bei einer Aufgabe; mit einem Thread, `julia` ohne `-t`, immer einer).
   Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei wie mit `cores = 1`, in
   Einheitenreihenfolge.
-  Eine feste Zahl verteilt seit 1.6.4 ohne Messung auf so viele Aufgaben (höchstens Zahl der Julia-Threads, mit einem
-  Thread nacheinander); Ausgaben, Meldungen, Warnungen und Fehler der Einheiten erscheinen dabei ebenso wie mit
-  `cores = 1`; höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
-  Eine feste Zahl lohnt sich bei rechenintensiven Teilrechnungen, sonst `"auto"` (bei leichten Einheiten kann sie langsamer sein als eine Aufgabe).
+  Eine feste Zahl ist seit 1.6.5 der Höchstwert der automatischen Wahl: SimLev misst und plant wie mit
+  `"auto"`, nimmt aber höchstens so viele Aufgaben (bis 1.6.4 immer so viele ohne Messung; höchstens Zahl der
+  Julia-Threads, mit einem Thread nacheinander); höchstens Zahl der Prozessoren: mehr wird mit einem Hinweis begrenzt.
   Ausgaben, die eigene Funktionen
   (etwa `metrics`) direkt mit `println` oder `print` schreiben, erscheinen bei mehreren Aufgaben in der Reihenfolge,
   in der die Einheiten fertig werden; Warnungen (`@warn`) und SimLevs eigene Meldungen erscheinen in
@@ -745,8 +813,11 @@ die LETF-Analyse von testfol.io. An `simulation()` wird ein Tabelle (RFrame) mit
 
 # Rückgabe
 Tabelle (RFrame) der Klasse `SimLevSensitivity` mit `leverage` und den Kennzahlen aus `metrics`
-(fehlgeschlagene Läufe fehlen); Attribut `optimal` (benannter Vektor `cagr`, `sharpe`: Hebel mit maximaler
-CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert) und `kind = "leverage"`. Mit Sparplan (`sim_args`) ist `cagr` geldgewichtet (XIRR).
+(fehlgeschlagene Läufe fehlen; seit 1.6.5 mit Warnung und Attribut `failed`, Tabelle mit `leverage` und
+`error`; schlagen alle fehl, ein Fehler); Attribut `optimal` (benannter Vektor `cagr`, `sharpe`: Hebel mit
+maximaler CAGR bzw. Sharpe Ratio; seit 1.6.4 NA ohne diese Kennzahl bzw. ohne Wert; seit 1.6.5 NA mit Hinweis,
+wenn mehrere Hebel mit dem besten Wert gleichauf liegen, Abstand höchstens relativ 1e-12, z. B. die Sharpe Ratio
+ohne Finanzierungskosten und ohne risikolosen Zins) und `kind = "leverage"`. Mit Sparplan (`sim_args`) ist `cagr` geldgewichtet (XIRR).
 Ausgabe und Grafik über `print()` und `plot()`.
 
 # Beispiel
@@ -768,7 +839,13 @@ SimLev.@study function sensitivity_leverage(data, index; leverages = nothing, ra
         lv = PS._vec(leverages)
         (!isempty(lv) && all(z -> z isa Real && !(z isa Bool) && isfinite(z), lv)) || SL.chk_stop("e2.zahlen_endlich", fn, "leverages")
     end
-    strategy === nothing || _sens_check_sim(data, strategy)
+    if strategy !== nothing
+        _sens_check_sim(data, strategy)
+        # seit 1.6.5 (CR2-H-6): die Strategie muss das Asset LEV enthalten
+        "LEV" in String[String(string(p.first)) for p in SL._strategy_pairs(strategy)] || SL.chk_stop("b2b.lev_asset", fn)
+    end
+    # seit 1.6.5 (CR2-H-6, Entscheidung 189): alle Spalten von data gehen mit an simulation(); Spalte LEV = Fehler
+    "LEV" in names(data) && SL.chk_stop("b2b.lev_spalte", fn)
     cores = _sens_check_common(fn, sim_args, cores; metrics = metrics)
     sim_args = SL.Bootstrap._e2_sim_args(sim_args)
     rate, expense, spread = SL.chk_scalar(rate), SL.chk_scalar(expense), SL.chk_scalar(spread)
@@ -777,20 +854,24 @@ SimLev.@study function sensitivity_leverage(data, index; leverages = nothing, ra
     metrics = _metrics(metrics)
     strategy === nothing && (strategy = SL.create_strategy("LEV" => SL.asset_config("etf", "bnh"; partial_exemption = 30)))
     dts = OF._dates(_col(data, "date"), "data\$date")
+    extra = [k for k in names(data) if k != "date"]
     function run(L)
         lev = series_leverage(data, index; leverage = L, rate = rate, expense = expense, spread = spread)
         lev[lev .<= 0] .= 1e-8
         df = SL.RFrame("date" => dts, "LEV" => lev)
+        for k in extra; df[k] = data[k]; end
         res = try
             _sim(df, strategy, sim_args)
         catch e
             e isa InterruptException && rethrow()
-            return nothing
+            return OF._cond_msg(e)
         end
         return PS._e2_pairs(metrics(res))
     end
     out = SL.RParallel.par_lapply(leverages, run, cores)
-    ok = [o !== nothing for o in out]
+    ok = [!(o isa AbstractString) for o in out]
+    # seit 1.6.5 (CR2-H-6): alle fehlgeschlagen = Fehler, einzelne = Warnung und Attribut failed (bis 1.6.4 still)
+    _sens_failed(fn, Any[o for o in out if o isa AbstractString], length(out))
     good = out[ok]
     # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und nicht leverage
     for g in good
@@ -804,15 +885,31 @@ SimLev.@study function sensitivity_leverage(data, index; leverages = nothing, ra
     end
     SL.attrs(tab)["kind"] = "leverage"
     lv = tab["leverage"]
-    jc = haskey(tab, "cagr") ? SimLev._which_max(tab["cagr"]) : nothing
-    js = haskey(tab, "sharpe") ? SimLev._which_max(tab["sharpe"]) : nothing
     # seit 1.6.4 (K43 T2-N3) immer cagr und sharpe, NA ohne Spalte bzw. ohne Wert (bis dahin fehlte cagr ohne Spalte
-    # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR)
+    # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR); seit 1.6.5 (CR2-X15-1, Entscheidung 189) NA
+    # mit Hinweis, wenn mehrere Hebel mit dem besten Wert gleichauf liegen (_near_eq)
+    function best(k)
+        haskey(tab, k) || return NA
+        v = OF._tofloat(tab[k]); j = SimLev._which_max(v)
+        j === nothing && return NA
+        if _lev_tie(v, j)
+            SL.DeepAnalysis._message(SL.chk_msg("b2b.lev_gleichauf", fn, k))
+            return NA
+        end
+        return Float64(lv[j])
+    end
     on = ["cagr", "sharpe"]
-    ov = Float64[jc === nothing ? NA : lv[jc], js === nothing ? NA : lv[js]]
+    ov = Float64[best("cagr"), best("sharpe")]
     SL.attrs(tab)["optimal"] = SL.RVector(ov; names = on)
+    if !all(ok)
+        SL.attrs(tab)["failed"] = SL.RFrame("leverage" => Float64[Float64(z) for z in leverages[.!ok]],
+                                            "error" => String[o for o in out if o isa AbstractString])
+    end
     return tab
 end
+
+"Mehrere Werte gleichauf mit dem besten `v[j]` (Regel `_near_eq`; NA zählt nicht)."
+_lev_tie(v, j) = count(z -> !isnan(z) && _near_eq(z, v[j]), v) > 1
 
 # ═════════════════════════════════════════════════════════════════════════════
 # print / plot
@@ -850,6 +947,12 @@ function _print_sens(io::IO, x)
         ov = opt isa SL.RVector ? opt.values : opt isa AbstractVector ? opt : [opt]
         o(i) = i <= length(ov) ? OF._f64(ov[i]) : NA          # R: x[i] jenseits der Länge = NA
         print(io, OF._spf("Optimaler Hebel: CAGR %.2f, Sharpe %.2f\n", o(1), o(2)))
+        # seit 1.6.5 (CR2-X15-1): Gleichstand benennen
+        for k in ("cagr", "sharpe")
+            haskey(x, k) || continue
+            v = OF._tofloat(x[k]); j = SimLev._which_max(v)
+            j !== nothing && _lev_tie(v, j) && print(io, SL.chk_msg("b2b.lev_gleichauf_druck", k), "\n")
+        end
     end
     nothing
 end

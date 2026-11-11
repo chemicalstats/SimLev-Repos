@@ -412,7 +412,8 @@
 #'       Jahresrendite (interner Zinsfuss/XIRR aus Startbetrag start_value plus Rate am Starttag
 #'       (brutto), datierten Einzahlungen und Endwert, Kalendertage / 365.25; NA mit Warnung, wenn
 #'       es keine Loesung gibt). Ohne Einzahlungen nach dem Starttag:
-#'       (Endwert / Depotwert am Starttag)^(1 / Jahre) - 1.}
+#'       (Endwert / (start_value plus Rate am Starttag))^(1 / Jahre) - 1; seit 1.6.5 zaehlen die
+#'       Kaufkosten am Starttag mit (bis 1.6.4 Bezug Depotwert am Starttag).}
 #'     \item{ttwror}{Zeitgewichtete Rendite (TTWROR, annualisiert) als Anteil}
 #'     \item{drawdowns}{Zahlenvektor der taeglichen Drawdowns als positiver Anteil; mit Einzahlungen
 #'       auf twr_index statt auf dem Depotwert (ebenso max_drawdown, average_drawdown, ulcer_index,
@@ -554,6 +555,7 @@ simulation <- function(data, strategy, start_value = 10000,
     church_tax = 0,                         # Kirchensteuersatz in Prozent (8 oder 9); passt tax_rate an
     order_fee = NULL,                       # Ordergebuehr: Zahl (fix, EUR) oder list(fixed, percent, min, max)
     dca_fee = NULL,                         # Gebuehr fuer Kaeufe an Sparplantagen (Standard: order_fee)
+    custody_fee = NULL,                     # seit 1.6.5: jaehrliche Depotgebuehr (Zahl EUR je Jahr oder list(fixed, percent, min, max))
     harvest_mode = FALSE,                   # jaehrlich Gewinne bis zum Freibetrag realisieren und wieder kaufen
     harvest_day = "12-15",                  # Termin (MM-TT, naechster Handelstag)
     harvest_loss_pot = TRUE,                # Verlusttopf zusaetzlich zum Freibetrag nutzen
@@ -565,7 +567,13 @@ simulation <- function(data, strategy, start_value = 10000,
   # Ablauf in Phasen (interne Funktionen, Uebersicht in sim_validate.R). Fehler und Warnungen, die
   # direkt in einer Phase entstehen, tragen wie bisher den Aufruf von simulation() (.sim_restore_call).
   sim_call <- .call
+  # seit 1.6.5 (Paket E, Studienkern R/sim_prepared.R): in einer Studie merkt sich .sim_call_study einen Lauf, dessen
+  # Phasen 1 und 2 ohne Meldung blieben; die Rechnung selbst bleibt unveraendert
+  cap <- .sim_prep_cap_take()
+  quiet <- TRUE
+  seen <- function(cond) if (cap) quiet <<- FALSE
   withCallingHandlers({
+   withCallingHandlers({
     # 1. Eingabepruefung, Steuer- und Gebuehreneinstellungen
     cfg <- .sim_check_inputs(
       data = data, strategy = strategy, start_value = start_value, details = details,
@@ -580,6 +588,7 @@ simulation <- function(data, strategy, start_value = 10000,
       split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
       dca_fee = dca_fee, harvest_mode = harvest_mode,
       taxable_income = taxable_income, tariff = tax_tariff, liquidate = liquidate)
+    cfg$fee_cust <- .fee_spec(custody_fee, "simulation", "custody_fee")   # seit 1.6.5 (Entscheidung 150)
 
     # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
     prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data)
@@ -597,18 +606,22 @@ simulation <- function(data, strategy, start_value = 10000,
     data <- cal$data
     fl <- cal$flags
     if (!is.null(cfg$event_col)) event_weight <- cal$event_weight
+   }, message = seen, warning = seen)
 
     # 3.-5. Termine, Tages-Flags und Startgewichte, Tagesschleife und Abschluss des letzten
     # Jahres im C++-Kern (sim_engine.R)
-    eng <- .sim_engine_run(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
-                           liquidate, prep$stopp_date, details, harvest_day)
+    ei <- .sim_engine_input(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                            liquidate, prep$stopp_date, details, harvest_day)
+    es <- if (cap && quiet) .sim_prep_capture(sim_call, cfg, prep, sim_mem, fl, data, ei, details, base_rate_flex,
+                                               base_rate_data, event_weight)
+    eng <- .sim_engine_finish(.Call(C_sim_engine_run, ei$inp), sim_mem, ei, ei$env, fl)
     sim_mem <- eng$sim_mem
     tax_unpaid <- eng$tax_unpaid
     fl$flag_harvest <- eng$flag_harvest
     fl$tax_regimes <- eng$tax_regimes
 
     # 6. Auswertung im C++-Kern (sim_evaluate.R) und Ergebnisobjekt
-    ev <- .sim_evaluate(sim_mem, fl, cfg, data, prep, tax_unpaid)
+    ev <- .sim_evaluate(sim_mem, fl, cfg, data, prep, tax_unpaid, st = es)
     .sim_result(sim_mem, fl, cfg, ev)
   },
   warning = function(w) .sim_restore_call(w, sim_call),
@@ -689,6 +702,8 @@ print.SimLevResult <- function(x, ...) {
   cat(sprintf("  Serenity:         %s\n", fmt_ratio(s$serenity)))
   cat(sprintf("  Martin Ratio:     %s\n", fmt_ratio(s$martin_ratio)))
   if (ext) cat("  (Calmar, Serenity, Martin mit TTWROR)\n")
+  # seit 1.6.5 (FB-6, Entscheidung 197): Hinweis bei Auswertungen ueber weniger als ein Jahr
+  if (length(x$worth) < 365) cat("  ", chk_msg("e.kurz_jahr", .n_tage(length(x$worth))), "\n", sep = "")
   cat("\n")
 
   cat("  Verteilung\n")
@@ -734,7 +749,8 @@ print.SimLevResult <- function(x, ...) {
 #'   Drawdowns als Anteil, invested in EUR:
 #'   \describe{
 #'     \item{total_return_twr}{zeitgewichtete Gesamtrendite: mit Einzahlungen (Sparplan) letzter Wert
-#'       von twr_index minus 1, sonst Endwert / Depotwert am Starttag - 1}
+#'       von twr_index minus 1, sonst Endwert / (start_value plus Rate des Starttags) - 1; Kaufkosten am
+#'       Starttag zaehlen (seit 1.6.5)}
 #'     \item{return_on_invested}{Gewinn je eingezahltem EUR: (Endwert - Eingezahlt) / Eingezahlt mit
 #'       Eingezahlt = letzter Wert von invested (Startwert plus Einzahlungen, brutto)}
 #'     \item{total_return}{gleichwertiger Alias fuer total_return_twr (aeltere Skripte)}
@@ -758,7 +774,9 @@ summary.SimLevResult <- function(object, ...) {
     start_capital = if (!is.null(object$invested))
       object$invested[1] - sum(vapply(object$report, function(r) r[["flows"]][1], numeric(1)), na.rm = TRUE) else NA_real_,
     end_value = tail(object$worth, 1),
-    total_return_twr = if (ext) tail(object$twr_index, 1) / object$twr_index[1] - 1 else (tail(object$worth, 1) / object$worth[1]) - 1,
+    # seit 1.6.5 (M4): Bezug start_value plus Rate des Starttags (Kaufkosten am Starttag zaehlen)
+    total_return_twr = if (ext) tail(object$twr_index, 1) - 1 else
+      (tail(object$worth, 1) / (if (!is.null(object$invested)) object$invested[1] else object$worth[1])) - 1,
     return_on_invested = NA_real_,
     total_return = NA_real_,             # Alias fuer total_return_twr (unten gesetzt)
     invested = if (!is.null(object$invested)) tail(object$invested, 1) else object$worth[1],
@@ -851,6 +869,7 @@ print.summary.SimLevResult <- function(x, ...) {
     cat(sprintf("  %s %s\n", format(metrics$Metrik[i], width = 16), metrics$Wert[i]))   # Breite in Zeichen (Umlaute)
   }
   if (ext) cat("  (Drawdowns zeitgewichtet; Calmar, Serenity, Martin mit TTWROR)\n")
+  if (n_days < 365) cat("  ", chk_msg("e.kurz_jahr", .n_tage(n_days)), "\n", sep = "")   # seit 1.6.5 (FB-6, Entscheidung 197)
 
   cat("\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")
   

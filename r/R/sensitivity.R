@@ -13,17 +13,16 @@
 # von simulation() (sim_validate.R) pruefen; sim_args als Liste, metrics als Funktion, cores als ganze Zahl >= 1.
 .sens_check_sim <- function(data, strategy) {
   if (!is.data.frame(data))
-    stop(sprintf("simulation: data muss eine Tabelle mit Spalte 'date' und je Asset einer Kursspalte sein (%s).",
-                 chk_msg("tabelle.formen")))
+    stop(chk_msg("a.m_sim_check_inputs", chk_msg("tabelle.formen")))
   .e2_check_strategy(strategy)
   invisible(NULL)
 }
 # strategy wie simulation() (sim_validate.R): nicht leer, alle Assets benannt; gleiche Meldungen
 .e2_check_strategy <- function(strategy) {
   if (length(strategy) == 0)
-    stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()).")
+    stop(chk_msg("a.m_sim_check_inputs_2"))
   if (is.null(names(strategy)) || any(is.na(names(strategy)) | names(strategy) == ""))
-    stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
+    stop(chk_msg("a.m_sim_check_inputs_3"))
   invisible(NULL)
 }
 .sens_check_common <- function(fn, sim_args, cores, metrics = mean, check_metrics = TRUE) {
@@ -45,6 +44,27 @@
   else chk_nofactor(rate, fn, "rate")
   chk_num1(expense, fn, "expense")
   chk_num1(spread, fn, "spread")
+  # seit 1.6.5 (CR2-V2-1): Datum ohne NA und aufsteigend, Index nach dem Auffuellen endlich und > 0, Zinsreihe ohne
+  # Luecke (bis 1.6.4 still NA, 0 bzw. negative Tagesabstaende; Entscheidung 186 M8 fuer Zinsreihen)
+  if (nrow(data)) {
+    dd <- .to_date(data$date, "data$date")
+    if (anyNA(dd) || is.unsorted(dd)) chk_stop("e3.datum", fn)
+    idx <- .fill_na(as.numeric(data[[index]]), "locf")
+    bad <- which(!(is.finite(idx) & idx > 0))
+    if (length(bad)) chk_stop("b2b.index_positiv", fn, index, bad[1])
+    rt <- .resolve_series(rate, data, "rate")
+    if (anyNA(rt)) chk_stop("a.mm_luecke", fn, "rate", format(dd[which(is.na(rt))[1]]))
+  }
+  invisible(NULL)
+}
+
+# Fehlgeschlagene Laeufe der Studien (seit 1.6.5, CR2-C-10/CR2-H-6, Entscheidungen 185 K26 und 189): alle
+# fehlgeschlagen = Fehler, sonst Warnung mit Anzahl und Meldungen (je Meldung mit Zahl der Laeufe, Form wie beim Fehler)
+.sens_failed <- function(fn, err, n) {
+  tab <- table(err)
+  txt <- paste(sprintf("%s (%d x)", names(tab), as.integer(tab)), collapse = "; ")
+  if (length(err) == n) chk_stop("b2b.alle_fehl", fn, n, txt)
+  if (length(err)) warning(chk_msg("b2b.teil_fehl", fn, length(err), n, txt), call. = FALSE)
   invisible(NULL)
 }
 
@@ -146,11 +166,7 @@ sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = 
   }
   out <- .par_lapply(seq_len(nrow(design)), run, cores)
   okm <- Filter(Negate(is.null), lapply(out, `[[`, "m"))
-  if (!length(okm)) {
-    err <- table(vapply(out, `[[`, "", "err"))
-    stop(sprintf("sensitivity_grid: Alle %d L\u00e4ufe fehlgeschlagen: %s", length(out),
-                 paste(sprintf("%s (%d x)", names(err), as.integer(err)), collapse = "; ")), call. = FALSE)
-  }
+  if (!length(okm)) .sens_failed("sensitivity_grid", vapply(out, `[[`, "", "err"), length(out))   # Fehler (Tabelle seit 1.6.5)
   # seit 1.6.4 (Entscheidung 43, Regel 28 wie bootstrap_study): Namen der Kennzahlen eindeutig, nicht leer und keine
   # Spalte des Rasters bzw. error; geprueft nach dem Rechnen, bei jedem cores gleich
   for (m in okm) chk_kennzahlen(names(m), length(m), c(names(design), "error"), "sensitivity_grid")
@@ -239,6 +255,15 @@ sensitivity_rebalancing <- function(data, strategy,
       any(names(frequencies) == ""))
     chk_stop("e2.benannt", fn, "frequencies")
   for (k in names(frequencies)) if (length(frequencies[[k]]) != 2L) chk_stop("e2.frequenz", fn, k)
+  # seit 1.6.5 (CR2-C-10, Entscheidung 185 K26): Einheit und Abstand vorab (bis 1.6.4 fehlten solche Laeufe still bzw.
+  # R warnte "NAs introduced by coercion", Python und Julia brachen mit Rohfehler ab)
+  for (k in names(frequencies)) {
+    u <- frequencies[[k]][[1]]; sp <- suppressWarnings(as.numeric(frequencies[[k]][[2]]))
+    uok <- is.character(u) && length(u) == 1L && !is.na(u) && u %in% c("month", "quarter", "year")
+    hi <- if (uok) .blk_span_max(u) else 2147483647
+    if (!uok || length(sp) != 1L || !is.finite(sp) || sp != trunc(sp) || sp < 1 || sp > hi)
+      chk_stop("b2b.frequenz_wert", fn, k, chk_fmt(hi))
+  }
   if (!is.null(offsets) && !(is.numeric(offsets) && length(offsets) >= 1L && all(is.finite(offsets)) &&
                              all(offsets == trunc(offsets)) && all(offsets >= 0)))
     chk_stop("ganz_vektor", fn, "offsets", chk_range_text(lo = 0))
@@ -270,9 +295,8 @@ sensitivity_rebalancing <- function(data, strategy,
   }
   out <- .par_lapply(seq_along(rows), run, cores)
   ok <- !vapply(out, is.character, TRUE)
-  if (!any(ok)) { err <- table(unlist(out))
-    stop(sprintf("sensitivity_rebalancing: Alle %d L\u00e4ufe fehlgeschlagen: %s", length(out),
-                 paste(sprintf("%s (%d x)", names(err), as.integer(err)), collapse = "; ")), call. = FALSE) }
+  # seit 1.6.5 (CR2-C-10 b): einzelne fehlgeschlagene Laeufe mit Warnung (bis 1.6.4 fehlten sie still)
+  .sens_failed("sensitivity_rebalancing", unlist(out[!ok]), length(out))
   # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und keine feste Spalte
   for (m in out[ok]) chk_kennzahlen(names(m), length(m), c("frequency", "offset", "band", "band_type"),
                                     "sensitivity_rebalancing")
@@ -364,6 +388,8 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
   # seit 1.6.4 Obergrenzen (Entscheidungen 16 und 46): Laufzeiten bis 100 Jahre (months in Monaten)
   chk_max(months, SL_MAX_MONATE, fn, "months")
   chk_max(horizon, SL_MAX_JAHRE, fn, "horizon")
+  # seit 1.6.5 (CR2-F-6): Einstiegsphase hoechstens so lang wie der Horizont (bis 1.6.4 je Sprache ein anderer Rohfehler)
+  if (months > 12 * horizon) chk_stop("b2b.months_horizont", fn, as.integer(months), as.integer(horizon))
   chk_int1(step, fn, "step")
   cores <- .sens_check_common(fn, sim_args, cores, check_metrics = FALSE)
   nm <- names(sim_args) %||% character(0)
@@ -375,13 +401,20 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
   data <- data[order(data$date), , drop = FALSE]
   d <- data$date
   if (!is.null(sim_args$tax))
-    warning("Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine N\u00e4herung (Index der Einmalanlage).")
+    warning(chk_msg("b2b.m_planning_lumpsum_vs_dca"))
   firsts <- d[format(d, "%d") == "01"]
-  last_ok <- seq.Date(max(d), by = paste0("-", horizon, " years"), length.out = 2)[2]
+  # seit 1.6.5 (CR2-F-5, Entscheidung 185 K12): ein Start zaehlt, wenn sein Fenster s + horizon Jahre - 1 Tag am
+  # letzten Datentag endet (bis 1.6.4 ab max(d) gerechnet: genau horizon Jahre Daten ergaben "Historie zu kurz")
+  last_ok <- seq.Date(max(d) + 1, by = paste0("-", horizon, " years"), length.out = 2)[2]
   starts <- firsts[firsts <= last_ok]
   if (!length(starts)) chk_stop("rs.horizont_kurz", fn)   # seit 1.6.4 vor seq() (vorher "wrong sign in 'by' argument")
   starts <- starts[seq(1, length(starts), by = step)]
   wraps <- .strategy_wrappers(strategy)   # Fonds-Wrapper: Asset-Name ist keine Kursspalte (.strategy_columns)
+  # seit 1.6.5 (CR2-F-7): gefuellte Kursspalten und Tageszahlen einmal vor den Starts (bis 1.6.4 je Start und Asset
+  # bis zu dreimal ueber alle Zeilen); gleiche Werte
+  dnum <- as.numeric(d)
+  pfill <- lapply(stats::setNames(nm = setdiff(intersect(names(strategy), names(data)), wraps)),
+                  function(a) .fill_na(as.numeric(data[[a]]), "locf"))
   run <- function(s) {
     e <- seq.Date(s, by = paste(horizon, "years"), length.out = 2)[2] - 1
     e_dca <- seq.Date(s, by = paste(months, "months"), length.out = 2)[2] - 1
@@ -403,7 +436,7 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
         i <- findInterval(as.numeric(dates), as.numeric(navs[[a]]$date)); i[i == 0L] <- 1L
         return(navs[[a]]$nav[i])
       }
-      v <- .fill_na(as.numeric(data[[a]]), "locf"); v[findInterval(as.numeric(dates), as.numeric(d))] }
+      v <- pfill[[a]] %||% .fill_na(as.numeric(data[[a]]), "locf"); v[findInterval(as.numeric(dates), dnum)] }
     rows <- k:nrow(ix)
     const <- all(vapply(assets, function(a) {
       p <- px(a, ix$date[rows]); u <- ls$report[[a]]$worth[rows] / p
@@ -421,20 +454,35 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
   tab$exact <- as.logical(tab$exact)
   tab$advantage <- tab$lump_sum / tab$dca - 1
   tab <- tab[c("start", "lump_sum", "dca", "advantage", "exact")]
-  win <- tab$advantage > 0
-  structure(tab, class = c("SimLevLumpSum", "data.frame"),
-            summary = c(win_rate = mean(win), mean_advantage = mean(tab$advantage), median_advantage = stats::median(tab$advantage),
-                        mlsa = if (any(win)) mean(tab$advantage[win]) else NA_real_,
-                        mlsd = if (any(!win)) mean(tab$advantage[!win]) else NA_real_),
+  # seit 1.6.5 (CR2-W3-1, Entscheidung 189): Fast-Gleichstand |advantage| <= 1e-12 (Regel .near_eq) zaehlt weder als
+  # vorn noch als hinten (bis 1.6.4 entschied das Rundungsrauschen, z. B. bei months = 1); win_rate ueber "vorn"
+  structure(tab, class = c("SimLevLumpSum", "data.frame"), summary = .ls_summary(tab$advantage),
             settings = list(amount = amount, months = months, horizon = horizon))
 }
+
+# Kennzahlen von planning_lumpsum_vs_dca aus den Vorspruengen (seit 1.6.5 eigene Funktion, CR2-W3-2: print rechnet
+# sie aus den vorhandenen Zeilen, damit eine Teilmenge ihre eigenen Werte zeigt)
+.ls_summary <- function(adv) {
+  tie <- .near_eq(adv, 0)
+  win <- adv > 0 & !tie; lose <- adv < 0 & !tie
+  c(win_rate = mean(win), mean_advantage = mean(adv), median_advantage = stats::median(adv),
+    mlsa = if (any(win)) mean(adv[win]) else NA_real_, mlsd = if (any(lose)) mean(adv[lose]) else NA_real_)
+}
+
+# Vergleich mit Toleranz (seit 1.6.5, Entscheidung 189 W2-1/W3-1): a und b gelten als gleich, wenn
+# |a - b| <= 1e-12 * max(1, |a|, |b|) (relativ 1e-12, fuer Werte unter 1 absolut 1e-12); NA ergibt NA
+.near_eq <- function(a, b, tol = 1e-12) abs(a - b) <= tol * pmax(1, abs(a), abs(b))
 
 #' @rdname SimLevAnalysis-methods
 #' @export
 print.SimLevLumpSum <- function(x, ...) {
-  s <- attr(x, "summary"); st <- attr(x, "settings")
+  # seit 1.6.5 (CR2-W3-2): Kennzahlen aus den vorhandenen Zeilen (bis 1.6.4 aus dem Attribut der ganzen Tabelle, auch
+  # fuer x[1:3, ]); fuer das ungeteilte Ergebnis dieselben Werte
+  s <- .ls_summary(x$advantage); st <- attr(x, "settings")
+  # seit 1.6.5 (CR2-W3-3): Betrag unter 1 mit %.15g (bis 1.6.4 "0" fuer 0.5)
+  amt <- if (st$amount < 1) sprintf("%.15g", st$amount) else formatC(st$amount, format = "f", digits = 0, big.mark = " ")
   cat(sprintf("Lump Sum vs. DCA: %d Starttermine, %s in %d Monatsraten, Horizont %g Jahre\n",
-              nrow(x), formatC(st$amount, format = "f", digits = 0, big.mark = " "), st$months, st$horizon))
+              nrow(x), amt, st$months, st$horizon))
   cat(sprintf("  Einmalanlage vorn:          %.1f %% der Starttermine\n", 100 * s["win_rate"]))
   cat(sprintf("  Vorsprung Mittel / Median:  %+.2f %% / %+.2f %%\n", 100 * s["mean_advantage"], 100 * s["median_advantage"]))
   cat(sprintf("  MLSA (wenn vorn):           %+.2f %%\n", 100 * s["mlsa"]))
@@ -540,19 +588,32 @@ sensitivity_leverage <- function(data, index, leverages = seq(0.5, 4, by = 0.25)
   .lev_check(fn, data, index, rate, expense, spread)   # seit 1.6.4
   if (!(is.numeric(leverages) && length(leverages) >= 1L && all(is.finite(leverages))))
     chk_stop("e2.zahlen_endlich", fn, "leverages")
-  if (!is.null(strategy)) .sens_check_sim(data, strategy)
+  if (!is.null(strategy)) {
+    .sens_check_sim(data, strategy)
+    # seit 1.6.5 (CR2-H-6): die Strategie muss das Asset LEV (die Hebelreihe) enthalten (bis 1.6.4 scheiterten alle
+    # Laeufe still)
+    if (!"LEV" %in% names(strategy)) chk_stop("b2b.lev_asset", fn)
+  }
+  # seit 1.6.5 (CR2-H-6, Entscheidung 189): alle Spalten von data gehen mit an simulation() (Signal- und
+  # Ereignisspalten einer eigenen Strategie); eine Spalte LEV in data ist deshalb ein Fehler
+  if ("LEV" %in% names(data)) chk_stop("b2b.lev_spalte", fn)
   cores <- .sens_check_common(fn, sim_args, cores, metrics)
   strategy <- strategy %||% create_strategy(LEV = asset_config("etf", "bnh", partial_exemption = 30))
   sim_args <- .sim_args_set(list(), sim_args, "sensitivity_leverage")
+  dd <- .to_date(data$date, "data$date"); extra <- setdiff(names(data), "date")
   run <- function(L) {
-    df <- data.frame(date = .to_date(data$date, "data$date"), LEV = series_leverage(data, index, L, rate, expense, spread))
+    df <- data.frame(date = dd, LEV = series_leverage(data, index, L, rate, expense, spread))
     if (any(df$LEV <= 0)) df$LEV[df$LEV <= 0] <- 1e-8
-    res <- tryCatch(suppressWarnings(suppressMessages(.sim_call(df, strategy, sim_args))), error = function(e) NULL)
-    if (is.null(res)) return(NULL)
+    for (k in extra) df[[k]] <- data[[k]]
+    res <- tryCatch(suppressWarnings(suppressMessages(.sim_call(df, strategy, sim_args))), error = function(e) e)
+    if (inherits(res, "error")) return(conditionMessage(res))
     metrics(res)
   }
   out <- .par_lapply(as.list(leverages), run, cores)
-  ok <- !vapply(out, is.null, TRUE)
+  ok <- !vapply(out, is.character, TRUE)
+  # seit 1.6.5 (CR2-H-6): alle fehlgeschlagen = Fehler, einzelne = Warnung und Attribut failed (Hebel, Meldung); bis
+  # 1.6.4 fehlten sie still (alle: leere Tabelle)
+  .sens_failed(fn, unlist(out[!ok]), length(out))
   # seit 1.6.4 (Entscheidung 43, Regel 28): Namen der Kennzahlen eindeutig, nicht leer und nicht leverage
   for (m in out[ok]) chk_kennzahlen(names(m), length(m), "leverage", fn)
   tab <- data.frame(leverage = leverages[ok], do.call(rbind, out[ok]), check.names = FALSE)
@@ -560,8 +621,17 @@ sensitivity_leverage <- function(data, index, leverages = seq(0.5, 4, by = 0.25)
   attr(tab, "kind") <- "leverage"
   # seit 1.6.4 (K43 T2-N3) immer cagr und sharpe, NA ohne Spalte bzw. ohne Wert (bis dahin fehlte cagr ohne Spalte
   # oder bei lauter NA, der Druck las dann den Sharpe-Hebel als CAGR)
-  best <- function(v) { j <- which.max(v); if (length(j)) tab$leverage[j] else NA }
-  attr(tab, "optimal") <- c(cagr = best(tab$cagr), sharpe = best(tab$sharpe))
+  # seit 1.6.5 (CR2-X15-1, Entscheidung 189): liegen mehrere Hebel mit dem besten Wert gleichauf (Regel .near_eq,
+  # relativ 1e-12), ist der optimale Hebel NA mit Hinweis (bis 1.6.4 entschied Rundungsrauschen, z. B. Sharpe ohne
+  # Finanzierungskosten)
+  best <- function(v, k) {
+    j <- which.max(v); if (!length(j)) return(NA)
+    if (sum(.near_eq(v, v[j]), na.rm = TRUE) > 1L) { message(chk_msg("b2b.lev_gleichauf", fn, k)); return(NA) }
+    tab$leverage[j]
+  }
+  attr(tab, "optimal") <- c(cagr = best(tab$cagr, "cagr"), sharpe = best(tab$sharpe, "sharpe"))
+  if (any(!ok)) attr(tab, "failed") <- data.frame(leverage = leverages[!ok], error = unlist(out[!ok]),
+                                                  stringsAsFactors = FALSE)
   tab
 }
 
@@ -605,6 +675,13 @@ print.SimLevSensitivity <- function(x, ...) {
   for (k in intersect(c("taxes", "trades"), names(y))) y[[k]] <- sprintf("%.1f", y[[k]])
   print(y, row.names = FALSE)
   if ("cagr" %in% names(y)) cat("cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts\n")
-  if (!is.null(attr(x, "optimal"))) cat(sprintf("Optimaler Hebel: CAGR %.2f, Sharpe %.2f\n", attr(x, "optimal")[1], attr(x, "optimal")[2]))
+  if (!is.null(attr(x, "optimal"))) {
+    cat(sprintf("Optimaler Hebel: CAGR %.2f, Sharpe %.2f\n", attr(x, "optimal")[1], attr(x, "optimal")[2]))
+    # seit 1.6.5 (CR2-X15-1): Gleichstand benennen
+    for (k in intersect(c("cagr", "sharpe"), names(x))) {
+      v <- x[[k]]; j <- which.max(v)
+      if (length(j) && sum(.near_eq(v, v[j]), na.rm = TRUE) > 1L) cat(chk_msg("b2b.lev_gleichauf_druck", k), "\n", sep = "")
+    }
+  }
   invisible(x)
 }

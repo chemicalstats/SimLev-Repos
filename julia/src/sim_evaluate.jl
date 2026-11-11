@@ -23,7 +23,7 @@ function _sim_risk_free(risk_free, fr::_Frame, n_days_sim::Int)
     @nospecialize
     risk_free === nothing && (risk_free = 0)
     if risk_free isa AbstractString
-        haskey(fr, risk_free) || error("risk_free: Spalte '$risk_free' fehlt im Datensatz.")
+        haskey(fr, risk_free) || chk_stop("a.m_sim_risk_free", risk_free)
         col = fr.cols[risk_free]
         k = fr.kinds[risk_free]
         k == :numeric && return Float64.(copy(col))
@@ -110,11 +110,11 @@ function _eval_warn(code::Integer, v)
     return nothing
 end
 
-"Auswertung im Kern; Meldungen in der Reihenfolge von R (Warnungen, risk_free, Abbruch)."
-function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_Frame)
+"""Teile der Auswertung ohne den Engine-Lauf (seit 1.6.5 eigene Funktion, Paket E: der Studienkern sim_prepared.jl merkt
+sie sich): rf, rf_err (Fehler von risk_free bzw. nothing), day, filled, sc (start_date, stopp_date, start_value)."""
+function _sim_eval_static(R::Run, start_date::Int, stopp_date::Int, fr::_Frame)
     @nospecialize
     fl, cfg = R.fl, R.cfg
-    na = length(fl.flag_assets)
     n = length(fl.flag_date)
     rf = Float64[]
     rf_err = nothing
@@ -123,17 +123,24 @@ function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_
     catch e
         rf_err = e
     end
-    day = Float64.(fl.flag_date)
-    filled = any(fl.flag_filled) ? Int32.(fl.flag_filled) : Int32[]
-    sc = Float64[start_date, stopp_date, cfg.start_value, R.tax_unpaid_total]
+    return (rf = rf, rf_err = rf_err, day = Float64.(fl.flag_date),
+            filled = any(fl.flag_filled) ? Int32.(fl.flag_filled) : Int32[],
+            sc = Float64[start_date, stopp_date, cfg.start_value])
+end
+
+"Auswertung im Kern; Meldungen in der Reihenfolge von R (Warnungen, risk_free, Abbruch)."
+function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_Frame, st = nothing)
+    @nospecialize
+    fl, cfg = R.fl, R.cfg
+    na = length(fl.flag_assets)
+    n = length(fl.flag_date)
+    st === nothing && (st = _sim_eval_static(R, start_date, stopp_date, fr))   # st: schon aus _capture (Studienkern)
+    rf, rf_err, day, filled = st.rf, st.rf_err, st.day, st.filled
+    sc = Float64[st.sc[1], st.sc[2], st.sc[3], R.tax_unpaid_total]
     sm = Float64[sim.status[a].money for a in 1:na]
     nb = Float64[length(sim.trades[a].buys) for a in 1:na]
     ns = Float64[length(sim.trades[a].sells) for a in 1:na]
     cnt = zeros(Int64, 2)
-    tw = zeros(n); twr = zeros(n); inv = zeros(n); dd = zeros(n); scal = zeros(3); ints = zeros(Int32, 2)
-    stv = zeros(20); buys = zeros(na); sells = zeros(na); why_i = zeros(Int32, 4); why_v = zeros(6)
-    err = zeros(Int32, 1)
-    um_i = Int32[]; um_v = Float64[]; msg_c = Int32[]; msg_v = Float64[]
     h = ccall((:simlev_c_eval_new, LIBSLC), Ptr{Cvoid}, ())
     h == C_NULL && throw(OutOfMemoryError())
     try
@@ -152,15 +159,25 @@ function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_
                        rf_err === nothing ? length(rf) : 0, Int32(rf_err === nothing), cnt)
         end
         CAbi.check(rc)
-        um_i = zeros(Int32, 3 * cnt[1]); um_v = zeros(3 * cnt[1]); msg_c = zeros(Int32, cnt[2]); msg_v = zeros(4 * cnt[2])
-        ccall((:simlev_c_eval_get, LIBSLC), Cvoid,
-              (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64},
-               Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64},
-               Ptr{Int32}),
-              h, tw, twr, inv, dd, scal, ints, stv, buys, sells, why_i, why_v, um_i, um_v, msg_c, msg_v, err)
+        return _sim_eval_output(h, n, na, cnt, rf_err, sim.names)
     finally
         ccall((:simlev_c_eval_free, LIBSLC), Cvoid, (Ptr{Cvoid},), h)
     end
+end
+
+"""Ergebnis der Auswertung (Objekt h nach dem Lauf, cnt Zahl der Zeilen und Warnungen) mit Meldungen in der Reihenfolge von R
+(seit 1.6.5 eigene Funktion, auch für den Studienkern)."""
+function _sim_eval_output(h::Ptr{Cvoid}, n::Int, na::Int, cnt::Vector{Int64}, rf_err, nms)
+    @nospecialize
+    tw = zeros(n); twr = zeros(n); inv = zeros(n); dd = zeros(n); scal = zeros(3); ints = zeros(Int32, 2)
+    stv = zeros(20); buys = zeros(na); sells = zeros(na); why_i = zeros(Int32, 4); why_v = zeros(6)
+    err = zeros(Int32, 1)
+    um_i = zeros(Int32, 3 * cnt[1]); um_v = zeros(3 * cnt[1]); msg_c = zeros(Int32, cnt[2]); msg_v = zeros(4 * cnt[2])
+    ccall((:simlev_c_eval_get, LIBSLC), Cvoid,
+          (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64},
+           Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64},
+           Ptr{Int32}),
+          h, tw, twr, inv, dd, scal, ints, stv, buys, sells, why_i, why_v, um_i, um_v, msg_c, msg_v, err)
     for i in eachindex(msg_c)
         _eval_warn(msg_c[i], view(msg_v, 4i-3:4i))
     end
@@ -175,7 +192,6 @@ function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_
                                "reason" => String[_EVAL_REASONS[um_i[3i+2]+1] for i in 0:k-1],
                                "detail" => String[_eval_detail(um_i[3i+3], view(um_v, 3i+1:3i+3), why_text) for i in 0:k-1];
                                class = ["data.frame"])
-    nms = sim.names
     ev = _Eval(tw, twr, inv, ints[1] != 0, scal[1], scal[2], scal[3], dd)
     return ev, statistics, undefined_metrics, RVector(buys; names = nms), RVector(sells; names = nms)
 end
@@ -262,7 +278,7 @@ function _sim_result(R::Run, sim::Sim, r::_Eval, statistics::RList, undefined_me
     res["tax_report"] = tax_report
     res["undefined_metrics"] = undefined_metrics
     res["open_lots"] = open_lots
-    cfg.fees_on && (res["fees_paid"] = R.fee_paid)
+    (cfg.fees_on || cfg.fee_cust !== nothing) && (res["fees_paid"] = R.fee_paid)   # seit 1.6.5 auch mit Depotgebühr
     _is_true(cfg.harvest_mode) && (res["harvest_days"] = Date[from_days(flag_date[i]) for i in findall(fl.flag_harvest)])
     cfg.wrappers !== nothing && length(cfg.wrappers) > 0 && (res["wrappers"] = cfg.wrappers)   # nur mit details = true
     return SimLevResult(res, _sim_compact_trades(sim))
@@ -294,7 +310,8 @@ InvStG, § 23 EStG).
   Signalspalten (für `trading = "signal"`; `true`/`false` oder `0`/`1`, NA erlaubt, andere Zahlen sind ein
   Fehler), Risk-Free-Reihe in Prozent p.a. (Name in `risk_free`), logische Trigger- und numerische
   Gewichtsspalten für `rebalance_plan(event_col, event_weight)`. Fehlende Kalendertage werden
-  automatisch per LOCF aufgefüllt (logische Spalten mit `false`); aufgefüllte Tage werden in `filled` markiert
+  automatisch per LOCF aufgefüllt (logische Spalten mit `false`; seit 1.6.5 mit Hinweis nur, wenn eine Lücke
+  länger als 5 Kalendertage ist); aufgefüllte Tage werden in `filled` markiert
   und aus Risikometriken ausgeschlossen. Trägt `data` das Attribut `filled` aus `series_align`, gelten Tage,
   an denen keines der Strategie-Assets einen echten Kurs hat, ebenso als aufgefüllt (kein Handel, nicht in den
   Risikometriken). Passt die Zeilenzahl des Attributs nicht zu `data` (z. B. nach einer Zeilenauswahl der
@@ -320,7 +337,7 @@ InvStG, § 23 EStG).
   = rebalance_plan()` gilt danach der normale Rhythmus. Liegt `start` nach dem letzten Datentag, bricht die
   Funktion mit Fehler ab (das Asset wäre nie handelbar).
 - `start_value`: Numerisch. Anfangskapital in EUR. Standard: `10000`.
-- `costs`: Kosten: `sim_costs(order_fee, dca_fee)` (Ordergebühren, Gebühren der Sparplankäufe) oder `nothing`
+- `costs`: Kosten: `sim_costs(order_fee, dca_fee; custody_fee)` (Ordergebühren, Gebühren der Sparplankäufe, seit 1.6.5 Depotgebühr) oder `nothing`
   (keine Kosten). Standard: `sim_costs()` (keine Gebühren). Der Bid-Ask-Spread gilt je Asset (`spread` in
   `asset_config`).
 - `dca`: Sparplan: `dca_plan(value, span, days, unit, anchor, start, skip, fill_deficits)` oder `nothing`
@@ -336,8 +353,8 @@ InvStG, § 23 EStG).
   oder `nothing` (Standard: keine Steuern).
 - `risk_free`: Numerisch oder Character. Annualisierte risikolose Rendite **in Prozent** (z. B. `3` = 3 %
   p.a.) oder Name einer Spalte in `data` mit einer täglichen, annualisierten Zeitreihe in Prozent (z. B. SOFR
-  als `5.31`; nur Zahlenspalten, Text-, logische und Faktorspalten sind ein Fehler). `nothing` und `0` sind
-  äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent umgerechnet und
+  als `5.31`; nur Zahlenspalten, Text-, logische und Faktorspalten sind ein Fehler). Seit 1.6.5 sind fehlende Werte (NA) in der
+  Spalte und Zinsen von -100 oder weniger ein Fehler. `nothing` und `0` sind äquivalent. Jede Tagesrate wird in ihr Tagesäquivalent umgerechnet und
   von der jeweiligen Tagesrendite abgezogen; Sharpe und Sortino werden auf den Überschussrenditen berechnet.
   LOCF-aufgefüllte Tage werden konsistent ausgeschlossen. Standard: `0`. Zahlen über 0 und unter 0,05
   (vermutlich Anteil, z. B. `0.02` für 2 %) werden mit Warnung als Prozent gelesen; kleine echte Prozentsätze
@@ -380,7 +397,10 @@ Liste der Klasse `"SimLevResult"` mit:
   interner Zinsfuß (XIRR) aus Startbetrag, datierten Einzahlungen und Endwert, S (1+r)^T + Σ_i F_i (1+r)^T -
   t_i = W_n mit Startbetrag S = `start_value` plus Rate am Starttag (brutto, wie die übrigen Einzahlungen) und
   t_i = Kalendertage seit Start / 365,25 (Nullstelle nach Brent; auch bei Beinahe-Totalverlust mit Rendite
-  nahe -100 %); ohne Einzahlungen nach dem Starttag (W_n / W_1)^1/T - 1. Gibt es keine Lösung, ist `cagr = NA`
+  nahe -100 %); ohne Einzahlungen nach dem Starttag (W_n / S)^1/T - 1. Seit 1.6.5 ist der Bezug immer S, also vor den
+  Kaufkosten am Starttag (bis 1.6.4 ohne spätere Einzahlungen W_1 nach den Kaufkosten); Spread und Ordergebühr
+  des Startkaufs mindern damit `cagr`, `ttwror`, `twr_index` (erste Stufe W_1 / S), die Drawdowns und alle
+  Renditekennzahlen. Gibt es keine Lösung, ist `cagr = NA`
   (mit Warnung). Ist der Endwert negativ (nicht gedeckte Steuerschuld, Verlust über 100 %), sind `cagr` und
   `ttwror` nicht definiert: `NA` mit Warnung (nicht -1, das den Verlust untertreiben würde); der Endwert
   bleibt unverändert (nicht auf 0 begrenzt). Bei einem Einzeltag (Laufzeit 0 Jahre) sind `cagr` und `ttwror`
@@ -407,16 +427,23 @@ Liste der Klasse `"SimLevResult"` mit:
   `cv`: Variationskoeffizient `|sd / mean|`. - `risk_free`: Effektiv genutzte mittlere Risk-Free-Rate
   (annualisiert, in Prozent). - `skewness`: Schiefe der Tagesrenditen. - `kurtosis`: Überschuss-Kurtosis der
   Tagesrenditen. - `lpm`, `hpm`: Unteres bzw. oberes partielles Moment 1. Ordnung der Tagesrenditen (Schwelle
-  0). - `sharpe`: Annualisierte Sharpe Ratio auf Überschussrenditen. - `sortino`: Annualisierte Sortino Ratio
+  0). - `sharpe`: Annualisierte Sharpe Ratio auf Überschussrenditen; `NA` ohne Schwankung (seit 1.6.5 auch
+  bei reinem Rundungsrauschen, sd höchstens 16 √N ε (1 + max|x|); ebenso `cv`, `skewness`, `kurtosis`).
+  - `sortino`: Annualisierte Sortino Ratio
   auf Überschussrenditen e_i: bar e · P / (D √(P)) mit P Beobachtungen je Jahr und Downside-Abweichung über
   alle Beobachtungen D = √(mean(min(e_i, 0)^2)) (Sortino/Price, wie `result_analysis`); `NA` ohne negative
   Überschussrendite. - `calmar`: Calmar Ratio (CAGR / Max Drawdown; mit Einzahlungen TTWROR / Max Drawdown). -
   `omega`: Omega Ratio (Schwelle 0). - `gain_to_pain`: Summe der Renditen / Summe der Verluste (Betrag). -
-  `serenity`: CAGR / (Ulcer Index * Max Drawdown); mit Einzahlungen TTWROR im Zähler. - `martin_ratio`: CAGR /
-  Ulcer Index; mit Einzahlungen TTWROR / Ulcer Index. - `max_drawdown`: Maximaler Drawdown (positiver Anteil).
-  - `average_drawdown`: Mittlerer Drawdown über alle Tage unter dem Höchststand. - `ulcer_index`: Ulcer Index
+  `serenity`: Serenity Ratio nach KeyQuant (AlternativeSoft): (CAGR - risikoloser Zins) / (Ulcer Index · Pitfall), mit Einzahlungen TTWROR statt CAGR; Pitfall = CDaR / Volatilität. Eigene Festlegungen von SimLev (die Quelle nennt sie nicht): CDaR zum Niveau 95 % = Mittel der Tages-Drawdowns ab ihrem 95-%-Quantil, Volatilität jährlich wie bei `sharpe` (Standardabweichung der Überschussrenditen · Wurzel der Beobachtungen je Jahr), Rendite und Zins jährlich wie bei `martin_ratio`. NA ohne Drawdown oder ohne Schwankung. Seit 1.6.5 (bis 1.6.4 CAGR / (Ulcer Index · Max Drawdown)). - `martin_ratio`: Ulcer
+  Performance Index nach Martin: (CAGR - risikoloser Zins) / Ulcer Index, mit Einzahlungen (TTWROR -
+  risikoloser Zins) / Ulcer Index; risikoloser Zins = mittlere jährliche Rate wie `risk_free` (als Anteil;
+  seit 1.6.5). - `max_drawdown`: Maximaler Drawdown (positiver Anteil).
+  - `average_drawdown`: Mittlere Tiefe an Tagen unter dem Höchststand (Mittel der Tageswerte von
+  `drawdowns` über alle Tage mit Drawdown größer 0; kein Mittel je Phase). - `ulcer_index`: Ulcer Index
   (Wurzel des mittleren quadrierten Drawdowns). - `longest_drawdown`: Längste Phase unter dem Höchststand in
-  Kalendertagen. - `avg_recovery_time`: Mittlere Erholungsdauer in Kalendertagen (`NA`, wenn keine
+  Kalendertagen. - `avg_recovery_time`: Mittlere Dauer abgeschlossener Phasen unter dem
+  Höchststand: Zahl der Kalendertage unter dem Hoch je Phase, vom Tag nach dem Hoch bis vor das neue Hoch
+  (ganze Phase, nicht erst ab dem Tief); eine am Ende offene Phase zählt nicht mit (`NA`, wenn keine
   abgeschlossene Erholung).
 - `report`: Benannte Liste je Asset mit täglichen Vektoren: `worth` (Kurswert in EUR), `money` (Cash in EUR),
   `flows` (DCA-Zufluss des Tages in EUR), `total` (`worth + money`), `share` (Ist-Gewicht als Anteil).
@@ -473,10 +500,10 @@ Liste der Klasse `"SimLevResult"` mit:
   mit Einzahlungen kein interner Zinsfuß (z. B. Einzahlung am letzten Tag größer als der Endwert): `cagr`. -
   `too_short`: Einzeltag (Laufzeit 0 Jahre: `cagr`, `ttwror`, `buys`, `sells`, `avg_recovery_time` und alle
   Renditekennzahlen) bzw. zu wenige Tagesrenditen (Schiefe ab 3, Kurtosis ab 4, Sharpe ab 2). -
-  `zero_start_value`: Depotwert am Starttag nicht positiv (`cagr`; wegen `start_value > 0` praktisch nicht
+  `zero_start_value`: Startbetrag (`start_value` plus Rate am Starttag) nicht positiv (`cagr`; wegen `start_value > 0` praktisch nicht
   erreichbar). - `nonpositive_twr_index`: zeitgewichteter Wertindex fällt auf 0 oder darunter (Tagesrendite
-  unter -100 %): `ttwror`. - `zero_volatility`: Standardabweichung der Tagesrenditen 0: `skewness`,
-  `kurtosis`, `sharpe`. - `zero_mean_return`: mittlere Tagesrendite 0: `cv`. - `no_negative_returns`: keine
+  unter -100 %): `ttwror`. - `zero_volatility`: Standardabweichung der Tagesrenditen 0 (seit 1.6.5 auch reines Rundungsrauschen): `skewness`,
+  `kurtosis`, `sharpe`, `serenity` (seit 1.6.5). - `zero_mean_return`: mittlere Tagesrendite 0: `cv`. - `no_negative_returns`: keine
   negativen (Überschuss-)Renditen: `sortino`, `omega`, `gain_to_pain`. - `no_drawdown`: kein Drawdown:
   `calmar`, `serenity`, `martin_ratio`. Ist die Jahresrendite (`cagr`, mit Einzahlungen `ttwror`) nicht
   definiert, erben diese drei deren Ursache. - `no_recovery`: keine abgeschlossene Erholung:
@@ -504,8 +531,8 @@ bleiben so.
 - `buys`: Benannter Vektor. Mittlere Anzahl Käufe je Jahr und Asset (Einzeltag, Laufzeit 0 Jahre: `NA`, siehe
   `undefined_metrics`).
 - `sells`: Benannter Vektor. Mittlere Anzahl Verkäufe je Jahr und Asset (Einzeltag: `NA`).
-- `fees_paid`: Nur wenn `order_fee` oder `dca_fee` eine Gebühr ungleich 0 festlegt: Summe der gezahlten
-  Ordergebühren in EUR.
+- `fees_paid`: Nur wenn `order_fee` oder `dca_fee` eine Gebühr ungleich 0 festlegt oder (seit 1.6.5) `custody_fee`
+  gesetzt ist: Summe der gezahlten Order- und Depotgebühren in EUR.
 - `harvest_days`: Nur mit `tax_profile(harvest = harvest_rule())`: Date-Vektor der Termine der
   Gewinnrealisierung.
 - `wrappers`: Nur mit `details = true` und Fonds-Wrapper-Assets (`asset_config(wrapper = )`): benannte Liste
@@ -601,7 +628,8 @@ schließt diesen Weg aus. Ohne `taxable_income` bleibt alles unverändert. Die J
 
 # print und summary
 `summary()` liefert unter anderem `total_return_twr` (zeitgewichtete Gesamtrendite: mit Einzahlungen letzter
-Wert von `twr_index` minus 1, sonst Endwert / Depotwert am Starttag - 1), `return_on_invested` = (Endwert -
+Wert von `twr_index` minus 1, sonst Endwert / (`start_value` plus Rate am Starttag) - 1; seit 1.6.5 zählen die
+Kaufkosten am Starttag mit), `return_on_invested` = (Endwert -
 Eingezahlt) / Eingezahlt mit Eingezahlt = letzter Wert von `invested` (brutto) und `total_return` als
 gleichwertigen Alias für `total_return_twr` (ältere Skripte). Mit Einzahlungen zeigt die Ausgabe beide Werte
 („Gesamtrendite (zeitgewichtet)“ und „Gewinn je eingezahltem EUR“ mit Endwert und Eingezahlt); ohne
@@ -713,33 +741,55 @@ function _simulation_flat(data, strategy; start_value = 10000, details = false, 
                     include_soli_on_income_tax = false, soli_rate_income_tax = 5.5, base_rate = nothing,
                     base_rate_flex = false, base_rate_data = nothing, fractions = true, risk_free = 0, split_mode = false, split_thresh = nothing, event_col = nothing,
                     event_mode = ("additional", "replace"), event_weight = nothing, church_tax = 0, order_fee = nothing,
-                    dca_fee = nothing, harvest_mode = false, harvest_day = "12-15", harvest_loss_pot = true,
+                    dca_fee = nothing, custody_fee = nothing, harvest_mode = false, harvest_day = "12-15", harvest_loss_pot = true,
                     taxable_income = nothing, tax_tariff = nothing, io::IO = stdout)
     @nospecialize
-    # seit 1.6.4 prüft _sim_check_inputs details wie fractions (bis 1.6.3: details == true)
-    cfg, fr = _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
-                                balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
-                                marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
-                                use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
-                                fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                                order_fee, dca_fee, harvest_mode, taxable_income, tax_tariff, io; liquidate = liquidate)
-    split_thresh !== nothing && (split_thresh = _num_vec(split_thresh))
-    start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data)
-    sim = _sim_build_state(fr, cfg.strategy, start_date, stopp_date, cfg.sparer_pauschbetrag,
-                           cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data)
-    fl, ew = _sim_build_calendar(fr, sim, cfg.strategy, start_date, stopp_date, cfg.dca_mode, dca_span,
-                                 dca_unit, cfg.dca_days, cfg.dca_value, dca_anchor, dca_start, dca_skip, cfg.balance_mode,
-                                 balance_span, balance_unit, cfg.balance_days, balance_anchor, balance_start,
-                                 balance_skip, cfg.event_col, event_mode, event_weight)
+    function phases(pio)
+        local cfg, fr, st, start_date, stopp_date, fill_src, sim, fl, ew
+        # seit 1.6.4 prüft _sim_check_inputs details wie fractions (bis 1.6.3: details == true)
+        cfg, fr = _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
+                                    balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
+                                    marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
+                                    use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
+                                    fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
+                                    order_fee, dca_fee, harvest_mode, taxable_income, tax_tariff, pio; liquidate = liquidate)
+        cfg.fee_cust = _fee_spec(custody_fee, "simulation", "custody_fee")   # seit 1.6.5 (Entscheidung 150)
+        st = split_thresh === nothing ? nothing : _num_vec(split_thresh)
+        start_date, stopp_date, fill_src = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data)
+        sim = _sim_build_state(fr, cfg.strategy, start_date, stopp_date, cfg.sparer_pauschbetrag,
+                               cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data)
+        fl, ew = _sim_build_calendar(fr, sim, cfg.strategy, start_date, stopp_date, cfg.dca_mode, dca_span,
+                                     dca_unit, cfg.dca_days, cfg.dca_value, dca_anchor, dca_start, dca_skip, cfg.balance_mode,
+                                     balance_span, balance_unit, cfg.balance_days, balance_anchor, balance_start,
+                                     balance_skip, cfg.event_col, event_mode, event_weight)
+        return (cfg, fr, st, start_date, stopp_date, fill_src, sim, fl, ew)
+    end
+    # seit 1.6.5 (Paket E, Studienkern sim_prepared.jl): in einer Studie rechnet ein Lauf, den _sim_call_study als
+    # Vorlage merken will, die Phasen 1 und 2 zuerst still (_prep_probe); blieben sie ohne Meldung, gelten ihre
+    # Ergebnisse (sie hätten nichts ausgegeben), sonst laufen sie wie bisher noch einmal mit allen Meldungen
+    got = _prep_cap_take() ? _prep_probe(phases) : nothing
+    cfg, fr, split_thresh, start_date, stopp_date, fill_src, sim, fl, ew = got === nothing ? phases(io) : got
     cfg.event_col !== nothing && (event_weight = ew)
     event_weight isa Union{Nothing,Vector{Pair{String,Any}}} || (event_weight = Pair{String,Any}[p for p in _kvpairs(event_weight)])
     R = Run(cfg, fl, details, io, 0.0, 0.0)
     # 3.-5. Termine, Flags, Startgewichte, Tagesschleife und Abschluss des letzten Jahres im C++-Kern
     # (sim_engine.jl)
-    _sim_engine_run!(R, sim, fr, liquidate, event_weight, split_thresh, balance_dca, harvest_loss_pot, stopp_date,
-                     harvest_day)
+    E = _sim_engine_input(R, sim, fr, liquidate, event_weight, split_thresh, balance_dca, harvest_loss_pot, stopp_date,
+                          harvest_day)
+    es = got === nothing ? nothing :
+         _prep_capture(data, R, sim, fr, fill_src, E, start_date, stopp_date, details, base_rate_flex, base_rate_data,
+                       event_weight)
+    h = ccall((:simlev_c_engine_new, LIBSLC), Ptr{Cvoid}, ())
+    h == C_NULL && throw(OutOfMemoryError())
+    try
+        flags_out = zeros(Int32, E.n)
+        rc = _engine_ccall(h, C_NULL, E, sim, R.fl, flags_out, nothing)
+        _sim_engine_output!(h, rc, R, sim, E, flags_out)
+    finally
+        ccall((:simlev_c_engine_free, LIBSLC), Cvoid, (Ptr{Cvoid},), h)
+    end
     # 6. Auswertung im C++-Kern und Ergebnisobjekt
-    ret, statistics, um, buys, sells = _sim_evaluate(R, sim, start_date, stopp_date, fr)
+    ret, statistics, um, buys, sells = _sim_evaluate(R, sim, start_date, stopp_date, fr, es)
     return _sim_result(R, sim, ret, statistics, um, buys, sells)
 end
 
